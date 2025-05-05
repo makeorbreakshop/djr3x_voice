@@ -11,7 +11,9 @@ from pedalboard import Pedalboard, Compressor, HighpassFilter, Gain, Distortion,
 from scipy.signal import lfilter
 from config.voice_config import DISABLE_AUDIO_PROCESSING
 from colorama import Fore, Style
+from debug_utils import debug_timer, DebugTimer  # Add debug timing utilities
 
+@debug_timer
 def load_config() -> dict:
     """Load audio effects configuration from JSON file."""
     config_path = Path("config/audio_effects.json")
@@ -20,6 +22,7 @@ def load_config() -> dict:
     with open(config_path) as f:
         return json.load(f)
 
+@debug_timer
 def timing_decorator(func):
     """Decorator to measure and log processing time."""
     @wraps(func)
@@ -33,6 +36,7 @@ def timing_decorator(func):
         return result
     return wrapper
 
+@debug_timer
 def create_comb_filter(delay_ms: float, feedback: float, sample_rate: int) -> tuple:
     """Create coefficients for a comb filter.
     
@@ -48,6 +52,7 @@ def create_comb_filter(delay_ms: float, feedback: float, sample_rate: int) -> tu
     a = [1]
     return b, a
 
+@debug_timer
 def apply_ring_modulation(audio: np.ndarray, frequency: float, sample_rate: int, mix: float = 1.0) -> np.ndarray:
     """Apply ring modulation effect to audio.
     
@@ -71,6 +76,7 @@ def apply_ring_modulation(audio: np.ndarray, frequency: float, sample_rate: int,
     # Apply mix
     return audio * (1 - mix) + modulated * mix
 
+@debug_timer
 def apply_bit_crusher(audio: np.ndarray, bit_depth: int, mix: float = 1.0) -> np.ndarray:
     """Apply bit crusher effect to audio.
     
@@ -97,6 +103,7 @@ class AudioProcessor:
         self.config = load_config()
         self.setup_effects()
         
+    @debug_timer
     def setup_effects(self):
         """Initialize the audio effects chain."""
         config = self.config
@@ -124,7 +131,7 @@ class AudioProcessor:
         self.comb_b = None
         self.comb_a = None
 
-    @timing_decorator
+    @debug_timer
     def process_audio(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
         """Apply the audio effects chain to the input audio.
         
@@ -179,6 +186,7 @@ class AudioProcessor:
             print(f"Warning: Audio processing failed, using fallback: {str(e)}")
             return audio_data  # Fallback to unprocessed audio
 
+@debug_timer
 async def process_and_play_audio(audio_data: Union[bytes, str, np.ndarray], 
                                sample_rate: Optional[int] = 44100) -> None:
     """
@@ -241,6 +249,7 @@ async def process_and_play_audio(audio_data: Union[bytes, str, np.ndarray],
     sd.play(processed_audio, 44100)  # Always use 44.1kHz for playback
     sd.wait()  # Wait for playback to finish
 
+@debug_timer
 def apply_audio_effects(audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
     """
     Apply audio effects chain to numpy array of audio data.
