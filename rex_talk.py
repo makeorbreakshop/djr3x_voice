@@ -16,6 +16,11 @@ import io
 import pygame
 from dotenv import load_dotenv
 from colorama import init, Fore, Style
+from pynput import keyboard  # NEW: For push-to-talk
+from config.voice_settings import active_config as voice_config  # Voice settings
+from config.openai_settings import active_config as openai_config  # OpenAI settings
+from audio_processor import process_and_play_audio
+import asyncio
 
 # Initialize colorama
 init()
@@ -36,9 +41,19 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-DJ_R3X_PERSONA = os.getenv("DJ_R3X_PERSONA", 
-    "You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. "
-    "keep responses brief and entertaining. You love music and Star Wars.")
+
+# System prompt loading logic
+DJ_R3X_PERSONA_FILE = os.getenv("DJ_R3X_PERSONA_FILE")
+if DJ_R3X_PERSONA_FILE and os.path.exists(DJ_R3X_PERSONA_FILE):
+    with open(DJ_R3X_PERSONA_FILE, "r") as f:
+        DJ_R3X_PERSONA = f.read()
+else:
+    DJ_R3X_PERSONA = os.getenv("DJ_R3X_PERSONA", 
+        "You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. "
+        "keep responses brief and entertaining. You love music and Star Wars.")
+
+# Add this after loading environment variables
+TEXT_ONLY_MODE = os.getenv("TEXT_ONLY_MODE", "false").lower() == "true"
 
 # Validate configuration
 def validate_config():
@@ -78,13 +93,16 @@ def validate_config():
 def initialize_clients():
     """Initialize API clients."""
     try:
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        # Initialize OpenAI client with just the API key
+        openai_client = OpenAI(
+            api_key=OPENAI_API_KEY
+        )
         recognizer = sr.Recognizer()
         
         # Configure recognizer for ambient noise
         recognizer.dynamic_energy_threshold = True
         recognizer.energy_threshold = 300  # Default is 300
-        recognizer.pause_threshold = 1.0  # Wait 1 second of silence before considering the phrase complete
+        recognizer.pause_threshold = 0.6  # Wait 0.6 seconds of silence before considering the phrase complete
         
         return openai_client, recognizer
     except Exception as e:
@@ -93,16 +111,29 @@ def initialize_clients():
 
 # Listen for speech
 def listen_for_speech(recognizer):
-    """Capture audio from microphone and convert to text."""
+    """Capture audio from microphone and convert to text using a timeout-based approach."""
     try:
         with sr.Microphone() as source:
-            print(f"{Fore.CYAN}🎧 Listening...{Style.RESET_ALL}")
-            audio = recognizer.listen(source)
+            print(f"{Fore.CYAN}🎧 Listening... (auto-stop after silence){Style.RESET_ALL}")
+            # Adjust the microphone sensitivity to ambient noise
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            
+            # Set parameters for recording
+            recognizer.dynamic_energy_threshold = True
+            recognizer.energy_threshold = 300  # Default is 300
+            recognizer.pause_threshold = 0.6  # Wait 0.6 seconds of silence before considering the phrase complete
+            
+            # Listen for the user's input with a timeout
+            print(f"{Fore.CYAN}Speak now...{Style.RESET_ALL}")
+            audio = recognizer.listen(source, timeout=10.0, phrase_time_limit=15.0)
             
             print(f"{Fore.YELLOW}🔍 Processing speech...{Style.RESET_ALL}")
             text = recognizer.recognize_google(audio)
-            
             return text
+            
+    except sr.WaitTimeoutError:
+        print(f"{Fore.YELLOW}No speech detected within timeout period.{Style.RESET_ALL}")
+        return None
     except sr.UnknownValueError:
         print(f"{Fore.YELLOW}Sorry, I couldn't understand that.{Style.RESET_ALL}")
         return None
@@ -119,14 +150,20 @@ def generate_response(openai_client, user_input):
     try:
         print(f"{Fore.YELLOW}🤖 Thinking...{Style.RESET_ALL}")
         
+        # Get OpenAI settings
+        settings = openai_config
+        
         response = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": DJ_R3X_PERSONA},
                 {"role": "user", "content": user_input}
             ],
-            max_tokens=150,
-            temperature=0.7
+            max_tokens=settings["max_tokens"],
+            temperature=settings["temperature"],
+            top_p=settings["top_p"],
+            presence_penalty=settings["presence_penalty"],
+            frequency_penalty=settings["frequency_penalty"]
         )
         
         return response.choices[0].message.content
@@ -162,7 +199,7 @@ def text_to_speech(text):
         return False
 
 def generate_and_play_audio_rest(text):
-    """Generate and play audio using ElevenLabs REST API."""
+    """Generate and play audio using ElevenLabs REST API with audio processing."""
     try:
         # Define API request
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
@@ -173,12 +210,18 @@ def generate_and_play_audio_rest(text):
             "xi-api-key": ELEVENLABS_API_KEY
         }
         
+        # Get voice settings from config
+        voice_settings = voice_config.to_dict()
+        
         data = {
             "text": text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": voice_settings["model_id"],
             "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.5
+                "stability": voice_settings["stability"],
+                "similarity_boost": voice_settings["similarity_boost"],
+                "style": voice_settings["style"],
+                "speaker_boost": voice_settings["speaker_boost"],
+                "speed": voice_settings["speed"]
             }
         }
         
@@ -189,16 +232,32 @@ def generate_and_play_audio_rest(text):
         # Check if successful
         if response.status_code == 200:
             print(f"{Fore.GREEN}Successfully received audio from ElevenLabs{Style.RESET_ALL}")
-            # Save audio to a temporary buffer
-            audio_data = io.BytesIO(response.content)
             
-            # Play the audio using pygame
-            pygame.mixer.music.load(audio_data)
-            pygame.mixer.music.play()
+            # Save raw audio to elevenlabs_audio directory
+            os.makedirs('audio/elevenlabs_audio', exist_ok=True)
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            raw_audio_path = f'audio/elevenlabs_audio/raw_response_{timestamp}.mp3'
+            with open(raw_audio_path, 'wb') as f:
+                f.write(response.content)
+            print(f"{Fore.CYAN}Saved raw audio to {raw_audio_path}{Style.RESET_ALL}")
             
-            # Wait for playback to finish
-            while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(10)
+            # Process and play audio using our pipeline
+            print(f"{Fore.CYAN}Applying audio effects...{Style.RESET_ALL}")
+            
+            # Create event loop if needed
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Process and play audio
+            processed_path = raw_audio_path.replace('elevenlabs_audio', 'processed_audio')
+            os.makedirs(os.path.dirname(processed_path), exist_ok=True)
+            
+            # Process and play audio, saving to processed_audio directory
+            loop.run_until_complete(process_and_play_audio(raw_audio_path))
+            
         else:
             print(f"{Fore.RED}Error from ElevenLabs API: Status code {response.status_code}{Style.RESET_ALL}")
             print(response.text)
@@ -213,6 +272,13 @@ def main():
     print(f"{Fore.GREEN}{'=' * 50}{Style.RESET_ALL}")
     print(f"{Fore.GREEN}DJ R3X Voice Assistant{Style.RESET_ALL}")
     print(f"{Fore.GREEN}{'=' * 50}{Style.RESET_ALL}")
+    if TEXT_ONLY_MODE:
+        print(f"{Fore.YELLOW}Running in TEXT ONLY MODE: Responses will be printed, not spoken.{Style.RESET_ALL}")
+    
+    # Show audio processing status
+    from config.voice_config import DISABLE_AUDIO_PROCESSING
+    if DISABLE_AUDIO_PROCESSING:
+        print(f"{Fore.YELLOW}Audio processing is DISABLED. Using raw ElevenLabs audio.{Style.RESET_ALL}")
     
     # Validate configuration and initialize clients
     validate_config()
@@ -221,24 +287,23 @@ def main():
     # Main loop
     while True:
         try:
-            # Wait for user to press Enter
+            # Wait for user to press Enter to start recording
             input(f"{Fore.CYAN}🎧 Press {Fore.GREEN}ENTER{Fore.CYAN} to talk...{Style.RESET_ALL}")
             
-            # Listen for speech
+            # Start listening for speech
             user_input = listen_for_speech(recognizer)
             
+            # Only process if we got valid input
             if user_input:
                 # Print what the user said
                 print(f"{Fore.GREEN}You: {user_input}{Style.RESET_ALL}")
-                
                 # Generate response
                 ai_response = generate_response(openai_client, user_input)
-                
                 # Print the response
                 print(f"{Fore.MAGENTA}R3X: {ai_response}{Style.RESET_ALL}")
-                
-                # Convert to speech
-                text_to_speech(ai_response)
+                # If not in text only mode, convert to speech
+                if not TEXT_ONLY_MODE:
+                    text_to_speech(ai_response)
             
             print()  # Add a newline for better readability
             
