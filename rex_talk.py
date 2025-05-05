@@ -8,19 +8,28 @@ a DJ R3X-inspired voice from Star Wars.
 import os
 import sys
 import time
+import json
+import wave
 import threading
-import speech_recognition as sr
-from openai import OpenAI
 import requests
+import speech_recognition as sr
+from pathlib import Path
 import io
 import pygame
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from colorama import init, Fore, Style
-from pynput import keyboard  # NEW: For push-to-talk
 from config.voice_settings import active_config as voice_config  # Voice settings
+from config.voice_config import DISABLE_AUDIO_PROCESSING  # Only import the processing flag
 from config.openai_settings import active_config as openai_config  # OpenAI settings
+from config.app_settings import DEBUG_MODE, TEXT_ONLY_MODE, PUSH_TO_TALK_MODE  # Import app settings
 from audio_processor import process_and_play_audio
 import asyncio
+from pydub import AudioSegment
+import numpy as np
+import sounddevice as sd
+from openai import OpenAI
+from whisper_manager import WhisperManager  # Add this import
+from pynput import keyboard
 
 # Initialize colorama
 init()
@@ -28,8 +37,48 @@ init()
 # Initialize pygame for audio playback
 pygame.mixer.init()
 
+# Global variables for push-to-talk
+space_pressed = False
+recording_event = threading.Event()
+is_recording = False  # New flag to track recording state
+
+def on_press(key):
+    """Handle key press events."""
+    global space_pressed, is_recording
+    try:
+        if key == keyboard.Key.space:
+            if not space_pressed:  # Only toggle if space wasn't already pressed
+                space_pressed = True
+                is_recording = not is_recording  # Toggle recording state
+                if is_recording:
+                    recording_event.set()
+                else:
+                    recording_event.clear()
+    except AttributeError:
+        pass
+
+def on_release(key):
+    """Handle key release events."""
+    global space_pressed
+    try:
+        if key == keyboard.Key.space:
+            space_pressed = False
+    except AttributeError:
+        pass
+
+# Start keyboard listener
+keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+keyboard_listener.start()
+
 # Load environment variables from .env file
-load_dotenv()
+env_path = find_dotenv(filename='.env', raise_error_if_not_found=True)
+load_dotenv(env_path)
+
+# Print debug status
+print(f"{Fore.YELLOW}Debug Mode is: {'enabled' if DEBUG_MODE else 'disabled'}{Style.RESET_ALL}")
+
+# Only import debug utils after environment is loaded
+from debug_utils import debug_timer, DebugTimer
 
 # Legacy support for env.visible (deprecated)
 if os.path.exists('env.visible') and not os.getenv("OPENAI_API_KEY"):
@@ -52,10 +101,8 @@ else:
         "You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. "
         "keep responses brief and entertaining. You love music and Star Wars.")
 
-# Add this after loading environment variables
-TEXT_ONLY_MODE = os.getenv("TEXT_ONLY_MODE", "false").lower() == "true"
-
 # Validate configuration
+@debug_timer
 def validate_config():
     """Validate that all required configuration variables are set."""
     global ELEVENLABS_API_KEY
@@ -90,6 +137,7 @@ def validate_config():
         os.environ["ELEVENLABS_API_KEY"] = clean_api_key
 
 # Initialize clients
+@debug_timer
 def initialize_clients():
     """Initialize API clients."""
     try:
@@ -99,36 +147,56 @@ def initialize_clients():
         )
         recognizer = sr.Recognizer()
         
-        # Configure recognizer for ambient noise
-        recognizer.dynamic_energy_threshold = True
-        recognizer.energy_threshold = 300  # Default is 300
-        recognizer.pause_threshold = 0.6  # Wait 0.6 seconds of silence before considering the phrase complete
+        # Initialize Whisper
+        whisper_manager = WhisperManager(model_size="base")
+        whisper_manager.load_model()  # Pre-load the model
         
-        return openai_client, recognizer
+        return openai_client, recognizer, whisper_manager
     except Exception as e:
         print(f"{Fore.RED}Error initializing clients: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 # Listen for speech
-def listen_for_speech(recognizer):
-    """Capture audio from microphone and convert to text using a timeout-based approach."""
+@debug_timer
+def listen_for_speech(recognizer, whisper_manager):
+    """Capture audio from microphone and convert to text using Whisper."""
+    global is_recording
     try:
         with sr.Microphone() as source:
-            print(f"{Fore.CYAN}🎧 Listening... (auto-stop after silence){Style.RESET_ALL}")
-            # Adjust the microphone sensitivity to ambient noise
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-            
-            # Set parameters for recording
-            recognizer.dynamic_energy_threshold = True
-            recognizer.energy_threshold = 300  # Default is 300
-            recognizer.pause_threshold = 0.6  # Wait 0.6 seconds of silence before considering the phrase complete
-            
-            # Listen for the user's input with a timeout
-            print(f"{Fore.CYAN}Speak now...{Style.RESET_ALL}")
-            audio = recognizer.listen(source, timeout=10.0, phrase_time_limit=15.0)
+            if PUSH_TO_TALK_MODE:
+                print(f"{Fore.CYAN}🎧 Press Space bar once to start recording, again to stop...{Style.RESET_ALL}")
+                
+                # Wait for space bar press to start
+                recording_event.wait()
+                
+                print(f"{Fore.CYAN}🎤 Recording... (press Space bar to stop){Style.RESET_ALL}")
+                
+                # Start recording with a timeout
+                try:
+                    audio = recognizer.listen(source, timeout=30.0, phrase_time_limit=30.0)
+                    is_recording = False  # Reset recording state after successful capture
+                    recording_event.clear()  # Clear the event
+                except sr.WaitTimeoutError:
+                    print(f"{Fore.YELLOW}Recording timed out. Press Space bar to try again.{Style.RESET_ALL}")
+                    is_recording = False
+                    recording_event.clear()
+                    return None
             
             print(f"{Fore.YELLOW}🔍 Processing speech...{Style.RESET_ALL}")
-            text = recognizer.recognize_google(audio)
+            
+            # Convert audio data to numpy array for Whisper
+            print(f"{Fore.YELLOW}Converting audio to format for Whisper...{Style.RESET_ALL}")
+            audio_data = np.frombuffer(audio.get_raw_data(), dtype=np.int16)
+            audio_float = audio_data.astype(np.float32) / 32768.0
+            
+            # Use Whisper for transcription
+            print(f"{Fore.YELLOW}Starting Whisper transcription...{Style.RESET_ALL}")
+            text = whisper_manager.transcribe(audio_float, sample_rate=audio.sample_rate)
+            
+            if not text:
+                print(f"{Fore.RED}Warning: Whisper returned empty transcription{Style.RESET_ALL}")
+                return None
+                
             return text
             
     except sr.WaitTimeoutError:
@@ -137,14 +205,12 @@ def listen_for_speech(recognizer):
     except sr.UnknownValueError:
         print(f"{Fore.YELLOW}Sorry, I couldn't understand that.{Style.RESET_ALL}")
         return None
-    except sr.RequestError as e:
-        print(f"{Fore.RED}Error with the speech recognition service; {e}{Style.RESET_ALL}")
-        return None
     except Exception as e:
         print(f"{Fore.RED}Unexpected error during speech recognition: {str(e)}{Style.RESET_ALL}")
         return None
 
 # Generate AI response
+@debug_timer
 def generate_response(openai_client, user_input):
     """Generate a response using OpenAI's API."""
     try:
@@ -172,6 +238,7 @@ def generate_response(openai_client, user_input):
         return "BZZZT! My circuits are a bit overloaded right now. Can you try again?"
 
 # Text to speech using REST API
+@debug_timer
 def text_to_speech(text):
     """Convert text to speech using ElevenLabs TTS via REST API."""
     try:
@@ -198,6 +265,7 @@ def text_to_speech(text):
         print(f"{Fore.RED}Error with text-to-speech: {str(e)}{Style.RESET_ALL}")
         return False
 
+@debug_timer
 def generate_and_play_audio_rest(text):
     """Generate and play audio using ElevenLabs REST API with audio processing."""
     try:
@@ -233,7 +301,18 @@ def generate_and_play_audio_rest(text):
         if response.status_code == 200:
             print(f"{Fore.GREEN}Successfully received audio from ElevenLabs{Style.RESET_ALL}")
             
-            # Save raw audio to elevenlabs_audio directory
+            # If audio processing is disabled, play directly
+            if DISABLE_AUDIO_PROCESSING:
+                # Convert response content to numpy array for playback
+                audio_segment = AudioSegment.from_mp3(io.BytesIO(response.content))
+                samples = np.array(audio_segment.get_array_of_samples(), dtype=np.float32) / 32768.0
+                
+                # Play audio directly
+                sd.play(samples, audio_segment.frame_rate)
+                sd.wait()
+                return
+            
+            # Otherwise proceed with normal processing flow
             os.makedirs('audio/elevenlabs_audio', exist_ok=True)
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             raw_audio_path = f'audio/elevenlabs_audio/raw_response_{timestamp}.mp3'
@@ -267,31 +346,60 @@ def generate_and_play_audio_rest(text):
         print(f"{Fore.YELLOW}API Key: {ELEVENLABS_API_KEY[:4]}...{ELEVENLABS_API_KEY[-4:]}{Style.RESET_ALL}")
 
 # Main application loop
+@debug_timer
 def main():
     """Main application loop."""
+    # Test our debug timer
+    with DebugTimer("Startup Test"):
+        time.sleep(1)  # Force a 1 second delay to test timing
+        
     print(f"{Fore.GREEN}{'=' * 50}{Style.RESET_ALL}")
     print(f"{Fore.GREEN}DJ R3X Voice Assistant{Style.RESET_ALL}")
     print(f"{Fore.GREEN}{'=' * 50}{Style.RESET_ALL}")
+    
+    # Print mode status
+    print(f"{Fore.YELLOW}Text-only mode is: {'enabled' if TEXT_ONLY_MODE else 'disabled'}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Debug mode is: {'enabled' if DEBUG_MODE else 'disabled'}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Push-to-talk mode is: {'enabled' if PUSH_TO_TALK_MODE else 'disabled'}{Style.RESET_ALL}")
+    
     if TEXT_ONLY_MODE:
         print(f"{Fore.YELLOW}Running in TEXT ONLY MODE: Responses will be printed, not spoken.{Style.RESET_ALL}")
     
+    if PUSH_TO_TALK_MODE:
+        print(f"{Fore.YELLOW}Running in PUSH TO TALK MODE: Press Space bar to toggle recording.{Style.RESET_ALL}")
+    
     # Show audio processing status
-    from config.voice_config import DISABLE_AUDIO_PROCESSING
     if DISABLE_AUDIO_PROCESSING:
         print(f"{Fore.YELLOW}Audio processing is DISABLED. Using raw ElevenLabs audio.{Style.RESET_ALL}")
     
+    # Print current voice settings
+    print(f"\n{Fore.CYAN}Current Voice Settings:{Style.RESET_ALL}")
+    settings_dict = voice_config.to_dict()
+    for key, value in settings_dict.items():
+        print(f"  {key}: {value}")
+    print()
+    
+    # Play startup notification sound
+    try:
+        startup_sound = pygame.mixer.Sound("audio/startours_audio/startours_ding_short.mp3")
+        startup_sound.play()
+        time.sleep(0.5)  # Give a short time for the sound to play
+    except Exception as e:
+        print(f"{Fore.YELLOW}Could not play startup sound: {str(e)}{Style.RESET_ALL}")
+    
     # Validate configuration and initialize clients
     validate_config()
-    openai_client, recognizer = initialize_clients()
+    openai_client, recognizer, whisper_manager = initialize_clients()
     
     # Main loop
     while True:
         try:
-            # Wait for user to press Enter to start recording
-            input(f"{Fore.CYAN}🎧 Press {Fore.GREEN}ENTER{Fore.CYAN} to talk...{Style.RESET_ALL}")
+            # Only prompt for Enter if not in push-to-talk mode
+            if not PUSH_TO_TALK_MODE:
+                input(f"{Fore.CYAN}🎧 Press {Fore.GREEN}ENTER{Fore.CYAN} to talk...{Style.RESET_ALL}")
             
             # Start listening for speech
-            user_input = listen_for_speech(recognizer)
+            user_input = listen_for_speech(recognizer, whisper_manager)
             
             # Only process if we got valid input
             if user_input:
@@ -304,6 +412,8 @@ def main():
                 # If not in text only mode, convert to speech
                 if not TEXT_ONLY_MODE:
                     text_to_speech(ai_response)
+                else:
+                    print(f"{Fore.YELLOW}Skipping speech synthesis (TEXT_ONLY_MODE is enabled){Style.RESET_ALL}")
             
             print()  # Add a newline for better readability
             
