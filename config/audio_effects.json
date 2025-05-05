@@ -1,0 +1,42 @@
+{
+  "eq": {
+    "highpass_freq": 60,
+    "presence_boost_freq": 4000,
+    "presence_boost_gain": 0,
+    "q_factor": 0.7
+  },
+  "compressor": {
+    "threshold_db": -20,
+    "ratio": 3,
+    "attack_ms": 5,
+    "release_ms": 50
+  },
+  "harmonic_exciter": {
+    "drive": 2.0,
+    "tone": 0.5,
+    "mix": 0.3
+  },
+  "distortion": {
+    "drive_db": 15
+  },
+  "output_gain": {
+    "gain_db": -3
+  },
+  "comb_filter": {
+    "delay_ms": 8.0,
+    "feedback": 0.4,
+    "mix": 0.3
+  },
+  "ring_modulator": {
+    "frequency": 75,
+    "mix": 0.25
+  },
+  "bit_crusher": {
+    "bit_depth": 14,
+    "mix": 0.08
+  },
+  "limiter": {
+    "threshold_db": -3.0,
+    "release_ms": 50
+  }
+} 

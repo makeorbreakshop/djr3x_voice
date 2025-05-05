@@ -1,0 +1,7 @@
+# DJ-R3X Setup Instructions
+1. Create a .env file with OPENAI_API_KEY, ELEVENLABS_API_KEY, and ELEVENLABS_VOICE_ID
+2. Get an ElevenLabs API key from https://elevenlabs.io/app
+3. Get a voice ID from the ElevenLabs voice library
+4. Get an OpenAI API key from https://platform.openai.com/api-keys
+5. Run python3 run_rex.py
+6. You can use python3 get_new_elevenlabs_key.py to help get an ElevenLabs key

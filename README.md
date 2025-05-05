@@ -1,6 +1,98 @@
 # DJ-R3X Voice Assistant
 
-A voice-activated assistant with the personality of DJ R3X, the droid DJ from Star Wars. This Python-based application listens to your voice, processes your requests through OpenAI, and responds with DJ R3X's quirky, upbeat personality using ElevenLabs' text-to-speech technology.
+A voice-first "mini-assistant" that listens, thinks, and speaks back in a DJ R3X-inspired voice from Star Wars.
+
+## Setup Instructions
+
+### 1. Install Dependencies
+Install all required Python packages:
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m pip install pygame
+```
+
+If you encounter issues with PyAudio installation, you may need to install PortAudio first:
+```bash
+brew install portaudio  # For macOS
+```
+
+### 2. API Keys Setup
+You need to set up the following API keys:
+
+#### ElevenLabs API Key
+1. Go to https://elevenlabs.io and create an account
+2. Go to https://elevenlabs.io/app
+3. Click on your profile icon in the top right
+4. Select 'Profile' or 'API Key'
+5. Copy one of your API keys
+
+You can also use the helper script to test your ElevenLabs API key:
+```bash
+python3 get_new_elevenlabs_key.py
+```
+
+#### ElevenLabs Voice ID
+1. After getting your API key, go to https://elevenlabs.io/voice-library
+2. Find or create a voice you want to use
+3. Click on the voice
+4. Copy the Voice ID from the URL (the string after /voice-lab/)
+
+#### OpenAI API Key
+1. Go to https://platform.openai.com/api-keys
+2. Create a new API key
+3. Copy the API key
+
+### 3. Create a .env File
+Create a file named `.env` in the same directory with the following contents:
+
+```
+# API Keys
+OPENAI_API_KEY=your_openai_api_key
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+
+# ElevenLabs Voice ID
+ELEVENLABS_VOICE_ID=your_elevenlabs_voice_id_here
+
+# OpenAI Model Configuration
+OPENAI_MODEL=gpt-4o
+
+# Operation Modes
+TEXT_ONLY_MODE=false
+DISABLE_AUDIO_PROCESSING=false
+
+# Personality Configuration
+DJ_R3X_PERSONA="You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. You occasionally use sound effect words like 'BZZZT!' and 'WOOP!' You like to keep responses brief and entertaining. You love music and Star Wars."
+```
+
+Replace the placeholder values with your actual API keys and voice ID.
+
+### 4. Test ElevenLabs API
+Before running the main program, you can test if your ElevenLabs API connection is working:
+
+```bash
+python3 test_elevenlabs_rest.py
+```
+
+### 5. Run the Program
+Run the program using:
+
+```bash
+python3 run_rex.py
+```
+
+The program will:
+1. Listen to your voice
+2. Convert speech to text
+3. Generate a response using OpenAI
+4. Convert the response to speech using ElevenLabs
+5. Play the audio response
+
+## Troubleshooting
+
+- If you see an error about `ELEVENLABS_API_KEY not found in .env file`, make sure your .env file exists and contains the correct API key.
+- If PyAudio installation fails, make sure you have installed PortAudio first.
+- If you have issues with audio playback, make sure pygame is installed correctly.
+- Check that your microphone is working properly for speech recognition.
 
 ## Features
 
@@ -51,6 +143,10 @@ A voice-activated assistant with the personality of DJ R3X, the droid DJ from St
    # OpenAI Model Configuration
    OPENAI_MODEL=gpt-4o
 
+   # Operation Modes
+   TEXT_ONLY_MODE=false
+   DISABLE_AUDIO_PROCESSING=false
+
    # Personality Configuration
    DJ_R3X_PERSONA="You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. You occasionally use sound effect words like 'BZZZT!' and 'WOOP!' You like to keep responses brief and entertaining. You love music and Star Wars."
    ```
@@ -77,6 +173,21 @@ The default configuration uses a pre-selected ElevenLabs voice ID for DJ R3X. Yo
 1. Creating your own voice in the ElevenLabs platform
 2. Replacing the `ELEVENLABS_VOICE_ID` in the `.env` file
 
+### Operation Modes
+
+You can configure the following operation modes in your `.env` file:
+
+1. **TEXT_ONLY_MODE**: Set to `true` to disable voice output and only show text responses
+   ```
+   TEXT_ONLY_MODE=true
+   ```
+
+2. **DISABLE_AUDIO_PROCESSING**: Set to `true` to disable the audio effects processing
+   ```
+   DISABLE_AUDIO_PROCESSING=true
+   ```
+   When this option is enabled, the app will use the raw ElevenLabs audio without applying the robotic voice effects. This is useful for debugging or when you prefer the unmodified ElevenLabs voice.
+
 ## Usage
 
 Run the assistant using:
@@ -91,25 +202,6 @@ Instructions:
 3. The assistant will process your input and respond as DJ R3X
 4. Audio will play with DJ R3X's voice
 5. Press ENTER again to speak more
-
-## Troubleshooting
-
-### API Key Issues
-
-- **ElevenLabs API Key**: Make sure your ElevenLabs API key starts with `sk_` and matches the exact format from your ElevenLabs dashboard
-- **OpenAI API Key**: Ensure your OpenAI API key has sufficient credits and permissions
-
-### Audio Issues
-
-- Make sure your microphone is properly connected and has permission to be accessed
-- Check that your speakers or headphones are working correctly
-- Install additional codecs if audio playback is not working
-
-### Voice Recognition Problems
-
-- Speak clearly and at a moderate pace
-- Reduce background noise when using the assistant
-- Make sure the microphone is not muted
 
 ## Testing
 
