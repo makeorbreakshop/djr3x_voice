@@ -23,10 +23,11 @@ from dotenv import load_dotenv, find_dotenv
 # Add the project root to the path so we can use local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configure logging
+# Configure logging - use a format that's more concise
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'  # Use shorter time format
 )
 logger = logging.getLogger(__name__)
 
@@ -47,16 +48,20 @@ from config.voice_settings import active_config as voice_config
 from config.openai_settings import active_config as openai_config
 
 # Local imports
-from src.bus import EventBus, EventTypes
+from src.bus import EventBus, EventTypes, SystemMode
 from src.voice_manager import VoiceManager
 from src.led_manager import LEDManager
 from src.music_manager import MusicManager
+from src.system_mode_manager import SystemModeManager
+from src.command_input import CommandInputThread
 
 # Global variables
 event_bus = None  # Will be initialized in main()
 voice_manager: Optional[VoiceManager] = None
 led_manager: Optional[LEDManager] = None
 music_manager: Optional[MusicManager] = None
+system_mode_manager: Optional[SystemModeManager] = None 
+command_input_thread: Optional[CommandInputThread] = None
 shutdown_event = asyncio.Event()
 
 def load_environment() -> Dict[str, str]:
@@ -132,32 +137,38 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
     Returns:
         bool: True if all components initialized successfully
     """
-    global voice_manager, led_manager, music_manager
+    global voice_manager, led_manager, music_manager, system_mode_manager, command_input_thread
     
     try:
-        logger.info(f"Initializing components (test_mode={test_mode})...")
+        logger.info("Initializing components...")
         
         # Get the currently running event loop to ensure consistency
         current_loop = asyncio.get_running_loop()
         
-        # Initialize Voice Manager with full configuration
-        voice_manager = VoiceManager(
-            event_bus=event_bus,
-            openai_key=env["OPENAI_API_KEY"],
-            openai_model=env["OPENAI_MODEL"],
-            elevenlabs_key=env["ELEVENLABS_API_KEY"],
-            elevenlabs_voice_id=env["ELEVENLABS_VOICE_ID"],
-            persona=env["DJ_R3X_PERSONA"],
-            voice_config=voice_config,
-            openai_config=openai_config,
-            text_only_mode=TEXT_ONLY_MODE,
-            push_to_talk_mode=PUSH_TO_TALK_MODE,
-            disable_audio_processing=DISABLE_AUDIO_PROCESSING,
-            sample_rate=SAMPLE_RATE,
-            channels=CHANNELS,
-            test_mode=test_mode,
-            loop=current_loop  # Pass the running event loop explicitly
-        )
+        # Initialize Voice Manager
+        try:
+            voice_manager = VoiceManager(
+                event_bus=event_bus,
+                openai_key=env["OPENAI_API_KEY"],
+                openai_model=env["OPENAI_MODEL"],
+                elevenlabs_key=env["ELEVENLABS_API_KEY"],
+                elevenlabs_voice_id=env["ELEVENLABS_VOICE_ID"],
+                persona=env["DJ_R3X_PERSONA"],
+                voice_config=voice_config,
+                openai_config=openai_config,
+                text_only_mode=TEXT_ONLY_MODE,
+                push_to_talk_mode=PUSH_TO_TALK_MODE,
+                disable_audio_processing=DISABLE_AUDIO_PROCESSING,
+                sample_rate=SAMPLE_RATE,
+                channels=CHANNELS,
+                test_mode=test_mode,
+                loop=current_loop  # Pass the running event loop explicitly
+            )
+            await voice_manager.start()
+            event_bus.voice_manager = voice_manager  # Store reference
+        except Exception as e:
+            logger.warning(f"Failed to initialize Voice Manager: {e}")
+            voice_manager = None
         
         # Initialize LED Manager
         try:
@@ -165,10 +176,8 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
                 event_bus=event_bus,
                 disable_eyes=DISABLE_EYES
             )
-            led_success = await led_manager.start()
-            
-            if not led_success:
-                logger.warning("LED Manager failed to initialize properly, continuing without LED support")
+            await led_manager.start()
+            event_bus.led_manager = led_manager  # Store reference
         except Exception as e:
             logger.warning(f"Failed to initialize LED Manager: {e}")
             led_manager = None
@@ -177,13 +186,32 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
         try:
             music_manager = MusicManager(event_bus)
             await music_manager.start()
+            event_bus.music_manager = music_manager  # Store reference
         except Exception as e:
             logger.warning(f"Failed to initialize Music Manager: {e}")
             music_manager = None
             
+        # Initialize System Mode Manager
+        # Start in STARTUP mode, will transition to IDLE mode after initialization
+        system_mode_manager = SystemModeManager(event_bus, initial_mode=SystemMode.STARTUP)
+        
         # Play startup sound after all components are initialized
         play_startup_sound()
+        
+        # Transition to IDLE mode after startup
+        logger.info("Startup complete. Transitioning to IDLE mode...")
+        await system_mode_manager.change_mode(SystemMode.IDLE)
+        
+        print("\n" + "="*50)
+        print(" DJ R3X system initialized and ready!")  
+        print(" Currently in IDLE mode")
+        print(" Type 'help' for available commands")
+        print("="*50 + "\n")
             
+        # Initialize Command Input Thread (after all init is complete)
+        command_input_thread = CommandInputThread(event_bus, current_loop)
+        command_input_thread.start()
+        
         # Return success if we got here
         return True
             
@@ -196,6 +224,10 @@ async def cleanup_components() -> None:
     logger.info("Cleaning up components...")
     
     # Order matters: stop components in reverse order of dependencies
+    
+    # Stop Command Input Thread
+    if command_input_thread and command_input_thread.is_alive():
+        command_input_thread.stop()
     
     # Stop Music Manager
     if music_manager:
@@ -369,74 +401,63 @@ async def main() -> int:
     """Main application entry point.
     
     Returns:
-        int: Exit code
+        int: Exit code (0 for success, non-zero for error)
     """
     global event_bus
     
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="DJ R3X Voice System")
-    parser.add_argument("--demo", action="store_true", help="Run in demo mode")
-    parser.add_argument("--music", type=str, help="Path to background music file")
-    parser.add_argument("--test", action="store_true", help="Run in test mode without API calls")
-    args = parser.parse_args()
-    
     try:
-        # Print startup banner
-        logger.info("=" * 50)
-        logger.info("DJ R3X Voice Assistant")
-        logger.info("=" * 50)
+        # Parse command line arguments
+        parser = argparse.ArgumentParser(description="DJ R3X Lights & Voice MVP")
+        parser.add_argument("--test", action="store_true", help="Run in test mode without API calls")
+        args = parser.parse_args()
         
-        # Print mode status
-        logger.info(f"Text-only mode: {'enabled' if TEXT_ONLY_MODE else 'disabled'}")
-        logger.info(f"Debug mode: {'enabled' if DEBUG_MODE else 'disabled'}")
-        logger.info(f"Push-to-talk mode: {'enabled' if PUSH_TO_TALK_MODE else 'disabled'}")
-        logger.info(f"Audio processing: {'disabled' if DISABLE_AUDIO_PROCESSING else 'enabled'}")
+        # Set up event bus
+        event_bus = EventBus()
+        
+        # Set up signal handlers for clean shutdown
+        # Register SIGINT and SIGTERM handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, signal_handler)
         
         # Load environment variables
         env = load_environment()
         
-        # Get the running event loop
-        loop = asyncio.get_running_loop()
-        
-        # Initialize EventBus with the running loop
-        event_bus = EventBus(loop=loop)
-        
-        # Register signal handlers
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, signal_handler)
-        
         # Initialize components
-        success = await initialize_components(env, test_mode=args.test)
-        if not success:
-            logger.error("Failed to initialize components, exiting")
+        if not await initialize_components(env, test_mode=args.test):
+            logger.error("Failed to initialize components")
             return 1
         
-        # Play background music if specified
-        if args.music and music_manager and os.path.exists(args.music):
-            await play_background_music(args.music)
+        # Set up system startup/shutdown event handlers
+        event_bus.on(EventTypes.SYSTEM_SHUTDOWN, lambda _: shutdown_event.set())
         
-        # Start voice interaction loop
-        if voice_manager:
-            await voice_manager.start_interaction_loop()
+        # Start voice interaction loop - this runs in the background
+        # but will only actively listen when in INTERACTIVE mode
+        # NOTE: Task creation removed - now handled by VoiceManager's activate_interactive_mode/deactivate_interactive_mode
+        # voice_loop_task = asyncio.create_task(voice_manager.start_interaction_loop())
         
-        # Wait for shutdown event
+        # Wait for shutdown signal
         await shutdown_event.wait()
         
-        return 0
+        # Cancel all tasks
+        logger.info("Shutting down...")
+        # voice_loop_task.cancel() # No longer needed - handled by cleanup_components()
         
-    except Exception as e:
-        logger.error(f"Unhandled exception in main: {e}")
-        return 1
-        
-    finally:
-        # Always clean up resources
+        # Clean up resources
         await cleanup_components()
-        logger.info("Application shutdown complete")
+        
+        return 0
+    
+    except Exception as e:
+        logger.error(f"Error in main: {e}")
+        return 1
 
 if __name__ == "__main__":
     try:
         exit_code = asyncio.run(main())
         sys.exit(exit_code)
     except KeyboardInterrupt:
-        print("\nInterrupted by user, shutting down...")
-        sys.exit(0) 
+        logger.info("Application terminated by user")
+    except Exception as e:
+        logger.error(f"Unhandled exception: {e}")
+        sys.exit(1) 

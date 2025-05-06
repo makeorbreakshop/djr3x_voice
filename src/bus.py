@@ -8,6 +8,13 @@ from pyee.asyncio import AsyncIOEventEmitter
 import asyncio
 import inspect
 
+class SystemMode(Enum):
+    """System operation modes for DJ R3X."""
+    STARTUP = "startup"           # Initial startup and self-check
+    IDLE = "idle"                 # Default idle state after startup
+    AMBIENT = "ambient"           # Ambient show mode (pre-scripted animations)
+    INTERACTIVE = "interactive"   # Interactive voice conversation mode
+
 class EventTypes(Enum):
     """Event types that can be emitted on the event bus."""
     
@@ -15,6 +22,7 @@ class EventTypes(Enum):
     SYSTEM_READY = "system.ready"
     SYSTEM_SHUTDOWN = "system.shutdown"
     SYSTEM_ERROR = "system.error"
+    SYSTEM_MODE_CHANGED = "system.mode_changed"
     
     # Voice events
     VOICE_LISTENING_STARTED = "voice.listening_started"
@@ -28,10 +36,16 @@ class EventTypes(Enum):
     MUSIC_TRACK_STARTED = "music.track_started"
     MUSIC_VOLUME_DUCKED = "music.volume_ducked"
     MUSIC_VOLUME_RESTORED = "music.volume_restored"
+    MUSIC_CONTROL_COMMAND = "music.control_command"
     
     # LED events
     LED_ANIMATION_STARTED = "led.animation_started"
     LED_ANIMATION_STOPPED = "led.animation_stopped"
+    LED_ANIMATION_ATTEMPTED = "led.animation_attempted"
+    
+    # Command events
+    COMMAND_RECEIVED = "command.received"
+    COMMAND_EXECUTED = "command.executed"
 
 class EventBus:
     """

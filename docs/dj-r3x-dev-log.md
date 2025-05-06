@@ -19,17 +19,22 @@ The application is built with an event-driven architecture with the following co
 | 2025-05-06 | Identified asyncio/thread bridge issue | Synchronous input (keyboard) needs proper bridge to async event bus |
 
 ## 🔎 Code Investigations & Discoveries
-- Audio level extraction using RMS envelope calculation works well for synchronizing LED mouth animations with speech (~50fps update rate)
-- Latency between voice.beat events and LED animation updates must be kept under 100ms for natural appearance
-- Asynchronous programming model (asyncio) enables smooth coordination between components while maintaining responsiveness
-- Discovered synchronous libraries (pynput for keyboard input) require proper threadsafe bridges to communicate with asyncio event loop (use asyncio.run_coroutine_threadsafe or loop.call_soon_threadsafe)
+- Audio RMS envelope calculation effective for LED mouth synchronization (~50fps)
+- Mouth animation latency must stay under 100ms for natural appearance
+- Asyncio best practices critical for stability:
+  - Tasks require explicit cancellation; boolean flags alone are insufficient
+  - Blocking I/O (serial, audio) must use run_in_executor
+  - Thread-based inputs (keyboard) need proper bridges via run_coroutine_threadsafe
+  - Cross-thread communication requires explicit lifecycle management
+- Arduino communication needs robust error handling, retries, and state reconciliation
+- Components require explicit cleanup for mode transitions, not just application shutdown
 
 ## 🐞 Known Bugs / Technical Limitations
-- Voice detection latency varies depending on microphone quality and ambient noise
-- Serial communication with Arduino introduces slight delay in LED animations
-- Audio ducking sometimes creates noticeable transitions in background music
-- Push-to-talk keyboard listener runs in a separate thread and can't directly create asyncio tasks without a proper thread-safe bridge
-- Audio playback through sounddevice appears to fail silently, requiring investigation into platform-specific audio driver configuration
+- Voice detection latency varies with microphone quality and ambient noise
+- Arduino serial communication introduces slight delay in LED animations
+- Audio ducking creates occasionally noticeable transitions in background music
+- Audio playback via sounddevice fails silently on some platforms
+- Cross-thread communication requires careful event loop reference management
 
 ## 💡 Feature Backlog & Design Notes
 - Move LED Manager to ESP32 for wireless control
@@ -102,3 +107,56 @@ The application is built with an event-driven architecture with the following co
 
 ### 2025-05-07: Added Startup Sound
 - Added platform-compatible startup sound playback after component initialization for better UX feedback 
+
+### 2025-05-07: LED Communication Protocol Update
+- Implemented ArduinoJson v7.4.1 for robust JSON parsing
+- Updated Arduino sketch with dynamic JSON allocation and proper error handling
+- Added structured acknowledgments for reliable communication
+- Next: Test communication reliability with voice state changes 
+
+### 2025-05-07: LED JSON Communication Fix
+- Fixed JSON communication between Python and Arduino
+- Updated LED Manager to handle multiple response types (debug, parsed, ack)
+- Added timeout protection and better error handling
+- Reduced Arduino debug output with DEBUG_MODE flag
+- Result: Eliminated "Invalid JSON" and "Unexpected acknowledgment" warnings 
+
+### 2025-05-08: System Modes Architecture Design
+- Implemented system mode architecture to fix debugging issues and improve interaction:
+  - **Modes**: STARTUP → IDLE → AMBIENT SHOW/INTERACTIVE VOICE
+- Key benefits: Explicit opt-in to voice interaction, state-based behavior control
+- Implementation: Command input thread with asyncio bridge, EventBus for mode transitions
+- Components respond to mode changes via event subscriptions
+
+### 2025-05-08: System Modes Architecture Refinement
+- Added distinct IDLE mode as default fallback state
+- System boot sequence: STARTUP → IDLE (can transition to AMBIENT or INTERACTIVE)
+- Commands: `ambient`, `engage`, `disengage` (returns to IDLE)
+- Improved LED patterns for each mode and fixed command input display
+
+### 2025-05-08: Voice Interaction and LED State Management Updates
+- Fixed VoiceManager interaction loop for speech synthesis/playback
+- Known Issue: LED transitions during pattern interruption need improvement 
+
+### 2025-05-09: Music Playback System Design
+- Implemented CLI music controls: `list music`, `play music <number/name>`, `stop music`
+- Mode-specific behaviors:
+  - IDLE: Limited controls; playing transitions to AMBIENT
+  - AMBIENT: Full controls, continuous playback
+  - INTERACTIVE: Full controls with audio ducking during speech
+- Architecture: MusicManager listens for control commands and mode changes
+- Next steps: CLI implementation, testing, voice command integration
+
+### 2025-05-09: Asyncio State Transition Fix
+- Fixed: Voice/LED persisting after mode changes; Arduino timeouts
+- Solutions: Task cancellation, non-blocking I/O, resource cleanup
+- Result: Clean transitions between system modes 
+
+### 2025-05-09: Added System Reset Command
+- Added `reset` CLI command for emergency system recovery
+- Implementation:
+  - Cancels all active tasks (voice, LED, music)
+  - Cleans up hardware connections (Arduino, audio)
+  - Forces transition to IDLE mode
+  - Re-initializes core managers if needed
+- Benefit: Quick recovery from stuck states without full restart 

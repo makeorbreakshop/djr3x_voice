@@ -11,7 +11,7 @@ PUSH_TO_TALK_MODE = True  # When True, audio recording only happens while space 
 
 # Audio Processing Settings
 SAMPLE_RATE = 44100
-CHANNELS = 1
+CHANNELS = 1 
 
 # LED Settings
 LED_SERIAL_PORT = "/dev/tty.usbmodem833301"  # Default port for macOS

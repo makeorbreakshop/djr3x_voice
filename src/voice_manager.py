@@ -16,7 +16,7 @@ import requests
 import io
 from pydub import AudioSegment
 
-from src.bus import EventBus, EventTypes
+from src.bus import EventBus, EventTypes, SystemMode
 from src.utils.envelope import AudioEnvelope
 from whisper_manager import WhisperManager
 from audio_processor import process_and_play_audio
@@ -97,16 +97,110 @@ class VoiceManager:
         self.is_recording = False
         self.recording_event = asyncio.Event()
         
+        # System mode flag - starts as inactive
+        self.interactive_mode_enabled = False
+        
+        # Task that runs the interaction loop - will be created when interactive mode is activated
+        self.interaction_task = None
+        
         # Initialize keyboard listener if using push-to-talk
+        # But don't actually start it until interactive mode is activated
         if push_to_talk_mode:
             self.keyboard_listener = keyboard.Listener(
                 on_press=self._on_key_press,
                 on_release=self._on_key_release
             )
+            # Register for system mode changes
+            self.event_bus.on(EventTypes.SYSTEM_MODE_CHANGED, self._handle_mode_change)
+    
+    async def _handle_mode_change(self, data: Dict[str, Any]) -> None:
+        """Handle system mode changes.
+        
+        Args:
+            data: Event data containing old_mode and new_mode
+        """
+        if "new_mode" not in data:
+            return
+            
+        new_mode = data["new_mode"]
+        
+        if new_mode == SystemMode.INTERACTIVE.value:
+            # Enable interactive mode
+            await self.activate_interactive_mode()
+        else:
+            # Disable interactive mode for all other modes
+            await self.deactivate_interactive_mode()
+    
+    async def activate_interactive_mode(self) -> None:
+        """Enable interactive voice mode."""
+        if self.interactive_mode_enabled:
+            return
+            
+        logger.info("Activating voice interactive mode")
+        self.interactive_mode_enabled = True
+        
+        # Start keyboard listener in push-to-talk mode
+        if self.push_to_talk_mode:
+            # Ensure any previous listener is stopped before creating a new one
+            if hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+                self.keyboard_listener.stop()
+                logger.info("Stopped existing keyboard listener")
+                
+            # Create a fresh keyboard listener
+            self.keyboard_listener = keyboard.Listener(
+                on_press=self._on_key_press,
+                on_release=self._on_key_release
+            )
             self.keyboard_listener.start()
+            logger.info("Push-to-talk listener activated")
+            
+        # Start the interaction loop as a proper asyncio task, if not already running
+        if self.interaction_task is None or self.interaction_task.done():
+            self.interaction_task = asyncio.create_task(self.start_interaction_loop())
+            logger.info("Started voice interaction loop task")
+    
+    async def deactivate_interactive_mode(self) -> None:
+        """Disable interactive voice mode."""
+        if not self.interactive_mode_enabled:
+            return
+            
+        logger.info("Deactivating voice interactive mode")
+        self.interactive_mode_enabled = False
+        
+        # Stop any active recording
+        if self.is_recording:
+            self.is_recording = False
+            self.recording_event.clear()
+            await self._emit_listening_stopped()
+            
+        # Stop the keyboard listener to prevent further key events
+        if self.push_to_talk_mode and hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+            self.keyboard_listener.stop()
+            logger.info("Push-to-talk listener stopped")
+            
+        # Cancel the interaction loop task if it's running
+        if self.interaction_task and not self.interaction_task.done():
+            logger.info("Cancelling voice interaction loop task")
+            self.interaction_task.cancel()
+            try:
+                # Wait briefly for the task to acknowledge cancellation
+                await asyncio.wait_for(asyncio.shield(self.interaction_task), timeout=1.0)
+                logger.info("Voice interaction loop task cancelled successfully")
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                # This is expected - either timeout or the task was cancelled
+                logger.info("Voice interaction loop task cancellation completed")
+            except Exception as e:
+                logger.error(f"Error during interaction task cancellation: {e}")
+            
+            # Clear the task reference
+            self.interaction_task = None
     
     def _on_key_press(self, key):
         """Handle key press events for push-to-talk."""
+        # Skip key press events if not in interactive mode
+        if not self.interactive_mode_enabled:
+            return
+            
         try:
             if key == keyboard.Key.space and not self.is_recording:
                 self.is_recording = True
@@ -123,6 +217,10 @@ class VoiceManager:
     
     def _on_key_release(self, key):
         """Handle key release events for push-to-talk."""
+        # Skip key release events if not in interactive mode
+        if not self.interactive_mode_enabled:
+            return
+            
         try:
             if key == keyboard.Key.space and self.is_recording:
                 self.is_recording = False
@@ -154,6 +252,11 @@ class VoiceManager:
     
     async def capture_audio(self) -> Optional[np.ndarray]:
         """Capture audio from microphone."""
+        # Return None if not in interactive mode
+        if not self.interactive_mode_enabled:
+            logger.debug("Skipping audio capture - not in interactive mode")
+            return None
+            
         try:
             with sr.Microphone(sample_rate=16000) as source:  # Set sample rate to 16kHz
                 logger.info("Listening for speech...")
@@ -363,63 +466,60 @@ class VoiceManager:
             })
     
     async def start_interaction_loop(self) -> None:
-        """Start the main voice interaction loop."""
-        logger.info("Starting voice interaction loop...")
+        """Start the voice interaction loop."""
+        logger.info("Starting voice interaction loop")
         
         while True:
             try:
-                # Capture audio
-                logger.info("Waiting for audio input...")
+                # Exit loop if not in interactive mode
+                if not self.interactive_mode_enabled:
+                    # Sleep a bit to avoid constant checking
+                    await asyncio.sleep(0.5)
+                    continue
+                    
+                # Capture audio from microphone
                 audio_data = await self.capture_audio()
                 if audio_data is None:
-                    logger.warning("Failed to capture audio, retrying...")
                     continue
                 
-                # Transcribe audio
-                logger.info("Transcribing audio...")
+                # Transcribe to text
                 text = await self.transcribe_audio(audio_data)
                 if not text:
-                    logger.warning("Failed to transcribe audio, retrying...")
+                    logger.info("No speech detected")
+                    continue
+                    
+                logger.info(f"Recognized: {text}")
+                
+                # Process with LLM
+                response_text = await self.process_text(text)
+                if not response_text:
+                    logger.warning("Failed to get AI response")
                     continue
                 
-                logger.info(f"Transcribed: {text}")
-                
-                # Process with OpenAI
-                logger.info(f"Processing text with OpenAI ({self.openai_model})...")
-                response = await self.process_text(text)
-                logger.info(f"Response: {response}")
-                
-                # Skip TTS in text-only mode
-                if self.text_only_mode:
-                    logger.info("Skipping speech synthesis (text-only mode)")
+                # Synthesize speech
+                audio_bytes = await self.synthesize_speech(response_text)
+                if not audio_bytes:
+                    logger.warning("Failed to synthesize speech")
                     continue
-                
-                # Convert to speech
-                logger.info("Synthesizing speech...")
-                audio_data = await self.synthesize_speech(response)
-                if audio_data:
-                    logger.info("Speech synthesized, starting playback...")
-                    await self.play_audio(audio_data)
-                    logger.info("Audio playback completed")
-                else:
-                    logger.error("Failed to synthesize speech")
+
+                # Play response
+                await self.play_audio(audio_bytes)
                 
             except asyncio.CancelledError:
                 logger.info("Interaction loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in interaction loop: {e}", exc_info=True)
-                await self.event_bus.emit(EventTypes.SYSTEM_ERROR, {
-                    "source": "voice_manager",
-                    "msg": f"Interaction error: {e}"
-                })
+                logger.error(f"Error in interaction loop: {e}")
+                # Sleep a bit before retrying
+                await asyncio.sleep(1)
     
     async def stop(self) -> None:
-        """Stop the voice manager."""
-        if self.push_to_talk_mode:
-            self.keyboard_listener.stop()
+        """Stop the voice manager and release resources."""
+        logger.info("Stopping Voice Manager")
         
-        # Reset state
-        self.is_recording = False
-        self.recording_event.clear()
-        self.envelope_analyzer.reset() 
+        # First deactivate interactive mode to handle the task and keyboard listener
+        await self.deactivate_interactive_mode()
+        
+        # Additional cleanup if needed
+        # Wait for any active audio processing to complete
+        # This is a placeholder - add actual cleanup if needed 
