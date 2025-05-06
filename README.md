@@ -2,13 +2,87 @@
 
 A voice-first "mini-assistant" that listens, thinks, and speaks back in a DJ R3X-inspired voice from Star Wars.
 
+## Overview
+
+DJ-R3X Voice Assistant is a Python application that creates an interactive Star Wars droid DJ experience with:
+
+- **Voice Recognition**: Listens for commands using SpeechRecognition and Whisper
+- **AI Processing**: Generates DJ R3X-style responses with OpenAI's GPT-4o
+- **Text-to-Speech**: Converts responses to lifelike speech using ElevenLabs
+- **LED Animation**: Synchronizes eye/mouth animations with speech via Arduino
+- **Music Management**: Plays background music that automatically ducks during speech
+
+The project features two implementations:
+1. A legacy monolithic design (`run_rex.py`)
+2. A modern event-driven MVP architecture (`run_r3x_mvp.py`)
+
+## Hardware Configuration
+
+### Components
+
+The DJ-R3X Voice Assistant utilizes the following hardware components:
+
+1. **Arduino Mega 2560 R3**:
+   - Main microcontroller for LED matrix control
+   - Connected via USB to the host computer
+   - Serial communication at 115200 baud rate
+
+2. **MAX7219 LED Matrix Modules** (2):
+   - Single color (typically red) 8x8 LED matrix modules
+   - Connected to Arduino for eyes visualization
+   - Wiring:
+     - VCC: 5V from Arduino
+     - GND: Ground from Arduino
+     - DIN: Pin 51 on Arduino
+     - CS: Pin 53 on Arduino
+     - CLK: Pin 52 on Arduino
+
+3. **Computer with Microphone**:
+   - For voice input and processing
+   - Required for running the Python software
+   - Connects to Arduino via USB
+
+4. **Speaker System**:
+   - For voice output and music playback
+   - Connected to the computer
+
+### Wiring Diagram
+
+```
+Arduino Mega 2560 R3       MAX7219 LED Matrices (2)
++----------------+         +------------------+
+|                |         |                  |
+| Pin 51 (DIN) --|---------|DIN               |
+| Pin 52 (CLK) --|---------|CLK               |
+| Pin 53 (CS)  --|---------|CS                |
+| 5V           --|---------|VCC               |
+| GND          --|---------|GND               |
+|                |         |                  |
++----------------+         +------------------+
+       |
+       | USB
+       |
++----------------+
+|    Computer    |
++----------------+
+```
+
+The two MAX7219 modules are daisy-chained together, with the first module controlling the left eye and the second module controlling the right eye.
+
+### LED Matrix Configuration
+
+Each 8x8 LED matrix represents one eye of DJ-R3X:
+- Center position is at (3,3) for each matrix
+- Animations typically use a 3x3 grid centered at this position
+- Different animation patterns represent different states (idle, listening, speaking, etc.)
+- LED intensity is configurable in the Arduino code
+
 ## Setup Instructions
 
 ### 1. Install Dependencies
 Install all required Python packages:
 ```bash
 python3 -m pip install -r requirements.txt
-python3 -m pip install pygame
 ```
 
 If you encounter issues with PyAudio installation, you may need to install PortAudio first:
@@ -73,19 +147,102 @@ Before running the main program, you can test if your ElevenLabs API connection 
 python3 test_elevenlabs_rest.py
 ```
 
-### 5. Run the Program
-Run the program using:
+### 5. Arduino Setup
+
+1. Connect the Arduino Mega 2560 to your computer via USB
+2. Connect the MAX7219 LED matrix modules following the wiring diagram
+3. Upload the `arduino/rex_eyes/rex_eyes.ino` sketch to the Arduino using the Arduino IDE
+4. Verify the serial connection is working (Arduino will output "READY" when initialized)
+5. Note the serial port being used (typically something like `/dev/ttyACM0` on Linux, `/dev/tty.usbmodem*` on macOS, or `COM*` on Windows)
+6. Update the `.env` file with your Arduino serial port:
+   ```
+   LED_SERIAL_PORT=/dev/ttyACM0  # Replace with your actual port
+   LED_BAUD_RATE=115200
+   ```
+
+### 6. Run the Program
+
+#### Legacy Version
+Run the original monolithic version using:
 
 ```bash
 python3 run_rex.py
 ```
 
-The program will:
-1. Listen to your voice
-2. Convert speech to text
-3. Generate a response using OpenAI
-4. Convert the response to speech using ElevenLabs
-5. Play the audio response
+#### MVP Architecture Version
+Run the modern event-driven MVP architecture version (recommended):
+
+```bash
+python3 run_r3x_mvp.py
+```
+
+You can also use these additional options:
+```bash
+# Run in demo mode with predefined interactions
+python3 run_r3x_mvp.py --demo
+
+# Play background music during operation
+python3 run_r3x_mvp.py --music path/to/music.mp3
+
+# Run in test mode (no API keys required)
+python3 run_r3x_mvp.py --test
+```
+
+### Test Mode
+The application includes a test mode that allows you to run the system without requiring API keys or external hardware. This is useful for development, testing, and demonstration purposes.
+
+In test mode:
+- Voice responses use pre-defined test responses instead of calling OpenAI
+- Speech synthesis generates simple audio patterns instead of using ElevenLabs
+- LED control gracefully handles missing Arduino connections
+- Music playback works if VLC is installed, but is optional
+
+To run in test mode:
+```bash
+python3 run_r3x_mvp.py --test
+```
+
+You can combine test mode with other flags:
+```bash
+# Run demo sequence in test mode
+python3 run_r3x_mvp.py --test --demo
+```
+
+## MVP Architecture
+
+The MVP architecture implements an event-driven design with the following components:
+
+1. **Event Bus** (`src/bus.py`) - Core communication system that enables all components to interact via events
+2. **Voice Manager** (`src/voice_manager.py`) - Manages voice interaction pipeline:
+   - Speech recognition (using SpeechRecognition and WhisperManager)
+   - Text processing (via OpenAI API)
+   - Speech synthesis (via ElevenLabs API)
+3. **LED Manager** (`src/led_manager.py`) - Controls Arduino-connected LED matrices:
+   - Updates animations based on system state
+   - Synchronizes mouth movement with speech amplitude
+   - Provides visual feedback during different interaction phases
+4. **Music Manager** (`src/music_manager.py`) - Handles background music features:
+   - Plays background tracks with VLC
+   - Implements auto-ducking (lowering volume) during speech
+   - Manages music transitions and playlist features
+
+### Events System
+The system uses these key events for inter-component communication:
+- `voice.listening_started/stopped` - Speech recording state
+- `voice.processing_started` - Voice is being transcribed/processed
+- `voice.speaking_started` - Speech synthesis begins
+- `voice.beat` - Emitted ~50 times per second with amplitude data during speech
+- `voice.speaking_finished` - Speech completes
+- `music.track_started` - New background music track begins
+- `music.volume_ducked/restored` - Volume state changes
+- `system.error` - Error handling events
+
+### Resource Management
+The MVP architecture provides proper resource cleanup, ensuring all components are gracefully shut down when the application exits, addressing these key areas:
+- Serial port connections for LED control
+- Audio playback resources
+- Background tasks
+- Event handlers
 
 ## Troubleshooting
 
@@ -93,137 +250,84 @@ The program will:
 - If PyAudio installation fails, make sure you have installed PortAudio first.
 - If you have issues with audio playback, make sure pygame is installed correctly.
 - Check that your microphone is working properly for speech recognition.
+- For Arduino LED connection issues, verify the correct serial port in the error messages.
+- If the Arduino code fails to compile, ensure you have the LedControl library installed. You can install it through Arduino IDE's Library Manager.
 
 ## Features
 
-- **Voice Recognition**: Listens to your voice commands using the SpeechRecognition library
-- **AI Processing**: Uses OpenAI's GPT-4o model to generate DJ R3X-style responses
-- **Text-to-Speech**: Converts responses to lifelike speech using ElevenLabs' voice synthesis API
-- **Interactive Experience**: Press ENTER to start talking, then listen to DJ R3X's response
+### Voice Recognition
+- Uses offline Whisper model for speech-to-text (no internet required for transcription)
+- Supports push-to-talk mode (toggle with spacebar) or automatic voice detection
+- Provides visual and audio feedback during listening state
 
-## Requirements
+### AI Processing
+- Processes speech input using OpenAI's GPT-4o model
+- Maintains DJ R3X character personality across interactions
+- Provides context-aware responses in DJ R3X's distinctive style
 
-- Python 3.7+
-- OpenAI API key
-- ElevenLabs API key
-- Microphone for voice input
+### Speech Synthesis
+- Converts responses to lifelike speech using ElevenLabs
+- Supports customized voice settings via configuration
+- Optional audio processing for enhanced output quality
 
-## Installation
+### LED Animation
+- Synchronizes LED eye/mouth animations with speech
+- Different patterns for idle, listening, processing, and speaking states
+- Visual feedback coordinated with audio through event system
 
-1. Clone this repository or download the source files
-
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-   Dependencies include:
-   - SpeechRecognition
-   - pyaudio
-   - openai
-   - elevenlabs
-   - python-dotenv
-   - colorama
-   - pygame
-
-3. Create an `.env` file by copying the template from `env.example`:
-   ```bash
-   cp env.example .env
-   ```
-
-4. Update the `.env` file with your own API keys:
-   ```
-   # API Keys
-   OPENAI_API_KEY=your_openai_api_key
-   ELEVENLABS_API_KEY=your_elevenlabs_api_key
-
-   # ElevenLabs Voice ID
-   ELEVENLABS_VOICE_ID=P9l1opNa5pWou2X5MwfB
-
-   # OpenAI Model Configuration
-   OPENAI_MODEL=gpt-4o
-
-   # Operation Modes
-   TEXT_ONLY_MODE=false
-   DISABLE_AUDIO_PROCESSING=false
-
-   # Personality Configuration
-   DJ_R3X_PERSONA="You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. You occasionally use sound effect words like 'BZZZT!' and 'WOOP!' You like to keep responses brief and entertaining. You love music and Star Wars."
-   ```
-
-## Configuration
-
-### API Keys
-
-1. **OpenAI API Key**:
-   - Sign up at [OpenAI](https://platform.openai.com/)
-   - Create an API key in your account
-   - Add it to the `.env` file
-
-2. **ElevenLabs API Key**:
-   - Sign up at [ElevenLabs](https://elevenlabs.io/)
-   - Go to your profile settings
-   - Generate an API key (starts with `sk_`)
-   - Add it to the `.env` file
-
-### Voice Configuration
-
-The default configuration uses a pre-selected ElevenLabs voice ID for DJ R3X. You can customize this by:
-
-1. Creating your own voice in the ElevenLabs platform
-2. Replacing the `ELEVENLABS_VOICE_ID` in the `.env` file
-
-### Operation Modes
-
-You can configure the following operation modes in your `.env` file:
-
-1. **TEXT_ONLY_MODE**: Set to `true` to disable voice output and only show text responses
-   ```
-   TEXT_ONLY_MODE=true
-   ```
-
-2. **DISABLE_AUDIO_PROCESSING**: Set to `true` to disable the audio effects processing
-   ```
-   DISABLE_AUDIO_PROCESSING=true
-   ```
-   When this option is enabled, the app will use the raw ElevenLabs audio without applying the robotic voice effects. This is useful for debugging or when you prefer the unmodified ElevenLabs voice.
+### Music Management
+- Background music playback with automatic ducking during speech
+- Support for playlists and random track selection
+- Smooth volume transitions during speech interactions
 
 ## Usage
 
-Run the assistant using:
+### Interactive Mode
+Run the MVP version and interact through the command line:
 
 ```bash
-python run_rex.py
+python3 run_r3x_mvp.py
 ```
 
-Instructions:
-1. The assistant will start and prompt you to press ENTER to begin speaking
-2. After pressing ENTER, start speaking your question or request
-3. The assistant will process your input and respond as DJ R3X
-4. Audio will play with DJ R3X's voice
-5. Press ENTER again to speak more
+Available commands:
+- Type any text to have DJ R3X respond to it
+- `speak <text>` - Generate and speak a response to text
+- `music <file>` - Play a background music file
+- `stop` - Stop music playback
+- `duck` - Duck music volume manually
+- `restore` - Restore music volume manually
+- `exit` or `quit` - Exit the program
+- `help` - Show command help
 
-## Testing
-
-The repository includes two test scripts:
-
-1. `test_elevenlabs.py`: Tests the ElevenLabs Python SDK integration
-2. `test_elevenlabs_rest.py`: Tests direct REST API calls to ElevenLabs
-
-Run these to verify your API keys and configuration:
+### Demo Mode
+Run a demonstration with predefined interactions:
 
 ```bash
-python test_elevenlabs_rest.py
+python3 run_r3x_mvp.py --demo
 ```
 
 ## Project Structure
 
-- `run_rex.py`: Wrapper script that sets the API key and launches the main application
-- `rex_talk.py`: Main application with speech recognition, AI processing, and voice synthesis
-- `.env`: Configuration file for API keys and parameters
-- `test_elevenlabs.py`: Test script for the ElevenLabs SDK
-- `test_elevenlabs_rest.py`: Test script for the ElevenLabs REST API
-- `get_new_elevenlabs_key.py`: Utility script to help set up a new ElevenLabs API key
+### Core Files
+- `run_r3x_mvp.py`: Launcher for the MVP architecture
+- `src/main.py`: Main application entry point and component coordinator
+- `src/bus.py`: Event bus implementation for inter-component communication
+- `src/voice_manager.py`: Speech processing and synthesis pipeline
+- `src/led_manager.py`: LED animation control and visual feedback
+- `src/music_manager.py`: Music playback and volume management 
+- `whisper_manager.py`: Local speech-to-text processing
+- `audio_processor.py`: Audio processing utilities
+
+### Legacy Files
+- `run_rex.py`: Wrapper for the original monolithic application
+- `rex_talk.py`: Original application with all functionality in one file
+
+### Configuration
+- `config/`: Configuration files for various components
+- `env.example`: Template for creating your `.env` file
+
+### Testing
+- Various test scripts for different components
 
 ## License
 

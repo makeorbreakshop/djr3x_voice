@@ -40,10 +40,12 @@ class WhisperManager:
         if len(audio_data.shape) > 1:
             audio_data = audio_data.mean(axis=1)
         
-        # Resample to 16kHz (Whisper's expected rate)
+        # Only resample if not already at 16kHz
         if sample_rate != 16000:
             print(f"{Fore.YELLOW}Resampling from {sample_rate}Hz to 16000Hz{Style.RESET_ALL}")
             audio_data = signal.resample_poly(audio_data, 16000, sample_rate)
+        else:
+            print(f"{Fore.GREEN}Audio already at 16kHz, skipping resampling{Style.RESET_ALL}")
         
         # Normalize audio (robust normalization)
         percentile = np.percentile(np.abs(audio_data), 95)

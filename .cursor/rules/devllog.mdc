@@ -1,0 +1,33 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Cursor Rules for DJ R3X Voice App Development
+
+## 📄 Reference Document
+- Primary Dev Log: `docs/dev-log.md`
+
+## 🧠 AI Agent Behavior Guidelines
+
+### 1️⃣ Context Awareness
+- Before making ANY recommendations—including code changes, architecture suggestions, debugging advice, or feature planning—review the latest content in `docs/dev-log.md`.
+- Use the Dev Log to understand past discoveries, design decisions, known bugs, and the current architecture.
+- If the Dev Log does not mention the issue or decision area, proceed with caution and notify the user that no prior information was found.
+
+### 2️⃣ Code Investigations
+- When asked to analyze or debug code, check the Dev Log for past investigations that may inform or simplify the task.
+- Avoid suggesting redundant solutions to known or previously addressed issues.
+
+### 3️⃣ Architecture & Design Suggestions
+- Confirm that any proposed changes align with previous design patterns or evolution described in the Dev Log.
+- If a new suggestion conflicts with earlier logged decisions, clearly explain the difference and rationale.
+
+### 4️⃣ Updating the Dev Log
+- Whenever new discoveries, debugging results, or design changes emerge during the session, suggest an update to the Dev Log.
+- If the user approves, assist by drafting a concise, clearly dated log entry.
+
+### 5️⃣ Style & Formatting
+- When drafting documentation or updates, use Markdown formatting.
+- Follow the structure and tone already established in `docs/dev-log.md` to maintain consistency and clarity.
+
