@@ -1,11 +1,20 @@
+/*
+ * DJ R3X Eyes Controller
+ * Controls LED animations for eyes using MAX7219 LED matrices
+ */
+
 #include <LedControl.h>
+
+// LED Configuration
+#define LEFT_EYE_DEVICE  0  // First MAX7219 in chain
+#define RIGHT_EYE_DEVICE 1  // Second MAX7219 in chain
 
 // DIN = 51, CLK = 52, CS = 53, 2 devices (left eye = 0, right eye = 1)
 LedControl lc = LedControl(51, 52, 53, 2);
 
 // Constants for visible area
 const int CENTER = 3;  // Center position (3,3) for each eye
-const int BRIGHTNESS = 8;  // Default brightness
+const int BRIGHTNESS = 8;  // Default brightness (0-15)
 
 // Current state
 String currentState = "IDLE";
@@ -15,6 +24,10 @@ bool animationActive = true;
 unsigned long lastUpdate = 0;
 int animationStep = 0;
 int speakingPattern = 0;  // Track different speaking patterns
+
+// Current pattern and emotion state
+String currentPattern = "idle";
+String currentEmotion = "neutral";
 
 void setup() {
   // Start serial communication
@@ -85,10 +98,6 @@ void setEyeState(String state) {
   
   // Clear both eyes
   clearEyes();
-  
-  // Acknowledge the state change
-  Serial.print("State changed to: ");
-  Serial.println(state);
   
   // Initial setup for the new state
   if (state == "IDLE") {
@@ -252,3 +261,73 @@ void clearEyes() {
     lc.clearDisplay(device);
   }
 }
+
+void setPattern(String pattern) {
+  // Clear both eyes
+  clearEyes();
+  
+  // Initial setup for the new pattern
+  if (pattern == "idle") {
+    // Full 3x3 grid
+    for (int device = 0; device < 2; device++) {
+      for (int row = CENTER-1; row <= CENTER+1; row++) {
+        for (int col = CENTER-1; col <= CENTER+1; col++) {
+          lc.setLed(device, row, col, true);
+        }
+      }
+    }
+  }
+  else if (pattern == "listening") {
+    // All center 3x3 LEDs
+    for (int device = 0; device < 2; device++) {
+      for (int row = CENTER-1; row <= CENTER+1; row++) {
+        for (int col = CENTER-1; col <= CENTER+1; col++) {
+          lc.setLed(device, row, col, true);
+        }
+      }
+    }
+  }
+  else if (pattern == "processing") {
+    // Start with center column
+    for (int device = 0; device < 2; device++) {
+      for (int row = CENTER-1; row <= CENTER+1; row++) {
+        lc.setLed(device, row, CENTER, true);
+      }
+    }
+  }
+  else if (pattern == "speaking") {
+    // Initial speaking state
+    for (int device = 0; device < 2; device++) {
+      for (int row = CENTER-1; row <= CENTER+1; row++) {
+        for (int col = CENTER-1; col <= CENTER+1; col++) {
+          lc.setLed(device, row, col, true);
+        }
+      }
+    }
+  }
+  else if (pattern == "startup") {
+    // Expanding rings
+    for (int device = 0; device < 2; device++) {
+      lc.setLed(device, CENTER, CENTER, true);
+    }
+  }
+  else if (pattern == "shutdown") {
+    // Start with full grid
+    for (int device = 0; device < 2; device++) {
+      for (int row = CENTER-1; row <= CENTER+1; row++) {
+        for (int col = CENTER-1; col <= CENTER+1; col++) {
+          lc.setLed(device, row, col, true);
+        }
+      }
+    }
+  }
+  else if (pattern == "error") {
+    // X pattern
+    for (int device = 0; device < 2; device++) {
+      lc.setLed(device, CENTER-1, CENTER-1, true);
+      lc.setLed(device, CENTER+1, CENTER+1, true);
+      lc.setLed(device, CENTER-1, CENTER+1, true);
+      lc.setLed(device, CENTER+1, CENTER-1, true);
+    }
+  }
+} 

@@ -28,9 +28,16 @@ var/
 venv/
 ENV/
 
-# Audio files (if you save them temporarily)
-*.wav
-*.mp3
+# Audio files (temporary processing files only)
+/audio/processed_audio/*.wav
+/audio/processed_audio/*.mp3
+/audio/elevenlabs_audio/*.wav
+/audio/elevenlabs_audio/*.mp3
+
+# But allow our specific audio files
+!/audio/startours_audio/*.mp3
+!/audio/bgmusic/*.mp3
+!/audio/soundfx/*.mp3
 
 # OS specific
 .DS_Store

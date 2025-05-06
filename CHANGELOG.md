@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Complete redesign with new event-driven MVP architecture
+  - Implemented EventBus system for inter-component communication
+  - Created dedicated manager classes for voice, LED, and music functionality
+  - Added proper resource management and cleanup
+  - Improved error handling and event propagation
+- Enhanced README documentation with clear architecture explanation
+  - Added detailed component descriptions
+  - Included event system overview
+  - Expanded feature documentation
+- Added new command-line options for improved usability
+  - Test mode that works without API keys
+  - Demo mode with predefined interactions
+  - Music playback options
+- Implemented robust event system with specialized event types
+  - Voice events (listening, processing, speaking)
+  - Music events (track started, volume changes)
+  - System events (ready, error, shutdown)
 - Debug output showing current voice settings in use
 - Improved visibility of which voice configuration values are active
 - Local Whisper speech recognition implementation
@@ -22,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed issues with unintended recording loops
 
 ### Changed
+- Restructured codebase with modular architecture
+  - Separated concerns into dedicated manager classes
+  - Moved from monolithic design to event-driven pattern
+  - Improved maintainability with clear component boundaries
+- Enhanced LED animation system
+  - Added more animation patterns
+  - Improved synchronization with audio
+  - Better handling of Arduino connection issues
+- Improved music management
+  - Added automatic ducking during speech
+  - Enhanced playlist and random track selection
+  - Added smooth volume transitions
 - Fixed voice configuration import structure
   - Now properly using settings from `voice_settings.py` instead of defaults from `voice_config.py`
   - Separated environment variable loading from voice configuration
@@ -34,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved state management for recording sessions
 
 ### Fixed
+- Implemented proper resource cleanup for all components
+  - Serial port connections for LEDs
+  - Audio playback resources
+  - Background tasks and threads
+  - Event handlers and listeners
 - Environment variables now loaded correctly in main script instead of through configuration
 - Removed redundant API key imports from voice configuration
 - Audio processing flag now imported separately from voice settings
@@ -43,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented safeguards against recording deadlocks
 
 ### Performance
+- Optimized event processing with efficient event bus implementation
+- Improved component initialization and shutdown procedures
+- Added graceful degradation for missing hardware or API keys
 - Optimized audio playback when processing is disabled
   - Removed unnecessary file operations
   - Implemented direct streaming from ElevenLabs to playback

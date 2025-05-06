@@ -19,9 +19,8 @@ import pygame
 from dotenv import load_dotenv, find_dotenv
 from colorama import init, Fore, Style
 from config.voice_settings import active_config as voice_config  # Voice settings
-from config.voice_config import DISABLE_AUDIO_PROCESSING  # Only import the processing flag
+from config.app_settings import DEBUG_MODE, TEXT_ONLY_MODE, PUSH_TO_TALK_MODE, DISABLE_AUDIO_PROCESSING  # Import app settings including DISABLE_AUDIO_PROCESSING
 from config.openai_settings import active_config as openai_config  # OpenAI settings
-from config.app_settings import DEBUG_MODE, TEXT_ONLY_MODE, PUSH_TO_TALK_MODE  # Import app settings
 from audio_processor import process_and_play_audio
 import asyncio
 from pydub import AudioSegment
@@ -30,12 +29,69 @@ import sounddevice as sd
 from openai import OpenAI
 from whisper_manager import WhisperManager  # Add this import
 from pynput import keyboard
+from enum import Enum
+import random
 
 # Initialize colorama
 init()
 
 # Initialize pygame for audio playback
 pygame.mixer.init()
+
+# Check if eyes should be disabled
+DISABLE_EYES = os.environ.get("DISABLE_EYES", "").lower() == "true"
+
+# Import real EyesIntegration if not disabled, otherwise use a dummy class
+if not DISABLE_EYES:
+    from eyes_integration import EyesIntegration, VoiceState
+    print(f"{Fore.CYAN}Using real Arduino eye integration{Style.RESET_ALL}")
+else:
+    # Define dummy classes when eyes are disabled
+    class VoiceState(Enum):
+        """Voice system states that map to eye states."""
+        IDLE = "idle"
+        LISTENING = "listening"
+        PROCESSING = "processing"
+        SPEAKING = "speaking"
+        ERROR = "error"
+    
+    class EyesIntegration:
+        """Dummy implementation of EyesIntegration that doesn't connect to hardware."""
+        
+        def __init__(self, port: str = '/dev/tty.usbmodem833301', baudrate: int = 115200):
+            """Initialize the dummy eyes integration."""
+            self._current_voice_state = None
+            self._speaking_pattern = 0
+            
+        async def connect(self) -> bool:
+            """Pretend to connect to the Arduino eyes."""
+            return True
+                
+        async def disconnect(self):
+            """Pretend to disconnect from the Arduino eyes."""
+            pass
+            
+        async def set_voice_state(self, state: VoiceState) -> bool:
+            """Set the voice state without actually updating hardware."""
+            self._current_voice_state = state
+            return True
+            
+        async def start_speaking(self, pattern: int = None) -> bool:
+            """Start speaking animation without actually updating hardware."""
+            if pattern is not None:
+                self._speaking_pattern = pattern
+            return await self.set_voice_state(VoiceState.SPEAKING)
+            
+        async def handle_error(self, error_msg: str) -> bool:
+            """Handle error state without actually updating hardware."""
+            return await self.set_voice_state(VoiceState.ERROR)
+            
+        @property
+        def is_ready(self) -> bool:
+            """Always report ready."""
+            return True
+    
+    print(f"{Fore.YELLOW}Eyes disabled - using dummy eye integration{Style.RESET_ALL}")
 
 # Global variables for push-to-talk
 space_pressed = False
@@ -151,14 +207,20 @@ def initialize_clients():
         whisper_manager = WhisperManager(model_size="base")
         whisper_manager.load_model()  # Pre-load the model
         
-        return openai_client, recognizer, whisper_manager
+        # Initialize eyes integration based on DISABLE_EYES setting
+        eyes = EyesIntegration()
+        if not DISABLE_EYES:
+            # Use real eyes integration
+            asyncio.run(eyes.connect())
+        
+        return openai_client, recognizer, whisper_manager, eyes
     except Exception as e:
         print(f"{Fore.RED}Error initializing clients: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 # Listen for speech
 @debug_timer
-def listen_for_speech(recognizer, whisper_manager):
+def listen_for_speech(recognizer, whisper_manager, eyes):
     """Capture audio from microphone and convert to text using Whisper."""
     global is_recording
     try:
@@ -168,6 +230,10 @@ def listen_for_speech(recognizer, whisper_manager):
                 
                 # Wait for space bar press to start
                 recording_event.wait()
+                
+                # Set eyes to listening state (no asyncio.run needed)
+                # Just print the state change instead
+                print(f"{Fore.CYAN}🎧 Listening...{Style.RESET_ALL}")
                 
                 print(f"{Fore.CYAN}🎤 Recording... (press Space bar to stop){Style.RESET_ALL}")
                 
@@ -180,9 +246,12 @@ def listen_for_speech(recognizer, whisper_manager):
                     print(f"{Fore.YELLOW}Recording timed out. Press Space bar to try again.{Style.RESET_ALL}")
                     is_recording = False
                     recording_event.clear()
+                    # Set eyes back to idle (no asyncio.run needed)
+                    print(f"{Fore.YELLOW}Going back to idle state{Style.RESET_ALL}")
                     return None
             
             print(f"{Fore.YELLOW}🔍 Processing speech...{Style.RESET_ALL}")
+            # Set eyes to processing state (no asyncio.run needed)
             
             # Convert audio data to numpy array for Whisper
             print(f"{Fore.YELLOW}Converting audio to format for Whisper...{Style.RESET_ALL}")
@@ -195,26 +264,35 @@ def listen_for_speech(recognizer, whisper_manager):
             
             if not text:
                 print(f"{Fore.RED}Warning: Whisper returned empty transcription{Style.RESET_ALL}")
+                # Set eyes back to idle (no asyncio.run needed)
+                print(f"{Fore.YELLOW}Going back to idle state{Style.RESET_ALL}")
                 return None
                 
             return text
             
     except sr.WaitTimeoutError:
         print(f"{Fore.YELLOW}No speech detected within timeout period.{Style.RESET_ALL}")
+        # Set eyes back to idle (no asyncio.run needed)
+        print(f"{Fore.YELLOW}Going back to idle state{Style.RESET_ALL}")
         return None
     except sr.UnknownValueError:
         print(f"{Fore.YELLOW}Sorry, I couldn't understand that.{Style.RESET_ALL}")
+        # Set eyes back to idle (no asyncio.run needed)
+        print(f"{Fore.YELLOW}Going back to idle state{Style.RESET_ALL}")
         return None
     except Exception as e:
         print(f"{Fore.RED}Unexpected error during speech recognition: {str(e)}{Style.RESET_ALL}")
+        # Set eyes to error state (no asyncio.run needed)
+        print(f"{Fore.RED}Error state: {str(e)}{Style.RESET_ALL}")
         return None
 
 # Generate AI response
 @debug_timer
-def generate_response(openai_client, user_input):
+def generate_response(openai_client, user_input, eyes):
     """Generate a response using OpenAI's API."""
     try:
         print(f"{Fore.YELLOW}🤖 Thinking...{Style.RESET_ALL}")
+        # Set eyes to processing state (no asyncio.run needed)
         
         # Get OpenAI settings
         settings = openai_config
@@ -235,14 +313,19 @@ def generate_response(openai_client, user_input):
         return response.choices[0].message.content
     except Exception as e:
         print(f"{Fore.RED}Error generating response: {str(e)}{Style.RESET_ALL}")
+        # Set eyes to error state (no asyncio.run needed)
+        print(f"{Fore.RED}Error state: {str(e)}{Style.RESET_ALL}")
         return "BZZZT! My circuits are a bit overloaded right now. Can you try again?"
 
 # Text to speech using REST API
 @debug_timer
-def text_to_speech(text):
+def text_to_speech(text, eyes):
     """Convert text to speech using ElevenLabs TTS via REST API."""
     try:
         print(f"{Fore.YELLOW}🔊 Generating audio...{Style.RESET_ALL}")
+        # Set eyes to speaking state with random pattern (no asyncio.run needed)
+        pattern = random.randint(0, 3)
+        print(f"{Fore.CYAN}Speaking state - pattern {pattern}{Style.RESET_ALL}")
         
         # Create a thread for audio generation to allow showing a spinner
         audio_thread = threading.Thread(target=generate_and_play_audio_rest, args=(text,))
@@ -260,9 +343,13 @@ def text_to_speech(text):
         sys.stdout.write("\r" + " " * 30 + "\r")
         sys.stdout.flush()
         
+        # Set eyes back to idle after speaking (no asyncio.run needed)
+        print(f"{Fore.GREEN}Audio generation complete - back to idle{Style.RESET_ALL}")
         return True
     except Exception as e:
         print(f"{Fore.RED}Error with text-to-speech: {str(e)}{Style.RESET_ALL}")
+        # Set eyes to error state (no asyncio.run needed)
+        print(f"{Fore.RED}Error state: {str(e)}{Style.RESET_ALL}")
         return False
 
 @debug_timer
@@ -389,7 +476,7 @@ def main():
     
     # Validate configuration and initialize clients
     validate_config()
-    openai_client, recognizer, whisper_manager = initialize_clients()
+    openai_client, recognizer, whisper_manager, eyes = initialize_clients()
     
     # Main loop
     while True:
@@ -399,30 +486,35 @@ def main():
                 input(f"{Fore.CYAN}🎧 Press {Fore.GREEN}ENTER{Fore.CYAN} to talk...{Style.RESET_ALL}")
             
             # Start listening for speech
-            user_input = listen_for_speech(recognizer, whisper_manager)
+            user_input = listen_for_speech(recognizer, whisper_manager, eyes)
             
             # Only process if we got valid input
             if user_input:
                 # Print what the user said
                 print(f"{Fore.GREEN}You: {user_input}{Style.RESET_ALL}")
                 # Generate response
-                ai_response = generate_response(openai_client, user_input)
+                ai_response = generate_response(openai_client, user_input, eyes)
                 # Print the response
                 print(f"{Fore.MAGENTA}R3X: {ai_response}{Style.RESET_ALL}")
                 # If not in text only mode, convert to speech
                 if not TEXT_ONLY_MODE:
-                    text_to_speech(ai_response)
+                    text_to_speech(ai_response, eyes)
                 else:
                     print(f"{Fore.YELLOW}Skipping speech synthesis (TEXT_ONLY_MODE is enabled){Style.RESET_ALL}")
+                    # Set eyes back to idle
+                    print(f"{Fore.GREEN}Going back to idle state{Style.RESET_ALL}")
             
             print()  # Add a newline for better readability
             
         except KeyboardInterrupt:
             print(f"\n{Fore.YELLOW}Exiting DJ R3X Voice Assistant. WOOP! See you next time!{Style.RESET_ALL}")
+            # Don't try to disconnect eyes, just exit
             break
         except Exception as e:
             print(f"{Fore.RED}Unexpected error: {str(e)}{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}Continuing...{Style.RESET_ALL}")
+            # Set eyes to error state
+            print(f"{Fore.RED}Error state: {str(e)}{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     main() 

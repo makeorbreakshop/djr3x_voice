@@ -9,7 +9,7 @@ import sounddevice as sd
 from pydub import AudioSegment
 from pedalboard import Pedalboard, Compressor, HighpassFilter, Gain, Distortion, Limiter
 from scipy.signal import lfilter
-from config.voice_config import DISABLE_AUDIO_PROCESSING
+from config.app_settings import DISABLE_AUDIO_PROCESSING
 from colorama import Fore, Style
 from debug_utils import debug_timer, DebugTimer  # Add debug timing utilities
 
