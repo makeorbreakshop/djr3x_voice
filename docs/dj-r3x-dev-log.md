@@ -8,6 +8,7 @@ The application is built with an event-driven architecture with the following co
 - **Voice Manager (VM)** - Handles speech recognition, AI processing, and voice synthesis
 - **LED Manager (LM)** - Controls LED animations on eyes and mouth
 - **Music Manager (MM)** - Manages background music and audio ducking
+- **Holocron Knowledge (HK)** - Provides Star Wars canonical knowledge via RAG system
 
 ## 🏗 Architecture Evolution Log
 | Date | Change | Reason |
@@ -17,6 +18,7 @@ The application is built with an event-driven architecture with the following co
 | 2023-Initial | Added voice processing pipeline (Whisper → GPT → ElevenLabs) | Provide high-quality speech recognition and synthesis for the character |
 | 2023-Initial | Implemented LED control via Arduino Mega | Allows for synchronized mouth/eye animations |
 | 2025-05-06 | Identified asyncio/thread bridge issue | Synchronous input (keyboard) needs proper bridge to async event bus |
+| 2025-05-10 | Added Holocron Knowledge component | Provide enhanced Star Wars knowledge via RAG system |
 
 ## 🔎 Code Investigations & Discoveries
 - Audio RMS envelope calculation effective for LED mouth synchronization (~50fps)
@@ -43,6 +45,10 @@ The application is built with an event-driven architecture with the following co
 - Add beat detection for music-synchronized animations
 - Create web dashboard for configuration and monitoring
 - Consider migrating from in-process Event Bus to MQTT for distributed architecture
+- Implement Holocron Knowledge System (IN PROGRESS):
+  - Star Wars knowledge retrieval via RAG with Supabase pgvector
+  - In-character delivery ("consulting the holocron")
+  - Hybrid activation (explicit questions + relevant responses)
 
 ## 🔗 References & Resources
 - [Lights & Voice MVP](./lights-voice-mvp.md) - Technical implementation details and event flow
@@ -88,7 +94,7 @@ The application is built with an event-driven architecture with the following co
 ### 2025-05-06: LED Configuration Update
 - Centralized LED settings in `app_settings.py` with macOS-compatible defaults 
 
-### 2025-05-07: Push-to-Talk Event Loop Reference Fix
+### 2025-05-06: Push-to-Talk Event Loop Reference Fix
 - Fixed critical error: "Task got Future <_GatheringFuture pending> attached to a different loop"
 - Root cause: Event loop reference mismatch between initialization and execution phases
 - Problem detail: VoiceManager captures event loop with `asyncio.get_event_loop()` during init, but `asyncio.run()` in main.py creates a new loop
@@ -96,7 +102,7 @@ The application is built with an event-driven architecture with the following co
 - Solution: Pass the running event loop explicitly from main.py to VoiceManager, ensuring consistent loop references
 - Learning: When using asyncio with threaded callbacks, always capture the running loop explicitly with `asyncio.get_running_loop()` and pass it to components requiring cross-thread communication 
 
-### 2025-05-07: Voice Interaction Pipeline Investigation
+### 2025-05-06: Voice Interaction Pipeline Investigation
 - Fixed OpenAI integration by storing model name directly in VoiceManager instance instead of config dictionary
 - Fixed ElevenLabs integration by properly using VoiceConfig.to_dict() method for API calls
 - Identified and resolved audio playback issues on macOS:
@@ -105,40 +111,40 @@ The application is built with an event-driven architecture with the following co
   - Enhanced logging throughout voice pipeline for better debugging
 - Added platform-specific audio playback support for macOS, Linux, and Windows 
 
-### 2025-05-07: Added Startup Sound
+### 2025-05-06: Added Startup Sound
 - Added platform-compatible startup sound playback after component initialization for better UX feedback 
 
-### 2025-05-07: LED Communication Protocol Update
+### 2025-05-06: LED Communication Protocol Update
 - Implemented ArduinoJson v7.4.1 for robust JSON parsing
 - Updated Arduino sketch with dynamic JSON allocation and proper error handling
 - Added structured acknowledgments for reliable communication
 - Next: Test communication reliability with voice state changes 
 
-### 2025-05-07: LED JSON Communication Fix
+### 2025-05-06: LED JSON Communication Fix
 - Fixed JSON communication between Python and Arduino
 - Updated LED Manager to handle multiple response types (debug, parsed, ack)
 - Added timeout protection and better error handling
 - Reduced Arduino debug output with DEBUG_MODE flag
 - Result: Eliminated "Invalid JSON" and "Unexpected acknowledgment" warnings 
 
-### 2025-05-08: System Modes Architecture Design
+### 2025-05-06: System Modes Architecture Design
 - Implemented system mode architecture to fix debugging issues and improve interaction:
   - **Modes**: STARTUP → IDLE → AMBIENT SHOW/INTERACTIVE VOICE
 - Key benefits: Explicit opt-in to voice interaction, state-based behavior control
 - Implementation: Command input thread with asyncio bridge, EventBus for mode transitions
 - Components respond to mode changes via event subscriptions
 
-### 2025-05-08: System Modes Architecture Refinement
+### 2025-05-06: System Modes Architecture Refinement
 - Added distinct IDLE mode as default fallback state
 - System boot sequence: STARTUP → IDLE (can transition to AMBIENT or INTERACTIVE)
 - Commands: `ambient`, `engage`, `disengage` (returns to IDLE)
 - Improved LED patterns for each mode and fixed command input display
 
-### 2025-05-08: Voice Interaction and LED State Management Updates
+### 2025-05-06: Voice Interaction and LED State Management Updates
 - Fixed VoiceManager interaction loop for speech synthesis/playback
 - Known Issue: LED transitions during pattern interruption need improvement 
 
-### 2025-05-09: Music Playback System Design
+### 2025-05-06: Music Playback System Design
 - Implemented CLI music controls: `list music`, `play music <number/name>`, `stop music`
 - Mode-specific behaviors:
   - IDLE: Limited controls; playing transitions to AMBIENT
@@ -147,12 +153,12 @@ The application is built with an event-driven architecture with the following co
 - Architecture: MusicManager listens for control commands and mode changes
 - Next steps: CLI implementation, testing, voice command integration
 
-### 2025-05-09: Asyncio State Transition Fix
+### 2025-05-06: Asyncio State Transition Fix
 - Fixed: Voice/LED persisting after mode changes; Arduino timeouts
 - Solutions: Task cancellation, non-blocking I/O, resource cleanup
 - Result: Clean transitions between system modes 
 
-### 2025-05-09: Added System Reset Command
+### 2025-05-06: Added System Reset Command
 - Added `reset` CLI command for emergency system recovery
 - Implementation:
   - Cancels all active tasks (voice, LED, music)
@@ -160,3 +166,51 @@ The application is built with an event-driven architecture with the following co
   - Forces transition to IDLE mode
   - Re-initializes core managers if needed
 - Benefit: Quick recovery from stuck states without full restart 
+
+### 2025-05-07: Holocron Knowledge Base - Major Implementation Day
+- **Data Collection Complete:**
+  - 1,505 articles collected using MediaWiki API
+  - Content breakdown: Mix of canonical (531), legends (836), and unknown (134) articles
+  - Categories: R3X/RX-24, Oga's Cantina, DJ/Entertainment
+  - In general followed this initial plan `dj-r3x-holocron-rag-PRD.md`
+
+- **Pipeline Implementation & Fixes:**
+  - Switched to MediaWiki API from web scraping
+  - Created optimized batch processing system with real-time progress tracking
+  - Fixed OpenAI client initialization for embeddings
+  - Resolved content chunking issues for small articles
+  - Implemented continuous processing with smart prioritization
+  
+- **Technical Improvements:**
+  - Enhanced URL processing status tracking
+  - Optimized worker processes (10 workers, 60 req/min)
+  - Added comprehensive error handling and recovery
+  - Improved content chunking to handle smaller articles
+
+- **Current Status:**
+  - Pipeline successfully processing all article types
+  - Expected completion time: 4-5 hours for full dataset
+  - Processing success rate increased to ~98%
+  - System ready for full knowledge base population
+
+### 2025-05-07: Wookieepedia Content Analysis
+- **Content Distribution Analysis:**
+  - Total Articles: 209,668 articles discovered
+  - Canon Articles: 49,286 (23.5% of total)
+  - Legends Articles: 116,014 (55.3% of total)
+  - Other/Uncategorized: 44,368 (21.2% of total)
+
+- **Strategic Implications:**
+  - Canon content scope is manageable (~49K articles)
+  - Clear separation between Canon/Legends content
+  - Focused approach on Canon material aligns with modern Star Wars experience
+  - Potential for future Legends content integration if needed
+
+- **Technical Notes:**
+  - Successfully implemented MediaWiki API pagination
+  - Rate limiting (1 req/sec) ensures stable data collection
+  - Category-based filtering effectively separates content types
+  - API provides reliable article classification
+
+
+

@@ -46,4 +46,14 @@ ENV/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+
+# Logs and data
+logs/
+data/
+*.log
+
+# Test files
+test_output.log
+test_*.py
+!tests/test_*.py 

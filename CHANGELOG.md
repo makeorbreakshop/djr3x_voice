@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added 30-second recording timeout protection
   - Updated user feedback messages for clarity
   - Fixed issues with unintended recording loops
+- Holocron RAG system for Star Wars knowledge base
+  - Created comprehensive Product Requirements Document
+  - Implemented Supabase vector database with pgvector
+  - Added configuration in app_settings.py and .env 
+  - Created scripts for setup and connection testing
+  - Designed schema optimized for semantic search
+  - Added similarity search function with threshold filtering
 
 ### Changed
 - Restructured codebase with modular architecture

@@ -18,6 +18,7 @@ from pydub import AudioSegment
 
 from src.bus import EventBus, EventTypes, SystemMode
 from src.utils.envelope import AudioEnvelope
+from src.holocron.holocron_manager import HolocronManager
 from whisper_manager import WhisperManager
 from audio_processor import process_and_play_audio
 
@@ -102,6 +103,9 @@ class VoiceManager:
         
         # Task that runs the interaction loop - will be created when interactive mode is activated
         self.interaction_task = None
+        
+        # Initialize the Holocron Manager for Star Wars knowledge
+        self.holocron_manager = HolocronManager(event_bus)
         
         # Initialize keyboard listener if using push-to-talk
         # But don't actually start it until interactive mode is activated
@@ -201,19 +205,24 @@ class VoiceManager:
         if not self.interactive_mode_enabled:
             return
             
-        try:
-            if key == keyboard.Key.space and not self.is_recording:
+        # Check if it's the spacebar
+        if key == keyboard.Key.space:
+            # Only start recording if not already recording
+            if not self.is_recording:
                 self.is_recording = True
-                self.recording_event.set()
-                # Use run_coroutine_threadsafe to safely schedule the coroutine from this thread
-                try:
-                    future = asyncio.run_coroutine_threadsafe(self._emit_listening_started(), self.main_loop)
-                    # Add a callback to handle any exceptions
-                    future.add_done_callback(self._handle_future_exceptions)
-                except Exception as e:
-                    logger.error(f"Error scheduling listening_started event: {e}")
-        except AttributeError:
-            pass
+                
+                # Use run_coroutine_threadsafe to safely call coroutines from this thread
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_listening_started(),
+                    self.main_loop
+                ).add_done_callback(self._handle_future_exceptions)
+                
+                # Set the recording event (this is used by the capture_audio method)
+                asyncio.run_coroutine_threadsafe(
+                    self.recording_event.set(),
+                    self.main_loop
+                )
+                logger.debug("Push-to-talk: Started recording")
     
     def _on_key_release(self, key):
         """Handle key release events for push-to-talk."""
@@ -221,108 +230,144 @@ class VoiceManager:
         if not self.interactive_mode_enabled:
             return
             
-        try:
-            if key == keyboard.Key.space and self.is_recording:
-                self.is_recording = False
-                self.recording_event.clear()
-                # Use run_coroutine_threadsafe to safely schedule the coroutine from this thread
-                try:
-                    future = asyncio.run_coroutine_threadsafe(self._emit_listening_stopped(), self.main_loop)
-                    # Add a callback to handle any exceptions
-                    future.add_done_callback(self._handle_future_exceptions)
-                except Exception as e:
-                    logger.error(f"Error scheduling listening_stopped event: {e}")
-        except AttributeError:
-            pass
+        # Check if it's the spacebar and we're currently recording
+        if key == keyboard.Key.space and self.is_recording:
+            self.is_recording = False
+            
+            # Use run_coroutine_threadsafe to safely call coroutines from this thread
+            asyncio.run_coroutine_threadsafe(
+                self._emit_listening_stopped(),
+                self.main_loop
+            ).add_done_callback(self._handle_future_exceptions)
+            
+            # Clear the recording event
+            asyncio.run_coroutine_threadsafe(
+                self.recording_event.clear(),
+                self.main_loop
+            )
+            logger.debug("Push-to-talk: Stopped recording")
+            
+        # Handle escape key for quitting (for convenience during development)
+        elif key == keyboard.Key.esc:
+            logger.debug("Escape key pressed - this has no effect in the final app")
     
     def _handle_future_exceptions(self, future):
-        """Handle exceptions from threadsafe coroutines."""
-        if future.cancelled():
-            return
-        if future.exception():
-            logger.error(f"Threadsafe coroutine raised exception: {future.exception()}")
+        """Handle exceptions from futures created by run_coroutine_threadsafe."""
+        try:
+            future.result()
+        except Exception as e:
+            logger.error(f"Error in async operation from key event: {e}")
     
     async def _emit_listening_started(self):
-        """Emit voice.listening_started event."""
+        """Emit event when R3X starts listening."""
         await self.event_bus.emit(EventTypes.VOICE_LISTENING_STARTED)
     
     async def _emit_listening_stopped(self):
-        """Emit voice.listening_stopped event."""
+        """Emit event when R3X stops listening."""
         await self.event_bus.emit(EventTypes.VOICE_LISTENING_STOPPED)
     
     async def capture_audio(self) -> Optional[np.ndarray]:
         """Capture audio from microphone."""
-        # Return None if not in interactive mode
-        if not self.interactive_mode_enabled:
-            logger.debug("Skipping audio capture - not in interactive mode")
-            return None
+        if self.test_mode:
+            await asyncio.sleep(1)
+            return np.zeros(8000)
             
         try:
-            with sr.Microphone(sample_rate=16000) as source:  # Set sample rate to 16kHz
-                logger.info("Listening for speech...")
+            if self.push_to_talk_mode:
+                # Wait for the recording event to be set (when space bar is pressed)
+                await self.recording_event.wait()
                 
-                if self.push_to_talk_mode:
-                    # Wait for spacebar press
-                    await self.recording_event.wait()
+                # Create a recognizer and microphone instance
+                microphone = sr.Microphone()
+                
+                # Start recording
+                with microphone as source:
+                    logger.info("Listening with push-to-talk...")
+                    self.recognizer.adjust_for_ambient_noise(source)
                     
-                    # Record until spacebar release or timeout
-                    audio = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: self.recognizer.listen(source, timeout=30.0, phrase_time_limit=30.0)
-                    )
-                else:
-                    # Use VAD to detect speech
-                    audio = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda: self.recognizer.listen(source)
-                    )
-                
-                # Convert to numpy array - audio is already at 16kHz
-                audio_data = np.frombuffer(audio.get_raw_data(), dtype=np.int16)
-                return audio_data.astype(np.float32) / 32768.0
+                    # Record until the recording event is cleared (space bar released)
+                    while self.recording_event.is_set():
+                        try:
+                            # Listen with a short timeout to allow checking if we should stop
+                            audio_data = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: self.recognizer.listen(source, timeout=0.5, phrase_time_limit=10)
+                            )
+                            return np.frombuffer(audio_data.get_raw_data(), dtype=np.int16)
+                        except sr.WaitTimeoutError:
+                            # This is expected - just loop around and check recording_event again
+                            continue
+            else:
+                # TODO: Implement VAD-based listening
+                logger.error("VAD-based listening not yet implemented")
+                return None
                 
         except Exception as e:
             logger.error(f"Error capturing audio: {e}")
             return None
     
     async def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
-        """Transcribe audio using Whisper."""
+        """Convert audio to text using Whisper."""
         if self.test_mode:
-            return "Test mode transcription"
+            return "Test input text"
             
         try:
-            await self.event_bus.emit(EventTypes.VOICE_PROCESSING_STARTED)
+            if audio_data is None or len(audio_data) == 0:
+                logger.warning("No audio data to transcribe")
+                return None
+                
+            logger.info("Transcribing audio...")
             
-            # Use run_in_executor to run the CPU-bound Whisper transcription in a thread pool
-            # This ensures we don't block the event loop and avoids potential loop conflicts
-            text = await asyncio.get_event_loop().run_in_executor(
+            # Process using WhisperManager
+            transcription = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.whisper_manager.transcribe(audio_data, sample_rate=16000)
+                lambda: self.whisper_manager.transcribe_audio(audio_data.astype(np.float32) / 32768.0)
             )
             
-            return text
+            return transcription
+            
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             return None
     
     async def process_text(self, text: str) -> str:
-        """Process text using OpenAI API."""
+        """Process text using OpenAI API with Holocron knowledge enhancement."""
         if self.test_mode:
             return "Test mode response"
             
         try:
+            logger.info(f"Processing text: {text}")
+            
+            # Enhance the system prompt with Star Wars knowledge if needed
+            enhanced_prompt, knowledge_used, modification_desc = await self.holocron_manager.enhance_voice_processing(
+                text, self.persona
+            )
+            
+            if knowledge_used:
+                logger.info(f"Holocron integration: {modification_desc}")
+            
+            # Make the API call with the enhanced prompt
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.openai_client.chat.completions.create(
                     model=self.openai_model,
                     messages=[
-                        {"role": "system", "content": self.persona},
+                        {"role": "system", "content": enhanced_prompt},
                         {"role": "user", "content": text}
                     ],
                     **self.openai_config
                 )
             )
-            return response.choices[0].message.content
+            
+            response_text = response.choices[0].message.content
+            
+            # Process the response to ensure proper holocron integration
+            processed_response = await self.holocron_manager.process_response(
+                text, response_text, knowledge_used
+            )
+            
+            return processed_response
+            
         except Exception as e:
             logger.error(f"Error processing text: {e}")
             return "I'm having trouble thinking right now. Can you try again?"
@@ -490,7 +535,7 @@ class VoiceManager:
                     
                 logger.info(f"Recognized: {text}")
                 
-                # Process with LLM
+                # Process with LLM and Holocron knowledge
                 response_text = await self.process_text(text)
                 if not response_text:
                     logger.warning("Failed to get AI response")
@@ -506,20 +551,21 @@ class VoiceManager:
                 await self.play_audio(audio_bytes)
                 
             except asyncio.CancelledError:
-                logger.info("Interaction loop cancelled")
+                logger.info("Voice interaction loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in interaction loop: {e}")
-                # Sleep a bit before retrying
-                await asyncio.sleep(1)
+                logger.error(f"Error in voice interaction loop: {e}", exc_info=True)
+                await asyncio.sleep(1)  # Avoid tight error loops
     
     async def stop(self) -> None:
-        """Stop the voice manager and release resources."""
-        logger.info("Stopping Voice Manager")
+        """Clean up resources and stop the voice manager."""
+        logger.info("Stopping voice manager")
         
-        # First deactivate interactive mode to handle the task and keyboard listener
+        # Deactivate interactive mode to stop tasks
         await self.deactivate_interactive_mode()
         
-        # Additional cleanup if needed
-        # Wait for any active audio processing to complete
-        # This is a placeholder - add actual cleanup if needed 
+        if self.push_to_talk_mode and hasattr(self, 'keyboard_listener') and self.keyboard_listener.is_alive():
+            self.keyboard_listener.stop()
+            logger.info("Stopped keyboard listener")
+            
+        logger.info("Voice manager stopped") 

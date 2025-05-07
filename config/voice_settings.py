@@ -31,7 +31,7 @@ VOICE_SETTINGS = {
     # - 1.0: Default speed
     # - <1.0: Slower speech
     # - >1.0: Faster speech
-    "speed": 1.2,  # Slightly faster for DJ R3X's energetic personality
+    "speed": 1.1,  # Slightly faster for DJ R3X's energetic personality
 
     # Model Selection
     # - "eleven_multilingual_v2": Most lifelike, supports 29 languages

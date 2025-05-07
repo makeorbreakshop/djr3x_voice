@@ -3,6 +3,9 @@ Application-wide settings that are not sensitive.
 These settings can be version controlled and shared across environments.
 """
 
+import os
+from dotenv import load_dotenv
+
 # Operation Modes
 TEXT_ONLY_MODE = False
 DISABLE_AUDIO_PROCESSING = True
@@ -27,10 +30,18 @@ AUDIO_OUTPUT_DIR = "audio/processed_audio"
 RAW_AUDIO_DIR = "audio/elevenlabs_audio"
 STARTUP_SOUND = "audio/startours_audio/startours_ding.mp3"  # Sound played when application starts
 
-# Load any environment-specific overrides
-import os
-from dotenv import load_dotenv
+# Holocron RAG System Settings
+HOLOCRON_TABLE_NAME = "holocron_knowledge"
+HOLOCRON_SIMILARITY_THRESHOLD = 0.5
+HOLOCRON_MAX_RESULTS = 3
+HOLOCRON_ENABLED = True
+HOLOCRON_CHUNK_SIZE = 1000
+HOLOCRON_CHUNK_OVERLAP = 100
+EMBEDDING_MODEL = "text-embedding-3-small"
+SUPABASE_URL = "https://xkotscjkvejcgrweolsd.supabase.co"
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+# Load any environment-specific overrides
 load_dotenv()
 
 # Allow environment variables to override these settings only if they exist
@@ -50,3 +61,24 @@ if 'LED_BAUD_RATE' in os.environ:
     LED_BAUD_RATE = int(os.getenv('LED_BAUD_RATE'))
 if 'DISABLE_EYES' in os.environ:
     DISABLE_EYES = os.getenv('DISABLE_EYES').lower() == 'true' 
+
+# Holocron settings overrides
+if 'HOLOCRON_TABLE_NAME' in os.environ:
+    HOLOCRON_TABLE_NAME = os.getenv('HOLOCRON_TABLE_NAME')
+if 'HOLOCRON_SIMILARITY_THRESHOLD' in os.environ:
+    HOLOCRON_SIMILARITY_THRESHOLD = float(os.getenv('HOLOCRON_SIMILARITY_THRESHOLD'))
+if 'HOLOCRON_MAX_RESULTS' in os.environ:
+    HOLOCRON_MAX_RESULTS = int(os.getenv('HOLOCRON_MAX_RESULTS'))
+if 'HOLOCRON_ENABLED' in os.environ:
+    HOLOCRON_ENABLED = os.getenv('HOLOCRON_ENABLED').lower() == 'true' 
+
+if 'HOLOCRON_CHUNK_SIZE' in os.environ:
+    HOLOCRON_CHUNK_SIZE = int(os.getenv('HOLOCRON_CHUNK_SIZE'))
+if 'HOLOCRON_CHUNK_OVERLAP' in os.environ:
+    HOLOCRON_CHUNK_OVERLAP = int(os.getenv('HOLOCRON_CHUNK_OVERLAP'))
+if 'EMBEDDING_MODEL' in os.environ:
+    EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL')
+if 'SUPABASE_URL' in os.environ:
+    SUPABASE_URL = os.getenv('SUPABASE_URL')
+if 'SUPABASE_KEY' in os.environ:
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY') 

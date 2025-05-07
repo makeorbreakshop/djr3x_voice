@@ -11,6 +11,7 @@ DJ-R3X Voice Assistant is a Python application that creates an interactive Star 
 - **Text-to-Speech**: Converts responses to lifelike speech using ElevenLabs
 - **LED Animation**: Synchronizes eye/mouth animations with speech via Arduino
 - **Music Management**: Plays background music that automatically ducks during speech
+- **Holocron Knowledge**: Enhanced Star Wars knowledge via RAG system with Supabase
 
 The project features two implementations:
 1. A legacy monolithic design (`run_rex.py`)
@@ -136,6 +137,12 @@ DISABLE_AUDIO_PROCESSING=false
 
 # Personality Configuration
 DJ_R3X_PERSONA="You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. You occasionally use sound effect words like 'BZZZT!' and 'WOOP!' You like to keep responses brief and entertaining. You love music and Star Wars."
+
+# Holocron Settings
+HOLOCRON_ENABLED=true
+HOLOCRON_TABLE_NAME=holocron_knowledge
+HOLOCRON_SIMILARITY_THRESHOLD=0.75
+HOLOCRON_MAX_RESULTS=3
 ```
 
 Replace the placeholder values with your actual API keys and voice ID.
@@ -331,4 +338,87 @@ python3 run_r3x_mvp.py --demo
 
 ## License
 
-This project is for personal use and entertainment purposes. Star Wars and DJ R3X are trademarks of Disney/Lucasfilm. 
+This project is for personal use and entertainment purposes. Star Wars and DJ R3X are trademarks of Disney/Lucasfilm.
+
+## Holocron Knowledge System
+
+The Holocron Knowledge System is a Retrieval-Augmented Generation (RAG) system that provides DJ R3X with canonical Star Wars knowledge:
+
+### Components
+
+1. **Vector Database** - Supabase pgvector database storing Star Wars knowledge chunks
+2. **Content Processor** - Extracts, chunks, and embeds text content from Wookieepedia articles
+3. **Knowledge Retriever** - Finds relevant Star Wars information for user queries
+4. **Voice Integration** - Delivers knowledge in DJ R3X's character voice
+
+### Database Structure
+
+The system uses two main tables:
+- `holocron_urls` - Tracks URLs to be processed, with status and priority
+- `holocron_knowledge` - Stores knowledge chunks with vector embeddings
+
+### Scripts
+
+The system includes several utility scripts for maintaining the knowledge base:
+
+#### Continuous Processing
+
+Process URLs continuously with intelligent batching and error handling:
+
+```bash
+# Process URLs in batches of 150 with 10 worker processes
+python scripts/run_continuous_processing.py --batch-size 150 --workers 10
+
+# Process URLs in priority order (high→medium→low)
+python scripts/run_continuous_processing.py --prioritize
+
+# Process a limited number of URLs
+python scripts/run_continuous_processing.py --limit 100
+
+# Reset and reprocess URLs that were marked as processed but have no chunks
+python scripts/run_continuous_processing.py --reset-failed
+```
+
+#### URL Rectification
+
+Fix URLs that were marked as processed but have no corresponding knowledge chunks:
+
+```bash
+# Identify and reset URLs without chunks
+python scripts/rectify_processed_urls.py
+
+# Dry run (show what would be reset without making changes)
+python scripts/rectify_processed_urls.py --dry-run
+
+# Limit the number of URLs to process
+python scripts/rectify_processed_urls.py --limit 50
+```
+
+#### Status Checking
+
+Check the status of the knowledge base:
+
+```bash
+# Display current processing status
+python scripts/check_holocron_status.py
+```
+
+### Test Mode
+The application includes a test mode that allows you to run the system without requiring API keys or external hardware. This is useful for development, testing, and demonstration purposes.
+
+In test mode:
+- Voice responses use pre-defined test responses instead of calling OpenAI
+- Speech synthesis generates simple audio patterns instead of using ElevenLabs
+- LED control gracefully handles missing Arduino connections
+- Music playback works if VLC is installed, but is optional
+
+To run in test mode:
+```bash
+python3 run_r3x_mvp.py --test
+```
+
+You can combine test mode with other flags:
+```bash
+# Run demo sequence in test mode
+python3 run_r3x_mvp.py --test --demo
+``` 
