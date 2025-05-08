@@ -21,8 +21,15 @@ import asyncio
 import logging
 from datetime import datetime
 
-# Add src directory to path for imports
+# Add src and root directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Import patches first to handle the httpx client issue
+try:
+    from holocron import patches
+    logging.info("Successfully imported patches for httpx")
+except ImportError:
+    logging.warning("Could not import holocron.patches - Supabase client might fail")
 
 from src.holocron.wookieepedia_scraper import WookieepediaScraper
 from src.holocron.data_processor import HolocronDataProcessor

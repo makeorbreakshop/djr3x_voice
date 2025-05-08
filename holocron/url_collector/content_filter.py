@@ -8,6 +8,7 @@ from typing import Dict, List, Set, Tuple
 import aiohttp
 from bs4 import BeautifulSoup
 import asyncio
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +25,15 @@ class ContentFilter:
             'Legends article',
             'Category:Legends',
             'Legends continuity',
-            'This article contains information from the Expanded Universe'
+            'This article contains information from the Expanded Universe',
+            'Category:Legends articles'
         ]
         
         # Indicators of canonical content
         self.canon_indicators = [
             'Canon article',
             'Category:Canon',
+            'Category:Canon articles',
             'This article is about a canonical subject'
         ]
         
@@ -47,7 +50,11 @@ class ContentFilter:
     async def fetch_article(self, url: str) -> str:
         """Fetch article HTML content."""
         try:
-            async with self.session.get(url) as response:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 DJ R3X Holocron Knowledge Base',
+                'Accept': 'text/html,application/xhtml+xml,application/xml'
+            }
+            async with self.session.get(url, headers=headers, timeout=30) as response:
                 response.raise_for_status()
                 return await response.text()
         except Exception as e:
@@ -57,56 +64,52 @@ class ContentFilter:
     def analyze_content(self, content: str) -> Tuple[str, Dict[str, any]]:
         """Analyze article content to determine canonicity and extract metadata."""
         if not content:
-            return 'unknown', {}
+            return 'unknown', {'confidence': 0.0, 'reason': 'empty_content'}
             
-        soup = BeautifulSoup(content, 'lxml')
+        soup = BeautifulSoup(content, 'html.parser')
         
-        # Initialize metadata
-        metadata = {
-            'title': '',
-            'categories': [],
-            'indicators_found': [],
-            'confidence': 0.0
-        }
-        
-        # Extract title
-        title_elem = soup.select_one('h1.page-header__title')
-        if title_elem:
-            metadata['title'] = title_elem.text.strip()
+        # Check for Legends banner
+        legends_banner = soup.find('div', class_='legends-notice')
+        if legends_banner:
+            return 'legends', {'confidence': 1.0, 'reason': 'legends_banner'}
             
-        # Extract categories
-        categories = soup.select('div.page-header__categories a')
-        metadata['categories'] = [cat.text.strip() for cat in categories]
+        # Check article text for indicators
+        article_text = soup.get_text().lower()
         
-        # Look for canonicity indicators
-        content_text = soup.get_text()
-        legends_matches = [ind for ind in self.legends_indicators 
-                         if ind.lower() in content_text.lower()]
-        canon_matches = [ind for ind in self.canon_indicators 
-                        if ind.lower() in content_text.lower()]
+        # Count matches for each type
+        legends_matches = sum(1 for indicator in self.legends_indicators 
+                            if indicator.lower() in article_text)
+        canon_matches = sum(1 for indicator in self.canon_indicators 
+                          if indicator.lower() in article_text)
         
-        metadata['indicators_found'] = {
-            'legends': legends_matches,
-            'canon': canon_matches
-        }
+        # Check categories
+        categories = [cat.get_text() for cat in soup.find_all('div', class_='page-header__categories')]
+        category_text = ' '.join(categories).lower()
         
-        # Determine content type and confidence
-        if legends_matches and not canon_matches:
-            content_type = 'legends'
-            metadata['confidence'] = 0.9 if len(legends_matches) > 1 else 0.7
-        elif canon_matches and not legends_matches:
-            content_type = 'canonical'
-            metadata['confidence'] = 0.9 if len(canon_matches) > 1 else 0.7
-        elif not legends_matches and not canon_matches:
-            # Default newer articles to canonical unless proven otherwise
-            content_type = 'canonical'
-            metadata['confidence'] = 0.5
-        else:
-            # Mixed signals - need manual review
-            content_type = 'unknown'
-            metadata['confidence'] = 0.3
+        if 'category:legends articles' in category_text:
+            return 'legends', {'confidence': 1.0, 'reason': 'legends_category'}
+        elif 'category:canon articles' in category_text:
+            return 'canonical', {'confidence': 1.0, 'reason': 'canon_category'}
             
-        return content_type, metadata
+        # Make decision based on indicator matches
+        if legends_matches > canon_matches:
+            return 'legends', {
+                'confidence': min(1.0, legends_matches / len(self.legends_indicators)),
+                'reason': 'legends_indicators'
+            }
+        elif canon_matches > legends_matches:
+            return 'canonical', {
+                'confidence': min(1.0, canon_matches / len(self.canon_indicators)),
+                'reason': 'canon_indicators'
+            }
+        elif legends_matches == 0 and canon_matches == 0:
+            # If no clear indicators, check URL structure
+            if '/legends/' in soup.find('link', rel='canonical').get('href', '').lower():
+                return 'legends', {'confidence': 0.8, 'reason': 'url_structure'}
+            elif '/canon/' in soup.find('link', rel='canonical').get('href', '').lower():
+                return 'canonical', {'confidence': 0.8, 'reason': 'url_structure'}
+                
+        return 'unknown', {'confidence': 0.0, 'reason': 'no_clear_indicators'}
         
     async def classify_url(self, url: str) -> str:
         """
@@ -122,35 +125,9 @@ class ContentFilter:
         if not html:
             return 'unknown'
             
-        soup = BeautifulSoup(html, "html.parser")
-        
-        # Check for Legends banner
-        legends_banner = soup.find("div", class_="legends-notice")
-        if legends_banner:
-            return 'legends'
-            
-        # Check for Canon/Legends tabs
-        tabs = soup.find("div", class_="tabber wds-tabber")
-        if tabs:
-            # If there are tabs, check which one is active
-            active_tab = tabs.find("div", class_="wds-tab__content wds-is-current")
-            if active_tab:
-                tab_name = active_tab.get("data-tab-name", "").lower()
-                if "canon" in tab_name:
-                    return 'canonical'
-                elif "legends" in tab_name:
-                    return 'legends'
-                    
-        # Check article categories
-        categories = soup.find_all("div", class_="page-header__categories")
-        for category in categories:
-            if "Category:Canon articles" in category.text:
-                return 'canonical'
-            elif "Category:Legends articles" in category.text:
-                return 'legends'
-                
-        # Default to unknown if we can't determine
-        return 'unknown'
+        content_type, metadata = self.analyze_content(html)
+        logger.debug(f"Classified {url} as {content_type} ({metadata})")
+        return content_type
         
     async def classify_urls(self, urls: Set[str]) -> Dict[str, str]:
         """
@@ -163,11 +140,20 @@ class ContentFilter:
             Dictionary mapping URLs to their content type
         """
         async with aiohttp.ClientSession() as self.session:
-            results = {}
+            tasks = []
             for url in urls:
-                content_type = await self.classify_url(url)
-                results[url] = content_type
+                task = asyncio.create_task(self.classify_url(url))
+                tasks.append((url, task))
                 
+            results = {}
+            for url, task in tasks:
+                try:
+                    content_type = await task
+                    results[url] = content_type
+                except Exception as e:
+                    logger.error(f"Error classifying {url}: {e}")
+                    results[url] = 'unknown'
+                    
             return results
         
     def estimate_canonicity(self, url: str) -> str:
@@ -187,21 +173,36 @@ class ContentFilter:
         """Analyze a batch of URLs and return detailed metadata."""
         results = {}
         
-        for url in urls:
-            # Start with URL-based estimate
-            initial_type = self.estimate_canonicity(url)
-            
-            if initial_type == 'unknown':
-                # Need to fetch and analyze content
-                content = await self.fetch_article(url)
-                content_type, metadata = self.analyze_content(content)
-            else:
-                content_type = initial_type
-                metadata = {'confidence': 0.8, 'source': 'url_pattern'}
+        async with aiohttp.ClientSession() as self.session:
+            tasks = []
+            for url in urls:
+                # Start with URL-based estimate
+                initial_type = self.estimate_canonicity(url)
                 
-            results[url] = {
-                'content_type': content_type,
-                'metadata': metadata
-            }
-            
-        return results 
+                if initial_type == 'unknown':
+                    # Need to fetch and analyze content
+                    task = asyncio.create_task(self.fetch_article(url))
+                    tasks.append((url, task))
+                else:
+                    results[url] = {
+                        'content_type': initial_type,
+                        'metadata': {'confidence': 0.8, 'source': 'url_pattern'}
+                    }
+                    
+            # Wait for all fetch tasks to complete
+            for url, task in tasks:
+                try:
+                    content = await task
+                    content_type, metadata = self.analyze_content(content)
+                    results[url] = {
+                        'content_type': content_type,
+                        'metadata': metadata
+                    }
+                except Exception as e:
+                    logger.error(f"Error analyzing {url}: {e}")
+                    results[url] = {
+                        'content_type': 'unknown',
+                        'metadata': {'confidence': 0.0, 'reason': str(e)}
+                    }
+                    
+            return results 

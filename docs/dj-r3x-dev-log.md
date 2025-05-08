@@ -56,25 +56,25 @@ The application is built with an event-driven architecture with the following co
 
 ## 🕒 Log Entries (Chronological)
 
-### 2023-MM-DD: Initial Architecture Design
+### 2025-05-05: Initial Architecture Design
 - Established event-driven architecture with Event Bus as central communication hub
 - Defined core components: Voice Manager, LED Manager, Music Manager
 - Created standard event types and payloads for cross-component communication
 - Planned file structure for organized code development
 
-### 2023-MM-DD: Voice Processing Pipeline Implementation
+### 2025-05-05: Voice Processing Pipeline Implementation
 - Integrated Whisper for speech recognition
 - Connected OpenAI GPT for conversational AI
 - Implemented ElevenLabs for character voice synthesis
 - Added audio level analysis for mouth animation synchronization
 
-### 2023-MM-DD: LED Animation System
+### 2025-05-05D: LED Animation System
 - Established serial communication protocol with Arduino
 - Created animation patterns for idle, listening, processing, and speaking states
 - Implemented mouth movement synchronized with speech audio levels
 - Added error recovery for connection issues
 
-### 2023-MM-DD: Music Manager Development
+### 2025-05-05: Music Manager Development
 - Implemented background music playback using python-vlc
 - Added volume ducking during speech with smooth transitions
 - Created event listeners for voice.speaking_started and voice.speaking_finished 
@@ -167,50 +167,284 @@ The application is built with an event-driven architecture with the following co
   - Re-initializes core managers if needed
 - Benefit: Quick recovery from stuck states without full restart 
 
-### 2025-05-07: Holocron Knowledge Base - Major Implementation Day
-- **Data Collection Complete:**
-  - 1,505 articles collected using MediaWiki API
-  - Content breakdown: Mix of canonical (531), legends (836), and unknown (134) articles
-  - Categories: R3X/RX-24, Oga's Cantina, DJ/Entertainment
-  - In general followed this initial plan `dj-r3x-holocron-rag-PRD.md`
-
-- **Pipeline Implementation & Fixes:**
-  - Switched to MediaWiki API from web scraping
-  - Created optimized batch processing system with real-time progress tracking
-  - Fixed OpenAI client initialization for embeddings
-  - Resolved content chunking issues for small articles
-  - Implemented continuous processing with smart prioritization
-  
-- **Technical Improvements:**
-  - Enhanced URL processing status tracking
-  - Optimized worker processes (10 workers, 60 req/min)
-  - Added comprehensive error handling and recovery
-  - Improved content chunking to handle smaller articles
-
-- **Current Status:**
-  - Pipeline successfully processing all article types
-  - Expected completion time: 4-5 hours for full dataset
-  - Processing success rate increased to ~98%
-  - System ready for full knowledge base population
+### 2025-05-07: Holocron Knowledge Base Implementation
+- **Data Collection**: 1,505 articles (531 canon, 836 legends, 134 unknown)
+- **Pipeline**: 
+  - Switched to MediaWiki API (60 req/min, 10 workers)
+  - Optimized batch processing with progress tracking
+  - 98% processing success rate
+- **Next**: Full knowledge base population (4-5 hours)
 
 ### 2025-05-07: Wookieepedia Content Analysis
-- **Content Distribution Analysis:**
-  - Total Articles: 209,668 articles discovered
-  - Canon Articles: 49,286 (23.5% of total)
-  - Legends Articles: 116,014 (55.3% of total)
-  - Other/Uncategorized: 44,368 (21.2% of total)
+- **Stats**: 209,668 total (Canon: 49,286, Legends: 116,014, Other: 44,368)
+- **Strategy**: Focus on Canon content (~49K articles)
+- **Technical**: Implemented API pagination, rate limiting (1 req/sec)
 
-- **Strategic Implications:**
-  - Canon content scope is manageable (~49K articles)
-  - Clear separation between Canon/Legends content
-  - Focused approach on Canon material aligns with modern Star Wars experience
-  - Potential for future Legends content integration if needed
+### 2025-05-07: Canon Content Processing Strategy
+- **Scale**: 49,286 articles, ~45 URLs/minute
+- **Process**:
+  1. Store URLs with priority flags
+  2. Process in 10 batches (5,000 each)
+  3. Priority order: Galaxy's Edge → Droids → Entertainment → General
+- **Monitoring**: Real-time tracking, automatic recovery, API rate monitoring
 
-- **Technical Notes:**
-  - Successfully implemented MediaWiki API pagination
-  - Rate limiting (1 req/sec) ensures stable data collection
-  - Category-based filtering effectively separates content types
-  - API provides reliable article classification
+### 2025-05-07: Canon URL Collection System
+- **Priority System**:
+  - Added weighted scoring for term matches
+  - Enhanced categorization (Galaxy's Edge, Droids, Entertainment)
+  - Improved metadata tracking
+- **Technical**: Configurable thresholds, subcategory tracking
+
+### 2025-05-07: Fixed Canon URL Collection Issues
+- **Bug**: KeyError in subcategories, URLs not saving to Supabase
+- **Fix**: 
+  - Corrected priority levels to match database schema
+  - Fixed batch processing and storage
+  - Removed redundant processing calls
+- **Result**: Successful URL collection with proper categorization
+
+### 2025-05-07: Optimized Canon URL Collection
+- **Issue**: Slow URL processing and database writes
+- **Solution**: 
+  - Batch size: 1000 URLs
+  - Concurrent processing: 5 workers, 10 max requests
+  - Transaction support for data consistency
+- **Result**: Significant performance improvement with reliable processing
+
+### 2025-05-07: Fixed Canon URL Collection Subcategories Bug
+- **Issue:** KeyError in subcategories tracking during URL categorization
+- **Root Cause:** Subcategories dictionary initialized with category types instead of priority levels
+- **Fix:**
+  ```python
+  self.subcategories = {
+      "high": set(),
+      "medium-high": set(),
+      "medium": set(),
+      "medium-low": set(),
+      "low": set()
+  }
+  ```
+- **Additional Improvements:**
+  - Fixed metadata storage to use priority levels as keys
+  - Aligned subcategory tracking with priority-based organization
+  - Ensures consistent categorization across all priority levels
+  - Optimized dry-run mode to skip API calls, using URL-based categorization only
+  - Removed overly conservative rate limiting (MediaWiki allows 50 req/sec)
+
+### 2025-05-07: Adjusted Canon URL Priority Scoring
+- **Initial Distribution Analysis:**
+  - High Priority: 0.5% (244 articles)
+  - Medium Priority: 0.9% (438 articles)
+  - Low Priority: 98.6% (48,604 articles)
+  - Medium-high and Medium-low: 0%
+
+- **Scoring Adjustments:**
+  - Increased weights for droid and entertainment terms (3.0 → 4.0)
+  - Increased related content weight (1.0 → 2.0)
+  - Adjusted category match weights upward
+  - Lowered priority thresholds to better distribute content:
+    ```python
+    PRIORITY_THRESHOLDS = {
+        "high": 4.5,         # Unchanged
+        "medium-high": 3.0,  # Was 3.5
+        "medium": 2.0,       # Was 2.5
+        "medium-low": 1.0,   # Was 1.5
+        "low": 0.0          # Unchanged
+    }
+    ```
+
+- **Expected Improvements:**
+  - Better distribution across priority levels
+  - More droid and entertainment content in medium-high category
+  - More related content in medium and medium-low categories
+  - Reduced number of low-priority articles
+
+### 2025-05-07: Optimized Canon URL Collection Process
+- **Performance Bottleneck Resolution:**
+  - Identified slow URL categorization and database writes
+  - Previous: Sequential processing of 49,286 URLs
+  - Solution: Implemented batch processing and parallel execution
+
+- **Technical Improvements:**
+  1. **Batch Processing:**
+     - Added `BATCH_SIZE = 1000` for efficient database operations
+     - Implemented URL batching for both categorization and storage
+     - Enhanced progress tracking with time estimates
+  
+  2. **Parallel Processing:**
+     - Added concurrent URL processing with `MAX_WORKERS = 5`
+     - Implemented request rate limiting with `MAX_CONCURRENT_REQUESTS = 10`
+     - Used `asyncio.Semaphore` for API request throttling
+  
+  3. **Progress Monitoring:**
+     - Enhanced progress bars with completion percentage
+     - Added time remaining estimates
+     - Improved error handling and reporting
+  
+  4. **Database Optimization:**
+     - Implemented batch database writes
+     - Added transaction support for better data consistency
+     - Enhanced error recovery for failed batches
+
+- **Results:**
+  - Significant reduction in processing time
+  - More efficient resource utilization
+  - Better visibility into progress and errors
+  - Improved reliability with proper rate limiting
+
+- **Next Steps:**
+  1. Monitor batch size impact on performance
+  2. Consider implementing retry mechanism for failed batches
+  3. Add checkpointing for long-running processes
+  4. Implement parallel content processing pipeline
+
+### 2025-05-07: Fixed Canon URL Storage Issue
+- **Issue Identified**: URLs not being saved to Supabase during batch collection
+- **Root Cause Analysis**:
+  1. Double processing in `collect_canon_urls.py`
+  2. `process_all_urls()` called twice: once in main loop and again in `store_urls()`
+  3. Second call overwrites results from first call
+  4. Results in empty batches being sent to Supabase
+
+- **Technical Details**:
+  ```python
+  # Original problematic flow:
+  await collector.process_all_urls()  # First call in main()
+  await store_urls(collector, dry_run=args.dry_run)
+    # which calls process_all_urls() again internally
+  ```
+
+- **Fix Applied**:
+  1. Removed redundant `process_all_urls()` call from main()
+  2. Enhanced error handling in `store_batch()` to raise exceptions
+  3. Added detailed logging for batch storage operations
+  4. Added result verification after batch storage
+
+### 2025-05-07: Fixed URL Priority Enum Error
+- **Issue Identified**: Full URL collection failing with database enum errors
+- **Root Cause Analysis**:
+  1. Schema constraint in database requires specific enum values for `priority` field
+  2. Script was using "medium-high" and "medium-low" values that don't exist in the database schema
+  3. This caused batch inserts to fail with error: `invalid input value for enum url_priority: "medium-high"`
+
+- **Technical Details**:
+  ```
+  ERROR: Error processing batch: Database error during batch storage: 
+  {'code': '22P02', 'details': None, 'hint': None, 
+  'message': 'invalid input value for enum url_priority: "medium-high"'}
+  ```
+
+- **Fix Applied**:
+  1. Simplified priority levels to match database schema: "high", "medium", "low"
+  2. Updated `PRIORITY_THRESHOLDS` in the code
+  3. Modified the `determine_priority()` method to only return valid enum values
+  4. Tested with small batches first, then full collection
+
+- **Results**:
+  1. Batch processing successfully stores URLs in database
+  2. No more enum errors with priority values
+  3. Full collection process working properly
+
+### 2025-05-07: Holocron Knowledge System Vector Overlap Analysis
+- **Investigation of Vector Overlap Mechanisms**:
+  - Confirmed intentional embedding overlap in chunking strategy
+  - Identified key overlap points:
+    1. OVERLAP_TOKENS = 100: Creates a 100-token overlap between adjacent chunks
+    2. Section headers & titles duplicated across related chunks to maintain context
+    3. Metadata embedding (article title, source URL) across multiple chunks
+  
+- **Benefits of Vector Overlap**:
+  - Maintains semantic continuity between chunks
+  - Prevents important context loss at chunk boundaries
+  - Improves retrieval quality for concepts spanning multiple segments
+  - Enhances the RAG system's ability to find relevant information
+
+- **Test Script Development**:
+  - Created `scripts/simple_holocron_chat.py` for testing vector retrievals
+  - Extended `holocron/knowledge/retriever.py` to support modern Supabase client
+  - Updated OpenAI client usage to be compatible with SDK v1.0+
+  - Isolated vector search from other dependencies for better testing
+
+- **Technical Challenges**:
+  - OpenAI SDK version compatibility issues (v0.x vs v1.0+)
+  - SQL query format for pgvector semantic search
+  - Supabase client initialization parameters
+  - Cross-thread async execution with proper cancellation
+
+- **Query Processing Flow**:
+  1. Generate embedding for search query
+  2. Execute vector similarity search against pgvector database
+  3. Format retrieved contexts for prompt injection
+  4. Generate DJ R3X character response using retrieved knowledge
+
+- **Next Steps**:
+  1. Benchmark semantic retrieval quality with different overlap settings
+  2. Investigate performance impact of increased vector dimensions
+  3. Consider hybrid retrieval strategies (keyword + semantic)
+  4. Expand test suite with canonical query examples
+
+### 2025-05-08: Vector Search Evolution and Migration
+- **Initial Implementation**: Integrated Supabase with pgvector for Holocron knowledge retrieval
+  - Used HNSW indexing with parameters m=16, ef_construction=64
+  - Implemented tiered fallback system for reliability (RPC → SQL → Basic)
+  - Added metadata filtering for targeted knowledge retrieval
+
+- **Key Challenges**:
+  - **Client API Compatibility**: Fixed multiple issues with Supabase client API changes and inconsistent method patterns
+  - **Connection Management**: Implemented client factory with connection pooling for reliability
+  - **Vector Type Handling**: Resolved vector dimension issues (1536D) and embedding format compatibility
+  - **Query Performance**: Encountered timeout issues at scale with larger knowledge base
+  - **Scaling Limitations**: As content grew (50k Wookieepedia URLs → ~200-300k vectors), hitting pgvector performance limits
+
+- **Progressive Optimizations**:
+  - Simplified search architecture to two-tier approach (Primary: RPC, Fallback: LLM)
+  - Optimized RPC function for better vector handling and similarity calculations
+  - Standardized error handling with graceful degradation
+  - Improved monitoring and progress tracking for pipeline operations
+
+- **Decision to Migrate to Qdrant (2025-05-08)**:
+  - **Rationale**: Need for better scaling, performance, and control at our projected vector scale (200-300k)
+  - **Implementation Plan**:
+    - Export vectors + metadata from Supabase
+    - Self-host Qdrant on cloud VM (Render, DigitalOcean, or Railway)
+    - Replace SQL/RPC with Qdrant API/SDK while maintaining core workflow
+  - **Expected Benefits**: Reduced costs, improved query performance, simpler scaling, full control over infrastructure
+
+- **Core Learnings**:
+  - Vector database selection should align with projected scale from the beginning
+  - Purpose-built vector databases outperform general-purpose DB extensions at scale
+  - Client API compatibility requires careful version management and abstraction
+  - Self-hosting provides important control over performance tuning and cost management
+  - Knowledge retrieval quality depends on both technical implementation and proper chunking strategy
+  - **Supabase Client Patterns**:
+    - Pin dependencies exactly (e.g., `supabase==2.3.5` not `>=2.3.4`) to prevent API drift
+    - Use `ClientOptions` objects instead of dictionaries for client initialization
+    - Properly handle synchronous vs. asynchronous client methods and avoid mixing patterns
+    - Implement version detection to handle API changes gracefully
+  - **Vector Search Optimization (pgvector)**:
+    - HNSW index parameters significantly affect performance (m=16, ef_construction=64 works well for ~50k vectors)
+    - Set appropriate `work_mem` (128MB) and `max_parallel_workers_per_gather` (2) for better performance
+    - Embedding dimension standardization crucial (verify 1536D for text-embedding-ada-002)
+    - Similarity threshold of 0.5 balances relevance with recall rate
+  - **Pipeline Engineering**:
+    - Batch processing (size 100-1000) dramatically improves throughput
+    - Concurrent workers (5-10) with proper rate limiting essential for web scraping
+    - Progress tracking with ETA calculations improves developer experience on long-running jobs
+    - Error handling should include automatic retries with exponential backoff
+    - URL processing requires careful handling of special characters (especially % symbols)
+  - **Testing Vector Implementations**:
+    - Mock fixtures need careful design to support both sync and async patterns
+    - Test vectors must match production dimensions exactly
+    - RPC function tests must validate similarity sorting and thresholds
+    - Consider separating unit tests from integration tests for independent verification
+    - Always test with realistic content volumes to catch scaling issues early
+
+### 2025-05-08: Switched to GPT-4.1-mini for Holocron
+- **Cost**: 80% reduction ($0.002/query vs $0.01/query)
+- **Benefits**: Same context window (128K), faster responses
+- **Changes**: 
+  - Increased chunks (5 → 8) within budget
+  - GPT-4o remains as fallback for complex queries
 
 
 

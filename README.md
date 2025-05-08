@@ -91,6 +91,11 @@ If you encounter issues with PyAudio installation, you may need to install PortA
 brew install portaudio  # For macOS
 ```
 
+### Important Version Notes
+The project uses specific versions of key dependencies to ensure compatibility:
+
+- **Supabase Client**: Version 2.3.5 is required for proper vector search functionality and API compatibility. Do not use other versions as they may cause compatibility issues with the Holocron Knowledge system.
+
 ### 2. API Keys Setup
 You need to set up the following API keys:
 

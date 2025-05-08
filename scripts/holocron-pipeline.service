@@ -1,0 +1,13 @@
+[Unit]
+Description=Holocron Vectorization Pipeline Service
+After=network.target
+
+[Service]
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/your/project/directory
+ExecStart=/bin/bash /path/to/your/project/directory/scripts/run_holocron_continuously.sh
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target 

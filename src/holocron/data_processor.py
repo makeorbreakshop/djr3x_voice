@@ -14,6 +14,21 @@ import asyncio
 import httpx
 from typing import List, Dict, Any, Optional, Set, Tuple
 
+# Import patches for httpx
+try:
+    # Try to import from holocron package first
+    from holocron import patches
+    logging.info("Using global patches from holocron package")
+except ImportError:
+    # Fallback to direct patching if import fails
+    logging.warning("Could not import holocron.patches - applying patch locally")
+    original_httpx_init = httpx.Client.__init__
+    def patched_httpx_init(self, *args, **kwargs):
+        if 'proxy' in kwargs:
+            del kwargs['proxy']
+        return original_httpx_init(self, *args, **kwargs)
+    httpx.Client.__init__ = patched_httpx_init
+
 from openai import OpenAI, AsyncOpenAI
 import tiktoken
 from supabase import create_client, Client

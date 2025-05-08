@@ -339,7 +339,10 @@ async def test_url_collection():
         test_urls = [
             "https://starwars.fandom.com/wiki/R-3X",  # Basic URL
             "https://starwars.fandom.com/wiki/Myths_%26_Fables",  # URL with &
-            "https://starwars.fandom.com/wiki/%22Arc_of_Fire%22_Bar_%26_Grill"  # URL with quotes and &
+            "https://starwars.fandom.com/wiki/%22Arc_of_Fire%22_Bar_%26_Grill",  # URL with quotes and &
+            "https://starwars.fandom.com/wiki/%Castua_crane",  # URL starting with %
+            "https://starwars.fandom.com/wiki/100%%_complete",  # URL with consecutive %
+            "https://starwars.fandom.com/wiki/%25,000_BBY"  # Already encoded % at start
         ]
         
         # Don't actually hit the server in test mode
