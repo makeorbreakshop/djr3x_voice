@@ -81,6 +81,7 @@ class VoiceManager:
         
         # Initialize clients if not in test mode
         if not test_mode:
+            # Only pass api_key to OpenAI client initialization
             self.openai_client = OpenAI(api_key=openai_key)
             self.elevenlabs_key = elevenlabs_key
             self.elevenlabs_voice_id = elevenlabs_voice_id
@@ -112,6 +113,12 @@ class VoiceManager:
             )
             # Register for system mode changes
             self.event_bus.on(EventTypes.SYSTEM_MODE_CHANGED, self._handle_mode_change)
+        
+        # Register for external transcriptions from StreamManager
+        self.event_bus.on(EventTypes.VOICE_LISTENING_STOPPED, self._handle_external_transcription)
+        
+        # Queue for external transcriptions
+        self.external_transcript_queue = asyncio.Queue()
     
     async def _handle_mode_change(self, data: Dict[str, Any]) -> None:
         """Handle system mode changes.
@@ -153,6 +160,11 @@ class VoiceManager:
             )
             self.keyboard_listener.start()
             logger.info("Push-to-talk listener activated")
+        else:
+            # In continuous listening mode, set recording to true immediately
+            self.is_recording = True
+            self.recording_event.set()
+            logger.info("Continuous listening mode activated")
             
         # Start the interaction loop as a proper asyncio task, if not already running
         if self.interaction_task is None or self.interaction_task.done():
@@ -246,9 +258,33 @@ class VoiceManager:
         """Emit voice.listening_started event."""
         await self.event_bus.emit(EventTypes.VOICE_LISTENING_STARTED)
     
-    async def _emit_listening_stopped(self):
-        """Emit voice.listening_stopped event."""
-        await self.event_bus.emit(EventTypes.VOICE_LISTENING_STOPPED)
+    async def _emit_listening_stopped(self, transcript: Optional[str] = None):
+        """Emit voice.listening_stopped event, optionally with transcript data."""
+        if transcript:
+            await self.event_bus.emit(EventTypes.VOICE_LISTENING_STOPPED, {"transcript": transcript})
+        else:
+            await self.event_bus.emit(EventTypes.VOICE_LISTENING_STOPPED)
+    
+    async def _handle_external_transcription(self, data: Dict[str, Any] = None) -> None:
+        """Handle incoming transcription from StreamManager.
+        
+        Args:
+            data: Event data potentially containing transcript
+        """
+        # Skip if not in interactive mode
+        if not self.interactive_mode_enabled:
+            return
+        
+        # Check if this is an external transcription with data
+        if data and "transcript" in data and data["transcript"]:
+            transcript = data["transcript"]
+            logger.info(f"Received external transcription: {transcript}")
+            
+            # Add to queue for processing in interaction loop
+            await self.external_transcript_queue.put(transcript)
+            
+            # Emit processing started event
+            await self.event_bus.emit(EventTypes.VOICE_PROCESSING_STARTED)
     
     async def capture_audio(self) -> Optional[np.ndarray]:
         """Capture audio from microphone."""
@@ -311,6 +347,15 @@ class VoiceManager:
             return "Test mode response"
             
         try:
+            # Extract only the valid parameters for the API call
+            api_params = {
+                "max_tokens": self.openai_config.get("max_tokens", 75),
+                "temperature": self.openai_config.get("temperature", 0.7),
+                "top_p": self.openai_config.get("top_p", 0.9),
+                "presence_penalty": self.openai_config.get("presence_penalty", 0.2),
+                "frequency_penalty": self.openai_config.get("frequency_penalty", 0.3)
+            }
+            
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.openai_client.chat.completions.create(
@@ -319,7 +364,7 @@ class VoiceManager:
                         {"role": "system", "content": self.persona},
                         {"role": "user", "content": text}
                     ],
-                    **self.openai_config
+                    **api_params
                 )
             )
             return response.choices[0].message.content
@@ -476,7 +521,35 @@ class VoiceManager:
                     # Sleep a bit to avoid constant checking
                     await asyncio.sleep(0.5)
                     continue
+            
+                # Check for external transcriptions first
+                try:
+                    # Use get_nowait to check without blocking
+                    text = self.external_transcript_queue.get_nowait()
+                    logger.info(f"Processing external transcription: {text}")
                     
+                    # Skip capturing and transcribing audio since we already have text
+                    # Directly process with LLM
+                    response_text = await self.process_text(text)
+                    if not response_text:
+                        logger.warning("Failed to get AI response")
+                        continue
+                    
+                    # Synthesize speech
+                    audio_bytes = await self.synthesize_speech(response_text)
+                    if not audio_bytes:
+                        logger.warning("Failed to synthesize speech")
+                        continue
+
+                    # Play response
+                    await self.play_audio(audio_bytes)
+                    continue  # Skip the regular capture flow
+                    
+                except asyncio.QueueEmpty:
+                    # No external transcription available, proceed with normal flow
+                    pass
+                
+                # Regular capture and transcription flow
                 # Capture audio from microphone
                 audio_data = await self.capture_audio()
                 if audio_data is None:
@@ -487,7 +560,7 @@ class VoiceManager:
                 if not text:
                     logger.info("No speech detected")
                     continue
-                    
+                
                 logger.info(f"Recognized: {text}")
                 
                 # Process with LLM
@@ -522,4 +595,10 @@ class VoiceManager:
         
         # Additional cleanup if needed
         # Wait for any active audio processing to complete
-        # This is a placeholder - add actual cleanup if needed 
+        # This is a placeholder - add actual cleanup if needed
+    
+    async def start(self) -> None:
+        """Start the voice manager."""
+        logger.info("Starting Voice Manager")
+        # No initialization needed here
+        # The constructor already does everything necessary 

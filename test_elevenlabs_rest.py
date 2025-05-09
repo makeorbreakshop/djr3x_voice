@@ -8,7 +8,6 @@ import requests
 import json
 from dotenv import load_dotenv
 import sys
-from config.voice_config import VoiceConfig
 
 # Force reload environment variables
 os.environ.clear()
@@ -80,28 +79,16 @@ try:
         "xi-api-key": api_key
     }
     
-    # Create a test configuration with slightly more expressive settings
-    test_config = VoiceConfig.create_custom(
-        stability=0.6,  # Slightly more stable
-        similarity_boost=0.8,  # Higher voice similarity
-        style_exaggeration=0.1  # Slight style boost
-    )
-    
-    voice_settings = test_config.to_dict()
-    
     tts_data = {
-        "text": "BZZZT! Test successful! I'm DJ R3X!",
-        "model_id": voice_settings["model_id"],
+        "text": "Test successful! I'm DJ R3X!",
+        "model_id": "eleven_monolingual_v1",
         "voice_settings": {
-            "stability": voice_settings["stability"],
-            "similarity_boost": voice_settings["similarity_boost"],
-            "style": voice_settings["style"],
-            "speaker_boost": voice_settings["speaker_boost"]
+            "stability": 0.5,
+            "similarity_boost": 0.5
         }
     }
     
     print(f"Using voice ID: {os.getenv('ELEVENLABS_VOICE_ID')}")
-    print("Voice settings:", json.dumps(voice_settings, indent=2))
     tts_response = requests.post(tts_url, json=tts_data, headers=tts_headers)
     
     if tts_response.status_code == 200:

@@ -23,17 +23,19 @@ from dotenv import load_dotenv, find_dotenv
 # Add the project root to the path so we can use local imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import DEBUG_MODE first for logging configuration
+from config.app_settings import DEBUG_MODE
+
 # Configure logging - use a format that's more concise
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     datefmt='%H:%M:%S'  # Use shorter time format
 )
 logger = logging.getLogger(__name__)
 
-# Import configuration
+# Import remaining configuration
 from config.app_settings import (
-    DEBUG_MODE,
     TEXT_ONLY_MODE,
     PUSH_TO_TALK_MODE,
     DISABLE_AUDIO_PROCESSING,
@@ -42,7 +44,8 @@ from config.app_settings import (
     LED_SERIAL_PORT,
     LED_BAUD_RATE,
     DISABLE_EYES,
-    STARTUP_SOUND
+    STARTUP_SOUND,
+    USE_STREAMING_VOICE
 )
 from config.voice_settings import active_config as voice_config
 from config.openai_settings import active_config as openai_config
@@ -54,10 +57,25 @@ from src.led_manager import LEDManager
 from src.music_manager import MusicManager
 from src.system_mode_manager import SystemModeManager
 from src.command_input import CommandInputThread
+from src.stream_manager import StreamManager
+
+# Monkey patch httpx.Client to fix the proxies issue with OpenAI 1.3.5
+import httpx
+original_httpx_init = httpx.Client.__init__
+def patched_httpx_init(self, *args, **kwargs):
+    # Remove 'proxies' if present to avoid the error
+    if 'proxies' in kwargs:
+        logger.info("Fixing OpenAI compatibility: Removing 'proxies' from httpx.Client")
+        kwargs.pop('proxies')
+    # Call original init with the cleaned kwargs
+    return original_httpx_init(self, *args, **kwargs)
+# Apply the patch
+httpx.Client.__init__ = patched_httpx_init
 
 # Global variables
 event_bus = None  # Will be initialized in main()
 voice_manager: Optional[VoiceManager] = None
+stream_manager: Optional[StreamManager] = None
 led_manager: Optional[LEDManager] = None
 music_manager: Optional[MusicManager] = None
 system_mode_manager: Optional[SystemModeManager] = None 
@@ -80,6 +98,10 @@ def load_environment() -> Dict[str, str]:
         "ELEVENLABS_API_KEY",
         "ELEVENLABS_VOICE_ID"
     ]
+    
+    # Conditionally add Deepgram API key if streaming voice is enabled
+    if USE_STREAMING_VOICE:
+        required_vars.append("DEEPGRAM_API_KEY")
     
     # Validate required variables
     missing = [var for var in required_vars if not os.getenv(var)]
@@ -106,7 +128,8 @@ def load_environment() -> Dict[str, str]:
         "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID"),
         "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4"),
         "DJ_R3X_PERSONA": dj_rex_persona,
-        "DISABLE_EYES": os.getenv("DISABLE_EYES", "").lower() == "true"
+        "DISABLE_EYES": os.getenv("DISABLE_EYES", "").lower() == "true",
+        "DEEPGRAM_API_KEY": os.getenv("DEEPGRAM_API_KEY", "")
     }
 
 def play_startup_sound():
@@ -137,7 +160,7 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
     Returns:
         bool: True if all components initialized successfully
     """
-    global voice_manager, led_manager, music_manager, system_mode_manager, command_input_thread
+    global voice_manager, stream_manager, led_manager, music_manager, system_mode_manager, command_input_thread
     
     try:
         logger.info("Initializing components...")
@@ -145,7 +168,7 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
         # Get the currently running event loop to ensure consistency
         current_loop = asyncio.get_running_loop()
         
-        # Initialize Voice Manager
+        # Initialize Voice Manager first (always needed for GPT and TTS)
         try:
             voice_manager = VoiceManager(
                 event_bus=event_bus,
@@ -162,14 +185,38 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
                 sample_rate=SAMPLE_RATE,
                 channels=CHANNELS,
                 test_mode=test_mode,
-                loop=current_loop  # Pass the running event loop explicitly
+                loop=current_loop
             )
             await voice_manager.start()
-            event_bus.voice_manager = voice_manager  # Store reference
+            event_bus.voice_manager = voice_manager
+            logger.info("Voice Manager initialized successfully")
         except Exception as e:
-            logger.warning(f"Failed to initialize Voice Manager: {e}")
+            logger.error(f"Failed to initialize Voice Manager: {e}")
             voice_manager = None
-        
+            return False
+
+        # Initialize Stream Manager if streaming is enabled
+        if USE_STREAMING_VOICE:
+            try:
+                logger.info("Initializing Stream Manager for streaming voice processing...")
+                stream_manager = StreamManager(
+                    event_bus=event_bus,
+                    deepgram_api_key=env["DEEPGRAM_API_KEY"],
+                    push_to_talk_mode=PUSH_TO_TALK_MODE,
+                    sample_rate=SAMPLE_RATE,
+                    channels=CHANNELS,
+                    test_mode=test_mode,
+                    loop=current_loop,
+                    debug_mode=DEBUG_MODE
+                )
+                event_bus.stream_manager = stream_manager
+                logger.info("Stream Manager initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize Stream Manager: {e}")
+                stream_manager = None
+                # Continue with Voice Manager only
+                logger.info("Continuing with Voice Manager only...")
+
         # Initialize LED Manager
         try:
             led_manager = LEDManager(
@@ -177,7 +224,7 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
                 disable_eyes=DISABLE_EYES
             )
             await led_manager.start()
-            event_bus.led_manager = led_manager  # Store reference
+            event_bus.led_manager = led_manager
         except Exception as e:
             logger.warning(f"Failed to initialize LED Manager: {e}")
             led_manager = None
@@ -186,11 +233,11 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
         try:
             music_manager = MusicManager(event_bus)
             await music_manager.start()
-            event_bus.music_manager = music_manager  # Store reference
+            event_bus.music_manager = music_manager
         except Exception as e:
             logger.warning(f"Failed to initialize Music Manager: {e}")
             music_manager = None
-            
+
         # Initialize System Mode Manager
         # Start in STARTUP mode, will transition to IDLE mode after initialization
         system_mode_manager = SystemModeManager(event_bus, initial_mode=SystemMode.STARTUP)
@@ -211,12 +258,11 @@ async def initialize_components(env: Dict[str, str], test_mode: bool = False) ->
         # Initialize Command Input Thread (after all init is complete)
         command_input_thread = CommandInputThread(event_bus, current_loop)
         command_input_thread.start()
-        
-        # Return success if we got here
+
         return True
-            
+
     except Exception as e:
-        logger.error(f"Failed to initialize components: {e}")
+        logger.error(f"Error during component initialization: {e}")
         return False
 
 async def cleanup_components() -> None:
@@ -244,6 +290,14 @@ async def cleanup_components() -> None:
             logger.info("LED Manager stopped")
         except Exception as e:
             logger.error(f"Error stopping LED Manager: {e}")
+    
+    # Stop Stream Manager (if using streaming voice)
+    if stream_manager:
+        try:
+            await stream_manager.stop()
+            logger.info("Stream Manager stopped")
+        except Exception as e:
+            logger.error(f"Error stopping Stream Manager: {e}")
     
     # Stop Voice Manager
     if voice_manager:

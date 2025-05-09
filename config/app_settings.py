@@ -6,8 +6,9 @@ These settings can be version controlled and shared across environments.
 # Operation Modes
 TEXT_ONLY_MODE = False
 DISABLE_AUDIO_PROCESSING = True
-DEBUG_MODE = True
+DEBUG_MODE = False
 PUSH_TO_TALK_MODE = True  # When True, audio recording only happens while space bar is held down
+USE_STREAMING_VOICE = False  # When True, uses Deepgram streaming ASR instead of Whisper
 
 # Audio Processing Settings
 SAMPLE_RATE = 44100
@@ -42,6 +43,8 @@ if 'DEBUG_MODE' in os.environ:
     DEBUG_MODE = os.getenv('DEBUG_MODE').lower() == 'true'
 if 'PUSH_TO_TALK_MODE' in os.environ:
     PUSH_TO_TALK_MODE = os.getenv('PUSH_TO_TALK_MODE').lower() == 'true'
+if 'USE_STREAMING_VOICE' in os.environ:
+    USE_STREAMING_VOICE = os.getenv('USE_STREAMING_VOICE').lower() == 'true'
     
 # LED settings overrides
 if 'LED_SERIAL_PORT' in os.environ:

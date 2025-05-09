@@ -13,19 +13,20 @@
 // LED Configuration
 #define LEFT_EYE_DEVICE  0  // First MAX7219 in chain
 #define RIGHT_EYE_DEVICE 1  // Second MAX7219 in chain
-#define JSON_BUFFER_SIZE 256  // Increased for v7 compatibility
-#define DEBUG_MODE false  // Set to true for verbose debug output
+#define JSON_BUFFER_SIZE 512  // Increased for more complex commands
+#define DEBUG_MODE true  // Set to true for verbose debug output
 
 // DIN = 51, CLK = 52, CS = 53, 2 devices (left eye = 0, right eye = 1)
 LedControl lc = LedControl(51, 52, 53, 2);
 
 // Constants for visible area
 const int CENTER = 3;  // Center position (3,3) for each eye
-const int BRIGHTNESS = 8;  // Default brightness (0-15)
+const int DEFAULT_BRIGHTNESS = 8;  // Default brightness (0-15)
 
 // Current state
 String currentPattern = "idle";
 String currentEmotion = "neutral";
+int currentBrightness = DEFAULT_BRIGHTNESS;
 bool animationActive = true;
 
 // Animation variables
@@ -33,25 +34,40 @@ unsigned long lastUpdate = 0;
 int animationStep = 0;
 int mouthLevel = 0;  // For mouth animation level (0-255)
 
+// Command handling
+enum class Command {
+  SET_PATTERN,
+  SET_COLOR,
+  SET_BRIGHTNESS,
+  RESET,
+  TEST,
+  STATUS,
+  UNKNOWN
+};
+
+Command getCommandFromString(const char* cmd) {
+  if (strcmp(cmd, "set_pattern") == 0) return Command::SET_PATTERN;
+  if (strcmp(cmd, "set_color") == 0) return Command::SET_COLOR;
+  if (strcmp(cmd, "set_brightness") == 0) return Command::SET_BRIGHTNESS;
+  if (strcmp(cmd, "reset") == 0) return Command::RESET;
+  if (strcmp(cmd, "test") == 0) return Command::TEST;
+  if (strcmp(cmd, "status") == 0) return Command::STATUS;
+  return Command::UNKNOWN;
+}
+
 void setup() {
   // Start serial communication
   Serial.begin(115200);
   
-  // Create response JSON
-  JsonDocument response;
-  response["status"] = "starting";
-  serializeJson(response, Serial);
-  Serial.println();
-
   // Initialize LED matrices
   for (int device = 0; device < 2; device++) {
     lc.shutdown(device, false);     // Wake up displays
-    lc.setIntensity(device, BRIGHTNESS);
+    lc.setIntensity(device, currentBrightness);
     lc.clearDisplay(device);
   }
 
-  // Signal we're ready
-  response.clear();
+  // Send ready status
+  StaticJsonDocument<200> response;
   response["status"] = "ready";
   serializeJson(response, Serial);
   Serial.println();
@@ -63,65 +79,141 @@ void setup() {
 void loop() {
   // Check for commands
   if (Serial.available() > 0) {
-    // Read the JSON from Serial
     String rawData = Serial.readStringUntil('\n');
     
-    // Echo received data if in debug mode
-    if (DEBUG_MODE) {
-      JsonDocument response;
-      response["received"] = rawData;
-      serializeJson(response, Serial);
-      Serial.println();
-    }
-    
-    // Parse incoming JSON
-    JsonDocument doc;
+    // Parse JSON command
+    StaticJsonDocument<JSON_BUFFER_SIZE> doc;
     DeserializationError error = deserializeJson(doc, rawData);
     
     if (error) {
-      JsonDocument response;
+      StaticJsonDocument<200> response;
       response["error"] = error.c_str();
       serializeJson(response, Serial);
       Serial.println();
       return;
     }
     
-    // Extract command components
-    const char* pattern = doc["pattern"] | "idle";
-    const char* emotion = doc["emotion"] | "neutral";
-    int level = doc["level"] | 0;  // For mouth animation
+    // Process command
+    const char* cmdStr = doc["command"];
+    Command cmd = getCommandFromString(cmdStr);
     
-    // Echo parsed values if in debug mode
-    if (DEBUG_MODE) {
-      JsonDocument response;
-      response["parsed"]["pattern"] = pattern;
-      response["parsed"]["emotion"] = emotion;
-      response["parsed"]["level"] = level;
-      serializeJson(response, Serial);
-      Serial.println();
+    bool success = false;
+    
+    switch (cmd) {
+      case Command::SET_PATTERN:
+        success = handleSetPattern(doc["params"]);
+        break;
+      case Command::SET_COLOR:
+        success = handleSetColor(doc["params"]);
+        break;
+      case Command::SET_BRIGHTNESS:
+        success = handleSetBrightness(doc["params"]);
+        break;
+      case Command::RESET:
+        success = handleReset();
+        break;
+      case Command::TEST:
+        success = handleTest();
+        break;
+      case Command::STATUS:
+        success = handleStatus();
+        break;
+      default:
+        StaticJsonDocument<200> response;
+        response["error"] = "Unknown command";
+        serializeJson(response, Serial);
+        Serial.println();
+        return;
     }
     
-    // Update state
-    if (pattern) {
-      currentPattern = pattern;
-      currentEmotion = emotion;
-      mouthLevel = level;
-      
-      // Apply the pattern
-      setPattern(currentPattern);
-      
-      // Send acknowledgment
-      JsonDocument response;
-      response["ack"] = pattern;
-      serializeJson(response, Serial);
-      Serial.println();
+    // Send acknowledgment
+    StaticJsonDocument<200> response;
+    response["ack"] = success;
+    serializeJson(response, Serial);
+    Serial.println();
+  }
+  
+  // Update animations
+  updateEyeAnimation();
+  delay(50);
+}
+
+bool handleSetPattern(JsonVariant params) {
+  const char* pattern = params["pattern"];
+  if (!pattern) return false;
+  
+  currentPattern = pattern;
+  
+  // Handle optional parameters
+  if (params.containsKey("color")) {
+    // Color handling would go here if RGB LEDs were available
+    // For now, we just acknowledge it
+  }
+  
+  if (params.containsKey("brightness")) {
+    float brightness = params["brightness"];
+    currentBrightness = map(brightness * 100, 0, 100, 0, 15);
+    for (int device = 0; device < 2; device++) {
+      lc.setIntensity(device, currentBrightness);
     }
   }
   
-  // Update animations based on current pattern
-  updateEyeAnimation();
+  // Reset animation state
+  animationStep = 0;
+  clearEyes();
   
-  delay(50); // Small delay to prevent overwhelming the serial port
+  return true;
+}
+
+bool handleSetColor(JsonVariant params) {
+  // Color handling would go here if RGB LEDs were available
+  // For now, we just acknowledge it
+  return true;
+}
+
+bool handleSetBrightness(JsonVariant params) {
+  if (!params.containsKey("brightness")) return false;
+  
+  float brightness = params["brightness"];
+  currentBrightness = map(brightness * 100, 0, 100, 0, 15);
+  
+  for (int device = 0; device < 2; device++) {
+    lc.setIntensity(device, currentBrightness);
+  }
+  
+  return true;
+}
+
+bool handleReset() {
+  for (int device = 0; device < 2; device++) {
+    lc.shutdown(device, false);
+    lc.setIntensity(device, DEFAULT_BRIGHTNESS);
+    lc.clearDisplay(device);
+  }
+  currentPattern = "idle";
+  currentBrightness = DEFAULT_BRIGHTNESS;
+  animationStep = 0;
+  return true;
+}
+
+bool handleTest() {
+  // Simple test pattern
+  for (int device = 0; device < 2; device++) {
+    lc.setLed(device, CENTER, CENTER, true);
+  }
+  delay(500);
+  clearEyes();
+  return true;
+}
+
+bool handleStatus() {
+  StaticJsonDocument<200> status;
+  status["pattern"] = currentPattern;
+  status["brightness"] = currentBrightness;
+  status["animation_step"] = animationStep;
+  serializeJson(status, Serial);
+  Serial.println();
+  return true;
 }
 
 void setPattern(String pattern) {
@@ -323,7 +415,7 @@ void updateEyeAnimation() {
   else if (currentPattern == "error") {
     // Blink the X pattern
     for (int device = 0; device < 2; device++) {
-      lc.setIntensity(device, animationStep == 0 ? BRIGHTNESS : 0);
+      lc.setIntensity(device, animationStep == 0 ? currentBrightness : 0);
     }
     animationStep = (animationStep + 1) % 2;
   }
