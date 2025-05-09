@@ -14,6 +14,7 @@ from postgrest import SyncRequestBuilder as RequestBuilder
 import time
 
 from ..database.client_factory import default_factory
+from .base_adapter import BaseVectorSearch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,7 +69,7 @@ class VectorSearchResult:
             'similarity': self.similarity
         }
 
-class VectorSearch:
+class VectorSearch(BaseVectorSearch):
     """
     Provides standardized vector similarity search functionality.
     Implements multiple search strategies with automatic fallback.
@@ -79,8 +80,8 @@ class VectorSearch:
         embedding_dimension: int = 1536,
         pool_key: str = "vector_search"
     ):
-        self.table_name = table_name
-        self.embedding_dimension = embedding_dimension
+        self._table_name = table_name
+        self._embedding_dimension = embedding_dimension
         self.pool_key = pool_key
         self._client = None
 
@@ -90,6 +91,11 @@ class VectorSearch:
         if not self._client:
             self._client = default_factory.get_client(self.pool_key)
         return self._client
+
+    @property
+    def embedding_dimension(self) -> int:
+        """Get the dimension of embedding vectors."""
+        return self._embedding_dimension
 
     def _validate_embedding(self, embedding: Union[List[float], np.ndarray]) -> np.ndarray:
         """
@@ -121,13 +127,13 @@ class VectorSearch:
         # Format as a simple comma-separated list without brackets for pgvector
         return ','.join([f"{x}" for x in embedding])
 
-    def search(
+    async def search(
         self,
         embedding: Union[List[float], np.ndarray],
         limit: int = 10,
         threshold: float = 0.3,
         metadata_filters: Optional[Dict[str, Any]] = None
-    ) -> List[VectorSearchResult]:
+    ) -> List[Dict[str, Any]]:
         """
         Search for similar vectors using pgvector RPC function.
         
@@ -149,13 +155,13 @@ class VectorSearch:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    results = self._search_rpc(
+                    results = await self._search_rpc(
                         embedding=embedding,
                         limit=limit,
                         threshold=threshold,
                         metadata_filters=metadata_filters
                     )
-                    return results
+                    return [r.to_dict() for r in results]
                 except Exception as e:
                     if "timeout" in str(e).lower() and attempt < max_retries - 1:
                         # Only retry on timeout errors
@@ -170,7 +176,7 @@ class VectorSearch:
             # Return empty list - application will fall back to LLM's training knowledge
             return []
 
-    def _search_rpc(
+    async def _search_rpc(
         self,
         embedding: np.ndarray,
         limit: int,
@@ -199,96 +205,43 @@ class VectorSearch:
             if not response.data:
                 return []
                 
-            return [
-                VectorSearchResult.from_rpc_result(result)
-                for result in response.data
-            ]
+            return [VectorSearchResult.from_rpc_result(r) for r in response.data]
+            
         except Exception as e:
-            logger.warning(f"RPC search failed: {str(e)}")
+            logger.error(f"RPC search failed: {str(e)}")
+            raise
+
+    async def add_vectors(
+        self,
+        vectors: List[Dict[str, Any]],
+        batch_size: int = 100
+    ) -> None:
+        """Add vectors to the database."""
+        try:
+            for i in range(0, len(vectors), batch_size):
+                batch = vectors[i:i + batch_size]
+                response = self.client.table(self._table_name).insert(batch).execute()
+                if not response.data:
+                    raise Exception("Failed to insert vectors")
+                logger.info(f"Added batch {i//batch_size + 1}")
+        except Exception as e:
+            logger.error(f"Error adding vectors: {str(e)}")
+            raise
+
+    async def delete_vectors(self, vector_ids: List[str]) -> None:
+        """Delete vectors from the database."""
+        try:
+            response = self.client.table(self._table_name).delete().in_('id', vector_ids).execute()
+            if not response.data:
+                raise Exception("Failed to delete vectors")
+            logger.info(f"Deleted {len(vector_ids)} vectors")
+        except Exception as e:
+            logger.error(f"Error deleting vectors: {str(e)}")
             raise
 
     def close(self) -> None:
-        """Close the vector search client connection."""
+        """Close database connections."""
         if self._client:
             default_factory.close_client(self.pool_key)
-            self._client = None 
-
-def search_vector(
-    embedding: Union[List[float], np.ndarray],
-    limit: int = 10,
-    threshold: float = 0.5,
-    metadata_filters: Optional[Dict[str, Any]] = None,
-    client: Optional[Client] = None
-) -> List[VectorSearchResult]:
-    """
-    Search for similar vectors in the database.
-    
-    Args:
-        embedding: Query vector (list or numpy array)
-        limit: Maximum number of results to return
-        threshold: Minimum similarity threshold (0-1)
-        metadata_filters: Optional filters to apply to metadata fields
-        client: Optional Supabase client, if None a default client will be created
-        
-    Returns:
-        List of VectorSearchResult objects
-    """
-    if client is None:
-        client = default_factory().get_client()
-    
-    # Convert numpy array to list if needed
-    if isinstance(embedding, np.ndarray):
-        # Ensure the embedding is a 1D array
-        embedding = embedding.flatten().tolist()
-    
-    # Convert embedding to string format for the RPC call
-    # Ensure all values in the embedding are converted properly
-    embedding_str = ','.join([str(float(x)) for x in embedding])
-    
-    # Set default parameters if none provided
-    if metadata_filters is None:
-        metadata_filters = {}
-    
-    # Call the match_documents function
-    try:
-        logger.info(f"Searching for similar vectors with threshold {threshold} and limit {limit}")
-        
-        rpc_response = client.rpc(
-            'match_documents',
-            {
-                'query_embedding': embedding_str,
-                'match_threshold': threshold,
-                'match_count': limit,
-                'metadata_filters': metadata_filters
-            }
-        ).execute()
-        
-        if hasattr(rpc_response, 'error') and rpc_response.error is not None:
-            logger.error(f"Error in vector search: {rpc_response.error}")
-            return []
-            
-        # Process the results
-        results = rpc_response.data
-        if not results:
-            logger.info("No results found")
-            return []
-            
-        # Convert to VectorSearchResult objects
-        vector_results = []
-        for item in results:
-            vector_results.append(
-                VectorSearchResult(
-                    id=item['id'],
-                    content=item['content'],
-                    metadata=item['metadata'],
-                    similarity=item['similarity']
-                )
-            )
-            
-        logger.info(f"Found {len(vector_results)} results")
-        return vector_results
-        
-    except Exception as e:
-        logger.error(f"Error in vector search: {str(e)}")
-        # Return empty list instead of raising
-        return [] 
+            self._client = None
+            logger.info("Closed vector search connections")

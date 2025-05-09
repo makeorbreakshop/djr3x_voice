@@ -6,13 +6,14 @@ semantic search with pgvector.
 """
 
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import logging
 from dotenv import load_dotenv
 import asyncio
+import numpy as np
+from openai import OpenAI
 
-from ..database.holocron_db import HolocronDB, HolocronKnowledge
-from .embeddings import OpenAIEmbeddings
+from ..database.vector_search import VectorSearchResult
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,66 +23,65 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 class HolocronRetriever:
-    """Retrieves knowledge from the Holocron database using semantic search."""
+    """Retrieves relevant knowledge from the Holocron database."""
     
-    def __init__(
-        self,
-        table_name: str = 'holocron_knowledge',
-        embedding_dimension: int = 1536,
-        pool_key: str = 'holocron_retriever'
-    ):
-        """
-        Initialize the retriever with database access and embedding generation.
-        
-        Args:
-            table_name: Name of the knowledge table
-            embedding_dimension: Dimension of the embeddings
-            pool_key: Key for the connection pool
-        """
-        self.db = HolocronDB(
-            table_name=table_name,
-            pool_key=pool_key,
-            embedding_dimension=embedding_dimension
-        )
-        self.embeddings = OpenAIEmbeddings()
+    def __init__(self, embedding_dimension: int = 1536):
+        self.embedding_dimension = embedding_dimension
+        self._db = None
+        self._client = OpenAI()
+    
+    @property
+    def db(self):
+        """Lazy load the database connection."""
+        if self._db is None:
+            # Import here to avoid circular dependency
+            from ..database.holocron_db import HolocronDB
+            self._db = HolocronDB(embedding_dimension=self.embedding_dimension)
+        return self._db
     
     async def search(
         self,
         query: str,
         limit: int = 5,
-        min_relevance: float = 0.3,
-        metadata_filters: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+        threshold: float = 0.5
+    ) -> List[VectorSearchResult]:
         """
-        Search the Holocron knowledge base using semantic similarity.
+        Search for relevant knowledge using semantic similarity.
         
         Args:
             query: The search query
-            limit: Maximum number of results to return
-            min_relevance: Minimum similarity score (0-1) for results
-            metadata_filters: Optional filters to apply to metadata fields
+            limit: Maximum number of results
+            threshold: Minimum similarity threshold
             
         Returns:
-            List of matching knowledge entries with their content and metadata
+            List of relevant knowledge entries
         """
         try:
-            # Get query embedding
-            query_embedding = await self.embeddings.embed_query(query)
+            # Generate embedding for query
+            response = self._client.embeddings.create(
+                model="text-embedding-ada-002",
+                input=query
+            )
+            query_embedding = response.data[0].embedding
             
-            # Perform vector search using HolocronDB
+            # Search database
             results = await self.db.search_similar(
                 embedding=query_embedding,
                 limit=limit,
-                threshold=min_relevance,
-                metadata_filters=metadata_filters
+                threshold=threshold
             )
             
-            # Convert results to dictionary format for backward compatibility
-            return [result.to_dict() for result in results]
+            return results
             
         except Exception as e:
-            logger.error(f"Error in search method: {e}")
+            logger.error(f"Error searching knowledge: {str(e)}")
             return []
+    
+    def close(self):
+        """Close database connection."""
+        if self._db:
+            self._db.close()
+            self._db = None
     
     async def get_entry_by_id(self, entry_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -98,8 +98,4 @@ class HolocronRetriever:
             return entry.to_dict() if entry else None
         except Exception as e:
             logger.error(f"Error retrieving entry {entry_id}: {e}")
-            return None
-    
-    async def close(self) -> None:
-        """Close database connections."""
-        await self.db.close() 
+            return None 
