@@ -187,7 +187,10 @@ class URLProcessor:
         
         if priority:
             cmd.extend(["--priority", priority])
-            
+        
+        if getattr(self, 'debug', False):
+            cmd.append("--debug")
+        
         # Print color-coded status
         priority_str = f"{priority} priority " if priority else ""
         print(f"\n{COLORS['BOLD']}{COLORS['BG_YELLOW']} Batch #{batch_num} {COLORS['RESET']} - Starting batch of {self.batch_size} URLs...")
@@ -399,9 +402,11 @@ async def main():
     parser.add_argument('--prioritize', action='store_true',
                       help="Process high priority URLs first, then medium, then low")
     parser.add_argument('--limit', type=int, default=None,
-                      help="Maximum number of URLs to process in this session")
+                      help="Maximum number of URLs to process in this run (optional)")
     parser.add_argument('--reset-failed', action='store_true',
-                      help="Reset and reprocess URLs that were processed but have no chunks")
+                      help="Reset URLs that were processed but have no chunks")
+    parser.add_argument('--debug', action='store_true',
+                      help="Enable detailed step-level timing and debug logging in batch pipeline")
     
     args = parser.parse_args()
     
@@ -409,12 +414,14 @@ async def main():
     processor = URLProcessor(
         batch_size=args.batch_size,
         delay=args.delay,
+        max_retries=3,
         workers=args.workers,
         requests_per_minute=args.requests_per_minute,
         prioritize=args.prioritize,
         limit=args.limit,
         reset_failed=args.reset_failed
     )
+    processor.debug = args.debug
     
     # Run continuous processing
     success = await processor.run_continuous()

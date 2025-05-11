@@ -13,6 +13,7 @@ import logging
 import asyncio
 import httpx
 from typing import List, Dict, Any, Optional, Set, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
 # Import patches for httpx
 try:
@@ -48,10 +49,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-BATCH_SIZE = 100  # Number of embeddings to generate in one API call
+BATCH_TOKEN_LIMIT = 8000  # Increased from 1500 based on testing (OpenAI allows up to 8K)
+MAX_PARALLEL_REQUESTS = 5  # Keep at 5 for stability
 MAX_TOKENS_PER_CHUNK = 1000  # Target token count per chunk
-OVERLAP_TOKENS = 100  # Number of tokens to overlap between chunks
-TOKENIZER = tiktoken.get_encoding("cl100k_base")  # For OpenAI embeddings
+TOKENIZER = tiktoken.get_encoding("cl100k_base")
+UPLOAD_BATCH_SIZE = 25  # Increased from 5 based on testing
 
 # Read OpenAI API key directly from .env file
 def read_api_key_from_env_file():
@@ -92,10 +94,10 @@ class HolocronDataProcessor:
             logger.error("Failed to load OpenAI API key from .env file")
             raise ValueError("OpenAI API key not found")
             
-        # Create a simple client without any additional configuration
-        self.openai_client = OpenAI(
+        # Create async OpenAI client
+        self.openai_client = AsyncOpenAI(
             api_key=api_key,
-            http_client=httpx.Client(
+            http_client=httpx.AsyncClient(
                 base_url="https://api.openai.com/v1",
                 follow_redirects=True,
                 timeout=60.0
@@ -296,48 +298,73 @@ class HolocronDataProcessor:
         
     async def generate_embeddings(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Generate embeddings for text chunks using OpenAI's API.
+        Generate embeddings for chunks in optimized batches.
         
         Args:
-            chunks: List of chunk dictionaries
+            chunks: List of chunk dictionaries with text and metadata
             
         Returns:
-            Chunks with embedding data added
+            List of chunks with embeddings added
         """
-        chunks_with_embeddings = []
+        if not chunks:
+            return []
+
+        # Group chunks into batches based on token count
+        batches = []
+        current_batch = []
+        current_tokens = 0
         
-        # Process chunks in batches to optimize API usage
-        for i in range(0, len(chunks), BATCH_SIZE):
-            batch = chunks[i:i+BATCH_SIZE]
-            logger.info(f"Generating embeddings for batch {i//BATCH_SIZE + 1}/{(len(chunks)-1)//BATCH_SIZE + 1}")
-            
-            try:
-                # Prepare batch of texts
-                texts = [chunk["content"] for chunk in batch]
-                
-                # Generate embeddings using the updated client
-                response = self.openai_client.embeddings.create(
-                    model=EMBEDDING_MODEL,
-                    input=texts,
-                    encoding_format="float"
-                )
-                
-                # Add embeddings to chunks
-                for j, chunk in enumerate(batch):
-                    chunk["embedding"] = response.data[j].embedding
-                    chunks_with_embeddings.append(chunk)
+        for chunk in chunks:
+            chunk_tokens = chunk['content_tokens']
+            if current_tokens + chunk_tokens > BATCH_TOKEN_LIMIT:
+                batches.append(current_batch)
+                current_batch = [chunk]
+                current_tokens = chunk_tokens
+            else:
+                current_batch.append(chunk)
+                current_tokens += chunk_tokens
+        
+        if current_batch:
+            batches.append(current_batch)
+
+        # Process batches in parallel with semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
+        start_time = time.time()
+        
+        async def process_batch(batch):
+            async with semaphore:
+                try:
+                    texts = [chunk["content"] for chunk in batch]
+                    response = await self.openai_client.embeddings.create(
+                        input=texts,
+                        model=EMBEDDING_MODEL
+                    )
                     
-                # Rate limiting to avoid hitting API limits
-                if i + BATCH_SIZE < len(chunks):
-                    await asyncio.sleep(0.5)
+                    # Map embeddings back to chunks
+                    for i, embedding_data in enumerate(response.data):
+                        batch[i]["embedding"] = embedding_data.embedding
                     
-            except Exception as e:
-                logger.error(f"Error generating embeddings for batch: {e}")
-                # Continue with next batch
-                continue
-                
-        logger.info(f"Generated embeddings for {len(chunks_with_embeddings)} chunks")
-        return chunks_with_embeddings
+                    return batch
+                except Exception as e:
+                    logger.error(f"Error generating embeddings for batch: {e}")
+                    # Return batch without embeddings on error
+                    return batch
+
+        # Process all batches concurrently
+        tasks = [process_batch(batch) for batch in batches]
+        processed_batches = await asyncio.gather(*tasks)
+        
+        # Flatten results and log performance
+        processed_chunks = [chunk for batch in processed_batches for chunk in batch]
+        end_time = time.time()
+        
+        total_chunks = len(processed_chunks)
+        total_time = end_time - start_time
+        chunks_per_second = total_chunks / total_time if total_time > 0 else 0
+        
+        logger.info(f"Generated {total_chunks} embeddings in {total_time:.2f}s ({chunks_per_second:.2f} chunks/s)")
+        
+        return processed_chunks
         
     async def upload_to_supabase(self, chunks: List[Dict[str, Any]]) -> bool:
         """
@@ -351,8 +378,8 @@ class HolocronDataProcessor:
         """
         logger.info(f"Uploading {len(chunks)} chunks to Supabase table '{self.table_name}'")
         
-        # Process in smaller batches to avoid timeout issues
-        upload_batch_size = 5
+        # Process in larger batches based on testing
+        upload_batch_size = UPLOAD_BATCH_SIZE
         success_count = 0
         
         for i in range(0, len(chunks), upload_batch_size):
@@ -360,31 +387,26 @@ class HolocronDataProcessor:
             logger.info(f"Uploading batch {i//upload_batch_size + 1}/{(len(chunks)-1)//upload_batch_size + 1}")
             
             try:
-                for chunk in batch:
-                    try:
-                        # Prepare data for insertion
-                        data = {
-                            "content": chunk["content"],
-                            "content_tokens": chunk["content_tokens"],
-                            "metadata": chunk["metadata"],
-                            "embedding": chunk["embedding"]
-                        }
-                        
-                        # Use the REST API to insert data
-                        result = await asyncio.to_thread(
-                            lambda: self.supabase.table(self.table_name).insert(data).execute()
-                        )
-                        
-                        # Count successful inserts
-                        success_count += 1
-                        logger.info(f"Successfully inserted chunk with {chunk['content_tokens']} tokens")
-                        
-                    except Exception as insert_error:
-                        logger.error(f"Error inserting chunk: {str(insert_error)}")
+                # Prepare all data for batch insertion
+                data = [{
+                    "content": chunk["content"],
+                    "content_tokens": chunk["content_tokens"],
+                    "metadata": chunk["metadata"],
+                    "embedding": chunk["embedding"]
+                } for chunk in batch]
                 
-                # Rate limiting
+                # Use batch insert for better performance
+                result = await asyncio.to_thread(
+                    lambda: self.supabase.table(self.table_name).insert(data).execute()
+                )
+                
+                # Count successful batch insert
+                success_count += len(batch)
+                logger.info(f"Successfully inserted batch of {len(batch)} chunks")
+                
+                # Rate limiting - reduced sleep time since we're doing batch inserts
                 if i + upload_batch_size < len(chunks):
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5)
                     
             except Exception as e:
                 logger.error(f"Error uploading batch to Supabase: {e}")
@@ -431,36 +453,24 @@ class HolocronDataProcessor:
         Returns:
             Success status
         """
-        # Check for empty articles list
-        if not articles:
-            logger.warning("No articles provided to process_and_upload")
+        try:
+            all_chunks = []
+            
+            # First pass: chunk all articles
+            for article in articles:
+                chunks = self.chunk_article(article)
+                all_chunks.extend(chunks)
+            
+            # Generate embeddings in optimized batches
+            chunks_with_embeddings = await self.generate_embeddings(all_chunks)
+            
+            # Upload chunks
+            success = await self.upload_chunks(chunks_with_embeddings)
+            
+            return success
+        except Exception as e:
+            logger.error(f"Error in process_and_upload: {e}")
             return False
-        
-        # Log article titles for debugging
-        logger.info(f"Processing {len(articles)} articles:")
-        for article in articles:
-            title = article.get('title', 'Unknown')
-            section_count = len(article.get('sections', []))
-            logger.info(f"  - '{title}' with {section_count} sections")
-        
-        # Process articles into chunks
-        chunks = await self.process_articles(articles)
-        
-        # Check if any chunks were created
-        if not chunks:
-            logger.warning("No chunks were generated from the articles - marking as processed but no embeddings to store")
-            return True  # Return success so URL is marked as processed to avoid endless retries
-        
-        # Generate embeddings
-        logger.info(f"Generating embeddings for {len(chunks)} chunks")
-        chunks_with_embeddings = await self.generate_embeddings(chunks)
-        
-        # Upload to Supabase
-        if not chunks_with_embeddings:
-            logger.warning("No embeddings were generated - marking as processed but nothing to upload")
-            return True  # Return success so URL is marked as processed
-        
-        return await self.upload_to_supabase(chunks_with_embeddings)
 
 async def main():
     """Run the data processor as a standalone script."""

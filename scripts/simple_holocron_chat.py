@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import logging
+import asyncio
 from typing import List, Dict, Any
 import numpy as np
 from openai import OpenAI
@@ -77,7 +78,7 @@ class SimpleChatInterface:
         # Initialize the client connection
         self.db.client
     
-    def search_knowledge_base(
+    async def search_knowledge_base(
         self,
         query: str,
         limit: int = 5,
@@ -101,7 +102,7 @@ class SimpleChatInterface:
             embedding = self.embeddings.embed_query(query)
             
             # Search for similar entries - pass the embedding as list to avoid numpy issues
-            results = self.db.search_similar(
+            results = await self.db.search_similar(
                 embedding=embedding.tolist() if isinstance(embedding, np.ndarray) else embedding,
                 limit=limit,
                 threshold=min_similarity,
@@ -127,12 +128,12 @@ class SimpleChatInterface:
             logger.error(f"Error in vector search: {str(e)}")
             return []
     
-    def generate_response(self, query: str) -> str:
+    async def generate_response(self, query: str) -> str:
         """Generate a response based on query and knowledge base using GPT-4.1-mini."""
         try:
             # Search knowledge base with increased chunk limit
             logger.info(f"Searching knowledge base for: {query}")
-            results = self.search_knowledge_base(query)
+            results = await self.search_knowledge_base(query)
             
             # Format context
             if results:
@@ -190,8 +191,8 @@ class SimpleChatInterface:
         logger.info("Closing database connection")
         self.db.close()
 
-def main():
-    """Main function for running the chat interface."""
+async def async_main():
+    """Async main function for running the chat interface."""
     try:
         # Initialize chat interface
         chat = SimpleChatInterface()
@@ -217,7 +218,7 @@ def main():
                     break
                 
                 # Generate and display response
-                response = chat.generate_response(user_input)
+                response = await chat.generate_response(user_input)
                 console.print(f"\n[cyan]DJ R-3X:[/cyan] {response}")
                 
         except KeyboardInterrupt:
@@ -230,6 +231,10 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)
+
+def main():
+    """Main function to run the asyncio event loop."""
+    asyncio.run(async_main())
 
 if __name__ == "__main__":
     main() 

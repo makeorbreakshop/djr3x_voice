@@ -26,6 +26,7 @@ import logging
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Set, Tuple
+from colorama import Fore, Style, init
 
 # Add src and root directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -44,7 +45,6 @@ from holocron.url_collector.url_store import URLStore
 
 # Add colorama for cross-platform colored terminal
 try:
-    from colorama import init, Fore, Style
     init()  # Initialize colorama
     COLOR_ENABLED = True
 except ImportError:
@@ -275,44 +275,79 @@ async def run_pipeline(args):
         data_processor = HolocronDataProcessor()
         
         # Override the process_url method to use our actual processing logic
+        debug = getattr(args, 'debug', False)
         async def process_url(url: str) -> bool:
+            import time as _time
             worker_id = asyncio.current_task().get_name().split('_')[-1]
             worker_id = int(worker_id) if worker_id.isdigit() else 0
+            timings = {}
             
             try:
+                t_start = _time.perf_counter()
                 progress_stats["worker_status"][worker_id] = {"active": True, "status": f"Scraping {url.split('/')[-1]}"}
                 
                 # Scrape content
+                t0 = _time.perf_counter()
                 async with WookieepediaScraper() as scraper:
                     content = await scraper.scrape_article(url)
+                t1 = _time.perf_counter()
+                timings['scrape'] = t1 - t0
                 
                 if content:
-                    # Update worker status
                     progress_stats["worker_status"][worker_id] = {
                         "active": True, 
                         "status": f"Processing {content.get('title', 'unknown')} ({len(content.get('sections', []))} sections)"
                     }
                     
                     # Process and upload content
+                    t2 = _time.perf_counter()
                     success = await data_processor.process_and_upload([content])
+                    t3 = _time.perf_counter()
+                    timings['process_upload'] = t3 - t2
                     
-                    # Update progress stats for successful processing
+                    # Update progress stats
                     progress_stats["processed_urls"] += 1
                     
-                    # Get chunk count and token count from content if available
+                    # Get chunk count and token count
+                    t4 = _time.perf_counter()
                     article_chunks = data_processor.chunk_article(content)
+                    t5 = _time.perf_counter()
+                    timings['chunking'] = t5 - t4
+                    
                     progress_stats["total_chunks"] += len(article_chunks)
                     progress_stats["total_tokens"] += sum(chunk.get("content_tokens", 0) for chunk in article_chunks)
                     
-                    # Update worker status
+                    t_end = _time.perf_counter()
+                    total_time = t_end - t_start
+                    
+                    # Always log timing info with color and clear formatting
+                    timing_msg = (
+                        f"\n{Fore.CYAN}[TIMING]{Style.RESET_ALL} {url.split('/')[-1]}\n"
+                        f"  ├─ Total: {Fore.GREEN}{total_time:.2f}s{Style.RESET_ALL}\n"
+                        f"  ├─ Scrape: {timings['scrape']:.2f}s\n"
+                        f"  ├─ Process/Upload: {timings['process_upload']:.2f}s\n"
+                        f"  ├─ Chunking: {timings['chunking']:.2f}s\n"
+                        f"  ├─ Chunks: {len(article_chunks)}\n"
+                        f"  └─ Tokens: {sum(chunk.get('content_tokens', 0) for chunk in article_chunks)}\n"
+                    )
+                    print(timing_msg)
+                    logger.info(f"[TIMING] {url.split('/')[-1]} | "
+                              f"Total={total_time:.2f}s | "
+                              f"Scrape={timings['scrape']:.2f}s | "
+                              f"Process/Upload={timings['process_upload']:.2f}s | "
+                              f"Chunking={timings['chunking']:.2f}s | "
+                              f"Chunks={len(article_chunks)} | "
+                              f"Tokens={sum(chunk.get('content_tokens', 0) for chunk in article_chunks)}")
+                    
                     progress_stats["worker_status"][worker_id] = {
                         "active": True, 
                         "status": f"Completed {content.get('title', 'unknown')}"
                     }
-                    
                     return success
                 else:
-                    # Update stats for failed scraping
+                    t_end = _time.perf_counter()
+                    total_time = t_end - t_start
+                    logger.warning(f"Failed to scrape URL: {url} (Total time={total_time:.2f}s, Scrape time={timings.get('scrape', 0):.2f}s)")
                     progress_stats["processed_urls"] += 1
                     progress_stats["failed_urls"] += 1
                     progress_stats["worker_status"][worker_id] = {
@@ -320,15 +355,17 @@ async def run_pipeline(args):
                         "status": f"Failed to scrape {url.split('/')[-1]}"
                     }
                     return False
+                    
             except Exception as e:
-                # Update stats for exceptions
+                t_end = _time.perf_counter()
+                total_time = t_end - t_start
+                logger.error(f"Error processing URL {url}: {str(e)} (Total time={total_time:.2f}s)")
                 progress_stats["processed_urls"] += 1
                 progress_stats["failed_urls"] += 1
                 progress_stats["worker_status"][worker_id] = {
                     "active": True, 
                     "status": f"Error: {str(e)[:30]}..."
                 }
-                logger.error(f"Failed to process URL {url}: {e}")
                 return False
         
         # Set the processing function
@@ -431,18 +468,20 @@ async def run_pipeline(args):
 def main():
     """Parse arguments and run the pipeline."""
     parser = argparse.ArgumentParser(description="Run the optimized Holocron knowledge pipeline")
-    parser.add_argument('--limit', type=int, default=50,
-                      help="Maximum number of URLs to process in this run (default: 50)")
+    parser.add_argument('--limit', type=int, default=1000,
+                      help="Maximum number of URLs to process in this run (default: 1000)")
     parser.add_argument('--priority', type=str, choices=['high', 'medium', 'low'], default=None,
                       help="Filter URLs by priority (optional)")
-    parser.add_argument('--workers', type=int, default=3,
-                      help="Number of worker processes (default: 3)")
-    parser.add_argument('--batch-size', type=int, default=10,
-                      help="Number of URLs to process before checkpointing (default: 10)")
-    parser.add_argument('--requests-per-minute', type=int, default=30,
-                      help="Maximum requests per minute for rate limiting (default: 30)")
+    parser.add_argument('--workers', type=int, default=10,
+                      help="Number of worker processes (default: 10)")
+    parser.add_argument('--batch-size', type=int, default=100,
+                      help="Number of URLs to process before checkpointing (default: 100)")
+    parser.add_argument('--requests-per-minute', type=int, default=60,
+                      help="Maximum requests per minute for rate limiting (Wookieepedia allows 60 req/min)")
     parser.add_argument('--no-color', action='store_true',
                       help="Disable colored output")
+    parser.add_argument('--debug', action='store_true',
+                      help="Enable detailed step-level timing and debug logging")
     
     args = parser.parse_args()
     

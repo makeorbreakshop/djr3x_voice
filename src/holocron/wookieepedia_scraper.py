@@ -12,7 +12,7 @@ import time
 import logging
 import asyncio
 from typing import List, Dict, Any, Optional, Set, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote, unquote
 
 import aiohttp
 import requests
@@ -68,6 +68,57 @@ class WookieepediaScraper:
         if self.session:
             await self.session.close()
             
+    def _encode_wiki_url(self, url: str) -> str:
+        """
+        Properly encode a Wookieepedia URL, handling special characters.
+        
+        Args:
+            url: The URL to encode
+            
+        Returns:
+            Properly encoded URL
+        """
+        # Parse the URL into components
+        parsed = urlparse(url)
+        
+        # Split the path to isolate the wiki article name
+        path_parts = parsed.path.split('/wiki/', 1)
+        if len(path_parts) != 2:
+            return url
+            
+        # The article name is after /wiki/
+        article_name = path_parts[1]
+        
+        # SPECIAL CASE 1: Fix corrupted characters after % symbol using regex pattern
+        # This handles Unicode replacement character (U+FFFD) that appears after the % was corrupted
+        if '\ufffd' in article_name:
+            logger.warning(f"Detected URL with Unicode replacement character: {url}")
+            # Pattern: the replacement character followed by any character is actually "%+that character"
+            article_name = re.sub(r'\ufffd([a-zA-Z0-9_])', r'%\1', article_name)
+            logger.info(f"Attempting to fix corrupted URL using regex pattern: {article_name}")
+        
+        # SPECIAL CASE 2: Fix hex-encoded Unicode replacement character pattern
+        if 'EF%BF%BD' in article_name:
+            logger.warning(f"Detected URL with hex-encoded replacement character: {url}")
+            # Match the full hex-encoded replacement character pattern followed by any letter/number
+            article_name = re.sub(r'%EF%BF%BD([a-zA-Z0-9_])', r'%\1', article_name)
+            logger.info(f"Attempting to fix corrupted URL using hex-encoded pattern: {article_name}")
+        
+        # First decode any existing encoding to prevent double-encoding
+        article_name = unquote(article_name)
+        
+        # Replace % with %25 to prevent it from being treated as an encoding marker
+        article_name = re.sub(r'%', '%25', article_name)
+        
+        # Re-encode the article name properly, preserving certain characters
+        encoded_name = quote(article_name, safe='')
+        
+        # Reconstruct the URL
+        new_path = f"/wiki/{encoded_name}"
+        encoded_url = parsed._replace(path=new_path).geturl()
+        
+        return encoded_url
+
     async def _make_request(self, url: str) -> str:
         """
         Make an HTTP request with rate limiting.
@@ -85,7 +136,9 @@ class WookieepediaScraper:
         await asyncio.sleep(self.rate_limit)
         
         try:
-            async with self.session.get(url, timeout=30) as response:
+            # Properly encode the URL before making the request
+            encoded_url = self._encode_wiki_url(url)
+            async with self.session.get(encoded_url, timeout=30) as response:
                 response.raise_for_status()
                 return await response.text()
         except Exception as e:

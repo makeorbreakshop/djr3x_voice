@@ -15,7 +15,9 @@ from supabase import Client
 from postgrest import SyncRequestBuilder as RequestBuilder
 
 from .client_factory import default_factory
-from .vector_search import VectorSearch, VectorSearchResult
+from .vector_search import VectorSearchResult
+from .vector_search_factory import VectorSearchFactory
+from .base_adapter import BaseVectorSearch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -138,7 +140,7 @@ class HolocronDB(Repository[HolocronKnowledge]):
         embedding_dimension: int = 1536
     ):
         super().__init__(table_name, pool_key)
-        self.vector_search = VectorSearch(
+        self.vector_search: BaseVectorSearch = VectorSearchFactory.create_vector_search(
             table_name=table_name,
             embedding_dimension=embedding_dimension,
             pool_key=pool_key
@@ -333,7 +335,7 @@ class HolocronDB(Repository[HolocronKnowledge]):
                 continue
         return updated
 
-    def search_similar(
+    async def search_similar(
         self,
         embedding: Union[List[float], np.ndarray],
         limit: int = 10,
@@ -345,38 +347,27 @@ class HolocronDB(Repository[HolocronKnowledge]):
         
         Args:
             embedding: Query vector
-            limit: Maximum number of results to return
-            threshold: Minimum similarity threshold (0-1)
-            metadata_filters: Optional filters to apply to metadata fields
+            limit: Maximum number of results
+            threshold: Minimum similarity threshold
+            metadata_filters: Optional metadata filters
             
         Returns:
             List of VectorSearchResult objects
         """
         try:
-            # Use the vector_search instance directly
-            return self.vector_search.search(
+            results = await self.vector_search.search(
                 embedding=embedding,
                 limit=limit,
                 threshold=threshold,
                 metadata_filters=metadata_filters
             )
+            return results
         except Exception as e:
-            logger.error(f"Error in vector search: {str(e)}")
-            raise
+            logger.error(f"Vector search failed: {str(e)}")
+            return []
 
     def close(self):
-        """Close all database connections."""
-        try:
-            # Close vector search client
+        """Close all connections."""
+        if hasattr(self.vector_search, 'close'):
             self.vector_search.close()
-            
-            # Close main client
-            if self._client:
-                default_factory.close_client(self.pool_key)
-                self._client = None
-                
-            logger.info("Closed all database connections")
-        except Exception as e:
-            logger.error(f"Error closing database connections: {str(e)}")
-            # Don't re-raise to ensure cleanup completes
-            pass 
+        super().close() 

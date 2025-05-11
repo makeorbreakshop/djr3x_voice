@@ -47,7 +47,7 @@ UPLOAD_STATUS_FILE = "../data/pinecone_upload_status.json"
 class PineconeUploader:
     """Handles uploading vectors to Pinecone."""
     
-    def __init__(self, batch_size: int = 100):
+    def __init__(self, batch_size: int = 500):
         """Initialize the uploader."""
         # Load environment variables
         load_dotenv()
@@ -63,8 +63,9 @@ class PineconeUploader:
         # Initialize Pinecone client
         self.pc = Pinecone(api_key=self.api_key)
         
-        # Set batch size
+        # Set batch size and parallel processing settings
         self.batch_size = batch_size
+        self.max_parallel_files = 3  # Process up to 3 files in parallel
         
         # Initialize upload status
         self.upload_status = self._load_upload_status()
@@ -103,15 +104,9 @@ class PineconeUploader:
         unprocessed_files = [f for f in all_files if f not in self.upload_status]
         return unprocessed_files
         
-    def upload_file(self, file_path: str) -> bool:
+    async def upload_file_async(self, file_path: str) -> bool:
         """
-        Upload vectors from a single Parquet file to Pinecone.
-        
-        Args:
-            file_path: Path to the Parquet file
-            
-        Returns:
-            True if successful, False otherwise
+        Upload vectors from a single Parquet file to Pinecone asynchronously.
         """
         try:
             # Load the Parquet file
@@ -131,30 +126,43 @@ class PineconeUploader:
                 }
                 vectors.append(vector)
                 
-            # Upload vectors in batches
+            # Upload vectors in larger batches with parallel processing
             total_batches = (len(vectors) + self.batch_size - 1) // self.batch_size
+            tasks = []
+            
             for i in range(0, len(vectors), self.batch_size):
                 batch = vectors[i:i + self.batch_size]
-                try:
-                    index.upsert(vectors=batch)
-                    logger.info(f"Uploaded batch {i//self.batch_size + 1}/{total_batches} from {file_path}")
-                except Exception as e:
-                    logger.error(f"Error uploading batch from {file_path}: {e}")
-                    return False
+                tasks.append(asyncio.create_task(self._upload_batch(index, batch, i//self.batch_size + 1, total_batches, file_path)))
                 
-            # Mark file as processed
-            self.upload_status[file_path] = True
-            self._save_upload_status()
+            # Wait for all batches to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            logger.info(f"Successfully uploaded all vectors from {file_path}")
-            return True
-            
+            if all(result == True for result in results):
+                # Mark file as processed
+                self.upload_status[file_path] = True
+                self._save_upload_status()
+                logger.info(f"Successfully uploaded all vectors from {file_path}")
+                return True
+            else:
+                logger.error(f"Some batches failed for {file_path}")
+                return False
+                
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {e}")
             return False
             
-    def upload_all(self, test_mode: bool = False) -> None:
-        """Upload all unprocessed files to Pinecone."""
+    async def _upload_batch(self, index, batch, batch_num, total_batches, file_path):
+        """Helper function to upload a single batch."""
+        try:
+            index.upsert(vectors=batch)
+            logger.info(f"Uploaded batch {batch_num}/{total_batches} from {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Error uploading batch {batch_num} from {file_path}: {e}")
+            return False
+            
+    async def upload_all_async(self, test_mode: bool = False) -> None:
+        """Upload all unprocessed files to Pinecone with parallel processing."""
         # Get unprocessed files
         files = self.get_unprocessed_files()
         
@@ -172,20 +180,24 @@ class PineconeUploader:
         # Display summary
         print(f"Found {len(files)} unprocessed files")
         print(f"Batch size: {self.batch_size}")
+        print(f"Max parallel files: {self.max_parallel_files}")
         print(f"Index: {self.index_name}")
         
         # Initialize index
         self.init_index()
         
-        # Process files
-        for file in tqdm(files, desc="Uploading files"):
-            print(f"\nProcessing {os.path.basename(file)}...")
-            success = self.upload_file(file)
-            if success:
-                print(f"Successfully uploaded {os.path.basename(file)}")
-            else:
-                print(f"Failed to upload {os.path.basename(file)}")
-                
+        # Process files in parallel with limit
+        for i in range(0, len(files), self.max_parallel_files):
+            batch_files = files[i:i + self.max_parallel_files]
+            tasks = [self.upload_file_async(file) for file in batch_files]
+            results = await asyncio.gather(*tasks)
+            
+            for file, success in zip(batch_files, results):
+                if success:
+                    print(f"Successfully uploaded {os.path.basename(file)}")
+                else:
+                    print(f"Failed to upload {os.path.basename(file)}")
+                    
         # Show summary
         total_processed = sum(1 for status in self.upload_status.values() if status)
         print(f"\nUploaded {total_processed} files to Pinecone")
@@ -194,24 +206,14 @@ class PineconeUploader:
 def main():
     """Parse arguments and run the uploader."""
     parser = argparse.ArgumentParser(description="Upload vectors to Pinecone")
-    parser.add_argument('--batch-size', type=int, default=100,
-                      help="Number of vectors to upload in each batch (default: 100)")
+    parser.add_argument('--batch-size', type=int, default=500,
+                      help="Number of vectors to upload in each batch (default: 500)")
     parser.add_argument('--test', action='store_true',
                       help="Run in test mode, only process 1 file")
-    
     args = parser.parse_args()
     
-    try:
-        # Initialize uploader
-        uploader = PineconeUploader(batch_size=args.batch_size)
-        
-        # Upload vectors
-        uploader.upload_all(test_mode=args.test)
-        
-    except Exception as e:
-        logger.error(f"Error in upload process: {e}")
-        print(f"Error: {e}")
-        sys.exit(1)
+    uploader = PineconeUploader(batch_size=args.batch_size)
+    asyncio.run(uploader.upload_all_async(test_mode=args.test))
 
 if __name__ == "__main__":
     main() 
