@@ -1,0 +1,71 @@
+{
+  "namespace_samples": {
+    "unknown": {
+      "title": null,
+      "text_sample": null,
+      "page_id": null
+    }
+  },
+  "debug_samples": [
+    {
+      "tag": "{http://www.mediawiki.org/xml/export-0.11/}page",
+      "children": [
+        "{http://www.mediawiki.org/xml/export-0.11/}title",
+        "{http://www.mediawiki.org/xml/export-0.11/}ns",
+        "{http://www.mediawiki.org/xml/export-0.11/}id",
+        "{http://www.mediawiki.org/xml/export-0.11/}revision"
+      ],
+      "title": null,
+      "has_ns": false,
+      "ns_value": null
+    },
+    {
+      "tag": "{http://www.mediawiki.org/xml/export-0.11/}page",
+      "children": [
+        "{http://www.mediawiki.org/xml/export-0.11/}title",
+        "{http://www.mediawiki.org/xml/export-0.11/}ns",
+        "{http://www.mediawiki.org/xml/export-0.11/}id",
+        "{http://www.mediawiki.org/xml/export-0.11/}revision"
+      ],
+      "title": null,
+      "has_ns": false,
+      "ns_value": null
+    },
+    {
+      "tag": "{http://www.mediawiki.org/xml/export-0.11/}page",
+      "children": [
+        "{http://www.mediawiki.org/xml/export-0.11/}title",
+        "{http://www.mediawiki.org/xml/export-0.11/}ns",
+        "{http://www.mediawiki.org/xml/export-0.11/}id",
+        "{http://www.mediawiki.org/xml/export-0.11/}revision"
+      ],
+      "title": null,
+      "has_ns": false,
+      "ns_value": null
+    },
+    {
+      "tag": "{http://www.mediawiki.org/xml/export-0.11/}page",
+      "children": [
+        "{http://www.mediawiki.org/xml/export-0.11/}title",
+        "{http://www.mediawiki.org/xml/export-0.11/}ns",
+        "{http://www.mediawiki.org/xml/export-0.11/}id",
+        "{http://www.mediawiki.org/xml/export-0.11/}revision"
+      ],
+      "title": null,
+      "has_ns": false,
+      "ns_value": null
+    },
+    {
+      "tag": "{http://www.mediawiki.org/xml/export-0.11/}page",
+      "children": [
+        "{http://www.mediawiki.org/xml/export-0.11/}title",
+        "{http://www.mediawiki.org/xml/export-0.11/}ns",
+        "{http://www.mediawiki.org/xml/export-0.11/}id",
+        "{http://www.mediawiki.org/xml/export-0.11/}revision"
+      ],
+      "title": null,
+      "has_ns": false,
+      "ns_value": null
+    }
+  ]
+}

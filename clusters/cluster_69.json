@@ -1,0 +1,737 @@
+{
+  "cluster_id": 69,
+  "size": 43,
+  "vectors": [
+    {
+      "id": "2063",
+      "title": "The Last Hand",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# The Last Hand - Appearances[]\n\nStar Wars: Squadrons (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Last_Hand",
+        "title": "The Last Hand",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "2065",
+      "title": "The Last Hand",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# The Last Hand - Appearances[]\n\nStar Wars: Squadrons (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Last_Hand",
+        "title": "The Last Hand",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "2707",
+      "title": "A-type",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droid models of the Alliance to Restore the Republic"
+        ],
+        "content": "# A-type - Appearances[]\n\nDark Forces: Soldier for the Empire (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/A-type",
+        "title": "A-type",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "2705",
+      "title": "A-type",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droid models of the Alliance to Restore the Republic"
+        ],
+        "content": "# A-type - Appearances[]\n\nDark Forces: Soldier for the Empire (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/A-type",
+        "title": "A-type",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3134",
+      "title": "A-type",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droid models of the Alliance to Restore the Republic"
+        ],
+        "content": "# A-type - Appearances[]\n\nDark Forces: Soldier for the Empire (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/A-type",
+        "title": "A-type",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3131",
+      "title": "A-type",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droid models of the Alliance to Restore the Republic"
+        ],
+        "content": "# A-type - Appearances[]\n\nDark Forces: Soldier for the Empire (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/A-type",
+        "title": "A-type",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3669",
+      "title": "The Last Hand",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# The Last Hand - Appearances[]\n\nStar Wars: Squadrons (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Last_Hand",
+        "title": "The Last Hand",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "3667",
+      "title": "The Last Hand",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# The Last Hand - Appearances[]\n\nStar Wars: Squadrons (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Last_Hand",
+        "title": "The Last Hand",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "4964",
+      "title": "Smuggler's Rest (Ruusan)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ruusan locations"
+        ],
+        "content": "# Smuggler's Rest (Ruusan) - Appearances[]\n\nDark Forces: Jedi Knight (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Smuggler%27s_Rest_(Ruusan)",
+        "title": "Smuggler's Rest (Ruusan)",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "4963",
+      "title": "Smuggler's Rest (Ruusan)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ruusan locations"
+        ],
+        "content": "# Smuggler's Rest (Ruusan) - Appearances[]\n\nDark Forces: Jedi Knight (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Smuggler%27s_Rest_(Ruusan)",
+        "title": "Smuggler's Rest (Ruusan)",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "5085",
+      "title": "The Glow Spider",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# The Glow Spider - Appearances[]\n\nThe Paradise Snare\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Glow_Spider",
+        "title": "The Glow Spider",
+        "tokens": 15.0
+      }
+    },
+    {
+      "id": "5089",
+      "title": "Twilight Taverna",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# Twilight Taverna - Appearances[]\n\nThe Last Jedi (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Twilight_Taverna",
+        "title": "Twilight Taverna",
+        "tokens": 17.0
+      }
+    },
+    {
+      "id": "5007",
+      "title": "The Desperate Pilot",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# The Desperate Pilot - Appearances[]\n\nLabyrinth of Evil\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Desperate_Pilot",
+        "title": "The Desperate Pilot",
+        "tokens": 16.0
+      }
+    },
+    {
+      "id": "5348",
+      "title": "Rimmer's Rest",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# Rimmer's Rest - Appearances[]\n\nDark Forces: Rebel Agent (First identified as Rimmer's Rest)\nDark Forces: Rebel Agent audio drama\nStar Wars: Jedi Knight: Dark Forces II (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Rest/Legends",
+        "title": "Rimmer's Rest",
+        "tokens": 46.0
+      }
+    },
+    {
+      "id": "5350",
+      "title": "Rimmer's Rest",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Nar Shaddaa locations"
+        ],
+        "content": "# Rimmer's Rest - Appearances[]\n\nDark Forces: Rebel Agent (First identified as Rimmer's Rest)\nDark Forces: Rebel Agent audio drama\nStar Wars: Jedi Knight: Dark Forces II (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Rest/Legends",
+        "title": "Rimmer's Rest",
+        "tokens": 46.0
+      }
+    },
+    {
+      "id": "5669",
+      "title": "Chug'n'Chuck",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# Chug'n'Chuck - Appearances[]\n\nPlanet of Twilight\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Chug%27n%27Chuck",
+        "title": "Chug'n'Chuck",
+        "tokens": 16.0
+      }
+    },
+    {
+      "id": "5955",
+      "title": "Barons Hed tavern",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Good articles",
+          "Articles with conjectural titles",
+          "3 more",
+          "Articles with gameplay alternatives",
+          "Barons Hed locations",
+          "Cantinas"
+        ],
+        "content": "# Barons Hed tavern - Behind the scenes[]\n\nThe tavern appeared in the 1997 video game Star Wars: Jedi Knight: Dark Forces II as a location in the game's fifth level. The tavern encounter is optional and can be skipped without any ill-effect. If the player visits the tavern, Star Wars: Jedi Knight: Dark Forces II: The Official Strategy Guide author Rick Barba suggests waiting for the Gran to kill two of their own before engaging the survivors and pillaging the tavern for supplies.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Barons_Hed_tavern",
+        "title": "Barons Hed tavern",
+        "tokens": 102.0
+      }
+    },
+    {
+      "id": "5959",
+      "title": "Barons Hed tavern",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Good articles",
+          "Articles with conjectural titles",
+          "3 more",
+          "Articles with gameplay alternatives",
+          "Barons Hed locations",
+          "Cantinas"
+        ],
+        "content": "# Barons Hed tavern - Appearances[]\n\nStar Wars: Jedi Knight: Dark Forces II (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Barons_Hed_tavern",
+        "title": "Barons Hed tavern",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "5969",
+      "title": "Barons Hed tavern",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Good articles",
+          "Articles with conjectural titles",
+          "3 more",
+          "Articles with gameplay alternatives",
+          "Barons Hed locations",
+          "Cantinas"
+        ],
+        "content": "# Barons Hed tavern - Appearances[]\n\nStar Wars: Jedi Knight: Dark Forces II (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Barons_Hed_tavern",
+        "title": "Barons Hed tavern",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "7252",
+      "title": "Mondegrene",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Mondegrene - Behind the scenes[]\n\nA mondegreen is a term for a common misinterpretation of a lyric.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Mondegrene",
+        "title": "Mondegrene",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "7256",
+      "title": "Mondegrene",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Mondegrene - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Mondegrene",
+        "title": "Mondegrene",
+        "tokens": 18.0
+      }
+    },
+    {
+      "id": "7250",
+      "title": "Mondegrene",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Mondegrene\n\nMondegrene was the composer of such classical pieces as \"Fugue in K.\"\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Mondegrene",
+        "title": "Mondegrene",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "7277",
+      "title": "Velocidrome",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Velocidrome - Appearances[]\n\nBefore the Storm (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Velocidrome",
+        "title": "Velocidrome",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "7254",
+      "title": "Mondegrene",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Mondegrene - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Mondegrene",
+        "title": "Mondegrene",
+        "tokens": 18.0
+      }
+    },
+    {
+      "id": "7424",
+      "title": "Razzledy Croom",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Razzledy Croom - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Razzledy_Croom",
+        "title": "Razzledy Croom",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "7423",
+      "title": "Razzledy Croom",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Razzledy Croom - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Razzledy_Croom",
+        "title": "Razzledy Croom",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "7555",
+      "title": "The Sound of Her Wings",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# The Sound of Her Wings - Appearances[]\n\nPlanet of Twilight (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Sound_of_Her_Wings",
+        "title": "The Sound of Her Wings",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7598",
+      "title": "Framjan Spathen",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Music stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Framjan Spathen - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Framjan_Spathen",
+        "title": "Framjan Spathen",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7599",
+      "title": "Framjan Spathen",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Music stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Framjan Spathen - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Framjan_Spathen",
+        "title": "Framjan Spathen",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7681",
+      "title": "Holoshow",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Stubs",
+          "Entertainment",
+          "2 more",
+          "Holographic technology",
+          "Holoshows"
+        ],
+        "content": "# Holoshow - Appearances[]\n\nLuke Skywalker and the Shadows of Mindor (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Holoshow/Legends",
+        "title": "Holoshow",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "7679",
+      "title": "Holoshow",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Stubs",
+          "Entertainment",
+          "2 more",
+          "Holographic technology",
+          "Holoshows"
+        ],
+        "content": "# Holoshow - Appearances[]\n\nLuke Skywalker and the Shadows of Mindor (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Holoshow/Legends",
+        "title": "Holoshow",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "8009",
+      "title": "Gayman Neeloid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Musicians",
+          "S'kytri"
+        ],
+        "content": "# Gayman Neeloid - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gayman_Neeloid",
+        "title": "Gayman Neeloid",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "8011",
+      "title": "Gayman Neeloid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Musicians",
+          "S'kytri"
+        ],
+        "content": "# Gayman Neeloid - Appearances[]\n\nPlanet of Twilight (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gayman_Neeloid",
+        "title": "Gayman Neeloid",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "8204",
+      "title": "Intermission",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Intermission - Appearances[]\n\nQueen of the Empire (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Intermission",
+        "title": "Intermission",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "8203",
+      "title": "Intermission",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Intermission\n\nAn intermission was a break between two parts of a performance. Bithabus the Mystifier's performances generally had intermissions, though during one intermission on Hologram Fun World in 5 ABY he was kidnapped and impersonated by a bounty hunter named Cobak. He presumably continued to include intermissions in his performances after that.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Intermission",
+        "title": "Intermission",
+        "tokens": 73.0
+      }
+    },
+    {
+      "id": "8388",
+      "title": "Soldier's Life is a Sorry Thing",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Soldier's Life is a Sorry Thing - Appearances[]\n\nX-Wing Rogue Squadron 6 (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Soldier%27s_Life_is_a_Sorry_Thing",
+        "title": "Soldier's Life is a Sorry Thing",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "8389",
+      "title": "Soldier's Life is a Sorry Thing",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Soldier's Life is a Sorry Thing - Appearances[]\n\nX-Wing Rogue Squadron 6 (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Soldier%27s_Life_is_a_Sorry_Thing",
+        "title": "Soldier's Life is a Sorry Thing",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "8336",
+      "title": "Holoporn",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Good articles",
+          "Entertainment",
+          "2 more",
+          "Holographic technology",
+          "Media"
+        ],
+        "content": "# Holoporn - Appearances[]\n\nPlanet of Twilight (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Holoporn",
+        "title": "Holoporn",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "8567",
+      "title": "Starlight by Moonlight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Starlight by Moonlight - Appearances[]\n\nX-Wing Rogue Squadron 1 (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Starlight_by_Moonlight",
+        "title": "Starlight by Moonlight",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "8569",
+      "title": "Starlight by Moonlight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Starlight by Moonlight - Appearances[]\n\nX-Wing Rogue Squadron 1 (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Starlight_by_Moonlight",
+        "title": "Starlight by Moonlight",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "8515",
+      "title": "Rimmer's Delight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Rimmer's Delight - Appearances[]\n\nDark Forces: Soldier for the Empire\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Delight",
+        "title": "Rimmer's Delight",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "8514",
+      "title": "Rimmer's Delight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Rimmer's Delight - Appearances[]\n\nDark Forces: Soldier for the Empire\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Delight",
+        "title": "Rimmer's Delight",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "8687",
+      "title": "The Twilight Chant",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# The Twilight Chant\n\n\"The Twilight Chant\" was composed by the Kashoonara of the planet Kashoon. It was addressed to Hurrungat and his steed Aarwynn as they tied the day and night together. The text of the chant was:\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/The_Twilight_Chant",
+        "title": "The Twilight Chant",
+        "tokens": 56.0
+      }
+    }
+  ]
+}

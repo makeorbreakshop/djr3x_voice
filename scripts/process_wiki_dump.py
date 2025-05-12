@@ -19,10 +19,17 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
-# Add src directory to Python path
-sys.path.append(str(Path(__file__).parent.parent / "src"))
+# Ensure src directory is in Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from holocron.wiki_processing.process_status_manager import ProcessStatusManager
+# Import local version
+try:
+    from process_status_manager import ProcessStatusManager
+except ImportError:
+    # Try importing from src directory
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+    from holocron.wiki_processing.process_status_manager import ProcessStatusManager
+# Import from project structure
 from holocron.wiki_processing.wiki_markup_converter import WikiMarkupConverter
 
 # Configure logging
@@ -42,6 +49,7 @@ class ArticleData:
     is_canonical: bool
     namespace: int
     revision_id: str
+    url: str  # Added URL field
 
 class WikiDumpProcessor:
     """Processes MediaWiki XML dumps with memory-efficient streaming."""
@@ -217,14 +225,20 @@ class WikiDumpProcessor:
             # Convert wiki markup to plain text
             plain_text = self.markup_converter.convert(content)
             
+            # Generate URL from title (similar to Wookieepedia URL structure)
+            # Replace spaces with underscores, remove special characters
+            url_title = title.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            url = f"https://starwars.fandom.com/wiki/{url_title}"
+            
             return ArticleData(
                 title=title,
                 content=content,
-                plain_text=plain_text,  # Add converted plain text
+                plain_text=plain_text,
                 categories=categories,
                 is_canonical=is_canonical,
                 namespace=ns,
-                revision_id=revision_id
+                revision_id=revision_id,
+                url=url  # Add URL to ArticleData
             )
             
         except Exception as e:
@@ -294,26 +308,25 @@ class WikiDumpProcessor:
                 yield current_batch
     
     def save_batch(self, batch: list[ArticleData], batch_num: int):
-        """
-        Save a batch of processed articles.
+        """Save a batch of processed articles to individual JSON files."""
+        batch_dir = self.output_dir / f"batch_{batch_num:04d}"
+        batch_dir.mkdir(parents=True, exist_ok=True)
         
-        Args:
-            batch: List of ArticleData objects
-            batch_num: Batch number for filename
-        """
-        output_file = self.output_dir / f"batch_{batch_num:04d}.json"
-        
-        # Convert to serializable format
-        articles = [
-            {
-                **asdict(article),
-                'categories': list(article.categories)  # Convert set to list
-            }
-            for article in batch
-        ]
-        
-        with open(output_file, 'w') as f:
-            json.dump(articles, f, indent=2)
+        for article in batch:
+            # Convert ArticleData to dictionary
+            article_dict = asdict(article)
+            # Convert set to list for JSON serialization
+            article_dict['categories'] = list(article_dict['categories'])
+            
+            # Create safe filename from article title
+            safe_title = article.title.replace('/', '_').replace('\\', '_')
+            filename = f"{safe_title}.json"
+            file_path = batch_dir / filename
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(article_dict, f, ensure_ascii=False, indent=2)
+            
+        logger.info(f"Saved {len(batch)} individual article files to {batch_dir}")
             
 def main():
     parser = argparse.ArgumentParser(description='Process Wookieepedia XML dump')

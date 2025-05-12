@@ -1,0 +1,642 @@
+{
+  "cluster_id": 4,
+  "size": 39,
+  "vectors": [
+    {
+      "id": "4885",
+      "title": "Fungus Pit",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ryloth locations"
+        ],
+        "content": "# Fungus Pit - Appearances[]\n\n\"Twi'light Storm\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fungus_Pit",
+        "title": "Fungus Pit",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "4886",
+      "title": "Fungus Pit",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ryloth locations"
+        ],
+        "content": "# Fungus Pit - Appearances[]\n\n\"Twi'light Storm\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fungus_Pit",
+        "title": "Fungus Pit",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "4980",
+      "title": "Raging Rancor Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Raging Rancor Cantina - Appearances[]\n\n\"Blinking Eyes: Quarters\" \u2013 Living Force campaign\n\"Peaces\" \u2013 Living Force campaign (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Raging_Rancor_Cantina",
+        "title": "Raging Rancor Cantina",
+        "tokens": 41.0
+      }
+    },
+    {
+      "id": "4979",
+      "title": "Raging Rancor Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Raging Rancor Cantina - Appearances[]\n\n\"Blinking Eyes: Quarters\" \u2013 Living Force campaign\n\"Peaces\" \u2013 Living Force campaign (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Raging_Rancor_Cantina",
+        "title": "Raging Rancor Cantina",
+        "tokens": 41.0
+      }
+    },
+    {
+      "id": "5096",
+      "title": "Medoric Fall cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Medoric Fall cantina - Appearances[]\n\n\"Inside-out: Lockdown on Soboll\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Medoric_Fall_cantina",
+        "title": "Medoric Fall cantina",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5027",
+      "title": "Chancellor's Head",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Chancellor's Head - Appearances[]\n\n\"For Every Action: Preemptive Strike\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Chancellor%27s_Head",
+        "title": "Chancellor's Head",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "5023",
+      "title": "Landing Lights Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Landing Lights Bar - Appearances[]\n\n\"Trade Wars: Mix 'n Match\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Landing_Lights_Bar",
+        "title": "Landing Lights Bar",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "5174",
+      "title": "Vanster Enan's Cantina (Tolea Biqua franchise)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Vanster Enan's Cantina (Tolea Biqua franchise) - Appearances[]\n\n\"Blown Away\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Vanster_Enan%27s_Cantina_(Tolea_Biqua_franchise)",
+        "title": "Vanster Enan's Cantina (Tolea Biqua franchise)",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "5193",
+      "title": "Vanster Enan's Sop House",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Vanster Enan's Sop House - Appearances[]\n\n\"Eye of the Sun: A Cularin Presence\" \u2013 Living Force campaign\n\"An Uneasy Peace\" \u2013 Living Force campaign\n\"Blown Away\" \u2013 Living Force campaign\n\"Jigsaw: In the Name of the Maker\" \u2013 Living Force campaign (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Vanster_Enan%27s_Sop_House",
+        "title": "Vanster Enan's Sop House",
+        "tokens": 74.0
+      }
+    },
+    {
+      "id": "5194",
+      "title": "Vanster Enan's Sop House",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Vanster Enan's Sop House - Appearances[]\n\n\"Eye of the Sun: A Cularin Presence\" \u2013 Living Force campaign\n\"An Uneasy Peace\" \u2013 Living Force campaign\n\"Blown Away\" \u2013 Living Force campaign\n\"Jigsaw: In the Name of the Maker\" \u2013 Living Force campaign (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Vanster_Enan%27s_Sop_House",
+        "title": "Vanster Enan's Sop House",
+        "tokens": 74.0
+      }
+    },
+    {
+      "id": "5137",
+      "title": "Near Vacuum Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# Near Vacuum Cantina - Appearances[]\n\n\"Who Goes Thaere?\" \u2013 Living Force campaign\n\"Jedi Code: The Dark Side Beckons\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Near_Vacuum_Cantina",
+        "title": "Near Vacuum Cantina",
+        "tokens": 39.0
+      }
+    },
+    {
+      "id": "5278",
+      "title": "Saludi's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Saludi's - Appearances[]\n\n\"Coruscani Dawn\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Saludi%27s",
+        "title": "Saludi's",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "5274",
+      "title": "Saludi's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Saludi's - Appearances[]\n\n\"Coruscani Dawn\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Saludi%27s",
+        "title": "Saludi's",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "5409",
+      "title": "The Chasm",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# The Chasm - Appearances[]\n\n\"Forces of Cularin: Force Contention\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Chasm",
+        "title": "The Chasm",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "5446",
+      "title": "Underground",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Tilnes locations"
+        ],
+        "content": "# Underground - Appearances[]\n\n\"Broken Orbits: Tilnes Rising\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Underground",
+        "title": "Underground",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "5416",
+      "title": "Hutt's Tail",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Cantinas",
+          "Locations in Nirama's public asteroid"
+        ],
+        "content": "# Hutt's Tail - Appearances[]\n\n\"Between the Worlds: TopWorld\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Hutt%27s_Tail",
+        "title": "Hutt's Tail",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5450",
+      "title": "The Cave",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# The Cave - Appearances[]\n\n\"An Official Engagement\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Cave",
+        "title": "The Cave",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "5447",
+      "title": "Underground",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Tilnes locations"
+        ],
+        "content": "# Underground - Appearances[]\n\n\"Broken Orbits: Tilnes Rising\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Underground",
+        "title": "Underground",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "5561",
+      "title": "Spanner's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Spanner's - Appearances[]\n\n\"Oblivion's Kiss\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Spanner%27s",
+        "title": "Spanner's",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "5607",
+      "title": "Sophouse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Sophouse - Appearances[]\n\n\"An Uneasy Peace\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sophouse",
+        "title": "Sophouse",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "5604",
+      "title": "Sophouse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Sophouse - Appearances[]\n\n\"An Uneasy Peace\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sophouse",
+        "title": "Sophouse",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "5650",
+      "title": "Space Monkey Caf\u00e9",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Space Monkey Caf\u00e9 - Appearances[]\n\n\"Trade Wars: Find the Lady\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Space_Monkey_Caf%C3%A9",
+        "title": "Space Monkey Caf\u00e9",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "5717",
+      "title": "Hedrett Observation Lounge",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# Hedrett Observation Lounge - Appearances[]\n\n\"Belted In: Incursion\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Hedrett_Observation_Lounge",
+        "title": "Hedrett Observation Lounge",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "5761",
+      "title": "Botcha's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Druckenwell locations"
+        ],
+        "content": "# Botcha's - Appearances[]\n\n\"Looking In: Outward Bound\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Botcha%27s",
+        "title": "Botcha's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "5751",
+      "title": "Botcha's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Druckenwell locations"
+        ],
+        "content": "# Botcha's - Appearances[]\n\n\"Looking In: Outward Bound\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Botcha%27s",
+        "title": "Botcha's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "5759",
+      "title": "Building 49-A",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Almas locations",
+          "Cantinas"
+        ],
+        "content": "# Building 49-A - Appearances[]\n\n\"Almas, Sweet Almas: The Kaluthin Are Always Greener\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Building_49-A",
+        "title": "Building 49-A",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "5892",
+      "title": "Cantina Oceana",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Cantinas",
+          "Dorumaa locations"
+        ],
+        "content": "# Cantina Oceana - Appearances[]\n\n\"Plea Bargain\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Cantina_Oceana",
+        "title": "Cantina Oceana",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "5876",
+      "title": "Dancing Flame Tavern",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Dancing Flame Tavern - Appearances[]\n\n\"Jigsaw: In the Name of the Maker\" \u2013 Living Force campaign (Mentioned only)\n\"Jigsaw: Cloak and Vibroblade\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Dancing_Flame_Tavern",
+        "title": "Dancing Flame Tavern",
+        "tokens": 47.0
+      }
+    },
+    {
+      "id": "5837",
+      "title": "Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Structure stubs",
+          "Cantinas",
+          "Cularin system"
+        ],
+        "content": "# Bar - Appearances[]\n\n\"Between the Worlds: MidWorld\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bar",
+        "title": "Bar",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "5915",
+      "title": "Cabana Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Cabana Bar - Appearances[]\n\n\"Clouds of Genarius: Head in the Clouds\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Cabana_Bar",
+        "title": "Cabana Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "7404",
+      "title": "Greentree Pointe",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Dorumaa locations",
+          "2 more",
+          "Entertainment",
+          "Islands"
+        ],
+        "content": "# Greentree Pointe - Appearances[]\n\n\"Broken Orbits: Depths of Dorumaa\" \u2013 Living Force campaign (First appearance)\n\"Looking In: Memories\" \u2013 Living Force campaign (Mentioned only)\n\"Paarty On!\" \u2013 Living Force campaign\n\"Dorumaa's Children\" \u2013 Living Force campaign (Mentioned only)\n\"For Every Action: Preemptive Strike\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Greentree_Pointe",
+        "title": "Greentree Pointe",
+        "tokens": 87.0
+      }
+    },
+    {
+      "id": "7406",
+      "title": "Greentree Pointe",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Dorumaa locations",
+          "2 more",
+          "Entertainment",
+          "Islands"
+        ],
+        "content": "# Greentree Pointe - Appearances[]\n\n\"Broken Orbits: Depths of Dorumaa\" \u2013 Living Force campaign (First appearance)\n\"Looking In: Memories\" \u2013 Living Force campaign (Mentioned only)\n\"Paarty On!\" \u2013 Living Force campaign\n\"Dorumaa's Children\" \u2013 Living Force campaign (Mentioned only)\n\"For Every Action: Preemptive Strike\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Greentree_Pointe",
+        "title": "Greentree Pointe",
+        "tokens": 87.0
+      }
+    },
+    {
+      "id": "7726",
+      "title": "Summertime",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Summertime - Appearances[]\n\n\"Trade Wars: Find the Lady\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Summertime",
+        "title": "Summertime",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "7742",
+      "title": "Nyronusa",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Males",
+          "Musicians",
+          "Tarasin"
+        ],
+        "content": "# Nyronusa - Appearances[]\n\n\"Paarty On!\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nyronusa",
+        "title": "Nyronusa",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "7724",
+      "title": "Summertime",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Summertime - Appearances[]\n\n\"Trade Wars: Find the Lady\" \u2013 Living Force campaign\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Summertime",
+        "title": "Summertime",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "8680",
+      "title": "Noj Smialliw",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Individuals of unidentified species",
+          "Individuals of unspecified gender",
+          "Musicians"
+        ],
+        "content": "# Noj Smialliw - Appearances[]\n\n\"Shadows in Green\" \u2013 Living Force campaign (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Noj_Smialliw",
+        "title": "Noj Smialliw",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "8678",
+      "title": "Noj Smialliw",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Individuals of unidentified species",
+          "Individuals of unspecified gender",
+          "Musicians"
+        ],
+        "content": "# Noj Smialliw - Appearances[]\n\n\"Shadows in Green\" \u2013 Living Force campaign (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Noj_Smialliw",
+        "title": "Noj Smialliw",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "8740",
+      "title": "Moritz Nor",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Males",
+          "Musicians",
+          "Ortolans"
+        ],
+        "content": "# Moritz Nor - Appearances[]\n\n\"Jigsaw: Portrait of the Artist as a Young Rodian\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moritz_Nor",
+        "title": "Moritz Nor",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8736",
+      "title": "Moritz Nor",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Males",
+          "Musicians",
+          "Ortolans"
+        ],
+        "content": "# Moritz Nor - Appearances[]\n\n\"Jigsaw: Portrait of the Artist as a Young Rodian\" \u2013 Living Force campaign (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moritz_Nor",
+        "title": "Moritz Nor",
+        "tokens": 32.0
+      }
+    }
+  ]
+}

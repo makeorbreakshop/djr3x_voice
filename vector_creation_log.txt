@@ -1,0 +1,8 @@
+2025-05-12 13:55:32,393 - process_status_manager - INFO - Loaded 0 processing statuses from data/processing_status.csv
+2025-05-12 13:55:32,393 - __main__ - INFO - Starting vector creation process...
+2025-05-12 13:55:32,393 - __main__ - INFO - Started new batch: 20250512_135532
+2025-05-12 13:55:32,872 - __main__ - INFO - Found 208074 processed article files
+2025-05-12 13:55:32,872 - __main__ - INFO - Worker processing batch 1 with 200 articles
+2025-05-12 13:55:32,889 - __main__ - INFO - Batch 1: Processing 200 articles (est. 105686 tokens)
+2025-05-12 13:55:32,891 - __main__ - INFO - Batch 1: Total chunks to process: 300
+2025-05-12 13:55:35,416 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 200 OK"

@@ -1,341 +1,398 @@
+#!/usr/bin/env python3
 """
-Process Status Manager for Wookieepedia XML dump processing.
-Handles tracking, comparison, and state management for large-scale article processing.
+Process Status Manager
+
+Tracks the status of article and URL processing throughout the Wookieepedia export pipeline.
+Provides persistent storage and status tracking for multi-step processing.
 """
 
+import os
 import csv
 import json
 import logging
+import fcntl
+import time
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Callable
+from typing import Dict, Optional, List, Set
+from datetime import datetime
+from contextlib import contextmanager
 
-import pandas as pd
-
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 @dataclass
 class ProcessingStatus:
-    """Represents the processing status of an article."""
-    title: str
+    """Tracks the processing status of an article."""
     url: str
     processed: bool = False
     vectorized: bool = False
     uploaded: bool = False
-    last_modified: Optional[str] = None
-    error: Optional[str] = None
-    process_date: Optional[str] = None
-    deleted: bool = False  # Track if article has been deleted
-    metadata: Optional[Dict] = None  # Store additional metadata
-
-    def to_dict(self) -> Dict:
-        """Convert to dictionary with proper metadata handling."""
-        data = asdict(self)
-        if self.metadata:
-            try:
-                # Ensure metadata is JSON serializable
-                data['metadata'] = json.dumps(self.metadata)
-            except Exception as e:
-                logger.error(f"Error serializing metadata for {self.url}: {e}")
-                data['metadata'] = None
-        return data
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'ProcessingStatus':
-        """Create from dictionary with proper metadata handling."""
-        if 'metadata' in data and data['metadata']:
-            try:
-                data['metadata'] = json.loads(data['metadata'])
-            except Exception as e:
-                logger.error(f"Error deserializing metadata: {e}")
-                data['metadata'] = None
-        return cls(**data)
+    error: bool = False
+    priority: str = "low"
+    timestamp: str = None
+    batch_id: Optional[str] = None
+    
+    def __post_init__(self):
+        """Set default timestamp if none provided."""
+        if not self.timestamp:
+            self.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 class ProcessStatusManager:
-    """Manages processing status for Wookieepedia XML dump articles."""
+    """Manages the status of article processing."""
     
-    def __init__(self, status_file: str = "data/processing_status.csv",
-                 upload_status_file: str = "data/pinecone_upload_status.json"):
-        self.status_file = Path(status_file)
-        self.upload_status_file = Path(upload_status_file)
-        self.status_map: Dict[str, ProcessingStatus] = {}
-        self.processed_urls: Set[str] = set()
-        self.current_batch: List[str] = []  # Track current processing batch
-        self.batch_size = 100  # Default batch size
+    def __init__(self, csv_path: str = "data/processing_status.csv", 
+                 flush_interval: int = 10, batch_updates: bool = True):
+        """
+        Initialize the status manager.
         
-        # Event callbacks
-        self.on_status_update: Optional[Callable[[str, Dict], None]] = None
-        self.on_batch_complete: Optional[Callable[[int, float], None]] = None
-        self.on_error: Optional[Callable[[str, str], None]] = None
+        Args:
+            csv_path: Path to CSV file storing status information
+            flush_interval: How often to flush updates to disk (in seconds)
+            batch_updates: Whether to batch status updates before writing to disk
+        """
+        self.csv_path = Path(csv_path)
+        self.statuses: Dict[str, ProcessingStatus] = {}
+        self.dirty_statuses: Dict[str, ProcessingStatus] = {}  # Statuses that need to be saved
+        self.loaded = False
+        self.current_batch_id = None
+        self.last_flush_time = time.time()
+        self.flush_interval = flush_interval
+        self.batch_updates = batch_updates
         
-        self._load_existing_status()
-        self._batch_start_time: Optional[datetime] = None
+        # Create directory if it doesn't exist
+        self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Create empty status file if it doesn't exist
+        if not self.csv_path.exists():
+            self._save_statuses({})
+        
+        # Load existing statuses
+        self._load_statuses()
 
-    def _load_existing_status(self) -> None:
-        """Load existing processing status from files."""
-        if self.status_file.exists():
+    @contextmanager
+    def _file_lock(self):
+        """Context manager for file locking to prevent concurrent access."""
+        lock_path = str(self.csv_path) + '.lock'
+        with open(lock_path, 'w') as lock_file:
             try:
-                df = pd.read_csv(self.status_file)
-                for _, row in df.iterrows():
-                    try:
-                        status = ProcessingStatus.from_dict(row.to_dict())
-                        self.status_map[row['url']] = status
-                        if status.processed and not status.deleted:
-                            self.processed_urls.add(row['url'])
-                    except Exception as e:
-                        logger.error(f"Error loading status for row: {e}")
-                        continue
-                logger.info(f"Loaded {len(self.status_map)} existing status records")
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def start_new_batch(self) -> str:
+        """Start a new processing batch and return the batch ID."""
+        self.current_batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return self.current_batch_id
+
+    def _load_statuses(self) -> None:
+        """Load processing statuses from CSV file with file locking."""
+        with self._file_lock():
+            try:
+                if not self.csv_path.exists():
+                    logger.info(f"No status file found at {self.csv_path}, will create new file")
+                    self.loaded = True
+                    return
+
+                with open(self.csv_path, 'r', newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        url = row.get('url', '')
+                        if not url:
+                            continue
+                            
+                        self.statuses[url] = ProcessingStatus(
+                            url=url,
+                            processed=row.get('processed', '').lower() == 'true',
+                            vectorized=row.get('vectorized', '').lower() == 'true',
+                            uploaded=row.get('uploaded', '').lower() == 'true',
+                            error=row.get('error', '').lower() == 'true',
+                            priority=row.get('priority', 'low'),
+                            timestamp=row.get('timestamp', ''),
+                            batch_id=row.get('batch_id', None)
+                        )
+                
+                logger.info(f"Loaded {len(self.statuses)} processing statuses from {self.csv_path}")
+                self.loaded = True
+                
             except Exception as e:
-                logger.error(f"Error loading status file: {e}")
-                raise
+                logger.error(f"Error loading statuses: {e}")
+                # Create an empty statuses dict
+                self.statuses = {}
+                self.loaded = True
 
-    def compare_urls(self, xml_urls: Set[str]) -> Tuple[Set[str], Set[str], Set[str]]:
+    def _save_statuses(self, statuses_to_save: Dict[str, ProcessingStatus]) -> None:
+        """Save processing statuses to CSV file with file locking."""
+        with self._file_lock():
+            try:
+                # First load existing statuses to merge
+                existing_statuses = {}
+                if self.csv_path.exists():
+                    with open(self.csv_path, 'r', newline='') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            url = row.get('url', '')
+                            if url:
+                                existing_statuses[url] = ProcessingStatus(
+                                    url=url,
+                                    processed=row.get('processed', '').lower() == 'true',
+                                    vectorized=row.get('vectorized', '').lower() == 'true',
+                                    uploaded=row.get('uploaded', '').lower() == 'true',
+                                    error=row.get('error', '').lower() == 'true',
+                                    priority=row.get('priority', 'low'),
+                                    timestamp=row.get('timestamp', ''),
+                                    batch_id=row.get('batch_id', None)
+                                )
+
+                # Merge new statuses with existing ones
+                merged_statuses = {**existing_statuses, **statuses_to_save}
+
+                # Write merged statuses back to file
+                fieldnames = ['url', 'processed', 'vectorized', 'uploaded', 'error', 'priority', 'timestamp', 'batch_id']
+                with open(self.csv_path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for status in merged_statuses.values():
+                        writer.writerow(asdict(status))
+                        
+                logger.info(f"Saved {len(merged_statuses)} processing statuses to {self.csv_path}")
+                
+            except Exception as e:
+                logger.error(f"Error saving statuses: {e}")
+
+    def _flush_dirty_statuses(self, force: bool = False) -> None:
         """
-        Compare XML dump URLs with existing processed URLs to identify changes.
+        Flush dirty (updated) statuses to disk if enough time has passed.
         
         Args:
-            xml_urls: Set of URLs found in the XML dump
-            
-        Returns:
-            Tuple containing sets of:
-            - new_urls: URLs not previously processed
-            - update_urls: URLs that need reprocessing
-            - deleted_urls: URLs no longer in dump
+            force: Force flush regardless of time interval
         """
-        existing_urls = set(self.status_map.keys())
-        
-        # Find new URLs
-        new_urls = xml_urls - existing_urls
-        
-        # Find deleted URLs
-        deleted_urls = existing_urls - xml_urls
-        
-        # Find URLs needing update (processed but with errors or incomplete)
-        update_urls = {
-            url for url in (xml_urls & existing_urls)
-            if self.needs_processing(url)
-        }
-        
-        # Mark deleted URLs in status map
-        for url in deleted_urls:
-            if url in self.status_map:
-                self.status_map[url].deleted = True
-                if url in self.processed_urls:
-                    self.processed_urls.remove(url)
-        
-        logger.info(f"URL comparison results:")
-        logger.info(f"- New URLs: {len(new_urls)}")
-        logger.info(f"- URLs needing update: {len(update_urls)}")
-        logger.info(f"- Deleted URLs: {len(deleted_urls)}")
-        
-        return new_urls, update_urls, deleted_urls
+        current_time = time.time()
+        if (force or (current_time - self.last_flush_time >= self.flush_interval)) and self.dirty_statuses:
+            # Only save dirty statuses to avoid reading/writing the entire file
+            statuses_to_save = self.dirty_statuses.copy()
+            self._save_statuses(statuses_to_save)
+            self.dirty_statuses.clear()
+            self.last_flush_time = current_time
 
-    def start_batch(self, batch_size: Optional[int] = None) -> None:
-        """Start a new processing batch."""
-        if batch_size is not None:
-            self.batch_size = batch_size
-        self.current_batch = []
-        self._batch_start_time = datetime.now()
-
-    def add_to_batch(self, url: str) -> bool:
+    def update_batch_status(self, statuses: Dict[str, ProcessingStatus]) -> None:
         """
-        Add URL to current batch. Returns True if batch is full.
+        Update status for a batch of URLs atomically.
         
         Args:
-            url: URL to add to batch
-            
-        Returns:
-            bool: True if batch is full and should be processed
+            statuses: Dictionary of URL to ProcessingStatus objects
         """
-        self.current_batch.append(url)
-        return len(self.current_batch) >= self.batch_size
+        if not self.current_batch_id:
+            self.start_new_batch()
 
-    def get_current_batch(self) -> List[str]:
-        """Get URLs in current batch."""
-        return self.current_batch.copy()
+        # Update batch_id for all statuses
+        for status in statuses.values():
+            status.batch_id = self.current_batch_id
 
-    def clear_batch(self) -> None:
-        """Clear the current batch and notify listeners."""
-        if self._batch_start_time and self.on_batch_complete:
-            duration = (datetime.now() - self._batch_start_time).total_seconds()
-            self.on_batch_complete(len(self.current_batch), duration)
-        self.current_batch = []
-        self._batch_start_time = None
+        # Update in-memory statuses
+        self.statuses.update(statuses)
+        
+        if self.batch_updates:
+            # Add to dirty statuses for batched updates
+            self.dirty_statuses.update(statuses)
+            self._flush_dirty_statuses()
+        else:
+            # Save immediately if not batching
+            self._save_statuses(statuses)
 
-    def mark_deleted(self, urls: Set[str]) -> None:
+    def reset_status_file(self) -> None:
+        """Reset the status file to start fresh."""
+        logger.info("Resetting status file...")
+        self.statuses = {}
+        self.dirty_statuses = {}
+        with self._file_lock():
+            if self.csv_path.exists():
+                self.csv_path.unlink()
+            self._save_statuses({})
+        self.loaded = True
+        self.last_flush_time = time.time()
+
+    def get_status(self, url: str) -> Optional[ProcessingStatus]:
+        """Get the status of a URL."""
+        if not self.loaded:
+            self._load_statuses()
+        return self.statuses.get(url)
+
+    def get_batch_status(self, batch_id: str) -> Dict[str, ProcessingStatus]:
+        """Get all statuses for a specific batch."""
+        if not self.loaded:
+            self._load_statuses()
+        return {url: status for url, status in self.statuses.items() if status.batch_id == batch_id}
+
+    def mark_vectorized(self, urls: List[str], success: bool = True) -> None:
         """
-        Mark articles as deleted.
+        Mark multiple URLs as vectorized in a batch.
         
         Args:
-            urls: Set of URLs to mark as deleted
+            urls: List of URLs to mark
+            success: Whether vectorization was successful
         """
+        batch_statuses = {}
         for url in urls:
-            if url in self.status_map:
-                self.status_map[url].deleted = True
-                if url in self.processed_urls:
-                    self.processed_urls.remove(url)
-        logger.info(f"Marked {len(urls)} articles as deleted")
+            status = self.get_status(url) or ProcessingStatus(url=url)
+            status.vectorized = True
+            status.error = not success
+            batch_statuses[url] = status
+        
+        self.update_batch_status(batch_statuses)
 
-    def get_deleted_articles(self) -> List[Tuple[str, str]]:
-        """Get list of deleted articles (title, url)."""
-        return [(status.title, status.url) 
-                for status in self.status_map.values() 
-                if status.deleted]
-
-    def get_batch_stats(self) -> Dict[str, int]:
-        """Get statistics about the current batch."""
-        return {
-            'batch_size': self.batch_size,
-            'current_size': len(self.current_batch),
-            'remaining_capacity': self.batch_size - len(self.current_batch)
+    def get_stats(self) -> Dict[str, int]:
+        """Get processing statistics."""
+        if not self.loaded:
+            self._load_statuses()
+            
+        stats = {
+            'total': len(self.statuses),
+            'processed': sum(1 for s in self.statuses.values() if s.processed),
+            'vectorized': sum(1 for s in self.statuses.values() if s.vectorized),
+            'uploaded': sum(1 for s in self.statuses.values() if s.uploaded),
+            'error': sum(1 for s in self.statuses.values() if s.error),
+            'current_batch': sum(1 for s in self.statuses.values() if s.batch_id == self.current_batch_id) if self.current_batch_id else 0
         }
+        
+        return stats
 
-    def save_status(self) -> None:
-        """Save current processing status to files."""
-        try:
-            # Ensure directory exists
-            self.status_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Convert to DataFrame and save
-            records = []
-            for status in self.status_map.values():
-                try:
-                    records.append(status.to_dict())
-                except Exception as e:
-                    logger.error(f"Error converting status to dict for {status.url}: {e}")
-                    continue
-            
-            df = pd.DataFrame(records)
-            df.to_csv(self.status_file, index=False)
-            logger.debug(f"Saved {len(records)} status records")
-            
-        except Exception as e:
-            logger.error(f"Error saving status file: {e}")
-            raise
-
-    def needs_processing(self, url: str, last_modified: Optional[str] = None) -> bool:
+    def get_to_process(self, limit: int = 100, priority: Optional[str] = None) -> List[str]:
         """
-        Check if an article needs processing.
+        Get URLs that need processing.
         
         Args:
-            url: Article URL
-            last_modified: Optional last modified timestamp
+            limit: Maximum number of URLs to return
+            priority: Optional priority to filter by
             
         Returns:
-            bool: True if article needs processing
+            List of URLs to process
         """
-        if url not in self.status_map:
-            return True
+        # Ensure statuses are loaded
+        if not self.loaded:
+            self._load_statuses()
             
-        status = self.status_map[url]
+        to_process = []
+        for url, status in self.statuses.items():
+            if not status.processed and not status.error:
+                if priority is None or status.priority == priority:
+                    to_process.append(url)
+                    if len(to_process) >= limit:
+                        break
+                        
+        return to_process
         
-        # Always reprocess if there was an error
-        if status.error:
-            return True
-            
-        # Check if content has been modified
-        if last_modified and status.last_modified:
-            if last_modified > status.last_modified:
-                return True
-                
-        # Check if processing is incomplete
-        if not status.processed or status.deleted:
-            return True
-            
-        return False
-
-    def update_status(self, url: str, title: str, processed: bool = False,
-                     vectorized: bool = False, uploaded: bool = False,
-                     error: Optional[str] = None, metadata: Optional[Dict] = None) -> None:
+    def get_to_vectorize(self, limit: int = 100) -> List[str]:
         """
-        Update processing status for an article.
+        Get URLs that need vectorization.
         
         Args:
-            url: Article URL
-            title: Article title
-            processed: Whether article has been processed
-            vectorized: Whether vectors have been generated
-            uploaded: Whether vectors have been uploaded
-            error: Optional error message
-            metadata: Optional metadata dictionary
-        """
-        try:
-            # Create or update status
-            if url in self.status_map:
-                status = self.status_map[url]
-                status.processed = processed
-                status.vectorized = vectorized
-                status.uploaded = uploaded
-                status.error = error
-                if metadata:
-                    status.metadata = metadata
-            else:
-                status = ProcessingStatus(
-                    title=title,
-                    url=url,
-                    processed=processed,
-                    vectorized=vectorized,
-                    uploaded=uploaded,
-                    error=error,
-                    metadata=metadata,
-                    process_date=datetime.now().isoformat()
-                )
-                self.status_map[url] = status
+            limit: Maximum number of URLs to return
             
-            # Update processed URLs set
-            if processed and not error:
-                self.processed_urls.add(url)
-            elif url in self.processed_urls:
-                self.processed_urls.remove(url)
-            
-            # Notify listeners
-            if self.on_status_update:
-                self.on_status_update(url, status.to_dict())
-            if error and self.on_error:
-                self.on_error(url, error)
-                
-        except Exception as e:
-            logger.error(f"Error updating status for {url}: {e}")
-            if self.on_error:
-                self.on_error(url, str(e))
-
-    def get_processing_stats(self) -> Dict[str, int]:
-        """Get current processing statistics."""
-        total = len(self.status_map)
-        processed = len(self.processed_urls)
-        failed = len([s for s in self.status_map.values() if s.error])
-        deleted = len([s for s in self.status_map.values() if s.deleted])
-        
-        return {
-            'total': total,
-            'processed': processed,
-            'failed': failed,
-            'deleted': deleted,
-            'remaining': total - processed - deleted
-        }
-
-    def get_failed_articles(self) -> List[Tuple[str, str, str]]:
-        """Get list of failed articles (title, url, error)."""
-        return [(status.title, status.url, status.error)
-                for status in self.status_map.values()
-                if status.error]
-
-    def reset_failed_articles(self) -> int:
-        """
-        Reset status of failed articles for retry.
-        
         Returns:
-            int: Number of articles reset
+            List of URLs to vectorize
         """
-        count = 0
-        for status in self.status_map.values():
-            if status.error:
-                status.error = None
-                status.processed = False
-                status.vectorized = False
-                status.uploaded = False
-                count += 1
-        return count 
+        # Ensure statuses are loaded
+        if not self.loaded:
+            self._load_statuses()
+            
+        to_vectorize = []
+        for url, status in self.statuses.items():
+            if status.processed and not status.vectorized and not status.error:
+                to_vectorize.append(url)
+                if len(to_vectorize) >= limit:
+                    break
+                    
+        return to_vectorize
+        
+    def get_to_upload(self, limit: int = 100) -> List[str]:
+        """
+        Get URLs that need uploading.
+        
+        Args:
+            limit: Maximum number of URLs to return
+            
+        Returns:
+            List of URLs to upload
+        """
+        # Ensure statuses are loaded
+        if not self.loaded:
+            self._load_statuses()
+            
+        to_upload = []
+        for url, status in self.statuses.items():
+            if status.vectorized and not status.uploaded and not status.error:
+                to_upload.append(url)
+                if len(to_upload) >= limit:
+                    break
+                    
+        return to_upload
+    
+    def mark_processed(self, url: str, success: bool = True) -> None:
+        """Mark a URL as processed."""
+        status = self.get_status(url) or ProcessingStatus(url=url)
+        status.processed = True
+        status.error = not success
+        
+        self.statuses[url] = status
+        self.dirty_statuses[url] = status
+        self._flush_dirty_statuses()
+    
+    def mark_uploaded(self, url: str, success: bool = True) -> None:
+        """Mark a URL as uploaded."""
+        status = self.get_status(url) or ProcessingStatus(url=url)
+        status.uploaded = True
+        status.error = not success
+        
+        self.statuses[url] = status
+        self.dirty_statuses[url] = status
+        self._flush_dirty_statuses()
+    
+    def mark_error(self, url: str) -> None:
+        """Mark a URL as having an error."""
+        status = self.get_status(url) or ProcessingStatus(url=url)
+        status.error = True
+        
+        self.statuses[url] = status
+        self.dirty_statuses[url] = status
+        self._flush_dirty_statuses()
+    
+    def set_priority(self, url: str, priority: str) -> None:
+        """Set the priority for a URL."""
+        status = self.get_status(url) or ProcessingStatus(url=url)
+        status.priority = priority
+        
+        self.statuses[url] = status
+        self.dirty_statuses[url] = status
+        self._flush_dirty_statuses()
+    
+    def reset_error(self, url: str) -> None:
+        """Reset error flag for a URL."""
+        status = self.get_status(url)
+        if status:
+            status.error = False
+            self.statuses[url] = status
+            self.dirty_statuses[url] = status
+            self._flush_dirty_statuses()
+    
+    def reset_status(self, url: str) -> None:
+        """Reset all status flags for a URL."""
+        if url in self.statuses:
+            self.statuses[url] = ProcessingStatus(url=url)
+            self.dirty_statuses[url] = self.statuses[url]
+            self._flush_dirty_statuses()
+    
+    def save(self) -> None:
+        """Force save all statuses to disk."""
+        self._flush_dirty_statuses(force=True)
+    
+    def get_all_statuses(self) -> Dict[str, ProcessingStatus]:
+        """Get all statuses."""
+        if not self.loaded:
+            self._load_statuses()
+        return self.statuses.copy() 

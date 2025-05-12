@@ -1,0 +1,572 @@
+{
+  "cluster_id": 43,
+  "size": 34,
+  "vectors": [
+    {
+      "id": "1211",
+      "title": "Doshka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Mus Kat & Nalpak"
+        ],
+        "content": "# Doshka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Doshka",
+        "title": "Doshka",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "1208",
+      "title": "Doshka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Mus Kat & Nalpak"
+        ],
+        "content": "# Doshka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Doshka",
+        "title": "Doshka",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "1324",
+      "title": "Blom Groffitch",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuu residents",
+          "Entertainers",
+          "3 more",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Individuals with unspecified pronouns"
+        ],
+        "content": "# Blom Groffitch - Appearances[]\n\nStar Wars: Galaxy's Edge (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Blom_Groffitch",
+        "title": "Blom Groffitch",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "1325",
+      "title": "Blom Groffitch",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuu residents",
+          "Entertainers",
+          "3 more",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Individuals with unspecified pronouns"
+        ],
+        "content": "# Blom Groffitch - Appearances[]\n\nStar Wars: Galaxy's Edge (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Blom_Groffitch",
+        "title": "Blom Groffitch",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "2130",
+      "title": "Aloogahoo",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Aloogahoo - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Aloogahoo",
+        "title": "Aloogahoo",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "2131",
+      "title": "Aloogahoo",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Aloogahoo - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Aloogahoo",
+        "title": "Aloogahoo",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "2981",
+      "title": "Aloogahoo",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Aloogahoo - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Aloogahoo",
+        "title": "Aloogahoo",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "2976",
+      "title": "Aloogahoo",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Aloogahoo - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Aloogahoo",
+        "title": "Aloogahoo",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3737",
+      "title": "Yocola Ateema",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Yocola Ateema - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Yocola_Ateema",
+        "title": "Yocola Ateema",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3731",
+      "title": "Doshka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Mus Kat & Nalpak"
+        ],
+        "content": "# Doshka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Doshka",
+        "title": "Doshka",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3743",
+      "title": "Yocola Ateema",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Yocola Ateema - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Yocola_Ateema",
+        "title": "Yocola Ateema",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3733",
+      "title": "Doshka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Mus Kat & Nalpak"
+        ],
+        "content": "# Doshka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Doshka",
+        "title": "Doshka",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "3825",
+      "title": "Blom Groffitch",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuu residents",
+          "Entertainers",
+          "3 more",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Individuals with unspecified pronouns"
+        ],
+        "content": "# Blom Groffitch - Appearances[]\n\nStar Wars: Galaxy's Edge (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Blom_Groffitch",
+        "title": "Blom Groffitch",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "3829",
+      "title": "Blom Groffitch",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuu residents",
+          "Entertainers",
+          "3 more",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Individuals with unspecified pronouns"
+        ],
+        "content": "# Blom Groffitch - Appearances[]\n\nStar Wars: Galaxy's Edge (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Blom_Groffitch",
+        "title": "Blom Groffitch",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "4637",
+      "title": "Beep Boop Bop",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Beep Boop Bop - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Beep_Boop_Bop",
+        "title": "Beep Boop Bop",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "4638",
+      "title": "Beep Boop Bop",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Beep Boop Bop - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Beep_Boop_Bop",
+        "title": "Beep Boop Bop",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "5890",
+      "title": "Batuu Jedi temple incident",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Mission stubs",
+          "2 more",
+          "Battles of Batuu",
+          "Battles of the High Republic Era"
+        ],
+        "content": "# Batuu Jedi temple incident - Appearances[]\n\nStar Wars: Tales from the Galaxy's Edge (First appearance) (In flashback(s))\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Batuu_Jedi_temple_incident",
+        "title": "Batuu Jedi temple incident",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5889",
+      "title": "Batuu Jedi temple incident",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Mission stubs",
+          "2 more",
+          "Battles of Batuu",
+          "Battles of the High Republic Era"
+        ],
+        "content": "# Batuu Jedi temple incident - Appearances[]\n\nStar Wars: Tales from the Galaxy's Edge (First appearance) (In flashback(s))\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Batuu_Jedi_temple_incident",
+        "title": "Batuu Jedi temple incident",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "6244",
+      "title": "Utinni",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Utinni - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Utinni",
+        "title": "Utinni",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "6246",
+      "title": "Utinni",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Utinni - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Utinni",
+        "title": "Utinni",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "6929",
+      "title": "Huttuk Cheeka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Huttuk Cheeka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Huttuk_Cheeka",
+        "title": "Huttuk Cheeka",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "6927",
+      "title": "Goola Bukee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Goola Bukee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Goola_Bukee",
+        "title": "Goola Bukee",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "6925",
+      "title": "Goola Bukee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Goola Bukee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Goola_Bukee",
+        "title": "Goola Bukee",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "6930",
+      "title": "Huttuk Cheeka",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Huttuk Cheeka - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Huttuk_Cheeka",
+        "title": "Huttuk Cheeka",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7098",
+      "title": "Moulee-rah",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Moulee-rah - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moulee-rah",
+        "title": "Moulee-rah",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "7097",
+      "title": "Moulee-rah",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Moulee-rah - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moulee-rah",
+        "title": "Moulee-rah",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "7106",
+      "title": "Modal Notes",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Figrin D'an and the Modal Nodes"
+        ],
+        "content": "# Modal Notes - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Modal_Notes",
+        "title": "Modal Notes",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7104",
+      "title": "Modal Notes",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs by Figrin D'an and the Modal Nodes"
+        ],
+        "content": "# Modal Notes - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Modal_Notes",
+        "title": "Modal Notes",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7114",
+      "title": "Nama Heh",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Nama Heh - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nama_Heh",
+        "title": "Nama Heh",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "7111",
+      "title": "Nama Heh",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Nama Heh - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nama_Heh",
+        "title": "Nama Heh",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "7748",
+      "title": "Una Duey Dee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Una Duey Dee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Una_Duey_Dee",
+        "title": "Una Duey Dee",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "7751",
+      "title": "Una Duey Dee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Una Duey Dee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Una_Duey_Dee",
+        "title": "Una Duey Dee",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "8809",
+      "title": "Bai Tee Tee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Bai Tee Tee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bai_Tee_Tee",
+        "title": "Bai Tee Tee",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "8806",
+      "title": "Bai Tee Tee",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Bai Tee Tee - Appearances[]\n\nStar Wars: Galaxy's Edge (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bai_Tee_Tee",
+        "title": "Bai Tee Tee",
+        "tokens": 20.0
+      }
+    }
+  ]
+}

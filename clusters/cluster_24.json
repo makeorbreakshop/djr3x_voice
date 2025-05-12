@@ -1,0 +1,712 @@
+{
+  "cluster_id": 24,
+  "size": 42,
+  "vectors": [
+    {
+      "id": "1157",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1158",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1575",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "1523",
+      "title": "Club Lao Che",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Cantinas"
+        ],
+        "content": "# Club Lao Che - Appearances[]\n\nStar Wars: The Bad Batch \u2014 \"Pabu\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Club_Lao_Che",
+        "title": "Club Lao Che",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "1574",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "1524",
+      "title": "Club Lao Che",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Cantinas"
+        ],
+        "content": "# Club Lao Che - Appearances[]\n\nStar Wars: The Bad Batch \u2014 \"Pabu\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Club_Lao_Che",
+        "title": "Club Lao Che",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "1829",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "2 more",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "1827",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "2 more",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "2166",
+      "title": "79's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# 79's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Orders\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/79%27s/Legends",
+        "title": "79's",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2179",
+      "title": "6R-0WL",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R2-series astromech droids"
+        ],
+        "content": "# 6R-0WL - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/6R-0WL",
+        "title": "6R-0WL",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2180",
+      "title": "6R-0WL",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R2-series astromech droids"
+        ],
+        "content": "# 6R-0WL - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/6R-0WL",
+        "title": "6R-0WL",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2165",
+      "title": "79's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# 79's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Orders\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/79%27s/Legends",
+        "title": "79's",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2280",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2278",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2324",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "2325",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "2307",
+      "title": "1M-AU5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "MSE-6 series repair droids"
+        ],
+        "content": "# 1M-AU5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/1M-AU5",
+        "title": "1M-AU5",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2308",
+      "title": "1M-AU5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "MSE-6 series repair droids"
+        ],
+        "content": "# 1M-AU5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/1M-AU5",
+        "title": "1M-AU5",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2926",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "2 more",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "2925",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "2 more",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "3019",
+      "title": "1M-AU5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "MSE-6 series repair droids"
+        ],
+        "content": "# 1M-AU5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/1M-AU5",
+        "title": "1M-AU5",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3016",
+      "title": "1M-AU5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "MSE-6 series repair droids"
+        ],
+        "content": "# 1M-AU5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/1M-AU5",
+        "title": "1M-AU5",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3142",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "3138",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Cantinas",
+          "Nal Hutta locations"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "3282",
+      "title": "6R-0WL",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R2-series astromech droids"
+        ],
+        "content": "# 6R-0WL - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/6R-0WL",
+        "title": "6R-0WL",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3280",
+      "title": "6R-0WL",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R2-series astromech droids"
+        ],
+        "content": "# 6R-0WL - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/6R-0WL",
+        "title": "6R-0WL",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3270",
+      "title": "79's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# 79's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Orders\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/79%27s/Legends",
+        "title": "79's",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "3262",
+      "title": "79's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments"
+        ],
+        "content": "# 79's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Orders\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/79%27s/Legends",
+        "title": "79's",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "3358",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "3356",
+      "title": "Sparky",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles that are known by a nickname",
+          "Character stubs",
+          "4 more",
+          "BX-series droid commandos",
+          "Droids of the Confederacy of Independent Systems",
+          "Droids with unspecified gender programming",
+          "Droids with unspecified pronouns"
+        ],
+        "content": "# Sparky - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Rookies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Sparky",
+        "title": "Sparky",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "4697",
+      "title": "Club Lao Che",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Cantinas"
+        ],
+        "content": "# Club Lao Che - Appearances[]\n\nStar Wars: The Bad Batch \u2014 \"Pabu\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Club_Lao_Che",
+        "title": "Club Lao Che",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "4707",
+      "title": "Club Lao Che",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Cantinas"
+        ],
+        "content": "# Club Lao Che - Appearances[]\n\nStar Wars: The Bad Batch \u2014 \"Pabu\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Club_Lao_Che",
+        "title": "Club Lao Che",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5115",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar/Legends",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5114",
+      "title": "Moshi Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Coruscant dining establishments",
+          "Coruscant underworld locations"
+        ],
+        "content": "# Moshi Bar - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Lethal Trackdown\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Moshi_Bar/Legends",
+        "title": "Moshi Bar",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5337",
+      "title": "K-O Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Edan II locations"
+        ],
+        "content": "# K-O Bar - Appearances[]\n\nIntroductory Adventure Game\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/K-O_Bar",
+        "title": "K-O Bar",
+        "tokens": 15.0
+      }
+    },
+    {
+      "id": "5466",
+      "title": "Plop Dribble's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# Plop Dribble's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Brothers\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Plop_Dribble%27s/Legends",
+        "title": "Plop Dribble's",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5457",
+      "title": "Bilbousa saloon",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Articles with conjectural titles",
+          "Cantinas"
+        ],
+        "content": "# Bilbousa saloon - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Friends and Enemies\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bilbousa_saloon/Legends",
+        "title": "Bilbousa saloon",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "5464",
+      "title": "Plop Dribble's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# Plop Dribble's - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Brothers\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Plop_Dribble%27s/Legends",
+        "title": "Plop Dribble's",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5703",
+      "title": "Officers' Club",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Jedi Temple locations"
+        ],
+        "content": "# Officers' Club - Appearances[]\n\nStar Wars: Clone Wars Adventures\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Officers%27_Club",
+        "title": "Officers' Club",
+        "tokens": 17.0
+      }
+    },
+    {
+      "id": "5704",
+      "title": "Officers' Club",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Jedi Temple locations"
+        ],
+        "content": "# Officers' Club - Appearances[]\n\nStar Wars: Clone Wars Adventures\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Officers%27_Club",
+        "title": "Officers' Club",
+        "tokens": 17.0
+      }
+    },
+    {
+      "id": "8506",
+      "title": "BO-LT5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R5-series astromech droids"
+        ],
+        "content": "# BO-LT5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/BO-LT5",
+        "title": "BO-LT5",
+        "tokens": 21.0
+      }
+    },
+    {
+      "id": "8503",
+      "title": "BO-LT5",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "R5-series astromech droids"
+        ],
+        "content": "# BO-LT5 - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/BO-LT5",
+        "title": "BO-LT5",
+        "tokens": 21.0
+      }
+    }
+  ]
+}

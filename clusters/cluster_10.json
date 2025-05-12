@@ -1,0 +1,679 @@
+{
+  "cluster_id": 10,
+  "size": 41,
+  "vectors": [
+    {
+      "id": "1551",
+      "title": "Rim's Edge",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "General location stubs",
+          "Cantinas",
+          "Freerock locations"
+        ],
+        "content": "# Rim's Edge - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rim%27s_Edge",
+        "title": "Rim's Edge",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "1553",
+      "title": "Rim's Edge",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "General location stubs",
+          "Cantinas",
+          "Freerock locations"
+        ],
+        "content": "# Rim's Edge - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rim%27s_Edge",
+        "title": "Rim's Edge",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "1874",
+      "title": "Ranjiy's Krayt Hut",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Cantinas",
+          "2 more",
+          "Lodestar locations",
+          "Rooms"
+        ],
+        "content": "# Ranjiy's Krayt Hut - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Ranjiy%27s_Krayt_Hut",
+        "title": "Ranjiy's Krayt Hut",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "1870",
+      "title": "Ranjiy's Krayt Hut",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Cantinas",
+          "2 more",
+          "Lodestar locations",
+          "Rooms"
+        ],
+        "content": "# Ranjiy's Krayt Hut - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Ranjiy%27s_Krayt_Hut",
+        "title": "Ranjiy's Krayt Hut",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "1977",
+      "title": "Winker's",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Winker's - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Winker%27s",
+        "title": "Winker's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "1983",
+      "title": "Gannory's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Mrinzebon locations"
+        ],
+        "content": "# Gannory's Cantina - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (Indirect mention only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gannory%27s_Cantina",
+        "title": "Gannory's Cantina",
+        "tokens": 43.0
+      }
+    },
+    {
+      "id": "1979",
+      "title": "Winker's",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Winker's - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Winker%27s",
+        "title": "Winker's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "1984",
+      "title": "Gannory's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Mrinzebon locations"
+        ],
+        "content": "# Gannory's Cantina - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (Indirect mention only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gannory%27s_Cantina",
+        "title": "Gannory's Cantina",
+        "tokens": 43.0
+      }
+    },
+    {
+      "id": "3553",
+      "title": "Winker's",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Winker's - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Winker%27s",
+        "title": "Winker's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "3562",
+      "title": "Gannory's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Mrinzebon locations"
+        ],
+        "content": "# Gannory's Cantina - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (Indirect mention only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gannory%27s_Cantina",
+        "title": "Gannory's Cantina",
+        "tokens": 43.0
+      }
+    },
+    {
+      "id": "3563",
+      "title": "Gannory's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas",
+          "Mrinzebon locations"
+        ],
+        "content": "# Gannory's Cantina - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (Indirect mention only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Gannory%27s_Cantina",
+        "title": "Gannory's Cantina",
+        "tokens": 43.0
+      }
+    },
+    {
+      "id": "3550",
+      "title": "Winker's",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Winker's - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Winker%27s",
+        "title": "Winker's",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "4724",
+      "title": "Rim's Edge",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "General location stubs",
+          "Cantinas",
+          "Freerock locations"
+        ],
+        "content": "# Rim's Edge - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rim%27s_Edge",
+        "title": "Rim's Edge",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4722",
+      "title": "Rim's Edge",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "General location stubs",
+          "Cantinas",
+          "Freerock locations"
+        ],
+        "content": "# Rim's Edge - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rim%27s_Edge",
+        "title": "Rim's Edge",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4788",
+      "title": "Ranjiy's Krayt Hut",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Cantinas",
+          "2 more",
+          "Lodestar locations",
+          "Rooms"
+        ],
+        "content": "# Ranjiy's Krayt Hut - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Ranjiy%27s_Krayt_Hut",
+        "title": "Ranjiy's Krayt Hut",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "4783",
+      "title": "Ranjiy's Krayt Hut",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Cantinas",
+          "2 more",
+          "Lodestar locations",
+          "Rooms"
+        ],
+        "content": "# Ranjiy's Krayt Hut - Appearances[]\n\nAlphabet Squadron (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Ranjiy%27s_Krayt_Hut",
+        "title": "Ranjiy's Krayt Hut",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5835",
+      "title": "Father Ambrosia's Glorious Revelation",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Father Ambrosia's Glorious Revelation - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Father_Ambrosia%27s_Glorious_Revelation",
+        "title": "Father Ambrosia's Glorious Revelation",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "5832",
+      "title": "Father Ambrosia's Glorious Revelation",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Father Ambrosia's Glorious Revelation - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Father_Ambrosia%27s_Glorious_Revelation",
+        "title": "Father Ambrosia's Glorious Revelation",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "6137",
+      "title": "Royal Anthem of Alderaan",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Royal Anthem of Alderaan - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Royal_Anthem_of_Alderaan",
+        "title": "Royal Anthem of Alderaan",
+        "tokens": 39.0
+      }
+    },
+    {
+      "id": "6131",
+      "title": "Royal Anthem of Alderaan",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Royal Anthem of Alderaan - Behind the scenes[]\n\nThe Royal Anthem of Alderaan was first mentioned in the 2021 novel Victory's Price: An Alphabet Squadron Novel, written by Alexander Freed, as the title of the novel's seventh chapter. All of the chapter titles in the first part of the novel are \"indigenous songs of lost civilizations.\"\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Royal_Anthem_of_Alderaan",
+        "title": "Royal Anthem of Alderaan",
+        "tokens": 74.0
+      }
+    },
+    {
+      "id": "6181",
+      "title": "Seven algorithmic \u00e9tudes of Vardos",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Seven algorithmic \u00e9tudes of Vardos - Behind the scenes[]\n\nThe seven algorithmic \u00e9tudes of Vardos was first mentioned in the 2021 novel Victory's Price: An Alphabet Squadron Novel, written by Alexander Freed, as the title of the novel's sixth chapter. All of the chapter titles in the first part of the novel are \"indigenous songs of lost civilizations.\"\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Seven_algorithmic_%C3%A9tudes_of_Vardos",
+        "title": "Seven algorithmic \u00e9tudes of Vardos",
+        "tokens": 80.0
+      }
+    },
+    {
+      "id": "6188",
+      "title": "Seven algorithmic \u00e9tudes of Vardos",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Seven algorithmic \u00e9tudes of Vardos - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Seven_algorithmic_%C3%A9tudes_of_Vardos",
+        "title": "Seven algorithmic \u00e9tudes of Vardos",
+        "tokens": 42.0
+      }
+    },
+    {
+      "id": "6134",
+      "title": "Royal Anthem of Alderaan",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Royal Anthem of Alderaan - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Royal_Anthem_of_Alderaan",
+        "title": "Royal Anthem of Alderaan",
+        "tokens": 39.0
+      }
+    },
+    {
+      "id": "6185",
+      "title": "Seven algorithmic \u00e9tudes of Vardos",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Seven algorithmic \u00e9tudes of Vardos - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Seven_algorithmic_%C3%A9tudes_of_Vardos",
+        "title": "Seven algorithmic \u00e9tudes of Vardos",
+        "tokens": 42.0
+      }
+    },
+    {
+      "id": "6649",
+      "title": "Silt Sea Threnody",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Silt Sea Threnody - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Silt_Sea_Threnody",
+        "title": "Silt Sea Threnody",
+        "tokens": 39.0
+      }
+    },
+    {
+      "id": "6645",
+      "title": "Silt Sea Threnody",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Silt Sea Threnody - Behind the scenes[]\n\n\"Silt Sea Threnody\" was first mentioned in the 2021 novel Victory's Price: An Alphabet Squadron Novel, written by Alexander Freed, as the title of the novel's second chapter. All of the chapter titles in the first part of the novel are \"indigenous songs of lost civilizations.\" Fittingly, the \"Silt Sea Threnody\" chapter marks the first appearance of Yrica Quell in the story; Quell took part in the destruction of Nacronis before the events of Alphabet Squadron and thus was partially responsible for having turned Nacronis into a \"lost civilization.\"\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Silt_Sea_Threnody",
+        "title": "Silt Sea Threnody",
+        "tokens": 137.0
+      }
+    },
+    {
+      "id": "6647",
+      "title": "Silt Sea Threnody",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# Silt Sea Threnody - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned) (Mentioned in chapter title)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Silt_Sea_Threnody",
+        "title": "Silt Sea Threnody",
+        "tokens": 39.0
+      }
+    },
+    {
+      "id": "6778",
+      "title": "The Khuntavaryan Fall",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# The Khuntavaryan Fall - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Khuntavaryan_Fall",
+        "title": "The Khuntavaryan Fall",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "6776",
+      "title": "The Khuntavaryan Fall",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# The Khuntavaryan Fall - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Khuntavaryan_Fall",
+        "title": "The Khuntavaryan Fall",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "6767",
+      "title": "Queen of Echo-Wave",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Musicians"
+        ],
+        "content": "# Queen of Echo-Wave - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Queen_of_Echo-Wave",
+        "title": "Queen of Echo-Wave",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "6773",
+      "title": "The Khuntavaryan Fall",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Songs"
+        ],
+        "content": "# The Khuntavaryan Fall - Behind the scenes[]\n\n\"The Khuntavaryan Fall\" was created for the 2021 novel Victory's Price, written by Alexander Freed. It is the title of the novel's third chapter; all of the chapter titles in the first part of the novel are \"indigenous songs of lost civilizations.\"\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/The_Khuntavaryan_Fall",
+        "title": "The Khuntavaryan Fall",
+        "tokens": 71.0
+      }
+    },
+    {
+      "id": "6764",
+      "title": "Queen of Echo-Wave",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Musicians"
+        ],
+        "content": "# Queen of Echo-Wave - Appearances[]\n\nVictory's Price: An Alphabet Squadron Novel (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Queen_of_Echo-Wave",
+        "title": "Queen of Echo-Wave",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "7236",
+      "title": "Unidentified Corellian traders' song",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Corellian culture",
+          "Songs"
+        ],
+        "content": "# Unidentified Corellian traders' song - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Unidentified_Corellian_traders%27_song",
+        "title": "Unidentified Corellian traders' song",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "7230",
+      "title": "Unidentified Corellian traders' song",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Corellian culture",
+          "Songs"
+        ],
+        "content": "# Unidentified Corellian traders' song - Behind the scenes[]\n\nThe song appeared in the 2020 novel Shadow Fall, written by Alexander Freed as the second book of the Star Wars: Alphabet Squadron trilogy.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Unidentified_Corellian_traders%27_song",
+        "title": "Unidentified Corellian traders' song",
+        "tokens": 44.0
+      }
+    },
+    {
+      "id": "7233",
+      "title": "Unidentified Corellian traders' song",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles with conjectural titles",
+          "Corellian culture",
+          "Songs"
+        ],
+        "content": "# Unidentified Corellian traders' song - Appearances[]\n\nShadow Fall: An Alphabet Squadron Novel (and audiobook) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Unidentified_Corellian_traders%27_song",
+        "title": "Unidentified Corellian traders' song",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "9331",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "9365",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "9333",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "9371",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "9662",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "9665",
+      "title": "Nacronis ground control",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Spaceport and traffic control organizations"
+        ],
+        "content": "# Nacronis ground control - Appearances[]\n\nAlphabet Squadron (and audiobook) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nacronis_ground_control",
+        "title": "Nacronis ground control",
+        "tokens": 25.0
+      }
+    }
+  ]
+}

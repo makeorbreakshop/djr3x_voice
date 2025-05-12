@@ -1,0 +1,23 @@
+{
+  "total_pages": 674499,
+  "namespace_0_pages": 283931,
+  "redirects": 75595,
+  "disambiguation_pages": 4979,
+  "stub_articles": 95610,
+  "meta_utility_pages": 2543,
+  "canon_content": 972,
+  "legends_content": 844,
+  "other_content": 103388,
+  "template_heavy_pages": 0,
+  "short_pages": 0,
+  "filtered_content": 178727,
+  "redirects_pct": 26.62442635710789,
+  "disambiguation_pct": 1.7535950635893933,
+  "stub_pct": 33.673674237754945,
+  "meta_utility_pct": 0.8956401379208329,
+  "canon_pct": 0.3423366944785881,
+  "legends_pct": 0.2972553190740004,
+  "other_pct": 36.413072190074345,
+  "filtered_pct": 62.94733579637306,
+  "remaining_pct": 37.05266420362694
+}

@@ -8,11 +8,12 @@ Provides real-time visualization of processing status and metrics through:
 
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from dataclasses import dataclass
 from collections import deque
 import json
 from pathlib import Path
+import logging
 
 from rich.console import Console
 from rich.live import Live
@@ -22,6 +23,8 @@ from rich.panel import Panel
 from rich.layout import Layout
 
 from process_status_manager import ProcessStatusManager
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ProcessingMetrics:
@@ -161,4 +164,43 @@ class ProcessingDashboard:
         }
         
         with open(output_file, 'w') as f:
-            json.dump(metrics_dict, f, indent=2) 
+            json.dump(metrics_dict, f, indent=2)
+
+    def update_progress(self, current: int, total: int, stage: str) -> None:
+        """
+        Update progress for a processing stage.
+        
+        Args:
+            current: Current item number
+            total: Total items
+            stage: Processing stage name
+        """
+        percentage = (current / total) * 100 if total > 0 else 0
+        logger.info(f"Progress for {stage}: {current}/{total} ({percentage:.1f}%)")
+        
+    def log_stats(self) -> Dict[str, Any]:
+        """
+        Log current processing statistics.
+        
+        Returns:
+            Dictionary of statistics
+        """
+        stats = self.status_manager.get_stats()
+        
+        logger.info("=== Processing Statistics ===")
+        logger.info(f"Total URLs: {stats['total']}")
+        
+        if stats['total'] > 0:
+            processed_pct = stats['processed']/stats['total']*100
+            vectorized_pct = stats['vectorized']/stats['total']*100
+            uploaded_pct = stats['uploaded']/stats['total']*100
+            error_pct = stats['error']/stats['total']*100
+        else:
+            processed_pct = vectorized_pct = uploaded_pct = error_pct = 0
+            
+        logger.info(f"Processed: {stats['processed']} ({processed_pct:.1f}%)")
+        logger.info(f"Vectorized: {stats['vectorized']} ({vectorized_pct:.1f}%)")
+        logger.info(f"Uploaded: {stats['uploaded']} ({uploaded_pct:.1f}%)")
+        logger.info(f"Errors: {stats['error']} ({error_pct:.1f}%)")
+        
+        return stats 

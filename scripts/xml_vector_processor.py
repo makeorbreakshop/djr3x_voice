@@ -5,17 +5,18 @@ XML Vector Processor
 This script combines XML processing with vector generation and Pinecone upload:
 1. Processes XML dump content
 2. Generates embeddings (OpenAI + E5)
-3. Uploads vectors to Pinecone
+3. Uploads vectors to Pinecone with deduplication
 4. Tracks processing status
 
 Usage:
-    python scripts/xml_vector_processor.py [--batch-size N] [--workers N]
+    python scripts/xml_vector_processor.py [--batch-size N] [--workers N] [--skip-deduplication]
 """
 
 import os
 import sys
 import asyncio
 import logging
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
@@ -25,13 +26,22 @@ import numpy as np
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-# Add project root to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root to path for imports (necessary for all imports)
+root_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, root_dir)
+# Add src directory to path for imports (necessary for wiki_markup_converter)
+sys.path.insert(0, os.path.join(root_dir, 'src'))
 
-from process_wiki_dump import WikiDumpProcessor
+# Import from scripts directory
+from scripts.process_wiki_dump import WikiDumpProcessor
 from scripts.upload_to_pinecone import PineconeUploader
-from holocron.knowledge.local_processor import LocalDataProcessor
-from process_status_manager import ProcessStatusManager
+
+# Import LocalDataProcessor directly
+sys.path.append(os.path.join(root_dir, 'holocron'))
+from knowledge.local_processor import LocalDataProcessor
+
+# Import from project root
+from process_status_manager import ProcessStatusManager, ProcessingStatus
 from processing_dashboard import ProcessingDashboard
 
 # Configure logging
@@ -53,7 +63,8 @@ class XMLVectorProcessor:
         xml_file: str,
         batch_size: int = 100,
         workers: int = 3,
-        vectors_dir: str = "data/vectors"
+        vectors_dir: str = "data/vectors",
+        skip_deduplication: bool = False
     ):
         """
         Initialize the processor.
@@ -63,11 +74,15 @@ class XMLVectorProcessor:
             batch_size: Size of processing batches
             workers: Number of worker processes
             vectors_dir: Directory for vector storage
+            skip_deduplication: Whether to skip content deduplication
         """
         self.xml_file = Path(xml_file)
         self.batch_size = batch_size
         self.workers = workers
         self.vectors_dir = Path(vectors_dir)
+        self.skip_deduplication = skip_deduplication
+        self.content_fingerprints = {}
+        self.fingerprint_file = Path("data/content_fingerprints.json")
         
         # Create output directories
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
@@ -75,11 +90,67 @@ class XMLVectorProcessor:
         # Initialize components
         self.wiki_processor = WikiDumpProcessor(str(self.xml_file), batch_size)
         self.data_processor = LocalDataProcessor(vectors_dir=str(self.vectors_dir))
-        self.pinecone_uploader = PineconeUploader(batch_size=batch_size)
+        self.pinecone_uploader = PineconeUploader(batch_size=batch_size, skip_deduplication=skip_deduplication)
         self.dashboard = ProcessingDashboard(self.wiki_processor.status_manager)
+        
+        # Load existing fingerprints
+        self._load_content_fingerprints()
         
         # Load environment variables
         load_dotenv()
+        
+    def _load_content_fingerprints(self):
+        """Load content fingerprints from file."""
+        if self.fingerprint_file.exists():
+            try:
+                with open(self.fingerprint_file, 'r') as f:
+                    self.content_fingerprints = json.load(f)
+                logger.info(f"Loaded {len(self.content_fingerprints)} content fingerprints")
+            except Exception as e:
+                logger.error(f"Error loading content fingerprints: {e}")
+                self.content_fingerprints = {}
+        
+    def _save_content_fingerprints(self):
+        """Save content fingerprints to file."""
+        try:
+            with open(self.fingerprint_file, 'w') as f:
+                json.dump(self.content_fingerprints, f, indent=2)
+            logger.info(f"Saved {len(self.content_fingerprints)} content fingerprints")
+        except Exception as e:
+            logger.error(f"Error saving content fingerprints: {e}")
+    
+    def _generate_content_fingerprint(self, content: Dict) -> str:
+        """Generate a fingerprint for article content."""
+        if not content:
+            return ""
+        
+        # Create fingerprint from key content fields
+        title = content.get('title', '')
+        text = content.get('plain_text', '')
+        revision = content.get('revision_id', '')
+        
+        fingerprint_data = f"{title}|{text[:1000]}|{revision}"  # Use first 1000 chars for efficiency
+        return hashlib.md5(fingerprint_data.encode('utf-8')).hexdigest()
+    
+    def _content_changed(self, url: str, content: Dict) -> bool:
+        """Check if content has changed based on fingerprint."""
+        if self.skip_deduplication:
+            return True
+            
+        new_fingerprint = self._generate_content_fingerprint(content)
+        
+        # If no fingerprint or fingerprint changed, content has changed
+        if not new_fingerprint or url not in self.content_fingerprints:
+            self.content_fingerprints[url] = new_fingerprint
+            return True
+            
+        changed = self.content_fingerprints[url] != new_fingerprint
+        
+        # Update fingerprint if changed
+        if changed:
+            self.content_fingerprints[url] = new_fingerprint
+            
+        return changed
         
     async def process_batch(
         self,
@@ -101,7 +172,20 @@ class XMLVectorProcessor:
         try:
             # Extract content from XML
             contents = []
+            unchanged_count = 0
+            processed_count = 0
+            
             for url in urls:
+                # Skip already processed content
+                status = self.wiki_processor.status_manager.get_status(url)
+                if status and status.processed and status.vectorized and status.uploaded and not status.error:
+                    # Check if content has changed before reprocessing
+                    content = await self.wiki_processor._extract_article_content(url)
+                    if not self._content_changed(url, content):
+                        unchanged_count += 1
+                        continue
+                
+                # Process changed or new content
                 content = await self.wiki_processor._extract_article_content(url)
                 if content and content['is_canonical']:
                     contents.append({
@@ -115,16 +199,24 @@ class XMLVectorProcessor:
                             'revision_id': content['revision_id']
                         }
                     })
+                    processed_count += 1
             
+            if unchanged_count > 0:
+                logger.info(f"Skipped {unchanged_count} unchanged articles in batch {batch_num}")
+                
             if not contents:
-                logger.warning(f"No valid content found in batch {batch_num}")
+                logger.info(f"No new or changed content to process in batch {batch_num}")
                 return None
             
             # Generate vectors
+            logger.info(f"Processing {len(contents)} articles in batch {batch_num}")
             success = await self.data_processor.process_and_upload(contents)
             if not success:
                 logger.error(f"Failed to process batch {batch_num}")
                 return None
+            
+            # Save fingerprints after successful processing
+            self._save_content_fingerprints()
             
             # Get the latest Parquet file (just generated)
             parquet_files = sorted(self.vectors_dir.glob("*.parquet"))
@@ -172,7 +264,14 @@ class XMLVectorProcessor:
             
             # Compare with existing processed URLs
             new_urls, update_urls, deleted_urls = self.wiki_processor.status_manager.compare_urls(xml_urls)
-            urls_to_process = new_urls | update_urls
+            
+            # Prioritize processing by groups (new first, then updates)
+            high_priority_new = {url for url in new_urls if self._is_high_priority(url)}
+            medium_priority_new = {url for url in new_urls if self._is_medium_priority(url)}
+            low_priority_new = new_urls - high_priority_new - medium_priority_new
+            
+            # Combine into priority-ordered list
+            urls_to_process = list(high_priority_new) + list(medium_priority_new) + list(low_priority_new) + list(update_urls)
             
             if not urls_to_process:
                 logger.info("No new or updated articles to process")
@@ -180,12 +279,13 @@ class XMLVectorProcessor:
             
             # Process in batches
             batches = [
-                list(urls_to_process)[i:i + self.batch_size]
+                urls_to_process[i:i + self.batch_size]
                 for i in range(0, len(urls_to_process), self.batch_size)
             ]
             
             total_batches = len(batches)
             logger.info(f"Processing {len(urls_to_process)} articles in {total_batches} batches")
+            logger.info(f"Priority breakdown: {len(high_priority_new)} high, {len(medium_priority_new)} medium, {len(low_priority_new)} low, {len(update_urls)} updates")
             
             for i, batch_urls in enumerate(batches):
                 batch_num = i + 1
@@ -215,6 +315,10 @@ class XMLVectorProcessor:
                 # Save status after each batch
                 self.wiki_processor.status_manager.save_status()
                 
+                # Save fingerprints periodically
+                if batch_num % 10 == 0:
+                    self._save_content_fingerprints()
+                
             logger.info("Processing pipeline completed successfully")
             
             # Save final metrics
@@ -234,6 +338,18 @@ class XMLVectorProcessor:
                     await dashboard_task
                 except asyncio.CancelledError:
                     pass
+                    
+    def _is_high_priority(self, url: str) -> bool:
+        """Check if URL is high priority."""
+        # Example high priority keywords
+        high_priority_terms = ["galaxy's_edge", "batuu", "oga", "droid", "r3x", "rex", "dj"]
+        return any(term in url.lower() for term in high_priority_terms)
+    
+    def _is_medium_priority(self, url: str) -> bool:
+        """Check if URL is medium priority."""
+        # Example medium priority keywords
+        medium_priority_terms = ["cantina", "entertainment", "music", "star_wars", "disney"]
+        return any(term in url.lower() for term in medium_priority_terms)
 
 async def main():
     """Parse arguments and run the processor."""
@@ -250,30 +366,35 @@ async def main():
         '--batch-size',
         type=int,
         default=100,
-        help='Number of articles to process in each batch'
+        help='Size of processing batches (default: 100)'
     )
     parser.add_argument(
         '--workers',
         type=int,
         default=3,
-        help='Number of worker processes'
+        help='Number of worker processes (default: 3)'
     )
     parser.add_argument(
         '--vectors-dir',
-        default='data/vectors',
-        help='Directory for vector storage'
+        type=str,
+        default="data/vectors",
+        help='Directory for vector storage (default: data/vectors)'
     )
-    
+    parser.add_argument(
+        '--skip-deduplication',
+        action='store_true',
+        help='Skip content deduplication checks'
+    )
     args = parser.parse_args()
     
     processor = XMLVectorProcessor(
         xml_file=args.xml_file,
         batch_size=args.batch_size,
         workers=args.workers,
-        vectors_dir=args.vectors_dir
+        vectors_dir=args.vectors_dir,
+        skip_deduplication=args.skip_deduplication
     )
-    
     await processor.run()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main()) 

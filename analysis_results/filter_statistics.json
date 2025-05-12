@@ -1,0 +1,19 @@
+{
+  "total_pages": 1000,
+  "namespace_0_pages": 0,
+  "filtered_content_pages": 0,
+  "filtered_out": {
+    "redirects": 0,
+    "disambiguation": 0,
+    "stubs": 0,
+    "meta_utility": 0,
+    "short_content": 0,
+    "other": 0
+  },
+  "canon_content": 0,
+  "legends_content": 0,
+  "unknown_content": 0,
+  "namespace_counts": {
+    "unknown": 1000
+  }
+}

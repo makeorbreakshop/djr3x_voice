@@ -1,0 +1,871 @@
+{
+  "cluster_id": 72,
+  "size": 55,
+  "vectors": [
+    {
+      "id": "1128",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1111",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1129",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1112",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "1267",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "1271",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "1268",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "1272",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2096",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2095",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2147",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2148",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2476",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2472",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2473",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2477",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "2809",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2810",
+      "title": "Rolo droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Rolo droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rolo_droid",
+        "title": "Rolo droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2929",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "2931",
+      "title": "Directional droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Directional droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Directional_droid",
+        "title": "Directional droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "3081",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3073",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3086",
+      "title": "RMS droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# RMS droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/RMS_droid",
+        "title": "RMS droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3079",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "3891",
+      "title": "Horseshoe droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Articles with conjectural titles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Horseshoe droid - Appearances[]\n\n\"Fierce Currents\" \u2014 Star Wars: Clone Wars Adventures Volume 1 (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Horseshoe_droid",
+        "title": "Horseshoe droid",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "3998",
+      "title": "I2-CG droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# I2-CG droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/I2-CG_droid",
+        "title": "I2-CG droid",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "4070",
+      "title": "HR-02 Omni Droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Galactic Solutions Industries products"
+        ],
+        "content": "# HR-02 Omni Droid - Behind the scenes[]\n\nHR-02 Omni Droid appears in Star Wars: The Old Republic during a Daily mission on Ziost.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/HR-02_Omni_Droid",
+        "title": "HR-02 Omni Droid",
+        "tokens": 35.0
+      }
+    },
+    {
+      "id": "4089",
+      "title": "Scour swarm droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath",
+          "Droids with masculine programming"
+        ],
+        "content": "# Scour swarm droid - Appearances[]\n\nStar Wars: The Old Republic: Knights of the Eternal Throne (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Scour_swarm_droid",
+        "title": "Scour swarm droid",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4081",
+      "title": "Scour swarm droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath",
+          "Droids with masculine programming"
+        ],
+        "content": "# Scour swarm droid - Behind the scenes[]\n\nScour swarm droids appear in Star Wars: The Old Republic: Knights of the Eternal Throne as emenies on Iokath.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Scour_swarm_droid",
+        "title": "Scour swarm droid",
+        "tokens": 40.0
+      }
+    },
+    {
+      "id": "4085",
+      "title": "Scour swarm droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath",
+          "Droids with masculine programming"
+        ],
+        "content": "# Scour swarm droid - Appearances[]\n\nStar Wars: The Old Republic: Knights of the Eternal Throne (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Scour_swarm_droid",
+        "title": "Scour swarm droid",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4074",
+      "title": "HR-02 Omni Droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Galactic Solutions Industries products"
+        ],
+        "content": "# HR-02 Omni Droid - Appearances[]\n\nStar Wars: The Old Republic: Shadow of Revan (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/HR-02_Omni_Droid",
+        "title": "HR-02 Omni Droid",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4004",
+      "title": "Stretch droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Stretch droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Stretch_droid/Legends",
+        "title": "Stretch droid",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "4007",
+      "title": "Stretch droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Stretch droid - Appearances[]\n\nStar Wars: Episode I The Phantom Menace\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Stretch_droid/Legends",
+        "title": "Stretch droid",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "4078",
+      "title": "HR-02 Omni Droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Galactic Solutions Industries products"
+        ],
+        "content": "# HR-02 Omni Droid - Appearances[]\n\nStar Wars: The Old Republic: Shadow of Revan (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/HR-02_Omni_Droid",
+        "title": "HR-02 Omni Droid",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "4001",
+      "title": "I2-CG droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Droid models"
+        ],
+        "content": "# I2-CG droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/I2-CG_droid",
+        "title": "I2-CG droid",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "4276",
+      "title": "Rakatan droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Infinite Empire technology"
+        ],
+        "content": "# Rakatan droid - Appearances[]\n\nDawn of the Jedi: The Prisoner of Bogan 3 (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rakatan_droid",
+        "title": "Rakatan droid",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "4398",
+      "title": "Tashelin serenading droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Tashelin serenading droid - Appearances[]\n\nStar Wars: The Old Republic (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Tashelin_serenading_droid",
+        "title": "Tashelin serenading droid",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "4373",
+      "title": "Technical support droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Technical support droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Technical_support_droid",
+        "title": "Technical support droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "4394",
+      "title": "Tashelin serenading droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Tashelin serenading droid - Behind the scenes[]\n\nThe Tashelin Serenading Droid appears in Star Wars: The Old Republic as a courting gift for companions.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Tashelin_serenading_droid",
+        "title": "Tashelin serenading droid",
+        "tokens": 40.0
+      }
+    },
+    {
+      "id": "4370",
+      "title": "Technical support droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Technical support droid - Appearances[]\n\nStar Wars: Episode III Revenge of the Sith (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Technical_support_droid",
+        "title": "Technical support droid",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "4409",
+      "title": "Unidentified Nikto mechanics (Mon Gazza)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Articles with conjectural titles",
+          "Character stubs",
+          "4 more",
+          "Confederacy of Independent Systems individuals",
+          "Kajain'sa'Nikto",
+          "Males",
+          "Mechanics"
+        ],
+        "content": "# Unidentified Nikto mechanics (Mon Gazza) - Appearances[]\n\nThe Clone Wars: Crash Course (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Unidentified_Nikto_mechanics_%28Mon_Gazza%29",
+        "title": "Unidentified Nikto mechanics (Mon Gazza)",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "4631",
+      "title": "Caretaker droid (Iokath)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath"
+        ],
+        "content": "# Caretaker droid (Iokath) - Appearances[]\n\nStar Wars: The Old Republic: Knights of the Eternal Throne (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Caretaker_droid_(Iokath)",
+        "title": "Caretaker droid (Iokath)",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "4629",
+      "title": "Caretaker droid (Iokath)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath"
+        ],
+        "content": "# Caretaker droid (Iokath) - Appearances[]\n\nStar Wars: The Old Republic: Knights of the Eternal Throne (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Caretaker_droid_(Iokath)",
+        "title": "Caretaker droid (Iokath)",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "4628",
+      "title": "Caretaker droid (Iokath)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models",
+          "Droids of Iokath"
+        ],
+        "content": "# Caretaker droid (Iokath) - Behind the scenes[]\n\nCaretaker droids appear in Star Wars: The Old Republic: Knights of the Eternal Throne as enemies on Iokath.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Caretaker_droid_(Iokath)",
+        "title": "Caretaker droid (Iokath)",
+        "tokens": 43.0
+      }
+    },
+    {
+      "id": "6067",
+      "title": "Droid boxing",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Entertainment",
+          "Martial arts"
+        ],
+        "content": "# Droid boxing - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Nomad Droids\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Droid_boxing",
+        "title": "Droid boxing",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "6069",
+      "title": "Droid boxing",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Entertainment",
+          "Martial arts"
+        ],
+        "content": "# Droid boxing - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Nomad Droids\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Droid_boxing",
+        "title": "Droid boxing",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "7534",
+      "title": "Unidentified Vendor droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Articles with conjectural titles",
+          "Droids of GL-916's model",
+          "Droids with masculine programming"
+        ],
+        "content": "# Unidentified Vendor droid - Appearances[]\n\nStar Wars: The Clone Wars \u2014 \"Nomad Droids\" (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Unidentified_Vendor_droid",
+        "title": "Unidentified Vendor droid",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "7616",
+      "title": "DJ droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Articles with conjectural titles",
+          "Entertainment droids"
+        ],
+        "content": "# DJ droid - Appearances[]\n\nStar Wars: Clone Wars Adventures (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/DJ_droid",
+        "title": "DJ droid",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "7843",
+      "title": "Jabba Flow",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Songs"
+        ],
+        "content": "# Jabba Flow - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Jabba_Flow",
+        "title": "Jabba Flow",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9466",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9431",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9430",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9468",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9712",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "9715",
+      "title": "Fighting droid",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Droid models"
+        ],
+        "content": "# Fighting droid - Appearances[]\n\nStar Wars: Episode VII The Force Awakens (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Fighting_droid",
+        "title": "Fighting droid",
+        "tokens": 23.0
+      }
+    }
+  ]
+}

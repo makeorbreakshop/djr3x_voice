@@ -1,0 +1,531 @@
+{
+  "cluster_id": 1,
+  "size": 35,
+  "vectors": [
+    {
+      "id": "7363",
+      "title": "The Bothan Bounce",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# The Bothan Bounce\n\n\"The Bothan Bounce\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/The_Bothan_Bounce",
+        "title": "The Bothan Bounce",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "7393",
+      "title": "Under the Double Sun",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Under the Double Sun\n\n\"Under the Double Sun\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Under_the_Double_Sun",
+        "title": "Under the Double Sun",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "7371",
+      "title": "Signal Your Surrender",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Signal Your Surrender\n\n\"Signal Your Surrender\" was the most famous song by BoSS Code.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Signal_Your_Surrender",
+        "title": "Signal Your Surrender",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7434",
+      "title": "Shake That Wampa Down",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Shake That Wampa Down\n\n\"Shake That Wampa Down\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Shake_That_Wampa_Down",
+        "title": "Shake That Wampa Down",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "7429",
+      "title": "Pillaging Villages One by One",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Pillaging Villages One by One\n\n\"Pillaging Villages One by One\" was a Gamorrean song.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pillaging_Villages_One_by_One",
+        "title": "Pillaging Villages One by One",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "7474",
+      "title": "Shapa Keesay",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Shapa Keesay\n\n\"Shapa Keesay\"  was a popular song of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Shapa_Keesay",
+        "title": "Shapa Keesay",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "7492",
+      "title": "Thruster Head (song)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Thruster Head (song)\n\n\"Thruster Head\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Thruster_Head_%28song%29",
+        "title": "Thruster Head (song)",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "7412",
+      "title": "My Ol' Tibanna Man",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# My Ol' Tibanna Man\n\n\"My Ol' Tibanna Man\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/My_Ol%27_Tibanna_Man",
+        "title": "My Ol' Tibanna Man",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "7416",
+      "title": "Run Kessel Run",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Run Kessel Run\n\n\"Run Kessel Run\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Run_Kessel_Run",
+        "title": "Run Kessel Run",
+        "tokens": 23.0
+      }
+    },
+    {
+      "id": "7431",
+      "title": "Pillaging Villages One by One",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Pillaging Villages One by One - Appearances[]\n\nChildren of the Jedi\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Pillaging_Villages_One_by_One",
+        "title": "Pillaging Villages One by One",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "7511",
+      "title": "The Hutt Two-Step",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# The Hutt Two-Step\n\n\"The Hutt Two-Step\" was a piece that could be played with a Kloo horn.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/The_Hutt_Two-Step",
+        "title": "The Hutt Two-Step",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "7603",
+      "title": "Yesterday's Jawa",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Yesterday's Jawa\n\n\"Yesterday's Jawa\" was a popular song of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Yesterday%27s_Jawa",
+        "title": "Yesterday's Jawa",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7693",
+      "title": "Spice is Nice",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Spice is Nice\n\n\"Spice is Nice\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Spice_is_Nice",
+        "title": "Spice is Nice",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7781",
+      "title": "Doe Azalus Ootmian",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Doe Azalus Ootmian\n\n\"Doe Azalus Ootmian\" (\"Dangerous Stranger\" in Huttese) was a popular tune of the Cold War era. The band South Sector Boppers played this song.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Doe_Azalus_Ootmian",
+        "title": "Doe Azalus Ootmian",
+        "tokens": 48.0
+      }
+    },
+    {
+      "id": "7808",
+      "title": "See You on the Dark Side",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# See You on the Dark Side\n\n\"See You on the Dark Side\"  was a popular song of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/See_You_on_the_Dark_Side",
+        "title": "See You on the Dark Side",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "7837",
+      "title": "Not the Droids",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Not the Droids\n\n\"Not the Droids\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Not_the_Droids",
+        "title": "Not the Droids",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7869",
+      "title": "If Tomorrow Never Comes",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# If Tomorrow Never Comes\n\n\"If Tomorrow Never Comes\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/If_Tomorrow_Never_Comes",
+        "title": "If Tomorrow Never Comes",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "7982",
+      "title": "That Slippery Little Hutt of Mine",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# That Slippery Little Hutt of Mine\n\n\"That Slippery Little Hutt of Mine\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/That_Slippery_Little_Hutt_of_Mine",
+        "title": "That Slippery Little Hutt of Mine",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "8073",
+      "title": "Smeeleeya Whao Tupee Upee",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Smeeleeya Whao Tupee Upee\n\n\"Smeeleeya Whao Tupee Upee\"  was a popular song of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Smeeleeya_Whao_Tupee_Upee",
+        "title": "Smeeleeya Whao Tupee Upee",
+        "tokens": 35.0
+      }
+    },
+    {
+      "id": "8152",
+      "title": "Shoot First",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Shoot First\n\n\"Shoot First\" was the most famous song by Proton Overload.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Shoot_First",
+        "title": "Shoot First",
+        "tokens": 19.0
+      }
+    },
+    {
+      "id": "8116",
+      "title": "Kayfoundo Naweea",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Kayfoundo Naweea\n\n\"Kayfoundo Naweea\" (\"Hungry Eyes\" in Huttese) was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Kayfoundo_Naweea",
+        "title": "Kayfoundo Naweea",
+        "tokens": 34.0
+      }
+    },
+    {
+      "id": "8148",
+      "title": "Twice Around the System (And Home Again)",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Twice Around the System (And Home Again)\n\n\"Twice Around the System (And Home Again)\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Twice_Around_the_System_%28And_Home_Again%29",
+        "title": "Twice Around the System (And Home Again)",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8216",
+      "title": "Credits Where Credits Are Due",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Credits Where Credits Are Due\n\n\"Credits Where Credits Are Due\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Credits_Where_Credits_Are_Due",
+        "title": "Credits Where Credits Are Due",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "8372",
+      "title": "In the Escape Pod",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# In the Escape Pod\n\n\"In the Escape Pod\"  was a popular song of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/In_the_Escape_Pod",
+        "title": "In the Escape Pod",
+        "tokens": 22.0
+      }
+    },
+    {
+      "id": "8305",
+      "title": "What Mamma Doesn't Know",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# What Mamma Doesn't Know\n\n\"What Mamma Doesn't Know\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/What_Mamma_Doesn%27t_Know",
+        "title": "What Mamma Doesn't Know",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "8393",
+      "title": "Let Go My Lekku",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Let Go My Lekku\n\n\"Let Go My Lekku\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Let_Go_My_Lekku",
+        "title": "Let Go My Lekku",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "8348",
+      "title": "For the Republic",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# For the Republic\n\n\"For the Republic\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/For_the_Republic",
+        "title": "For the Republic",
+        "tokens": 20.0
+      }
+    },
+    {
+      "id": "8430",
+      "title": "One Chuba Too Many",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# One Chuba Too Many\n\n\"One Chuba Too Many\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/One_Chuba_Too_Many",
+        "title": "One Chuba Too Many",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "8516",
+      "title": "Womp Rat Stomp",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Womp Rat Stomp\n\n\"Womp Rat Stomp\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Womp_Rat_Stomp",
+        "title": "Womp Rat Stomp",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "8502",
+      "title": "Cut the Phobium",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Cut the Phobium\n\n\"Cut the Phobium\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Cut_the_Phobium",
+        "title": "Cut the Phobium",
+        "tokens": 25.0
+      }
+    },
+    {
+      "id": "8597",
+      "title": "Strummer",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Musicians"
+        ],
+        "content": "# Strummer\n\nA strummer was a musician who played a particular musical instrument. During the Cold War, an Arcona strummer played with The Load Lifters and a male Twi'lek with the South Sector Boppers.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Strummer",
+        "title": "Strummer",
+        "tokens": 47.0
+      }
+    },
+    {
+      "id": "8530",
+      "title": "Boot Black and Bachani Blossoms",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Boot Black and Bachani Blossoms\n\n\"Boot Black and Bachani Blossoms\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Boot_Black_and_Bachani_Blossoms",
+        "title": "Boot Black and Bachani Blossoms",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "8770",
+      "title": "Makin' the Jump",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Makin' the Jump\n\n\"Makin' the Jump\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Makin%27_the_Jump",
+        "title": "Makin' the Jump",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "8713",
+      "title": "Average Brown Wookiee",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Average Brown Wookiee\n\n\"Average Brown Wookiee\" was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Average_Brown_Wookiee",
+        "title": "Average Brown Wookiee",
+        "tokens": 24.0
+      }
+    },
+    {
+      "id": "8972",
+      "title": "Carbines in the Wind",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Carbines in the Wind\n\n\"Carbines in the Wind\"  was a popular tune of the Cold War era.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Carbines_in_the_Wind",
+        "title": "Carbines in the Wind",
+        "tokens": 26.0
+      }
+    }
+  ]
+}

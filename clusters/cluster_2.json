@@ -1,0 +1,559 @@
+{
+  "cluster_id": 2,
+  "size": 33,
+  "vectors": [
+    {
+      "id": "2796",
+      "title": "Aucellis Park",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Entertainment",
+          "2 more",
+          "Keriba VI locations",
+          "Parks and gardens"
+        ],
+        "content": "# Aucellis Park - Appearances[]\n\nBeneath Aucellis Park on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Aucellis_Park",
+        "title": "Aucellis Park",
+        "tokens": 34.0
+      }
+    },
+    {
+      "id": "4896",
+      "title": "The White Door",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# The White Door - Appearances[]\n\nCat and Mouse on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_White_Door",
+        "title": "The White Door",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "4895",
+      "title": "The White Door",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# The White Door - Appearances[]\n\nCat and Mouse on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_White_Door",
+        "title": "The White Door",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "5045",
+      "title": "Qexi's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ord Mantell locations"
+        ],
+        "content": "# Qexi's - Appearances[]\n\n\"Rendezvous at Ord Mantell\" \u2014 Star Wars Gamer 1\n Rendezvous at Ord Mantell on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Qexi%27s",
+        "title": "Qexi's",
+        "tokens": 48.0
+      }
+    },
+    {
+      "id": "5048",
+      "title": "Qexi's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Ord Mantell locations"
+        ],
+        "content": "# Qexi's - Appearances[]\n\n\"Rendezvous at Ord Mantell\" \u2014 Star Wars Gamer 1\n Rendezvous at Ord Mantell on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Qexi%27s",
+        "title": "Qexi's",
+        "tokens": 48.0
+      }
+    },
+    {
+      "id": "5063",
+      "title": "Happy Landing",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Tazan locations"
+        ],
+        "content": "# Happy Landing - Appearances[]\n\nUltimate Core Dump on Wizards.com (backup link) (original site is defunct) (First appearance) (Unlicensed)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Happy_Landing",
+        "title": "Happy Landing",
+        "tokens": 35.0
+      }
+    },
+    {
+      "id": "5186",
+      "title": "Leatherback's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Sriluur locations"
+        ],
+        "content": "# Leatherback's - Appearances[]\n\nLast Call at Leatherback's on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Leatherback%27s",
+        "title": "Leatherback's",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5184",
+      "title": "Leatherback's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Sriluur locations"
+        ],
+        "content": "# Leatherback's - Appearances[]\n\nLast Call at Leatherback's on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Leatherback%27s",
+        "title": "Leatherback's",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5160",
+      "title": "Lurbi's Mercantile",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Engebo V locations",
+          "2 more",
+          "Hotels",
+          "Vendors and sellers"
+        ],
+        "content": "# Lurbi's Mercantile - Appearances[]\n\nDeath, Dirt, and the Nerf Rancher's Daughter on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Lurbi%27s_Mercantile",
+        "title": "Lurbi's Mercantile",
+        "tokens": 40.0
+      }
+    },
+    {
+      "id": "5215",
+      "title": "Krakin's Alehouse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Krakin's Alehouse - Appearances[]\n\nRemember When on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Krakin%27s_Alehouse",
+        "title": "Krakin's Alehouse",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5218",
+      "title": "Frundle's Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Keren locations"
+        ],
+        "content": "# Frundle's Cantina - Appearances[]\n\nOperation: Clodhopper Part I: Rendezvous at Frundle's on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Frundle%27s_Cantina",
+        "title": "Frundle's Cantina",
+        "tokens": 42.0
+      }
+    },
+    {
+      "id": "5216",
+      "title": "Frundle's Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Keren locations"
+        ],
+        "content": "# Frundle's Cantina - Appearances[]\n\nOperation: Clodhopper Part I: Rendezvous at Frundle's on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Frundle%27s_Cantina",
+        "title": "Frundle's Cantina",
+        "tokens": 42.0
+      }
+    },
+    {
+      "id": "5217",
+      "title": "Krakin's Alehouse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Krakin's Alehouse - Appearances[]\n\nRemember When on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Krakin%27s_Alehouse",
+        "title": "Krakin's Alehouse",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5213",
+      "title": "Krakin's Alehouse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Krakin's Alehouse - Behind the scenes[]\n\nKrakin's Alehouse was created by Morrie Mullins and appeared in Remember When, an article that was added to Wizards.com in 2005 as part of the Living Force campaign.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Krakin%27s_Alehouse",
+        "title": "Krakin's Alehouse",
+        "tokens": 50.0
+      }
+    },
+    {
+      "id": "5333",
+      "title": "Mud Puddle",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Cantinas",
+          "Ord Mantell locations"
+        ],
+        "content": "# Mud Puddle - Appearances[]\n\nRebel Jedi on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Mud_Puddle",
+        "title": "Mud Puddle",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5330",
+      "title": "Mud Puddle",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Cantinas",
+          "Ord Mantell locations"
+        ],
+        "content": "# Mud Puddle - Appearances[]\n\nRebel Jedi on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Mud_Puddle",
+        "title": "Mud Puddle",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "5660",
+      "title": "Crosstown Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Crosstown Bar - Appearances[]\n\nDisapproval on Wizards.com (backup link) (original site is defunct)\n Dark Soul on Wizards.com (backup link) (original site is defunct)\n Living Force: From the Cradle to the Grave on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Crosstown_Bar",
+        "title": "Crosstown Bar",
+        "tokens": 66.0
+      }
+    },
+    {
+      "id": "5643",
+      "title": "The Hutt's Last Laugh",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas"
+        ],
+        "content": "# The Hutt's Last Laugh - Appearances[]\n\nPut Up Your Dukes on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Hutt%27s_Last_Laugh",
+        "title": "The Hutt's Last Laugh",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "5659",
+      "title": "Crosstown Bar",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Cularin locations"
+        ],
+        "content": "# Crosstown Bar - Appearances[]\n\nDisapproval on Wizards.com (backup link) (original site is defunct)\n Dark Soul on Wizards.com (backup link) (original site is defunct)\n Living Force: From the Cradle to the Grave on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Crosstown_Bar",
+        "title": "Crosstown Bar",
+        "tokens": 66.0
+      }
+    },
+    {
+      "id": "5856",
+      "title": "Bent Lekku cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "General location stubs",
+          "Cantinas",
+          "Ryloth locations"
+        ],
+        "content": "# Bent Lekku cantina - Appearances[]\n\nOperation: Clodhopper Part I: Rendezvous at Frundle's on Wizards.com (backup link) (original site is defunct) (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Bent_Lekku_cantina",
+        "title": "Bent Lekku cantina",
+        "tokens": 49.0
+      }
+    },
+    {
+      "id": "5917",
+      "title": "Falling Rodian",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Falling Rodian - Appearances[]\n\nHead Trip on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Falling_Rodian",
+        "title": "Falling Rodian",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5922",
+      "title": "Falling Rodian",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Genarius locations"
+        ],
+        "content": "# Falling Rodian - Appearances[]\n\nHead Trip on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Falling_Rodian",
+        "title": "Falling Rodian",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "7504",
+      "title": "Tzeel",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Females",
+          "Humans",
+          "Musicians"
+        ],
+        "content": "# Tzeel - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Tzeel",
+        "title": "Tzeel",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "7931",
+      "title": "Quoltus Firth",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Humans",
+          "Males",
+          "Musicians"
+        ],
+        "content": "# Quoltus Firth - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Quoltus_Firth",
+        "title": "Quoltus Firth",
+        "tokens": 29.0
+      }
+    },
+    {
+      "id": "7921",
+      "title": "Ushka Et",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Devaronians",
+          "2 more",
+          "Females",
+          "Musicians"
+        ],
+        "content": "# Ushka Et - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Ushka_Et",
+        "title": "Ushka Et",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8255",
+      "title": "Xornu Plox",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Xornu Plox - Appearances[]\n\nHorning In on Wizards.com (backup link) (original site is defunct) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Xornu_Plox",
+        "title": "Xornu Plox",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "8257",
+      "title": "Xornu Plox",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Individuals of unspecified gender",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Xornu Plox - Appearances[]\n\nHorning In on Wizards.com (backup link) (original site is defunct) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Xornu_Plox",
+        "title": "Xornu Plox",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "8555",
+      "title": "Emo Aucellis Tribute March",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Emo Aucellis Tribute March - Appearances[]\n\nBeneath Aucellis Park on Wizards.com (backup link) (original site is defunct)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Emo_Aucellis_Tribute_March",
+        "title": "Emo Aucellis Tribute March",
+        "tokens": 37.0
+      }
+    },
+    {
+      "id": "8616",
+      "title": "Rem Yonka",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Rem Yonka - Appearances[]\n\nHorning In on Wizards.com (backup link) (original site is defunct) (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rem_Yonka",
+        "title": "Rem Yonka",
+        "tokens": 34.0
+      }
+    },
+    {
+      "id": "8615",
+      "title": "Rem Yonka",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Character stubs",
+          "Individuals of unspecified gender",
+          "2 more",
+          "Individuals of unspecified species",
+          "Musicians"
+        ],
+        "content": "# Rem Yonka - Appearances[]\n\nHorning In on Wizards.com (backup link) (original site is defunct) (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Rem_Yonka",
+        "title": "Rem Yonka",
+        "tokens": 34.0
+      }
+    },
+    {
+      "id": "8771",
+      "title": "Niklas Cories",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Assassins",
+          "Humans",
+          "2 more",
+          "Males",
+          "Musicians"
+        ],
+        "content": "# Niklas Cories - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Niklas_Cories",
+        "title": "Niklas Cories",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8769",
+      "title": "Niklas Cories",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Assassins",
+          "Humans",
+          "2 more",
+          "Males",
+          "Musicians"
+        ],
+        "content": "# Niklas Cories - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Niklas_Cories",
+        "title": "Niklas Cories",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8729",
+      "title": "Enni Anni",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Herglics",
+          "Males",
+          "Musicians"
+        ],
+        "content": "# Enni Anni - Appearances[]\n\nWith the Band on Wizards.com (backup link) (original site is defunct) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Enni_Anni",
+        "title": "Enni Anni",
+        "tokens": 32.0
+      }
+    }
+  ]
+}

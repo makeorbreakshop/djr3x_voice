@@ -4,11 +4,11 @@ Upload to Pinecone
 
 This script uploads locally processed vectors to Pinecone:
 1. Reads vectors from Parquet files in data/vectors
-2. Uploads them to Pinecone in batches
-3. Tracks upload progress
+2. Uploads them to Pinecone in batches with deduplication
+3. Tracks upload progress with robust error handling and retry logic
 
 Usage:
-    python scripts/upload_to_pinecone.py [--batch-size N] [--test]
+    python scripts/upload_to_pinecone.py [--batch-size N] [--test] [--skip-deduplication]
 """
 
 import os
@@ -19,8 +19,9 @@ import asyncio
 import logging
 import time
 import glob
+import hashlib
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 from pathlib import Path
 
 import pandas as pd
@@ -43,11 +44,12 @@ logger = logging.getLogger(__name__)
 # Constants
 VECTORS_DIR = "../data/vectors"
 UPLOAD_STATUS_FILE = "../data/pinecone_upload_status.json"
+VECTOR_FINGERPRINTS_FILE = "../data/vector_fingerprints.json"
 
 class PineconeUploader:
-    """Handles uploading vectors to Pinecone."""
+    """Handles uploading vectors to Pinecone with deduplication and adaptive rate limiting."""
     
-    def __init__(self, batch_size: int = 500):
+    def __init__(self, batch_size: int = 500, skip_deduplication: bool = False):
         """Initialize the uploader."""
         # Load environment variables
         load_dotenv()
@@ -64,11 +66,27 @@ class PineconeUploader:
         self.pc = Pinecone(api_key=self.api_key)
         
         # Set batch size and parallel processing settings
+        self.initial_batch_size = batch_size
         self.batch_size = batch_size
         self.max_parallel_files = 3  # Process up to 3 files in parallel
         
+        # Rate limiting settings
+        self.min_batch_size = 50  # Minimum batch size we'll go down to
+        self.max_batch_size = 1000  # Maximum batch size we'll go up to
+        self.success_threshold = 3  # Number of consecutive successes before increasing batch size
+        self.consecutive_successes = 0
+        self.consecutive_failures = 0
+        
+        # Exponential backoff settings
+        self.base_wait_time = 1  # Base wait time in seconds
+        self.max_retries = 5  # Maximum number of retries
+        
         # Initialize upload status
         self.upload_status = self._load_upload_status()
+        
+        # Vector fingerprinting for deduplication
+        self.skip_deduplication = skip_deduplication
+        self.vector_fingerprints = self._load_vector_fingerprints()
         
     def _load_upload_status(self) -> Dict[str, bool]:
         """Load the upload status file or create it if it doesn't exist."""
@@ -82,6 +100,31 @@ class PineconeUploader:
         os.makedirs(os.path.dirname(UPLOAD_STATUS_FILE), exist_ok=True)
         with open(UPLOAD_STATUS_FILE, 'w') as f:
             json.dump(self.upload_status, f, indent=2)
+            
+    def _load_vector_fingerprints(self) -> Dict[str, str]:
+        """Load vector fingerprints for deduplication."""
+        if os.path.exists(VECTOR_FINGERPRINTS_FILE):
+            with open(VECTOR_FINGERPRINTS_FILE, 'r') as f:
+                return json.load(f)
+        return {}
+        
+    def _save_vector_fingerprints(self) -> None:
+        """Save vector fingerprints."""
+        os.makedirs(os.path.dirname(VECTOR_FINGERPRINTS_FILE), exist_ok=True)
+        with open(VECTOR_FINGERPRINTS_FILE, 'w') as f:
+            json.dump(self.vector_fingerprints, f, indent=2)
+            
+    def _generate_vector_fingerprint(self, vector: Dict) -> str:
+        """Generate a fingerprint for a vector based on its content."""
+        # Create a concatenated string of key metadata fields
+        metadata = vector.get('metadata', {})
+        content = metadata.get('content', '')
+        title = metadata.get('title', '')
+        url = metadata.get('url', '')
+        
+        # Generate fingerprint from content and metadata
+        fingerprint_data = f"{content}|{title}|{url}"
+        return hashlib.md5(fingerprint_data.encode('utf-8')).hexdigest()
             
     def init_index(self) -> None:
         """Initialize the Pinecone index if it doesn't exist."""
@@ -103,6 +146,43 @@ class PineconeUploader:
         all_files = glob.glob(os.path.join(VECTORS_DIR, "*.parquet"))
         unprocessed_files = [f for f in all_files if f not in self.upload_status]
         return unprocessed_files
+        
+    async def _check_vector_exists(self, index, vector_id: str) -> bool:
+        """Check if a vector already exists in Pinecone."""
+        try:
+            response = index.fetch(ids=[vector_id])
+            return vector_id in response.get('vectors', {})
+        except Exception as e:
+            logger.warning(f"Error checking if vector {vector_id} exists: {e}")
+            return False
+            
+    def _filter_existing_vectors(self, vectors: List[Dict]) -> Tuple[List[Dict], int]:
+        """Filter out vectors that already exist in Pinecone based on fingerprints."""
+        if self.skip_deduplication:
+            return vectors, 0
+            
+        new_vectors = []
+        duplicate_count = 0
+        
+        for vector in vectors:
+            vector_id = vector['id']
+            fingerprint = self._generate_vector_fingerprint(vector)
+            
+            # Check if we've seen this fingerprint before
+            if vector_id in self.vector_fingerprints:
+                # If fingerprint changed, update it and keep the vector
+                if self.vector_fingerprints[vector_id] != fingerprint:
+                    self.vector_fingerprints[vector_id] = fingerprint
+                    new_vectors.append(vector)
+                else:
+                    # Same fingerprint, skip this vector
+                    duplicate_count += 1
+            else:
+                # New vector ID, add to fingerprints and keep
+                self.vector_fingerprints[vector_id] = fingerprint
+                new_vectors.append(vector)
+                
+        return new_vectors, duplicate_count
         
     async def upload_file_async(self, file_path: str) -> bool:
         """
@@ -126,16 +206,31 @@ class PineconeUploader:
                 }
                 vectors.append(vector)
                 
-            # Upload vectors in larger batches with parallel processing
+            # Filter out vectors that already exist in Pinecone
+            vectors, duplicate_count = self._filter_existing_vectors(vectors)
+            
+            if duplicate_count > 0:
+                logger.info(f"Skipping {duplicate_count} duplicate vectors from {file_path}")
+                
+            if not vectors:
+                logger.info(f"No new vectors to upload from {file_path}")
+                self.upload_status[file_path] = True
+                self._save_upload_status()
+                return True
+                
+            # Upload vectors in batches with adaptive batch sizing
             total_batches = (len(vectors) + self.batch_size - 1) // self.batch_size
             tasks = []
             
             for i in range(0, len(vectors), self.batch_size):
                 batch = vectors[i:i + self.batch_size]
-                tasks.append(asyncio.create_task(self._upload_batch(index, batch, i//self.batch_size + 1, total_batches, file_path)))
+                tasks.append(asyncio.create_task(self._upload_batch_with_retry(index, batch, i//self.batch_size + 1, total_batches, file_path)))
                 
             # Wait for all batches to complete
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Save fingerprints after processing
+            self._save_vector_fingerprints()
             
             if all(result == True for result in results):
                 # Mark file as processed
@@ -151,15 +246,68 @@ class PineconeUploader:
             logger.error(f"Error processing file {file_path}: {e}")
             return False
             
+    async def _upload_batch_with_retry(self, index, batch, batch_num, total_batches, file_path):
+        """Upload a batch with exponential backoff retry logic."""
+        retries = 0
+        wait_time = self.base_wait_time
+        
+        while retries <= self.max_retries:
+            try:
+                success = await self._upload_batch(index, batch, batch_num, total_batches, file_path)
+                if success:
+                    # Update batch size based on success
+                    self._adjust_batch_size(True)
+                    return True
+                else:
+                    # Batch failed but not due to exception, adjust batch size down
+                    self._adjust_batch_size(False)
+            except Exception as e:
+                logger.error(f"Error on attempt {retries + 1} for batch {batch_num}: {e}")
+                self._adjust_batch_size(False)
+                
+            # Exponential backoff
+            retries += 1
+            if retries <= self.max_retries:
+                logger.info(f"Retrying batch {batch_num} in {wait_time} seconds (attempt {retries + 1}/{self.max_retries + 1})")
+                await asyncio.sleep(wait_time)
+                wait_time = min(wait_time * 2, 60)  # Cap at 60 seconds
+            
+        logger.error(f"Failed to upload batch {batch_num} after {self.max_retries + 1} attempts")
+        return False
+            
     async def _upload_batch(self, index, batch, batch_num, total_batches, file_path):
         """Helper function to upload a single batch."""
         try:
             index.upsert(vectors=batch)
-            logger.info(f"Uploaded batch {batch_num}/{total_batches} from {file_path}")
+            logger.info(f"Uploaded batch {batch_num}/{total_batches} from {file_path} (batch size: {len(batch)})")
             return True
         except Exception as e:
             logger.error(f"Error uploading batch {batch_num} from {file_path}: {e}")
-            return False
+            raise e
+            
+    def _adjust_batch_size(self, success: bool):
+        """Adjust batch size based on success or failure."""
+        if success:
+            self.consecutive_successes += 1
+            self.consecutive_failures = 0
+            
+            # Increase batch size after consecutive successes
+            if self.consecutive_successes >= self.success_threshold:
+                old_size = self.batch_size
+                self.batch_size = min(self.batch_size + 50, self.max_batch_size)
+                if old_size != self.batch_size:
+                    logger.info(f"Increased batch size to {self.batch_size}")
+                self.consecutive_successes = 0
+        else:
+            self.consecutive_failures += 1
+            self.consecutive_successes = 0
+            
+            # Reduce batch size after failure
+            if self.consecutive_failures > 0:
+                old_size = self.batch_size
+                self.batch_size = max(self.batch_size // 2, self.min_batch_size)
+                if old_size != self.batch_size:
+                    logger.info(f"Reduced batch size to {self.batch_size}")
             
     async def upload_all_async(self, test_mode: bool = False) -> None:
         """Upload all unprocessed files to Pinecone with parallel processing."""
@@ -179,9 +327,10 @@ class PineconeUploader:
             
         # Display summary
         print(f"Found {len(files)} unprocessed files")
-        print(f"Batch size: {self.batch_size}")
+        print(f"Initial batch size: {self.batch_size}")
         print(f"Max parallel files: {self.max_parallel_files}")
         print(f"Index: {self.index_name}")
+        print(f"Deduplication: {'Disabled' if self.skip_deduplication else 'Enabled'}")
         
         # Initialize index
         self.init_index()
@@ -200,7 +349,10 @@ class PineconeUploader:
                     
         # Show summary
         total_processed = sum(1 for status in self.upload_status.values() if status)
+        fingerprint_count = len(self.vector_fingerprints)
         print(f"\nUploaded {total_processed} files to Pinecone")
+        print(f"Total vector fingerprints tracked: {fingerprint_count}")
+        print(f"Final batch size: {self.batch_size}")
         print(f"Index: {self.index_name}")
 
 def main():
@@ -210,9 +362,12 @@ def main():
                       help="Number of vectors to upload in each batch (default: 500)")
     parser.add_argument('--test', action='store_true',
                       help="Run in test mode, only process 1 file")
+    parser.add_argument('--skip-deduplication', action='store_true',
+                      help="Skip vector deduplication")
     args = parser.parse_args()
     
-    uploader = PineconeUploader(batch_size=args.batch_size)
+    uploader = PineconeUploader(batch_size=args.batch_size, 
+                               skip_deduplication=args.skip_deduplication)
     asyncio.run(uploader.upload_all_async(test_mode=args.test))
 
 if __name__ == "__main__":

@@ -1,0 +1,403 @@
+{
+  "cluster_id": 16,
+  "size": 25,
+  "vectors": [
+    {
+      "id": "3984",
+      "title": "Repulsor-droid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid models"
+        ],
+        "content": "# Repulsor-droid - Appearances[]\n\n\"Little Empires\" \u2014 The Kathol Outback (Reprinted and collected in The DarkStryder Campaign, Deluxe)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Repulsor-droid",
+        "title": "Repulsor-droid",
+        "tokens": 38.0
+      }
+    },
+    {
+      "id": "4337",
+      "title": "Domodroid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Domodroid - Appearances[]\n\n\"Class Reunion\" \u2014 Star Wars: The Roleplaying Game (First appearance)\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Domodroid",
+        "title": "Domodroid",
+        "tokens": 44.0
+      }
+    },
+    {
+      "id": "4333",
+      "title": "Domodroid",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Droid stubs",
+          "Droid models"
+        ],
+        "content": "# Domodroid - Appearances[]\n\n\"Class Reunion\" \u2014 Star Wars: The Roleplaying Game (First appearance)\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Domodroid",
+        "title": "Domodroid",
+        "tokens": 44.0
+      }
+    },
+    {
+      "id": "5206",
+      "title": "Shilley's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Structure stubs",
+          "Cantinas",
+          "Questal locations"
+        ],
+        "content": "# Shilley's - Appearances[]\n\nRookies: No Turning Back\nThe Game Chambers of Questal (reprinted in Classic Adventures: Volume Five)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Shilley%27s",
+        "title": "Shilley's",
+        "tokens": 34.0
+      }
+    },
+    {
+      "id": "5461",
+      "title": "Long Drink",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Structure stubs",
+          "Cantinas",
+          "Mon Cala locations"
+        ],
+        "content": "# Long Drink - Appearances[]\n\nDeath in the Undercity (reprinted in Classic Adventures: Volume Three) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Long_Drink",
+        "title": "Long Drink",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5514",
+      "title": "The Rusty Bucket",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bars and clubs",
+          "Cantinas",
+          "Iyuta locations"
+        ],
+        "content": "# The Rusty Bucket - Appearances[]\n\n\"The Plant\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Rusty_Bucket",
+        "title": "The Rusty Bucket",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "5550",
+      "title": "The Jungle Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bazaar locations",
+          "Cantinas"
+        ],
+        "content": "# The Jungle Cantina - Appearances[]\n\nGraveyard of Alderaan (reprinted in Classic Adventures: Volume Two)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Jungle_Cantina",
+        "title": "The Jungle Cantina",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "5505",
+      "title": "The Giant Step",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bars and clubs",
+          "Cantinas",
+          "Iyuta locations"
+        ],
+        "content": "# The Giant Step - Appearances[]\n\n\"The Plant\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Giant_Step",
+        "title": "The Giant Step",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5507",
+      "title": "The Giant Step",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bars and clubs",
+          "Cantinas",
+          "Iyuta locations"
+        ],
+        "content": "# The Giant Step - Appearances[]\n\n\"The Plant\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Giant_Step",
+        "title": "The Giant Step",
+        "tokens": 30.0
+      }
+    },
+    {
+      "id": "5516",
+      "title": "The Rusty Bucket",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bars and clubs",
+          "Cantinas",
+          "Iyuta locations"
+        ],
+        "content": "# The Rusty Bucket - Appearances[]\n\n\"The Plant\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns) (First mentioned)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Rusty_Bucket",
+        "title": "The Rusty Bucket",
+        "tokens": 31.0
+      }
+    },
+    {
+      "id": "5552",
+      "title": "The Jungle Cantina",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bazaar locations",
+          "Cantinas"
+        ],
+        "content": "# The Jungle Cantina - Appearances[]\n\nGraveyard of Alderaan (reprinted in Classic Adventures: Volume Two)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/The_Jungle_Cantina",
+        "title": "The Jungle Cantina",
+        "tokens": 28.0
+      }
+    },
+    {
+      "id": "6002",
+      "title": "Farmer's Folly",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Draenell's Point locations"
+        ],
+        "content": "# Farmer's Folly - Appearances[]\n\n\"'Blades and Blasters\" \u2014 Star Wars Gamemaster Kit (reprinted in Classic Campaigns)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Farmer%27s_Folly",
+        "title": "Farmer's Folly",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "6001",
+      "title": "Farmer's Folly",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Draenell's Point locations"
+        ],
+        "content": "# Farmer's Folly - Appearances[]\n\n\"'Blades and Blasters\" \u2014 Star Wars Gamemaster Kit (reprinted in Classic Campaigns)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Farmer%27s_Folly",
+        "title": "Farmer's Folly",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "7778",
+      "title": "Nightclub",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Stubs",
+          "Entertainment"
+        ],
+        "content": "# Nightclub - Appearances[]\n\n\"The Gem of Alderaan\" \u2013 Dawn of Defiance campaign\n \"Home\" \u2014 The Kathol Rift (Reprinted and collected in The DarkStryder Campaign, Deluxe) (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nightclub/Legends",
+        "title": "Nightclub",
+        "tokens": 52.0
+      }
+    },
+    {
+      "id": "7777",
+      "title": "Nightclub",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Stubs",
+          "Entertainment"
+        ],
+        "content": "# Nightclub - Appearances[]\n\n\"The Gem of Alderaan\" \u2013 Dawn of Defiance campaign\n \"Home\" \u2014 The Kathol Rift (Reprinted and collected in The DarkStryder Campaign, Deluxe) (Mentioned only)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Nightclub/Legends",
+        "title": "Nightclub",
+        "tokens": 52.0
+      }
+    },
+    {
+      "id": "8057",
+      "title": "Glizband",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Musical groups"
+        ],
+        "content": "# Glizband - Appearances[]\n\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Glizband",
+        "title": "Glizband",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "8096",
+      "title": "Entertainment holocube",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Entertainment holocube - Appearances[]\n\n\"Lens Reekeene Is Missing\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Entertainment_holocube",
+        "title": "Entertainment holocube",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8059",
+      "title": "Glizband",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Musical groups"
+        ],
+        "content": "# Glizband - Appearances[]\n\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Glizband",
+        "title": "Glizband",
+        "tokens": 27.0
+      }
+    },
+    {
+      "id": "8093",
+      "title": "Entertainment holocube",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Entertainment holocube - Appearances[]\n\n\"Lens Reekeene Is Missing\" \u2014 Star Wars Campaign Pack (reprinted in Classic Campaigns)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Entertainment_holocube",
+        "title": "Entertainment holocube",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "8192",
+      "title": "SqualSpinner",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# SqualSpinner - Appearances[]\n\nThe Game Chambers of Questal (reprinted in Classic Adventures: Volume Five)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/SqualSpinner",
+        "title": "SqualSpinner",
+        "tokens": 26.0
+      }
+    },
+    {
+      "id": "8287",
+      "title": "Slafcourse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Slafcourse - Appearances[]\n\nGraveyard of Alderaan (reprinted in Classic Adventures: Volume Two)\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Slafcourse",
+        "title": "Slafcourse",
+        "tokens": 44.0
+      }
+    },
+    {
+      "id": "8286",
+      "title": "Slafcourse",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Slafcourse - Appearances[]\n\nGraveyard of Alderaan (reprinted in Classic Adventures: Volume Two)\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Slafcourse",
+        "title": "Slafcourse",
+        "tokens": 44.0
+      }
+    },
+    {
+      "id": "8489",
+      "title": "Xerrol's Place",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment",
+          "Kuari Princess locations"
+        ],
+        "content": "# Xerrol's Place - Appearances[]\n\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Xerrol%27s_Place",
+        "title": "Xerrol's Place",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "8488",
+      "title": "Xerrol's Place",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment",
+          "Kuari Princess locations"
+        ],
+        "content": "# Xerrol's Place - Appearances[]\n\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three) (First appearance)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/Xerrol%27s_Place",
+        "title": "Xerrol's Place",
+        "tokens": 33.0
+      }
+    },
+    {
+      "id": "8704",
+      "title": "EM entertainment module",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# EM entertainment module - Appearances[]\n\nRiders of the Maelstrom (reprinted in Classic Adventures: Volume Three)\n\n",
+        "section": "Appearances[]",
+        "source": "https://starwars.fandom.com/wiki/EM_entertainment_module",
+        "title": "EM entertainment module",
+        "tokens": 27.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,438 @@
+{
+  "cluster_id": 64,
+  "size": 27,
+  "vectors": [
+    {
+      "id": "6050",
+      "title": "Coruscant Nights",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Entertainment"
+        ],
+        "content": "# Coruscant Nights\n\nCoruscant Nights was a source of entertainment on the planet Coruscant during the Clone Wars. The musician known as Max Rebo was part of it. Posters were put up around Galactic City in order to promote Coruscant Nights.\n\nThere were at least two two different poster designs: The first one showed white text on a dark background and read \"Max Reebo [sic]\" \u2013 \"Coruscant Nights\". The other poster showed the silhouette of two people against a blue background, and said \"Coruscant Nights\" at the top and \"Coruscant Ballroom\" at the bottom. Fifteen years after the Clone Wars ended, the first poster was used to decorate the walls of the Ghost.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Coruscant_Nights",
+        "title": "Coruscant Nights",
+        "tokens": 150.0
+      }
+    },
+    {
+      "id": "6115",
+      "title": "Who's Who in the Max Rebo Band",
+      "metadata": {
+        "categories": [
+          "Real-world media",
+          "2003 articles and stories",
+          "Magazine article stubs",
+          "2 more",
+          "Star Wars Insider 67 articles",
+          "Who's Who"
+        ],
+        "content": "# Who's Who in the Max Rebo Band\n\n\"Who's Who in the Max Rebo Band\"\n\nAttribution information\n\nAuthor(s)\nRich Handley\n\n\nIllustrator(s)\nJustine Mara Andersen\n\n\n\nPublication information\n\nRelease date\nApril 15, 2003\n\n\nPublished in\nStar Wars Insider 67\n\n\n[Source]\n\n\n\"Who's Who in the Max Rebo Band\" is an article that appeared in Star Wars Insider 67. It was written by Rich Handley, with illustrations by Justine Mara Andersen. It covers the history of the Max Rebo Band.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Who%27s_Who_in_the_Max_Rebo_Band",
+        "title": "Who's Who in the Max Rebo Band",
+        "tokens": 118.0
+      }
+    },
+    {
+      "id": "6210",
+      "title": "Hit it, Max!",
+      "metadata": {
+        "categories": [
+          "Real-world media",
+          "2024 articles and stories",
+          "Magazine article stubs",
+          "4 more",
+          "Incomplete lists",
+          "Incomplete Appearances",
+          "Cast interviews",
+          "Star Wars Insider 224 articles"
+        ],
+        "content": "# Hit it, Max!\n\n\"Hit it, Max\"\n\nAttribution information\n\nAuthor(s)\nBrandon Wainerdi\n\n\n\nPublication information\n\nPublisher\nTitan Magazines\n\n\nRelease date\nMarch 12, 2024\n\n\nPublished in\nStar Wars Insider 224\n\n\n[Source]\n\n\"Hit it, Max\" is an article by Brandon Wainerdi in Star Wars Insider 224, published on March 12, 2024, that interviews actors who portrayed members of the Max Rebo Band.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Hit_it%2C_Max%21",
+        "title": "Hit it, Max!",
+        "tokens": 100.0
+      }
+    },
+    {
+      "id": "6414",
+      "title": "Pawp",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Businesses",
+          "Coruscant locations",
+          "Entertainment"
+        ],
+        "content": "# Pawp\n\nPawp was a video store on the planet Coruscant during the Clone Wars. Billboards were put up in order to advertise the business. One particular billboard, written in Aurebesh characters, read \"VIDEO STORE\" - \"PAWP\". The business' logo showed the last character upside-down. Another Pawp store was located in the city of Ro Station on Pantora.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pawp",
+        "title": "Pawp",
+        "tokens": 82.0
+      }
+    },
+    {
+      "id": "6895",
+      "title": "Video store",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Entertainment"
+        ],
+        "content": "# Video store\n\nVideo store\n\n\nGeneral information\n\nLocations\nCoruscantPantora\n\n\n\nOperational information\n\nGoods\nVideos\n\n\n[Source]\n\n\nA video store was, presumably, a business that rented holodramas. They were common on the planet Coruscant, where a series of billboards were put up in order to advertise them, and attract potential customers. One video store was located at the corner of twelfth and G on Level 1312, next to a hotel building, although the sign was upside-down, and another sign was lying dumped on the ground nearby. Another video store was located on Level 1313, although once again, the sign was upside-down. Yet another video store was located at the wharf, where several signs were put up on a building lying next to a lake.\n\nVideo stores were also present in the central marketplace of Ro Station on Pantora, which featured a similar series of billboards, but with a different motif. The stylized multicolored motif featured on the Pantoran billboards, resembling a kneeling figure, was also featured on an alcoholic beverage served on Coruscant.\n\nOne video store was known as Pawp and was present on both Coruscant and Pantora, where a third set of billboards was used to advertise the business.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Video_store",
+        "title": "Video store",
+        "tokens": 264.0
+      }
+    },
+    {
+      "id": "6944",
+      "title": "Max Rebo Band",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Music stubs",
+          "Bands"
+        ],
+        "content": "# Max Rebo Band - Behind the scenes[]\n\nWhile the Max Rebo Band's name is never spoken in Star Wars: Episode VI Return of the Jedi, the scene they first appear in is titled \"the Max Rebo Band\" in the scene selection menu of the DVD releases.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Band",
+        "title": "Max Rebo Band",
+        "tokens": 58.0
+      }
+    },
+    {
+      "id": "7124",
+      "title": "Show Girls",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Entertainment"
+        ],
+        "content": "# Show Girls\n\nShow Girls was a stage entertainment show that was active on the planet Coruscant during the Clone Wars. It featured scantily clad female performers. In order to promote the show, posters were put up. Screen advertisements were also used, and were featured on hover taxis. These advertisements stated the name of the show, in Aurebesh letters.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Show_Girls",
+        "title": "Show Girls",
+        "tokens": 73.0
+      }
+    },
+    {
+      "id": "7564",
+      "title": "Max Rebo's Greatest Hits",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Music stubs",
+          "Max Rebo's albums"
+        ],
+        "content": "# Max Rebo's Greatest Hits\n\nMax Rebo's Greatest Hits was a name of the compilation of the most popular compositions by the Max Rebo Band.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo%27s_Greatest_Hits",
+        "title": "Max Rebo's Greatest Hits",
+        "tokens": 32.0
+      }
+    },
+    {
+      "id": "7747",
+      "title": "Show Girls",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Show Girls\n\nShow Girls was a stage entertainment show, active on Coruscant during the Clone Wars. It featured scantily clad female performers. The show was promoted via posters, and screen advertisements on hover taxis, which stated the name of the show in Aurebesh letters.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Show_Girls/Legends",
+        "title": "Show Girls",
+        "tokens": 57.0
+      }
+    },
+    {
+      "id": "7999",
+      "title": "Max Rebo Fan Club",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Comprehensive articles",
+          "Society and culture"
+        ],
+        "content": "# Max Rebo Fan Club - Behind the scenes[]\n\nThe Max Rebo Fan Club was introduced in \"Who's Who in the Max Rebo Band,\" an article Rich Handley wrote for the sixty-seventh issue of the Star Wars Insider magazine, which was published on April 15, 2003.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Fan_Club",
+        "title": "Max Rebo Fan Club",
+        "tokens": 63.0
+      }
+    },
+    {
+      "id": "7997",
+      "title": "Max Rebo Fan Club",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Comprehensive articles",
+          "Society and culture"
+        ],
+        "content": "# Max Rebo Fan Club - Behind the scenes[]\n\nThe Max Rebo Fan Club was introduced in \"Who's Who in the Max Rebo Band,\" an article Rich Handley wrote for the sixty-seventh issue of the Star Wars Insider magazine, which was published on April 15, 2003.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Fan_Club",
+        "title": "Max Rebo Fan Club",
+        "tokens": 63.0
+      }
+    },
+    {
+      "id": "7954",
+      "title": "Max Rebo Band",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Pages needing citation",
+          "Articles to be expanded",
+          "3 more",
+          "Articles with multiple issues",
+          "Hutt Clan organizations",
+          "Jizz bands"
+        ],
+        "content": "# Max Rebo Band - Behind the scenes[]\n\nThe 1984 Kenner action figure set listed this band's name as Sy Snootles and the Rebo Band.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Band/Legends",
+        "title": "Max Rebo Band",
+        "tokens": 36.0
+      }
+    },
+    {
+      "id": "7994",
+      "title": "Max Rebo Fan Club",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Wookieepedia Comprehensive articles",
+          "Society and culture"
+        ],
+        "content": "# Max Rebo Fan Club\n\nMax Rebo Fan Club(President Tik Tali Talosh depicted)\n\n\nGeneral information\n\nLeader(s)\nTik Tali Talosh (Derf Chapter's president)\n\n\nSub-group(s)\nDerf Chapter\n\n\n[Source]\n\n\nThe Max Rebo Fan Club, which had Tik Tali Talosh as president of the group's Derf Chapter, was a fan club dedicated to the eponymous musician.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Fan_Club",
+        "title": "Max Rebo Fan Club",
+        "tokens": 87.0
+      }
+    },
+    {
+      "id": "8090",
+      "title": "Coruscant Nights",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Coruscant Nights - Behind the scenes[]\n\nIt is not known what exactly Coruscant Nights is, though the involvement of Max Rebo suggests that it may be a series of concerts or a festival of some sort.\n\nThe two posters are first seen in the Star Wars: The Clone Wars episode Lightsaber Lost, inside the building where Anakin Skywalker goes to fetch the criminal Car Affa. Only parts of the Max Rebo poster is seen in this episode, and the other poster is unreadable. Both posters are seen up close in Moshi Bar in in Lethal Trackdown. The second version can also be seen on the streets of Coruscant in Evil Plans, when IG-86 is searching for R2-D2. A mirror-inverted, and partially obscured, version of the Max Rebo poster can be seen in in an unidentified cantina in Pursuit of Peace.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Coruscant_Nights/Legends",
+        "title": "Coruscant Nights",
+        "tokens": 182.0
+      }
+    },
+    {
+      "id": "8085",
+      "title": "Coruscant Nights",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Coruscant Nights\n\nCoruscant Nights was a source of entertainment on the planet Coruscant during the Clone Wars. The musician Max Rebo was part of it. Posters were put up around the city in order to promote Coruscant Nights. One design showed white text on a dark background and read \"Max Reebo [sic]\" - \"Coruscant Nights\". Another showed the silhouette of two people against a blue background and said \"Coruscant Nights\" at the top and \"Coruscant Ballroom\" at the bottom.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Coruscant_Nights/Legends",
+        "title": "Coruscant Nights",
+        "tokens": 112.0
+      }
+    },
+    {
+      "id": "8153",
+      "title": "Max Rebo's Collected Classics: Dirge",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Max Rebo's albums"
+        ],
+        "content": "# Max Rebo's Collected Classics: Dirge\n\nMax Rebo's Collected Classics: Dirge was a collection of songs by Max Rebo, that were made available for purchase by Jabba Desilijic Tiure, to be sold during the Galactic Moon Festival in 1 ABY.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo%27s_Collected_Classics:_Dirge",
+        "title": "Max Rebo's Collected Classics: Dirge",
+        "tokens": 62.0
+      }
+    },
+    {
+      "id": "8163",
+      "title": "Max Rebo Duo",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bands"
+        ],
+        "content": "# Max Rebo Duo\n\nMax Rebo Duo\n\n\nHistorical information\n\nFormed\n4 ABY, Max Rebo Band\n\n\n[Source]\n\n\nThe Max Rebo Duo was the temporary name for Max Rebo and Sy Snootles after the breakup of the Max Rebo Band in 4 ABY. Ryst\u00e1ll Sant and Greeata Jendowanian eventually rejoined the group, reforming the Max Rebo Band once again.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Max_Rebo_Duo",
+        "title": "Max Rebo Duo",
+        "tokens": 91.0
+      }
+    },
+    {
+      "id": "8370",
+      "title": "Pawp",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Businesses",
+          "Coruscant locations",
+          "Entertainment"
+        ],
+        "content": "# Pawp\n\nPawp was a video store on the planet Coruscant. Billboards were put up in order to advertise the store. These billboards read \"video store\" - \"Pawp\". The logo of the establishment showed the name of the business written in Aurebesh, with the last P (Peth) upside-down.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pawp/Legends",
+        "title": "Pawp",
+        "tokens": 72.0
+      }
+    },
+    {
+      "id": "8578",
+      "title": "Video store",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Entertainment"
+        ],
+        "content": "# Video store\n\nVideo store\n\n\nGeneral information\n\nLocations\nCoruscant\n\n\n\nOperational information\n\nGoods\nVideos\n\n\n[Source]\n\n\nA video store was, presumably, a business that rents holomovies. Video stores were common on the planet Coruscant, where a series of billboards were put up in order to advertise them. One such video store was Pawp, which had its own unique billboard advertisement.\n\nOne video store was located at the corner of twelfth and G on Level 1312, right next to a hotel building. However, the sign, which read \"VIDEO STORE\" in Aurebesh, was was upside-down, while another sign was lying dumped on the ground nearby.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Video_store/Legends",
+        "title": "Video store",
+        "tokens": 142.0
+      }
+    },
+    {
+      "id": "8509",
+      "title": "Rimmer's Delight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Rimmer's Delight\n\n\"Rimmer's Delight\" was a song popular among cantina bands during the Galactic Civil War.\n\nA four-piece music band played a rendition of that song in Blue Moon while Kyle Katarn had a secret meeting with Meck Odom. Jan Ors had difficulty to spy on them over the sound of the music.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Delight",
+        "title": "Rimmer's Delight",
+        "tokens": 72.0
+      }
+    },
+    {
+      "id": "8511",
+      "title": "Rimmer's Delight",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Songs"
+        ],
+        "content": "# Rimmer's Delight - Behind the scenes[]\n\nIn the Dark Forces: Soldier for the Empire novel the band playing the song is unnamed. In the audio drama, Kyle and Meck mention that the group playing is the Max Rebo Band, but the music heard is unnamed.\n\n",
+        "section": "Behind the scenes[]",
+        "source": "https://starwars.fandom.com/wiki/Rimmer%27s_Delight",
+        "title": "Rimmer's Delight",
+        "tokens": 58.0
+      }
+    },
+    {
+      "id": "8675",
+      "title": "Max (disambiguation)",
+      "metadata": {
+        "categories": [
+          "Disambiguation pages"
+        ],
+        "content": "# Max (disambiguation) - Canon[]\n\nMax (Ryloth), a resident of Ryloth\nMaximilian Rebo, an Ortolan musician also called Max Rebo\nMaxx, a Lepi cousin of Jaxxon T. Tumperakki\nMaxx, an operative of the Alliance to Restore the Republic\n\n",
+        "section": "Canon[]",
+        "source": "https://starwars.fandom.com/wiki/Max_%28disambiguation%29",
+        "title": "Max (disambiguation)",
+        "tokens": 73.0
+      }
+    },
+    {
+      "id": "8676",
+      "title": "Max (disambiguation)",
+      "metadata": {
+        "categories": [
+          "Disambiguation pages"
+        ],
+        "content": "# Max (disambiguation) - Legends[]\n\nMax, a resident of Ryloth\nMax Rebo, an Ortolan musician\nBlue Max, a droid\nMax Ryko, a Human police captain\nMax, a Dark Forces easter egg\nMax Shrekk, the owner of Max Shrekk \"Mystery Meat\" Pies Emporium\nMax, Thurm Loogg's assistant\nmax-W 100, a Star Tours droid\n\n",
+        "section": "Legends[]",
+        "source": "https://starwars.fandom.com/wiki/Max_%28disambiguation%29",
+        "title": "Max (disambiguation)",
+        "tokens": 98.0
+      }
+    },
+    {
+      "id": "8650",
+      "title": "Music in the Star Wars Galaxy: The Modal Nodes vs. The Max Rebo Band",
+      "metadata": {
+        "categories": [
+          "Real-world media",
+          "2015 miscellaneous releases",
+          "Website stubs",
+          "Star Wars Blog"
+        ],
+        "content": "# Music in the Star Wars Galaxy: The Modal Nodes vs. The Max Rebo Band\n\nMusic in the Star Wars Galaxy:The Modal Nodes vs.The Max Rebo Band\n\nAttribution information\n\nAuthor(s)\nAmy Ratcliffe\n\n\n\nPublication information\n\nRelease date\nFebruary 24, 2015\n\n\n\nGeneral information\n\nCanon\nCanon and Legends, as stated\n\n\n[Source]\n\nMusic in the Star Wars Galaxy: The Modal Nodes vs. The Max Rebo Band is an article written by Amy Ratcliffe and published on StarWars.com on February 24, 2015. The article details the bands Max Rebo Band and Figrin D'an and the Modal Nodes, listing their members, the instruments they use and the venues the have played in. The article contains information from both canon and legends sources, but clearly identifies what continuity each piece of information comes from. The article reintroduced the names of several members of each band into canon.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Music_in_the_Star_Wars_Galaxy:_The_Modal_Nodes_vs._The_Max_Rebo_Band",
+        "title": "Music in the Star Wars Galaxy: The Modal Nodes vs. The Max Rebo Band",
+        "tokens": 189.0
+      }
+    },
+    {
+      "id": "8674",
+      "title": "Max (disambiguation)",
+      "metadata": {
+        "categories": [
+          "Disambiguation pages"
+        ],
+        "content": "# Max (disambiguation)\n\nMax may refer to one of the following:\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Max_%28disambiguation%29",
+        "title": "Max (disambiguation)",
+        "tokens": 17.0
+      }
+    },
+    {
+      "id": "9826",
+      "title": "Pawp",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Businesses",
+          "Coruscant locations",
+          "Entertainment"
+        ],
+        "content": "# Pawp\n\nPawp was a video store on the planet Coruscant during the Clone Wars. Billboards were put up in order to advertise the business. One particular billboard, written in Aurebesh characters, read \"VIDEO STORE\" - \"PAWP\". The business' logo showed the last character upside-down. Another Pawp store was located in the city of Ro Station on Pantora.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pawp",
+        "title": "Pawp",
+        "tokens": 82.0
+      }
+    },
+    {
+      "id": "9823",
+      "title": "Pawp",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Businesses",
+          "Coruscant locations",
+          "Entertainment"
+        ],
+        "content": "# Pawp\n\nPawp was a video store on the planet Coruscant during the Clone Wars. Billboards were put up in order to advertise the business. One particular billboard, written in Aurebesh characters, read \"VIDEO STORE\" - \"PAWP\". The business' logo showed the last character upside-down. Another Pawp store was located in the city of Ro Station on Pantora.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pawp",
+        "title": "Pawp",
+        "tokens": 82.0
+      }
+    }
+  ]
+}

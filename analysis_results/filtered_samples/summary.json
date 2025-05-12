@@ -1,0 +1,35 @@
+{
+  "total_samples": {
+    "redirect": 30,
+    "disambiguation": 30,
+    "stub": 30,
+    "meta_utility": 30
+  },
+  "canon_counts": {},
+  "legends_counts": {
+    "meta_utility": 6,
+    "stub": 15
+  },
+  "top_categories": {
+    "males": 557,
+    "humans": 367,
+    "individuals with he/him pronouns": 296,
+    "galactic empire planets": 219,
+    "galactic republic planets": 191,
+    "females": 155,
+    "terrestrial planets": 153,
+    "new republic planets": 138,
+    "type i atmosphere planets": 134,
+    "confederacy of independent systems planets": 114,
+    "individuals with she/her pronouns": 98,
+    "years in the great peace of the republic era": 83,
+    "galactic empire sectors": 78,
+    "outer rim territories species": 74,
+    "galactic alliance planets": 73,
+    "pilots": 68,
+    "yuuzhan vong planets": 59,
+    "outer rim territories sectors": 59,
+    "tatooinians": 57,
+    "post-ruusan jedi masters": 56
+  }
+}

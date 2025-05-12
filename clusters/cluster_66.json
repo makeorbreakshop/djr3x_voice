@@ -1,0 +1,609 @@
+{
+  "cluster_id": 66,
+  "size": 32,
+  "vectors": [
+    {
+      "id": "1884",
+      "title": "Blue milk",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Food and beverage stubs",
+          "Batuuan food",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Lothalian food",
+          "Milk",
+          "Tatooinian food"
+        ],
+        "content": "# Blue milk\n\nBlue milk\n\n\nHistorical information\n\nFound\nBatuuCastilonLah'muLothalSerolonisTatooine\n\n\n\nFood specifications\n\nType\nMilk\n\n\nPhysical description\nBeverage\n\n\nAnimal-based ingredients\nBanthas\n\n\nPotable by\nArtiodacsChadra-FanHumansMirialansNiktosRodians\n\n\nDishes\nBantha butterBlue BanthaBlue bantha buttermilk biscuitsBlue-milk cheeseBlue Milk CoolerBlue milk custard\n\n\n\nChronological information\n\nAffiliation\nAces' LoungeAunt Z's TavernMilk StandOga's Cantina\n\n\n[Source]\n\nBlue milk, also known as Bantha milk, was a rich blue-colored milk produced by female banthas. Sentients drank it, and also used it in bantha butter, blue bantha buttermilk biscuits, blue-milk cheese, blue milk custard, ice cream, and yogurt. It was notably available on Outer Rim planets such as Batuu, Lah'mu, Lothal, and Tatooine. Cid's Parlor on Ord Mantell served a similar beverage that was alcoholic called Dark Blue Milk.\n\nDuring a lightsaber training session, the young Ezra Bridger had to protect himself as the astromech droid Chopper kept lobbing cartons of blue milk at him. Luke Skywalker drank blue milk while he discussed the new droids, R2-D2 and C-3PO, with his aunt and uncle.\n\nTwo establishments in Black Spire Outpost on Batuu, served blue milk or blue milk-based concoctions; Milk Stand sold blue milk and an alcoholic Blue Milk Cooler, while Oga's Cantina served the non-alcoholic Blue Bantha.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Blue_milk",
+        "title": "Blue milk",
+        "tokens": 353.0
+      }
+    },
+    {
+      "id": "1833",
+      "title": "Oga's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles in need of updating",
+          "Batuu dining establishments",
+          "2 more",
+          "Cantinas",
+          "Real-world restaurants"
+        ],
+        "content": "# Oga's Cantina - Offerings[]\n\nThe establishment offered alcoholic beverages, including Andoan White, Angry Bloody Rancor, Bad Motivator IPA, Bespin Fizz, Bloody Rancor, Blue Bantha with Guava and Dragonberry Rum, Blue Citrus Mule, Corellian Spike Cold Brew, Coruscant Cooler, Dagobah Slug Slinger, Dantooine Tonic, Fiery Mustafarian Fuzzy Tauntaun, Gamorrean Ale, Ginger Lime Tea Lemonade with Soju, Gold Squadron Lager, High Republic, Imperial Guard, Jedi Mind Trick, Jet juice, Jogan Blossom Hazy IPA, Joh Blastoh Sangria Gocola, Keshian Spiced Cream, Krill Elixir, Naboo Sunset, Ne'tra gal Ale, Nysillin and Bubbles with Brub Berry Essence, Sesid Seltzer, Silver Sea Martini, Sith Scorcher, Spice Runner Hard Cider, Surabat Valley Harvest Brew, T-16 Skyhopper, Takodana Quencher, The Outer Rim, The Sylop, Toniray, White Wampa Ale, and Yub Nub.\n\nThere were also a number of non-alcoholic drinks served there, such as Akivan Tea, Black Spire Brew, Black Spire Hot Chocolate, Blue Bantha, Blue milk, Blurrgfire, Carbon Freeze, Cliff Dweller, Hyperdrive (Punch It!), Jabba Juice, Spiran caf, Tarine tea, and The Grinning Loth-cat.\n\nMoogan Tea and Purple glandis flower juice was available both with and without alcohol. The cantina served drinks for both children and adults, and people came from all over the galaxy to sample the famous concoctions, which were formed from exotic ingredients using otherworldly methods and served in unique vessels.\n\nThe cantina also provided food for its patrons. Batuu Bits, Batuu Sea Harvest with Crait Salt Sprinkle, Garra Outpost Roll, Gungan Gooberfish Dip, Jonsior System Triangle, Kaadu Pork Belly Slider Skewer, Millaflower Toast, Mossberry Biscuit, Mustafarian Lava Roll, Mygeeto Roll, Oga's Obsession, Reythan Crackers and Moss Mousse, Rising Moons Overnight Oats, Rodian Ration, Spiced Wroshyr Pods, Surabat Valley Harvest Board, Thruster Roasted Bantha Flatbread, and Umbaran Cheese Roll were all served there. Entertainment was provided in the form of music performed by DJ R-3X.\n\n",
+        "section": "Offerings[]",
+        "source": "https://starwars.fandom.com/wiki/Oga%27s_Cantina",
+        "title": "Oga's Cantina",
+        "tokens": 537.0
+      }
+    },
+    {
+      "id": "1845",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea - Description[]\n\nThe original Moogan Tea was a beverage that originated on the planet Mooga, but its recipe was widely known across the Outer Rim. It was brewed using a spiced syrup or tea concentrate; the resulting beverage was beige-colored, frothy, and served cold.\n\nMany drinking establishments prepared fresh batches of the sweet and spicy tea every day, sometimes with added alcohol. Some merchants on the desert planet Tatooine sold small tea bags at their market stalls. The drink shared its name with Moogan iced tea, a beverage served at the Day Star Hotel.\n\n",
+        "section": "Description[]",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 120.0
+      }
+    },
+    {
+      "id": "1844",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire\n\nBlurrgfire\n\n\nHistorical information\n\nHomeworld\nBatuu\n\n\nCreator\nA bartender at Oga's Cantina\n\n\nFound\nCastilon\n\n\n\nFood specifications\n\nType\nNon-alcoholic mixed drink\n\n\nPhysical description\nRed-orange liquidSweet, sour, and spicy imitation of citrom juiceGreen, disc-shaped garnish\n\n\nOther ingredients\nRed salt (on rim of glass)\n\n\nPotable by\nArtiodacsChadra-FansHumans\n\n\nEffects\nHeat in throat\n\n\n\nChronological information\n\nAffiliation\nAunt Z's TavernOga's Cantina\n\n\n[Source]\n\nBlurrgfire was a non-alcoholic beverage that imitated the sweet, sour, and spicy flavor of citrom juice. It was found throughout the galaxy, but it was allegedly invented by a bartender at Oga's Cantina in Black Spire Outpost on Batuu.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 178.0
+      }
+    },
+    {
+      "id": "1850",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire - History[]\n\nAccording to chef Strono Tuggs, Blurrgfire was invented by a bartender at Oga's Cantina, an establishment that was owned by Oga Garra and located in Black Spire Outpost on the Outer Rim planet Batuu. In Tuggs' account, the bartender came up with a recipe that combined various juices and spices to mimic the flavor of citrom. Tuggs claimed that he could not tell the difference between citrom and Blurrgfire because the imitation was so perfect, and he included the anecdote and a recipe for the drink in his cookbook, The Official Black Spire Outpost Cookbook. Although Tuggs did not specify the bartender's name, author and explorer Eloc Throno wrote in his Traveler's Guide to Batuu that Garra put \"her own twist\" on the drink.\n\nNear the end of the Clone Wars, Blurrgfire was among the drink selections that the bartender Janott offered to Senator Padm\u00e9 Amidala when she visited Oga's Cantina for a personal mission. It remained available at the cantina in 34 ABY, and on one occasion Resistance spy Vi Moradi drank it to stay sober and hangover-free while her ex-First Order companion Archex got intoxicated from a potent Jedi Mind Trick.\n\nAlso during 34 ABY, Blurrgfire was served at Aunt Z's Tavern on the Colossus, a mobile aircraft refueling station on the ocean planet Castilon, around the time of the First Order-Resistance War. While at the tavern, the Chadra-Fan Orka was drinking the beverage. After realizing that his pit droid G-LN was bored, Orka decided to let the repair droid try some of his Blurrgfire. Upon sipping the drink, G-LN began to cough and then became erratic, running around the tavern and disturbing other patrons. Shortly thereafter, the Klatooinian Bolza Grool hit G-LN on the head, incapacitating the droid and stopping the adverse effects of the Blurrgfire. Upon seeing G-LN unconscious, Orka made a joke to his partner Flix and ordered another round of Blurrgfire.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 452.0
+      }
+    },
+    {
+      "id": "1848",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea - History[]\n\nAround 233 BBY, while on the snowy planet Andraven, the pilot Nash Durango eagerly anticipated drinking the tea, which she had been told would be available. Indeed, later that day, she drank a cup of it.\n\nBy the time of the Clone Wars, the Commerce Guild had taken control of Mooga and declared that Moogan Tea was their trademarked beverage with a proprietary recipe. The Commerce Guild created the Ardees Beverage Company to manufacture the bottled beverage with the brand name Ardees Beverage. The guild utilized corporate surveillance droids to identify establishments that attempted to sell their own homebrewed Moogan Tea. Despite the threat of being issued cease and desist transmissions, many businesses defiantly but discreetly continued to serve their brews.\n\nWhile the human Senator Padm\u00e9 Amidala was on the Outer Rim planet Batuu for a personal mission later during the Clone Wars, she visited a cantina in Black Spire Outpost. She was offered alcoholic and non-alcoholic Moogan Tea by the bartender, Janott. In 3 ABY, the casino cruiser Morenia sold Moogan Tea for eleven credits.\n\nBy 34 ABY, that location had been named Oga's Cantina after its owner, Oga Garra, and it continued to serve the beverage during breakfast hours. In his Traveler's Guide to Batuu, author Eloc Throno described the Moogan Tea served at Oga's Cantina as \"well-garnished.\"\n\nThe Artiodac chef Strono Tuggs claimed that any respectable barkeep would know how to make real Moogan Tea from the original recipe, and he believed it was likely worth risking legal ramifications to have a taste. In 34 ABY, he took a risk himself with his cookbook The Official Black Spire Outpost Cookbook; it included his recipes for Moogan Tea made with his personal blend of Moogan Spice Syrup and a Christophsian sugar topping.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 404.0
+      }
+    },
+    {
+      "id": "1843",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea\n\nMoogan Tea\n\n\nHistorical information\n\nHomeworld\nMooga\n\n\nRace\nMoogan\n\n\nFound\nBlack Spire Outpost, BatuuTatooineMorenia\n\n\n\nFood specifications\n\nType\nTea\n\n\nPhysical description\nBeige-colored, sweet, spicy, and frothy beverage\n\n\nOther ingredients\nSyrup or concentrate, such as Moogan Spice SyrupChristophsian sugar (Topping)Alcohol (Optional)\n\n\nPotable by\nArtiodacsHumans\n\n\n\nChronological information\n\nAffiliation\nOga's Cantina\n\n\n[Source]\n\nMoogan Tea was a beverage that was popular throughout the Outer Rim. It was brewed daily at drinking establishments using a spiced syrup or tea concentrate. The drink was sweet, spicy, and frothy. When the Commerce Guild took control of its planet of origin, Mooga, they trademarked the recipe and gave it the name Ardees Beverage. Various businesses defied the legal claim that Moogan Tea was a proprietary recipe and continued to brew and serve it, albeit more discreetly.\n\nDuring the Clone Wars, a cantina in Black Spire Outpost on Batuu, later known as Oga's Cantina, offered alcoholic and non-alcoholic versions of the tea. They were still serving the non-alcoholic version in 34 ABY when the Artiodac chef Strono Tuggs published his recipes for Moogan Spice Syrup and the drink made from it in his cookbook The Official Black Spire Outpost Cookbook.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 309.0
+      }
+    },
+    {
+      "id": "1847",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire - Description[]\n\nBlurrgfire was a classic non-alcoholic mixed drink found at cantinas throughout the galaxy. Its flavor imitated juice from a citrom, a fruit that did not stay fresh for long, but was both sweet and sour with a burst of heat. Blurrgfire was suitable for consumption by Artiodacs, humans, and Chadra-Fans. When consumed by pit droids, Blurrgfire would cause erratic behavior.\n\n",
+        "section": "Description[]",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 94.0
+      }
+    },
+    {
+      "id": "1911",
+      "title": "Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles to be expanded",
+          "Incomplete lists",
+          "Teas"
+        ],
+        "content": "# Tea\n\nTea\n\n\nFood specifications\n\nPhysical description\nNon-alcoholic beverage\n\n\nPotable by\nArtiodacHumanUmbaran\n\n\n[Source]\n\nTea was a kind of non-alcoholic beverage that was notably consumed by the people of Alderaan and those of Mandalore. There existed many types of tea. One was made from the florets of the Cassius tree. Another, known as Tarine tea, was served on planets as diverse as Lothal and Christophsis. Gatalenta was a planet famous for its tea. One tea was the Deychin tea. While some varieties of tea were consumed hot, others were served cold, such as Moogan Tea or its corporate-branded version, Ardees Beverage, which came in bottles or as a fizzy canned tea. Teahouses were establishments dedicated to the serving of tea. Sky Graf had fifty-seven percent oxidized green Orsh Mountain tea onboard the Brightbird which he served to Rooper Nitani on Batuu.\n\nAt some point during the Clone Wars, smugglers led by a Moogan named Tee Va came to Sundari, the capital city of Mandalore, where they distributed Ardees beverage tea diluted with slabin, a hazardous chemical. As a result, Tee Va's profits were doubled, but many Sundari schoolchildren became ill. However, due to to an investigation run by the Duchess of Mandalore, Satine Kryze, and the Galactic Republic Senator Padm\u00e9 Amidala, Tee Va and his smugglers were arrested.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Tea",
+        "title": "Tea",
+        "tokens": 314.0
+      }
+    },
+    {
+      "id": "1909",
+      "title": "Siggi's tavern",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Cantinas",
+          "E'ronoh locations"
+        ],
+        "content": "# Siggi's tavern\n\nSiggi's tavern\n\n\nGeneral information\n\nLocations\nU'ronoh, E'ronoh\n\n\n\nOperational information\n\nStaff\nA bartender\n\n\nGoods\nStinger\n\n\nServices\nDrinks\n\n\n[Source]\n\nSiggi's tavern was a drink-selling establishment in the mining village of U'ronoh on the planet E'ronoh. It employed at least one bartender. In 382 BBY, a Remembrance was held in the tavern to commemorate two losses in the village, and many U'ronoh residents came to mourn, joined by E'roni princess Xiri A'lbaran and heir to the neighboring planet Eiram, Phan-tu Zenn. After the bereaved families shared stories of their loved ones, the mood turned happier, with singing and dancing.\n\nThe Jedi Knight Gella Nattai ordered a stinger beverage from the bartender, though its burning taste made it hard for her to drink. She conversed with U'ronoh's marshal, Iana Percei, while in the tavern as well as the human Kala. Nattai left soon after when Percei joined the dancing. Later on that night, rain began to fall, a significant enough sight on the desert world that everyone in the tavern went outside to look.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Siggi%27s_tavern",
+        "title": "Siggi's tavern",
+        "tokens": 265.0
+      }
+    },
+    {
+      "id": "1919",
+      "title": "Milk",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Food and beverage stubs",
+          "Milk"
+        ],
+        "content": "# Milk\n\nMilk\n\n\nFood specifications\n\nType\nAnimal product\n\n\nPhysical description\nLiquid\n\n\nEdible by\nHumansTooka\n\n\nDishes\nButterIce creamMilk shakeYogurt\n\n\n[Source]\n\nMilk was a nutritious liquid produced and secreted by the females of certain species. While milk was typically white, the one produced by bantha cows was blue, the one produced by thala-siren sea sows was green, and the one produced by po'acksters was pink. Other species that secreted milk included the whilks, the nerfs, and the falumpasets. Moofs made moof milk, but \"moof-milker\" was an insult. The term \"milk\" was also used to describe any similar fluid in plants, such as the juice of a black melon.\n\nSome intelligent species would farm non-sentient creatures to extract their milk and use it as food. When left standing for a while, milk would turn sour. However, to prevent spoilage, it could be stored in cool places, just like meat. Milk was the basis of various preparations that included ice cream, yogurt, and butter. Tooka were known to enjoy milk.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Milk",
+        "title": "Milk",
+        "tokens": 248.0
+      }
+    },
+    {
+      "id": "2522",
+      "title": "Oga's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles in need of updating",
+          "Batuu dining establishments",
+          "2 more",
+          "Cantinas",
+          "Real-world restaurants"
+        ],
+        "content": "# Oga's Cantina - Offerings[]\n\nThe establishment offered alcoholic beverages, including Andoan White, Angry Bloody Rancor, Bad Motivator IPA, Bespin Fizz, Bloody Rancor, Blue Bantha with Guava and Dragonberry Rum, Blue Citrus Mule, Corellian Spike Cold Brew, Coruscant Cooler, Dagobah Slug Slinger, Dantooine Tonic, Fiery Mustafarian Fuzzy Tauntaun, Gamorrean Ale, Ginger Lime Tea Lemonade with Soju, Gold Squadron Lager, High Republic, Imperial Guard, Jedi Mind Trick, Jet juice, Jogan Blossom Hazy IPA, Joh Blastoh Sangria Gocola, Keshian Spiced Cream, Krill Elixir, Naboo Sunset, Ne'tra gal Ale, Nysillin and Bubbles with Brub Berry Essence, Sesid Seltzer, Silver Sea Martini, Sith Scorcher, Spice Runner Hard Cider, Surabat Valley Harvest Brew, T-16 Skyhopper, Takodana Quencher, The Outer Rim, The Sylop, Toniray, White Wampa Ale, and Yub Nub.\n\nThere were also a number of non-alcoholic drinks served there, such as Akivan Tea, Black Spire Brew, Black Spire Hot Chocolate, Blue Bantha, Blue milk, Blurrgfire, Carbon Freeze, Cliff Dweller, Hyperdrive (Punch It!), Jabba Juice, Spiran caf, Tarine tea, and The Grinning Loth-cat.\n\nMoogan Tea and Purple glandis flower juice was available both with and without alcohol. The cantina served drinks for both children and adults, and people came from all over the galaxy to sample the famous concoctions, which were formed from exotic ingredients using otherworldly methods and served in unique vessels.\n\nThe cantina also provided food for its patrons. Batuu Bits, Batuu Sea Harvest with Crait Salt Sprinkle, Garra Outpost Roll, Gungan Gooberfish Dip, Jonsior System Triangle, Kaadu Pork Belly Slider Skewer, Millaflower Toast, Mossberry Biscuit, Mustafarian Lava Roll, Mygeeto Roll, Oga's Obsession, Reythan Crackers and Moss Mousse, Rising Moons Overnight Oats, Rodian Ration, Spiced Wroshyr Pods, Surabat Valley Harvest Board, Thruster Roasted Bantha Flatbread, and Umbaran Cheese Roll were all served there. Entertainment was provided in the form of music performed by DJ R-3X.\n\n",
+        "section": "Offerings[]",
+        "source": "https://starwars.fandom.com/wiki/Oga%27s_Cantina",
+        "title": "Oga's Cantina",
+        "tokens": 537.0
+      }
+    },
+    {
+      "id": "2950",
+      "title": "Unkar's Milk Bar",
+      "metadata": {
+        "categories": [
+          "Non-canon articles",
+          "Articles with conjectural capitalization",
+          "Structure stubs",
+          "Cantinas"
+        ],
+        "content": "# Unkar's Milk Bar\n\nUnkar's Milk Bar\n\n\nGeneral information\n\nType\nBar\n\n\n\nChronological and political information\n\nAffiliation\nUnkar's thugs\n\n\n[Source]\n\nUnkar's Milk Bar was a bar owned by Unkar Plutt that sold various products with blue milk.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Unkar%27s_Milk_Bar",
+        "title": "Unkar's Milk Bar",
+        "tokens": 59.0
+      }
+    },
+    {
+      "id": "2972",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea - Description[]\n\nThe original Moogan Tea was a beverage that originated on the planet Mooga, but its recipe was widely known across the Outer Rim. It was brewed using a spiced syrup or tea concentrate; the resulting beverage was beige-colored, frothy, and served cold.\n\nMany drinking establishments prepared fresh batches of the sweet and spicy tea every day, sometimes with added alcohol. Some merchants on the desert planet Tatooine sold small tea bags at their market stalls. The drink shared its name with Moogan iced tea, a beverage served at the Day Star Hotel.\n\n",
+        "section": "Description[]",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 120.0
+      }
+    },
+    {
+      "id": "2987",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire - Description[]\n\nBlurrgfire was a classic non-alcoholic mixed drink found at cantinas throughout the galaxy. Its flavor imitated juice from a citrom, a fruit that did not stay fresh for long, but was both sweet and sour with a burst of heat. Blurrgfire was suitable for consumption by Artiodacs, humans, and Chadra-Fans. When consumed by pit droids, Blurrgfire would cause erratic behavior.\n\n",
+        "section": "Description[]",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 94.0
+      }
+    },
+    {
+      "id": "2971",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea\n\nMoogan Tea\n\n\nHistorical information\n\nHomeworld\nMooga\n\n\nRace\nMoogan\n\n\nFound\nBlack Spire Outpost, BatuuTatooineMorenia\n\n\n\nFood specifications\n\nType\nTea\n\n\nPhysical description\nBeige-colored, sweet, spicy, and frothy beverage\n\n\nOther ingredients\nSyrup or concentrate, such as Moogan Spice SyrupChristophsian sugar (Topping)Alcohol (Optional)\n\n\nPotable by\nArtiodacsHumans\n\n\n\nChronological information\n\nAffiliation\nOga's Cantina\n\n\n[Source]\n\nMoogan Tea was a beverage that was popular throughout the Outer Rim. It was brewed daily at drinking establishments using a spiced syrup or tea concentrate. The drink was sweet, spicy, and frothy. When the Commerce Guild took control of its planet of origin, Mooga, they trademarked the recipe and gave it the name Ardees Beverage. Various businesses defied the legal claim that Moogan Tea was a proprietary recipe and continued to brew and serve it, albeit more discreetly.\n\nDuring the Clone Wars, a cantina in Black Spire Outpost on Batuu, later known as Oga's Cantina, offered alcoholic and non-alcoholic versions of the tea. They were still serving the non-alcoholic version in 34 ABY when the Artiodac chef Strono Tuggs published his recipes for Moogan Spice Syrup and the drink made from it in his cookbook The Official Black Spire Outpost Cookbook.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 309.0
+      }
+    },
+    {
+      "id": "2989",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire - History[]\n\nAccording to chef Strono Tuggs, Blurrgfire was invented by a bartender at Oga's Cantina, an establishment that was owned by Oga Garra and located in Black Spire Outpost on the Outer Rim planet Batuu. In Tuggs' account, the bartender came up with a recipe that combined various juices and spices to mimic the flavor of citrom. Tuggs claimed that he could not tell the difference between citrom and Blurrgfire because the imitation was so perfect, and he included the anecdote and a recipe for the drink in his cookbook, The Official Black Spire Outpost Cookbook. Although Tuggs did not specify the bartender's name, author and explorer Eloc Throno wrote in his Traveler's Guide to Batuu that Garra put \"her own twist\" on the drink.\n\nNear the end of the Clone Wars, Blurrgfire was among the drink selections that the bartender Janott offered to Senator Padm\u00e9 Amidala when she visited Oga's Cantina for a personal mission. It remained available at the cantina in 34 ABY, and on one occasion Resistance spy Vi Moradi drank it to stay sober and hangover-free while her ex-First Order companion Archex got intoxicated from a potent Jedi Mind Trick.\n\nAlso during 34 ABY, Blurrgfire was served at Aunt Z's Tavern on the Colossus, a mobile aircraft refueling station on the ocean planet Castilon, around the time of the First Order-Resistance War. While at the tavern, the Chadra-Fan Orka was drinking the beverage. After realizing that his pit droid G-LN was bored, Orka decided to let the repair droid try some of his Blurrgfire. Upon sipping the drink, G-LN began to cough and then became erratic, running around the tavern and disturbing other patrons. Shortly thereafter, the Klatooinian Bolza Grool hit G-LN on the head, incapacitating the droid and stopping the adverse effects of the Blurrgfire. Upon seeing G-LN unconscious, Orka made a joke to his partner Flix and ordered another round of Blurrgfire.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 452.0
+      }
+    },
+    {
+      "id": "2973",
+      "title": "Moogan Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Alcoholic beverages",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Beverages on the Morenia",
+          "Teas",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Moogan Tea - History[]\n\nAround 233 BBY, while on the snowy planet Andraven, the pilot Nash Durango eagerly anticipated drinking the tea, which she had been told would be available. Indeed, later that day, she drank a cup of it.\n\nBy the time of the Clone Wars, the Commerce Guild had taken control of Mooga and declared that Moogan Tea was their trademarked beverage with a proprietary recipe. The Commerce Guild created the Ardees Beverage Company to manufacture the bottled beverage with the brand name Ardees Beverage. The guild utilized corporate surveillance droids to identify establishments that attempted to sell their own homebrewed Moogan Tea. Despite the threat of being issued cease and desist transmissions, many businesses defiantly but discreetly continued to serve their brews.\n\nWhile the human Senator Padm\u00e9 Amidala was on the Outer Rim planet Batuu for a personal mission later during the Clone Wars, she visited a cantina in Black Spire Outpost. She was offered alcoholic and non-alcoholic Moogan Tea by the bartender, Janott. In 3 ABY, the casino cruiser Morenia sold Moogan Tea for eleven credits.\n\nBy 34 ABY, that location had been named Oga's Cantina after its owner, Oga Garra, and it continued to serve the beverage during breakfast hours. In his Traveler's Guide to Batuu, author Eloc Throno described the Moogan Tea served at Oga's Cantina as \"well-garnished.\"\n\nThe Artiodac chef Strono Tuggs claimed that any respectable barkeep would know how to make real Moogan Tea from the original recipe, and he believed it was likely worth risking legal ramifications to have a taste. In 34 ABY, he took a risk himself with his cookbook The Official Black Spire Outpost Cookbook; it included his recipes for Moogan Tea made with his personal blend of Moogan Spice Syrup and a Christophsian sugar topping.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Moogan_Tea",
+        "title": "Moogan Tea",
+        "tokens": 404.0
+      }
+    },
+    {
+      "id": "2985",
+      "title": "Blurrgfire",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Batuuan food",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Juices",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Blurrgfire\n\nBlurrgfire\n\n\nHistorical information\n\nHomeworld\nBatuu\n\n\nCreator\nA bartender at Oga's Cantina\n\n\nFound\nCastilon\n\n\n\nFood specifications\n\nType\nNon-alcoholic mixed drink\n\n\nPhysical description\nRed-orange liquidSweet, sour, and spicy imitation of citrom juiceGreen, disc-shaped garnish\n\n\nOther ingredients\nRed salt (on rim of glass)\n\n\nPotable by\nArtiodacsChadra-FansHumans\n\n\nEffects\nHeat in throat\n\n\n\nChronological information\n\nAffiliation\nAunt Z's TavernOga's Cantina\n\n\n[Source]\n\nBlurrgfire was a non-alcoholic beverage that imitated the sweet, sour, and spicy flavor of citrom juice. It was found throughout the galaxy, but it was allegedly invented by a bartender at Oga's Cantina in Black Spire Outpost on Batuu.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Blurrgfire",
+        "title": "Blurrgfire",
+        "tokens": 178.0
+      }
+    },
+    {
+      "id": "3064",
+      "title": "Oga's Cantina",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles in need of updating",
+          "Batuu dining establishments",
+          "2 more",
+          "Cantinas",
+          "Real-world restaurants"
+        ],
+        "content": "# Oga's Cantina - Offerings[]\n\nThe establishment offered alcoholic beverages, including Andoan White, Angry Bloody Rancor, Bad Motivator IPA, Bespin Fizz, Bloody Rancor, Blue Bantha with Guava and Dragonberry Rum, Blue Citrus Mule, Corellian Spike Cold Brew, Coruscant Cooler, Dagobah Slug Slinger, Dantooine Tonic, Fiery Mustafarian Fuzzy Tauntaun, Gamorrean Ale, Ginger Lime Tea Lemonade with Soju, Gold Squadron Lager, High Republic, Imperial Guard, Jedi Mind Trick, Jet juice, Jogan Blossom Hazy IPA, Joh Blastoh Sangria Gocola, Keshian Spiced Cream, Krill Elixir, Naboo Sunset, Ne'tra gal Ale, Nysillin and Bubbles with Brub Berry Essence, Sesid Seltzer, Silver Sea Martini, Sith Scorcher, Spice Runner Hard Cider, Surabat Valley Harvest Brew, T-16 Skyhopper, Takodana Quencher, The Outer Rim, The Sylop, Toniray, White Wampa Ale, and Yub Nub.\n\nThere were also a number of non-alcoholic drinks served there, such as Akivan Tea, Black Spire Brew, Black Spire Hot Chocolate, Blue Bantha, Blue milk, Blurrgfire, Carbon Freeze, Cliff Dweller, Hyperdrive (Punch It!), Jabba Juice, Spiran caf, Tarine tea, and The Grinning Loth-cat.\n\nMoogan Tea and Purple glandis flower juice was available both with and without alcohol. The cantina served drinks for both children and adults, and people came from all over the galaxy to sample the famous concoctions, which were formed from exotic ingredients using otherworldly methods and served in unique vessels.\n\nThe cantina also provided food for its patrons. Batuu Bits, Batuu Sea Harvest with Crait Salt Sprinkle, Garra Outpost Roll, Gungan Gooberfish Dip, Jonsior System Triangle, Kaadu Pork Belly Slider Skewer, Millaflower Toast, Mossberry Biscuit, Mustafarian Lava Roll, Mygeeto Roll, Oga's Obsession, Reythan Crackers and Moss Mousse, Rising Moons Overnight Oats, Rodian Ration, Spiced Wroshyr Pods, Surabat Valley Harvest Board, Thruster Roasted Bantha Flatbread, and Umbaran Cheese Roll were all served there. Entertainment was provided in the form of music performed by DJ R-3X.\n\n",
+        "section": "Offerings[]",
+        "source": "https://starwars.fandom.com/wiki/Oga%27s_Cantina",
+        "title": "Oga's Cantina",
+        "tokens": 537.0
+      }
+    },
+    {
+      "id": "3521",
+      "title": "Blue milk",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Food and beverage stubs",
+          "Batuuan food",
+          "4 more",
+          "Beverages in Black Spire Outpost",
+          "Lothalian food",
+          "Milk",
+          "Tatooinian food"
+        ],
+        "content": "# Blue milk\n\nBlue milk\n\n\nHistorical information\n\nFound\nBatuuCastilonLah'muLothalSerolonisTatooine\n\n\n\nFood specifications\n\nType\nMilk\n\n\nPhysical description\nBeverage\n\n\nAnimal-based ingredients\nBanthas\n\n\nPotable by\nArtiodacsChadra-FanHumansMirialansNiktosRodians\n\n\nDishes\nBantha butterBlue BanthaBlue bantha buttermilk biscuitsBlue-milk cheeseBlue Milk CoolerBlue milk custard\n\n\n\nChronological information\n\nAffiliation\nAces' LoungeAunt Z's TavernMilk StandOga's Cantina\n\n\n[Source]\n\nBlue milk, also known as Bantha milk, was a rich blue-colored milk produced by female banthas. Sentients drank it, and also used it in bantha butter, blue bantha buttermilk biscuits, blue-milk cheese, blue milk custard, ice cream, and yogurt. It was notably available on Outer Rim planets such as Batuu, Lah'mu, Lothal, and Tatooine. Cid's Parlor on Ord Mantell served a similar beverage that was alcoholic called Dark Blue Milk.\n\nDuring a lightsaber training session, the young Ezra Bridger had to protect himself as the astromech droid Chopper kept lobbing cartons of blue milk at him. Luke Skywalker drank blue milk while he discussed the new droids, R2-D2 and C-3PO, with his aunt and uncle.\n\nTwo establishments in Black Spire Outpost on Batuu, served blue milk or blue milk-based concoctions; Milk Stand sold blue milk and an alcoholic Blue Milk Cooler, while Oga's Cantina served the non-alcoholic Blue Bantha.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Blue_milk",
+        "title": "Blue milk",
+        "tokens": 353.0
+      }
+    },
+    {
+      "id": "4786",
+      "title": "Tea",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles to be expanded",
+          "Incomplete lists",
+          "Teas"
+        ],
+        "content": "# Tea\n\nTea\n\n\nFood specifications\n\nPhysical description\nNon-alcoholic beverage\n\n\nPotable by\nArtiodacHumanUmbaran\n\n\n[Source]\n\nTea was a kind of non-alcoholic beverage that was notably consumed by the people of Alderaan and those of Mandalore. There existed many types of tea. One was made from the florets of the Cassius tree. Another, known as Tarine tea, was served on planets as diverse as Lothal and Christophsis. Gatalenta was a planet famous for its tea. One tea was the Deychin tea. While some varieties of tea were consumed hot, others were served cold, such as Moogan Tea or its corporate-branded version, Ardees Beverage, which came in bottles or as a fizzy canned tea. Teahouses were establishments dedicated to the serving of tea. Sky Graf had fifty-seven percent oxidized green Orsh Mountain tea onboard the Brightbird which he served to Rooper Nitani on Batuu.\n\nAt some point during the Clone Wars, smugglers led by a Moogan named Tee Va came to Sundari, the capital city of Mandalore, where they distributed Ardees beverage tea diluted with slabin, a hazardous chemical. As a result, Tee Va's profits were doubled, but many Sundari schoolchildren became ill. However, due to to an investigation run by the Duchess of Mandalore, Satine Kryze, and the Galactic Republic Senator Padm\u00e9 Amidala, Tee Va and his smugglers were arrested.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Tea",
+        "title": "Tea",
+        "tokens": 314.0
+      }
+    },
+    {
+      "id": "4781",
+      "title": "Siggi's tavern",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Comprehensive articles",
+          "Cantinas",
+          "E'ronoh locations"
+        ],
+        "content": "# Siggi's tavern\n\nSiggi's tavern\n\n\nGeneral information\n\nLocations\nU'ronoh, E'ronoh\n\n\n\nOperational information\n\nStaff\nA bartender\n\n\nGoods\nStinger\n\n\nServices\nDrinks\n\n\n[Source]\n\nSiggi's tavern was a drink-selling establishment in the mining village of U'ronoh on the planet E'ronoh. It employed at least one bartender. In 382 BBY, a Remembrance was held in the tavern to commemorate two losses in the village, and many U'ronoh residents came to mourn, joined by E'roni princess Xiri A'lbaran and heir to the neighboring planet Eiram, Phan-tu Zenn. After the bereaved families shared stories of their loved ones, the mood turned happier, with singing and dancing.\n\nThe Jedi Knight Gella Nattai ordered a stinger beverage from the bartender, though its burning taste made it hard for her to drink. She conversed with U'ronoh's marshal, Iana Percei, while in the tavern as well as the human Kala. Nattai left soon after when Percei joined the dancing. Later on that night, rain began to fall, a significant enough sight on the desert world that everyone in the tavern went outside to look.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Siggi%27s_tavern",
+        "title": "Siggi's tavern",
+        "tokens": 265.0
+      }
+    },
+    {
+      "id": "4800",
+      "title": "Milk",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Food and beverage stubs",
+          "Milk"
+        ],
+        "content": "# Milk\n\nMilk\n\n\nFood specifications\n\nType\nAnimal product\n\n\nPhysical description\nLiquid\n\n\nEdible by\nHumansTooka\n\n\nDishes\nButterIce creamMilk shakeYogurt\n\n\n[Source]\n\nMilk was a nutritious liquid produced and secreted by the females of certain species. While milk was typically white, the one produced by bantha cows was blue, the one produced by thala-siren sea sows was green, and the one produced by po'acksters was pink. Other species that secreted milk included the whilks, the nerfs, and the falumpasets. Moofs made moof milk, but \"moof-milker\" was an insult. The term \"milk\" was also used to describe any similar fluid in plants, such as the juice of a black melon.\n\nSome intelligent species would farm non-sentient creatures to extract their milk and use it as food. When left standing for a while, milk would turn sour. However, to prevent spoilage, it could be stored in cool places, just like meat. Milk was the basis of various preparations that included ice cream, yogurt, and butter. Tooka were known to enjoy milk.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Milk",
+        "title": "Milk",
+        "tokens": 248.0
+      }
+    },
+    {
+      "id": "5181",
+      "title": "Leatherback's",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Cantinas",
+          "Sriluur locations"
+        ],
+        "content": "# Leatherback's\n\nLeatherback's\n\n\nGeneral information\n\nType\nBar\n\n\nLocation\nMeirm City, Sriluur\n\n\n\nChronological and political information\n\nAffiliation\nLeatherback\n\n\n[Source]\n\nLeatherback's was a bar in Meirm city on the planet Sriluur operated by the Weequay Leatherback. When business declined during the Yuuzhan Vong War Leatherback had to get rid of his bartender droid, but still employed a middle-aged Twi'lek woman to dance on a stage.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Leatherback%27s",
+        "title": "Leatherback's",
+        "tokens": 109.0
+      }
+    },
+    {
+      "id": "5320",
+      "title": "Blue milk",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Food and beverage stubs",
+          "Milk",
+          "Tatooinian food"
+        ],
+        "content": "# Blue milk\n\nBlue milk\n\n\nHistorical information\n\nFound\nTatooine\n\n\n\nFood specifications\n\nType\nMilk\n\n\nPhysical description\nBeverage\n\n\nAnimal-based ingredients\nBantha\n\n\nPotable by\nBesaliskHumans\n\n\n[Source]\n\nBlue milk, sometimes known as Bantha milk and Tatooine milk, was a blue-colored liquid produced by a female bantha's mammary glands. It could be found on most planets across the galaxy. Blue Milk could also be fermented into an alcoholic version. The milk was also used to make a variety of yogurt, ice cream, and cheese. Its ubiquity inspired the military phrase \"blue milk run.\" Dex's Diner served chilled blue milk in whole and short-wavelength varieties at a price of 1.5 credits for a small serving or 2.3 credits for a large.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Blue_milk/Legends",
+        "title": "Blue milk",
+        "tokens": 173.0
+      }
+    },
+    {
+      "id": "5842",
+      "title": "Dagobah Slug Slinger",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Cocktails",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Dagobah Slug Slinger - History[]\n\nThe cocktail was served at Oga's Cantina in Black Spire Outpost on the Outer Rim planet Batuu in 34 ABY. The cantina sweetened the drink with slime from swamp slugs that lived in tanks along the bar back. One night in 34 ABY, Vi Moradi, a human female and Resistance spy, visited the cantina with her Batuuan coworkers after her first day's work for Savi & Son Salvage. Following her coworker Ylena's recommendation, Moradi started the night by imbibing a Dagobah Slug Slinger. After she bought the second round of drinks, she unsuccessfully attempted to recruit her new acquaintances for the Resistance.\n\nArtiodac chef Strono Tuggs created an imitation syrup, Dagobah Slug Syrup, to use as a slime substitute when lacking a supply of slugs. In 34 ABY, Tuggs published his cookbook The Official Black Spire Outpost Cookbook, which included recipes for his imitation syrup and the Dagobah Slug Slinger. The same year, the historian Eloc Throno included a photo of Dagobah Slug Slinger in Batuu guidebook, Traveler's Guide to Batuu, listing it as one of Oga's Cantina's offerings.\n\nAt some point no earlier than 35 ABY, Galactic Society of Creature Enthusiasts' Director of Creature Cartography, Ardis San Tekka, and her safari droid B8-T5 visited Batuu while studying non-sentient creatures throughout the galaxy. While in Oga's Cantina, San Tekka tasted a Dagobah Slug Slinger while her droid conversed with the cantia's DJ, R-3X. Later, B8-T5 mentioned his owner consumption of a Dagobah Slug Slinger in an annotation in her journal, within a section about swamp slugs. In the same publication, San Tekka noted that the decadence of the swamp slugs' slime had led to smaller specimens of the species being exported from Dagobah and kept in captivity for chefs to harvest from them for dishes and drinks.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Dagobah_Slug_Slinger",
+        "title": "Dagobah Slug Slinger",
+        "tokens": 447.0
+      }
+    },
+    {
+      "id": "5836",
+      "title": "Dagobah Slug Slinger",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Cocktails",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Dagobah Slug Slinger\n\nDagobah Slug Slinger\n\n\nHistorical information\n\nFound\nOga's Cantina, Batuu\n\n\n\nFood specifications\n\nType\nCocktail\n\n\nPhysical description\nGreen liquid with herb garnishTart, sweet, herbaceous flavorPotent alcoholic content\n\n\nAnimal-based ingredients\nDagobah swamp slug slime (original recipe)\n\n\nPlant-based ingredients\nCitrus juices\n\n\nOther ingredients\nDagobah Slug Syrup (slime substitute)\n\n\nPotable by\nArtiodacsHumans\n\n\n\nChronological information\n\nAffiliation\nOga's Cantina\n\n\n[Source]\n\nDagobah Slug Slinger was a cocktail with a strong alcoholic base. It could be sweetened with either the slime of its namesake, the Dagobah swamp slug, or with an imitation syrup, Dagobah Slug Syrup. It was served at Oga's Cantina in Black Spire Outpost on the planet Batuu in 34 ABY. The human spy Vi Moradi drank the beverage there before she attempted to recruit for the Resistance.\n\nThe same year, Artiodac chef Strono Tuggs included recipes for the cocktail and syrup in his cookbook The Official Black Spire Outpost Cookbook. At some point no earlier than 35 ABY, the drink was mentioned in a journal by Ardis San Tekka, the Galactic Society of Creature Enthusiasts' Director of Creature Cartography.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Dagobah_Slug_Slinger",
+        "title": "Dagobah Slug Slinger",
+        "tokens": 293.0
+      }
+    },
+    {
+      "id": "5839",
+      "title": "Dagobah Slug Slinger",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Wookieepedia Good articles",
+          "Beverages in Black Spire Outpost",
+          "2 more",
+          "Cocktails",
+          "The Official Black Spire Outpost Cookbook recipes"
+        ],
+        "content": "# Dagobah Slug Slinger - Description[]\n\nThe Dagobah Slug Slinger was a green-colored cocktail named after swamp slugs, a native species of the swamp planet Dagobah. The large slugs secreted saccharine slime with fragrant notes from the herbs they had digested, and the slime was used to sweeten desserts and drinks. The cocktail's combination of sweet and herbaceous slime plus a tart citrus juice base masked its strong alcoholic content, which was said to have a stronger kick than a master of the martial art Ter\u00e4s K\u00e4si. The drink was garnished with a sprig of an herb.\n\n",
+        "section": "Description[]",
+        "source": "https://starwars.fandom.com/wiki/Dagobah_Slug_Slinger",
+        "title": "Dagobah Slug Slinger",
+        "tokens": 130.0
+      }
+    },
+    {
+      "id": "7131",
+      "title": "Pyloon's Saloon",
+      "metadata": {
+        "categories": [
+          "Canon articles",
+          "Articles in need of cleanup",
+          "Structure stubs",
+          "2 more",
+          "Cantinas",
+          "Koboh locations"
+        ],
+        "content": "# Pyloon's Saloon\n\nPyloon's Saloon\n\n\nGeneral information\n\nType\nSaloon\n\n\nLocation\nRambler's Reach, Koboh\n\n\n[Source]\n\nPyloon's Saloon was a saloon situated at the mouth of Foothill Falls in Rambler's Reach Outpost on Koboh, and was owned and operated by Greez Dritus. The saloon was named after Dritus' great-grandmother Pyloon.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Pyloon%27s_Saloon",
+        "title": "Pyloon's Saloon",
+        "tokens": 93.0
+      }
+    },
+    {
+      "id": "8618",
+      "title": "Miss Mylla's Saloon",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bartyn's Landing locations",
+          "Businesses",
+          "2 more",
+          "Entertainment",
+          "Hotels"
+        ],
+        "content": "# Miss Mylla's Saloon - History[]\n\nMiss Mylla, an exotic female Falleen of mysterious origin, went to Lamaredd in a passenger ship at some point before 69 BBY. She arrived in the company of dozen of Falleen escorts and, for as long as anyone can remember, was escorted by the massive Chagrian known as \"Bantha\" Burloo.\n\nMiss Mylla fixed her gaze in the dull building that served as local inn and acquired it. In no time, she refurnished it and transformed the structure into \"Miss Mylla's Saloon\", a 24-hour business offering a variety of services. Customers could enjoy a good drink served by any of the beautiful, scantily-clad waitresses \u2014her travel companions\u2014 or gamble in any of the tables, listening the music and talking. It was also an economic hotel. The waitresses also provided an undisclosed second service, euphemistically known as \"the work\", for reduced groups in the private rooms of the top floor. Burloo on his own provided the security with his mere, but constant, presence in the door; rarely he needed to take a ruffian out of the door.\n\nFrom the very first moment, the business thrived and Miss Mylla's Saloon became the busiest and most popular venture in the Center Sphere District \u2014 although Nyubuna Bulul's The Even Cut Sabacc Parlor and Casino just in front of the door provided a rival alternative in the form of only gambling. In little time, Miss Mylla had a need for more employees, whom she called \"her girls.\"\n\nThe courtesans doubled as waitress, with some of them preferring one activity over the other. Knowing that inebriated, overexcited customers could tend to overlook certain limits, Miss Mylla made sure that patrons treated \"her girls\" with due respect, and provided each of the girls with a knife \u2014 not to mention Burloo's attentive eye.\n\nMiss Mylla also encouraged her employees to make themselves a life beyond that. Whenever any of them wanted to leave, Miss Mylla arranged things to give that person an offworld education for other field and, in at least one case, marrying the fortunate girl with a Falleen prince. Those former employees always considered Mylla to be their guardian.\n\nAs of c. 29 BBY, several important citizens of the Landing were also regular patrons, including the Security Chief's Senior Second Grubber Vapps, the Security Chief Mix Liddell \u2014who had some kind of personal romatic relationship with Miss Mylla\u2014 and Guther Bartyn, mayor of the town council, Administrator of the local mines, owner of Bartyn Gourmet Delicacies and a usual of the top floor.\n\nAround that time, one of the working girls had decided to leave this field of activity, with Miss Mylla approvingly accepting that the Human woman had never been made for that. Miss Mylla arranged her retirement, sending her in the form of a package to a legitimate business partner of Miss Mylla in the remote Cape Regret.\n\nIn the times immediately after the public reappearance of the thought-extinct Menahuun species, two of Miss Mylla's girls disappeared along with their customer in the lowlands of Maw range. She admitted that it had happened before, but she was nevertheless worried.\n\nAt the same time, the shipments of Corellian brandy for the Saloon were being seized by corrupt officers of the spaceport security for their personal use. Miss Mylla suspected what was happening \u2014although she was blissfully unaware of the existence of an organize smuggling ring\u2014 but she refused to turn to Chief Lidell once again, as the case could put him in conflict with his own bosses.\n\nDue to a series of events, Lidell hired a group of outsiders as his new Seconds. He suggested them to live in Miss Mylla's Saloon, and offered to pay for the rooms \u2014 only.\n\n",
+        "section": "History[]",
+        "source": "https://starwars.fandom.com/wiki/Miss_Mylla%27s_Saloon",
+        "title": "Miss Mylla's Saloon",
+        "tokens": 802.0
+      }
+    },
+    {
+      "id": "8617",
+      "title": "Miss Mylla's Saloon",
+      "metadata": {
+        "categories": [
+          "Legends articles",
+          "Bartyn's Landing locations",
+          "Businesses",
+          "2 more",
+          "Entertainment",
+          "Hotels"
+        ],
+        "content": "# Miss Mylla's Saloon\n\nMiss Mylla's Saloon\n\n\nGeneral information\n\nLocation\nBartyn's Landing, Lamaredd\n\n\n\nChronological and political information\n\nAffiliation\nMiss Mylla\n\n\n[Source]\n\nMiss Mylla's Saloon was an entertainment house and inn in the city of Bartyn's Landing in Lamaredd. Owned and managed by the pretty and cunning Miss Mylla, it provided pleasure through several means and was the busiest locale in the Center Sphere District during the last decades of the Galactic Republic.\n\n",
+        "section": "Introduction",
+        "source": "https://starwars.fandom.com/wiki/Miss_Mylla%27s_Saloon",
+        "title": "Miss Mylla's Saloon",
+        "tokens": 108.0
+      }
+    }
+  ]
+}
