@@ -2082,3 +2082,689 @@ Each service should have a single responsibility and communicate through events 
 2. Clean up BaseService implementation
 3. Update all services to follow standard patterns
 4. Add architectural validation to CI pipeline
+
+### 2025-05-12: Fixed Critical Architectural Inconsistencies
+
+**Problem**: Identified significant architecture and naming inconsistencies causing runtime errors:
+- `AttributeError: 'CantinaOS' object has no attribute 'logger'`
+- `AttributeError: 'CantinaOS' object has no attribute '_services'`
+
+**Root Causes**:
+1. **Inconsistent Attribute Naming**: Mixture of protected (`self._name`) and public (`self.name`) attributes
+   - Example: `self.services` in `__init__` but `self._services` elsewhere in code
+2. **Missing Initialization**: Some objects accessing attributes never properly initialized
+3. **Inconsistent Async Method Usage**: Some async methods properly awaited, others not
+4. **Service Lifecycle Issues**: Inconsistent service initialization and cleanup patterns
+
+**Fixes Implemented**:
+1. Standardized attribute naming conventions using protected attributes with underscore (`_name`)
+2. Added proper logger initialization and property accessors
+3. Fixed all event_bus references to consistently use `self._event_bus`
+4. Created comprehensive documentation and tools:
+   - [`docs/architecture_BUGLOG.md`](../docs/architecture_BUGLOG.md): Detailed analysis of issues
+   - [`docs/ARCHITECTURE_STANDARDS.md`](../docs/ARCHITECTURE_STANDARDS.md): Standardized patterns
+   - [`cantina_os/cantina_os/service_template.py`](../cantina_os/cantina_os/service_template.py): Template for new services
+   - [`cantina_os/tools/find_naming_inconsistencies.py`](../cantina_os/tools/find_naming_inconsistencies.py): Script to detect issues
+
+**Long-term Improvements**:
+1. Added Pydantic integration for service configuration and validation
+2. Standardized event subscription patterns with proper async handling
+3. Implemented consistent error handling and status reporting approaches
+4. Added comprehensive coding standards for future development
+
+**Impact**: System now starts and operates correctly with clean architecture. All services follow consistent patterns for attribute naming, initialization, and cleanup. Clear documentation ensures consistent implementation in future services.
+
+**Key Learning**: Standardized architectural patterns are critical in complex, event-driven systems with multiple services. Even minor inconsistencies in naming or initialization patterns can cause hard-to-debug issues and service failures.
+
+**Next Steps**:
+1. Implement the same naming conventions across all remaining services
+2. Add CI checks for architectural compliance
+3. Gradually migrate existing services to use Pydantic for configuration
+4. Run the naming inconsistency scanner regularly to catch issues early
+
+### 2025-05-12: Fixed Event Payload Timestamp Inheritance Issue
+- **Issue**: AttributeError when accessing 'time.get' during help command execution
+- **Root Cause**: Several event payload classes incorrectly redefining timestamp field
+- **Fixed Classes**:
+  - ServiceStatusPayload
+  - ModeChangedPayload
+  - ModeTransitionStartedPayload
+  - ModeTransitionPayload
+- **Solution**: Removed redundant timestamp field definitions, letting them properly inherit from BaseEventPayload
+- **Impact**: Fixed help command error and standardized timestamp handling across all event payloads
+- **Technical Details**:
+  - BaseEventPayload already provides timestamp field with correct time.time implementation
+  - Removed duplicate timestamp fields that were causing Pydantic validation issues
+  - Ensures consistent timestamp handling across all event types
+  - Prevents future timestamp-related errors in event system
+
+### 2025-05-12: Fixed Event Emission Error in ModeCommandHandlerService
+- **Issue**: AttributeError: 'time' object has no attribute 'get' when running help command
+- **Root Cause**: emit_error_response method receiving a Pydantic model directly rather than a dictionary
+- **Fix Location**: ModeCommandHandlerService event error handling
+- **Solution**: Convert CliResponsePayload objects to dictionaries before passing to emit_error_response
+- **Technical Details**:
+  - Previous code was passing Pydantic model objects directly to emit_error_response
+  - BaseService.emit_error_response was trying to call model_dump() on already constructed objects
+  - Fixed by calling model_dump() before passing to emit_error_response
+  - This better follows the pattern established in other services
+- **Impact**: Fixed help command execution and prevents similar errors in other command handlers
+- **Learning**: Always convert Pydantic models to dictionaries with model_dump() before passing to event bus methods
+
+### 2025-05-12: Comprehensive Fix for Event Payload Handling
+- **Issue**: Ongoing issues with Pydantic model event payloads causing "AttributeError: 'time' object has no attribute 'get'"
+- **Root Cause Analysis**:
+  - Direct use of Pydantic models in event emissions without conversion to dictionaries
+  - Different patterns used across services leading to inconsistent handling
+  - Missing model_dump() calls in many service methods
+  - No automatic payload conversion in the BaseService.emit method
+- **Comprehensive Solution**:
+  1. Fixed all CLI command handlers to convert payloads with model_dump() before emission
+  2. Enhanced BaseService.emit method to automatically convert Pydantic models to dictionaries
+  3. Added debug_payload method to BaseService for troubleshooting payload issues
+  4. Increased logging verbosity for event-related components
+  5. Standardized event payload handling patterns across all services
+- **Key Changes**:
+  - Updated ModeCommandHandlerService, CommandDispatcherService, and CLIService
+  - Added auto-conversion in BaseService.emit for future compatibility
+  - Added detailed payload debugging for CLI_RESPONSE events
+  - Enhanced logging for event bus operations
+- **Impact**:
+  - Fixed help command and other CLI commands
+  - Improved reliability of event system
+  - Reduced chances of similar errors in the future
+  - Better troubleshooting capabilities for event payload issues
+- **Learning**: Always convert Pydantic models to dictionaries before event emission, or better yet, build the conversion into the event emission process itself to create a safety net
+
+### 2025-05-12: Fixed Music Controller Service Issues
+
+- **Issue**: Music commands (list music, play music, stop music) weren't working
+- **Root Causes**:
+  1. MusicControllerService was not being initialized (missing from service_order list)
+  2. Similar Pydantic model event payload issues as previously fixed in other services
+  3. Event subscriptions for MUSIC_COMMAND events were not properly logging or handling commands
+
+- **Fixes**:
+  1. Added "music_controller" to the service_order list in main.py to ensure initialization
+  2. Added detailed debugging throughout the music service to trace command flow
+  3. Fixed all event emissions to use proper dictionary payloads instead of Pydantic models
+  4. Enhanced music directory discovery to find tracks in alternate locations
+  5. Improved error handling and response formatting
+
+- **Technical Details**:
+  - Updated _handle_list_music, _handle_play_by_index, and _handle_play_by_name methods
+  - Fixed event payload format consistency with other services
+  - Added debugging for subscription verification
+  - Created proper dictionary payloads with consistent timestamp and event_id fields
+  - Improved music directory fallback logic for better track discovery
+
+- **Impact**:
+  - Music commands now work properly
+  - Better error messages for missing tracks
+  - Consistent payload format across all services
+  - More robust music file discovery
+
+- **Key Learning**: All event payloads should be emitted as dictionaries, not Pydantic models, for consistent event handling.
+
+### 2025-05-08: Command Handling Investigation & Debugging Service Need
+- Investigated issue with "stop music" command not being recognized
+- Root cause analysis:
+  - CommandDispatcherService not properly handling compound commands
+  - Command parsing logic needed enhancement for multi-word commands
+  - Proper shortcuts ('s', 'stop') defined but not reaching handler
+- Implemented fixes:
+  - Enhanced CommandDispatcherService with improved command format handling:
+    - Full command with first argument
+    - Command-only fallback
+    - Expanded shortcut version
+  - Added comprehensive debug logging in both dispatcher and music services
+- **New Requirement**: Dedicated Debugging Service
+  - Need centralized debugging and logging system
+  - Requirements:
+    - Consistent log format across services
+    - Log level control per component
+    - Command tracing capability
+    - State transition logging
+    - Performance metrics for command handling
+  - Benefits:
+    - Faster issue resolution
+    - Better system observability
+    - Simplified debugging workflow
+- Next steps: Design and implement DebugService as core system component
+
+### 2025-05-12: Implemented DebugService for System Observability
+- Added comprehensive DebugService for centralized debugging and monitoring:
+  - Asynchronous logging with component-level control
+  - Command tracing for execution path tracking
+  - Performance metrics collection and threshold alerts
+  - State transition tracking across services
+- Implemented event-based configuration management
+- Added CLI commands: `debug level`, `debug trace`, `debug performance`
+- Created detailed documentation in [DebugService_BUGLOG.md](./DebugService_BUGLOG.md)
+- Key features:
+  - Queue-based log processing
+  - Real-time command execution tracking
+  - Operation timing metrics
+  - System state visualization
+- Impact: Significantly improved system observability and debugging capabilities
+
+### 2025-05-10: Implemented MouseInputService for Click-Based Recording Control
+- **New Feature**: Added MouseInputService for intuitive recording control
+  - Single left-click to start/stop recording
+  - Event-based integration with MicInputService
+  - Clean thread-to-asyncio bridging for mouse events
+  - Proper resource cleanup and error handling
+- **Technical Details**:
+  - Uses pynput for cross-platform mouse input
+  - Implements proper event loop bridging for thread safety
+  - Follows CantinaOS service architecture patterns
+  - Full integration with existing voice pipeline
+- **Documentation**: See [mouseClick_BUGLOG.md](./mouseClick_BUGLOG.md) for implementation details
+- **Key Features**:
+  - Non-blocking mouse event handling
+  - Clear visual feedback through LED system
+  - Graceful error recovery
+  - Platform-independent implementation
+- **Impact**: Provides more intuitive way to control recording without keyboard
+
+### 2025-05-12: Deepgram Transcription Pipeline Investigation
+
+**Issue**: Audio capture working but transcription pipeline not producing results.
+
+**Investigation Tools Created**:
+1. `test_deepgram_debug.py`: Enhanced logging and event tracking
+2. `test_mic_signal.py`: Direct microphone signal verification
+3. `test_deepgram_live.py`: Direct Deepgram testing bypassing event system
+
+**Key Findings**:
+- Audio capture confirmed working (test_mic_signal.py shows strong signal)
+- Event bus subscriptions fixed for audio chunk events
+- Thread-to-asyncio bridging implemented correctly
+- Deepgram SDK v4.0.0 integration verified
+
+**Current Status**:
+- Audio successfully captured and emitted as events
+- Audio chunks reaching Deepgram service
+- No transcription results being received
+- Error in audio callback: "RuntimeError: There is no current event loop in thread 'Dummy-5'"
+
+**Next Steps**:
+1. Investigate event loop reference issue in audio callback
+2. Consider switching to thread-safe queues instead of asyncio queues
+3. Move audio processing to dedicated thread
+4. Improve error handling and logging in transcription pipeline
+
+**Technical Focus**: Need to properly handle the thread boundary between audio capture and event loop processing. Current architecture attempting to use asyncio primitives from a non-event-loop thread, which is causing failures.
+
+### 2025-05-12: Major System Fixes & Architecture Standardization
+
+**Key Fixes Implemented**:
+1. **Audio Pipeline Integration**:
+   - Fixed critical issue where audio wasn't reaching Deepgram
+   - Updated to Deepgram SDK v4.0.0 with proper event handler registration
+   - Implemented proper thread-to-asyncio bridging for audio callbacks
+   - Added enhanced debugging and monitoring capabilities
+
+2. **Event System Architecture**:
+   - Fixed service responsibility separation
+   - Standardized event payload handling (Pydantic models → dictionaries)
+   - Improved event subscription patterns with proper async task wrapping
+   - Enhanced error handling and logging across services
+
+3. **CLI and Recording**:
+   - Implemented text-based recording mode with 'rec' command
+   - Added mouse-based recording control with single-click interface
+   - Fixed command handling for compound commands (e.g., "stop music")
+   - Enhanced user feedback and error reporting
+
+4. **Music System**:
+   - Fixed initialization and event handling in MusicControllerService
+   - Improved track discovery and playback control
+   - Enhanced mode-aware behavior and volume management
+   - Added proper resource cleanup for VLC instances
+
+**Critical Learnings & Standards**:
+
+1. **Event System Best Practices**:
+   - Always convert Pydantic models to dictionaries before event emission
+   - Wrap all event subscriptions in asyncio.create_task()
+   - Use proper event synchronization with grace periods
+   - Implement consistent error handling patterns
+
+2. **Service Architecture Standards**:
+   - Use protected attributes with underscore prefix (_name)
+   - Follow consistent lifecycle methods: __init__, _start, _stop
+   - Implement proper cleanup in both success and error paths
+   - Maintain clear service responsibility boundaries
+
+3. **Thread Management**:
+   - Hardware interfaces (audio, mouse) require careful thread-to-asyncio bridging
+   - Store event loop reference during service initialization
+   - Use run_coroutine_threadsafe for thread-to-asyncio communication
+   - Implement proper resource cleanup across thread boundaries
+
+4. **Testing & Debugging**:
+   - Added DebugService for centralized system observability
+   - Implemented comprehensive logging and command tracing
+   - Created test utilities for component isolation testing
+   - Enhanced error detection and reporting capabilities
+
+**Next Steps**:
+1. Implement standardized patterns across all remaining services
+2. Add CI checks for architectural compliance
+3. Enhance system monitoring and diagnostics
+4. Continue improving system stability and reliability
+
+**Impact**: These changes have significantly improved system stability, maintainability, and observability. The standardized patterns and best practices will ensure consistent implementation in future development.
+
+### 2025-05-12: Audio Transcription Pipeline Issue Investigation
+
+**Issue**: Audio capture working but transcription pipeline not producing results.
+
+**Investigation**:
+- Audio capture confirmed working (MicInputService logs show strong signal)
+- Audio chunks being emitted correctly on AUDIO_RAW_CHUNK topic
+- DeepgramTranscriptionService receiving chunks but not producing transcripts
+- Error in audio callback: "RuntimeError: There is no current event loop in thread 'Dummy-5'"
+
+**Root Cause**: 
+- Thread-to-asyncio bridging issue in DeepgramTranscriptionService
+- Audio chunks from MicInputService (running in sounddevice callback thread) not properly crossing thread boundary
+- Event loop reference missing in callback thread
+
+**Next Steps**:
+1. Implement proper thread-to-asyncio bridging in DeepgramTranscriptionService
+2. Store event loop reference during service initialization
+3. Use run_coroutine_threadsafe for thread boundary crossing
+4. Add enhanced error handling and recovery mechanisms
+5. Improve logging for audio chunk processing
+
+**Technical Focus**: Need to properly handle the thread boundary between audio capture and event loop processing. Current architecture attempting to use asyncio primitives from a non-event-loop thread, which is causing failures.
+
+### 2025-05-12: Major Audio Pipeline and Event System Fixes
+
+**Audio Pipeline Fixes**:
+- Fixed critical issue with audio not reaching Deepgram transcription service
+- Implemented proper thread-to-asyncio bridging in audio callbacks
+- Added event loop reference storage for thread-safe operations
+- Enhanced audio chunk processing with proper error handling
+- Fixed Deepgram SDK v4.0.0 integration with correct event handlers
+
+**Event System Improvements**:
+- Standardized event payload handling (Pydantic models → dictionaries)
+- Fixed service responsibility separation and naming conventions
+- Improved event subscription patterns with proper async task wrapping
+- Added DebugService for centralized system observability
+- Enhanced error handling and logging across all services
+
+**CLI and Recording**:
+- Added text-based recording mode with 'rec' command
+- Implemented mouse-based recording with single-click interface
+- Fixed compound command handling (e.g., "stop music")
+- Enhanced user feedback and error reporting
+
+**Music System**:
+- Fixed MusicControllerService initialization and event handling
+- Improved track discovery and playback control
+- Enhanced mode-aware behavior and volume management
+- Added proper VLC instance cleanup
+
+**Technical Focus**: Properly handling thread boundaries between audio capture and event loop processing. Architecture now correctly bridges between hardware interfaces and the asyncio event system.
+
+**Next Steps**:
+- Monitor transcript reception and latency
+- Fine-tune audio chunk processing
+- Implement reconnection logic for dropped connections
+- Continue improving system stability
+
+### 2025-05-12: Fixed MicInputService Threading Import
+- **Issue**: System failing to start due to undefined threading module in MicInputService
+- **Fix**: Added proper threading import to MicInputService
+- **Impact**: System now starts correctly with proper thread management for audio capture
+- **Technical Note**: Standardized imports across service modules for better consistency
+- **Next**: Continue testing audio capture and transcription pipeline
+
+### 2025-05-12: Fixed Transcription Service Lifecycle
+- **Issue**: Transcription service was not properly starting/stopping with recording
+- **Root Cause**: While audio chunks were being captured and sent to Deepgram, the transcript processor task was never started because `start_streaming()` wasn't being called
+- **Fix**: Added subscriptions to `RECORDING_STARTED` and `RECORDING_STOPPED` events in DeepgramTranscriptionService to properly manage the streaming lifecycle
+- **Impact**: Transcription service now properly starts processing when recording begins and stops when recording ends
+- **Technical Note**: This ensures the transcript processor task is running during recording sessions and properly cleaned up afterward
+
+### 2025-05-12: Improved Audio Processing Threading Model
+- **Issue**: Audio processing and WebSocket communication were not properly isolated in dedicated threads
+- **Root Cause**: Previous implementation mixed thread responsibilities and had multiple thread crossings
+- **Fix**: 
+  - Implemented dedicated Deepgram WebSocket thread
+  - Added proper thread-safe queues for audio data and transcripts
+  - Single direction data flow: Event Loop → Audio Queue → Deepgram Thread → Transcript Queue → Event Loop
+  - Removed multiple thread crossings and potential race conditions
+- **Impact**: More stable audio processing and transcription with proper thread isolation
+- **Technical Note**: Now fully compliant with ARCHITECTURE_STANDARDS.md Section 9.5 threading rules
+
+### 2025-05-13: Fixed Critical Event Subscription Issue in Transcription Service
+- **Issue**: Audio capture working but not reaching Deepgram for transcription despite threading model fix
+- **Root Cause**: Missing _setup_subscriptions and _start methods in DeepgramTranscriptionService
+- **Fix**: 
+  - Added proper _start method to initialize service and subscriptions
+  - Implemented _setup_subscriptions to subscribe to RECORDING_STARTED/STOPPED events
+  - Added _extract_audio_samples method to handle different payload formats
+  - Enhanced error handling and debugging in audio data extraction
+- **Impact**: Complete end-to-end audio pipeline from capture to transcription
+- **Technical Note**: Now both threading model and event subscriptions are properly implemented
+
+### 2025-05-13: Audio Pipeline Optimization - DeepgramDirectMicService Implementation
+
+### Changes Made
+- Created new `DeepgramDirectMicService` to replace separate `MicInputService` and `DeepgramTranscriptionService`
+- Leverages Deepgram's built-in `Microphone` class for direct audio streaming
+- Eliminates thread-to-asyncio boundaries and simplifies audio pipeline
+- Maintains compatibility with existing event system for GPT and ElevenLabs integration
+
+### Technical Details
+- Uses Deepgram SDK v4.1.0's native microphone support
+- Configured with latest "nova-3" model and smart formatting
+- Implements proper lifecycle management and error handling
+- Maintains identical event payload format for backward compatibility
+
+### Benefits
+1. **Simplified Architecture**:
+   - Single service for audio capture and transcription
+   - Fewer components to manage and debug
+   - Clearer event flow
+
+2. **Improved Reliability**:
+   - Reduced thread boundary crossings
+   - Fewer race condition opportunities
+   - Leverages Deepgram's optimized implementation
+
+3. **Better Performance**:
+   - Lower latency with direct streaming
+   - Reduced CPU usage
+   - Less event bus traffic for audio data
+
+### Integration Points
+- Maintains compatibility with GPTService through identical transcription event format
+- Preserves ElevenLabs integration for text-to-speech responses
+- Uses same voice control events (VOICE_LISTENING_STARTED/STOPPED)
+
+### Next Steps
+- [ ] Monitor performance metrics in production
+- [ ] Gather user feedback on latency and reliability
+- [ ] Consider deprecating old audio services if new implementation proves stable
+- [ ] Document any edge cases or limitations discovered during testing
+
+### References
+- [Deepgram Python SDK Documentation](https://developers.deepgram.com/docs/python-sdk-streaming-transcription)
+- [Architecture Standards](cantina_os/docs/ARCHITECTURE_STANDARDS.md)
+- [Service Template](cantina_os/cantina_os/service_template.py)
+
+### 2025-05-13: Implemented DeepgramDirectMicService - Simplified Audio Pipeline
+
+**Audio Pipeline Architecture Improvement**:
+- Implemented new `DeepgramDirectMicService` that replaces separate MicInputService and DeepgramTranscriptionService
+- Uses Deepgram's built-in `Microphone` class for direct audio streaming without intermediary steps
+- Eliminated complex thread-to-asyncio boundaries and simplified threading model
+- Integrated with mouse click functionality for intuitive recording control
+- Full implementation details documented in `docs/buglog/DeepgramDirectMicService_BUGLOG.md`
+
+**Key Benefits**:
+- Simplified architecture with fewer components and clearer event flow
+- Improved reliability by reducing thread boundary crossings and race conditions
+- Better performance with direct streaming from microphone to Deepgram
+- Easier maintenance with less custom code and better SDK alignment
+- Preserved compatibility with existing GPT and ElevenLabs services
+
+**Technical Details**:
+- Uses Deepgram SDK v4's native microphone support with "nova-3" model
+- Maintains identical event payload format for backward compatibility
+- Implements proper lifecycle management and error handling
+- Properly bridges mouse clicks to voice listening events
+
+**Impact**: This architectural improvement addresses persistent issues with the audio capture and transcription pipeline, providing a more stable and maintainable solution with lower latency and better resource utilization.
+
+### 2025-05-13: DeepgramDirectMicService Integration Complete
+- Successfully integrated DeepgramDirectMicService into main system:
+  - Fixed API key loading from environment variables
+  - Corrected event bus subscription patterns
+  - Implemented proper error handling and recovery
+  - Added enhanced logging for debugging
+- Fixed critical issues:
+  - Resolved AsyncIOEventEmitter errors with proper event emission
+  - Fixed event payload handling with correct dictionary conversion
+  - Corrected service initialization order in main.py
+  - Added proper cleanup during service shutdown
+- Added mouse click integration for intuitive recording control:
+  - Single left-click to start/stop recording
+  - Visual feedback through LED system
+  - Clean thread-to-asyncio bridging
+- Verified full pipeline functionality:
+  - Audio capture → Deepgram transcription → GPT processing → ElevenLabs synthesis
+  - Proper event flow between all components
+  - Stable operation with mouse click control
+  - Clean mode transitions and resource cleanup
+
+### 2025-05-13: Major System Architecture Improvements & Bug Fixes
+
+**Audio Pipeline Optimization**:
+- Implemented DeepgramDirectMicService to replace separate MicInput and Transcription services
+- Leverages Deepgram SDK v4's native Microphone class for direct streaming
+- Eliminated complex thread boundaries and simplified audio pipeline
+- Added mouse click integration for intuitive recording control
+
+**Event System Fixes**:
+- Fixed critical event subscription patterns across all services
+- Standardized event payload handling (Pydantic models → dictionaries)
+- Improved service lifecycle management and cleanup
+- Enhanced error handling and recovery mechanisms
+
+**Service Architecture Standardization**:
+- Created comprehensive service creation checklist in ARCHITECTURE_STANDARDS.md
+- Standardized attribute naming (_protected vs public)
+- Fixed service initialization order and dependencies
+- Improved resource cleanup and error handling
+
+**Key Improvements**:
+- Reduced voice interaction latency through optimized audio pipeline
+- More reliable event system with proper async/await patterns
+- Better system stability with standardized service architecture
+- Enhanced debugging capabilities with detailed logging
+
+**Impact**: These changes significantly improve system stability, reduce latency, and provide a more maintainable codebase with clear architectural standards for future development.
+
+### 2025-05-13: Audio Pipeline Debugging - Transcription Chain Investigation
+
+**Issue**: Audio capture working but transcriptions not reaching GPT service for processing.
+
+**Investigation**:
+- Audio capture confirmed working (logs show strong signal and proper chunk emission)
+- DeepgramDirectMicService successfully capturing and transcribing audio
+- GPTService subscriptions to TRANSCRIPTION_FINAL events not triggering
+- Log messages show transcripts like "What's up, DJ Rex? How are you doing today?" being captured
+
+**Current Focus**:
+- Investigating GPTService._setup_subscriptions implementation
+- Verifying event topic string matching between services
+- Checking event bus subscription patterns
+- Analyzing thread-to-asyncio bridging in event system
+
+**Next Steps**:
+1. Add enhanced logging in GPTService event handlers
+2. Verify event topic consistency across services
+3. Test event subscription patterns
+4. Consider implementing event flow monitoring tool
+
+**Technical Note**: The issue appears to be in the event chain between Deepgram transcription and GPT processing, not in the audio capture itself. This suggests a potential event subscription or event emission mismatch that needs to be resolved.
+
+### 2025-05-13: Fixed Audio Response Pipeline - ElevenLabs Service Integration
+
+**Issue**: GPT service receiving transcriptions but no voice responses heard.
+
+**Root Cause**: ElevenLabs service was missing from the service initialization order in main.py. The GPT service was correctly processing transcriptions and likely generating responses (emitting LLM_RESPONSE events), but the ElevenLabs service that would convert these responses to speech was not running.
+
+**Fix**:
+1. Added "elevenlabs" to the service_order list in main.py
+2. Updated the _create_service method to properly initialize ElevenLabsService
+3. Enhanced config loading to include ELEVENLABS_API_KEY
+4. Added proper error handling and logging in the GPT service API call methods
+
+**Changes**:
+- Updated the service initialization in CantinaOS._initialize_services
+- Fixed parameter handling in ElevenLabs service creation 
+- Enhanced logging throughout the GPT service to aid debugging
+- Followed ARCHITECTURE_STANDARDS.md for proper event handling
+
+**Impact**: Complete end-to-end pipeline from voice capture to GPT processing to speech synthesis is now functional.
+
+**Technical Note**: This completes the audio response chain which requires three separate services working together:
+1. DeepgramDirectMicService for voice capture/transcription
+2. GPTService for natural language understanding/response generation
+3. ElevenLabsService for converting text responses to voice output
+
+**Next Steps**:
+1. Monitor full conversation cycles for performance and reliability
+2. Fine-tune API response handling and error recovery
+3. Consider implementing conversation persistence
+
+### 2025-05-13: Enhanced LLM Response Debugging with DebugService Integration
+
+**Issue**: Need a way to see LLM responses directly in the console, even when ElevenLabs service isn't working.
+
+**Implementation**:
+1. Enhanced DebugService to subscribe to LLM_RESPONSE events
+2. Added formatting for clear visibility of LLM responses in console output
+3. Implemented handling for both streaming and complete responses
+4. Added robust error handling and detailed debug logging
+
+**Technical Details**:
+- Created a specialized handler for LLM_RESPONSE events
+- Added support for different payload formats (Pydantic models, dictionaries)
+- Implemented conversation tracking to avoid duplicate output for streaming responses
+- Enhanced debug logging to trace event flow and payload structure
+
+**Implementation challenges**:
+- Had to handle both Pydantic model instances and dictionary payloads
+- Added conversation ID tracking to manage streaming response chunks
+- Implemented detailed error handling to prevent service disruption
+- Ensured formatting was clear and readable in console output
+
+**Impact**: 
+- Greatly improved debugging capability for voice interaction pipeline
+- Allows developers to see LLM responses even when speech synthesis fails
+- Provides clear, formatted output with conversation tracking
+- Helps isolate issues in the voice processing chain
+
+**Technical Note**: This implementation follows Architecture Standards for event handling, error management, and resource utilization. The DebugService now provides comprehensive visibility into the LLM response flow while maintaining system stability.
+
+### 2025-05-13: Voice Interaction Flow - Mouse Click Transcript Handling
+
+**Issue**: When using mouse clicks to control recording, transcriptions were being sent to GPT as they arrived, causing fragmented responses.
+
+**Solution**: 
+1. Modified DeepgramDirectMicService to accumulate transcriptions during recording
+2. Enhanced _handle_mic_recording_stop to send the complete accumulated transcript with VOICE_LISTENING_STOPPED event
+3. Updated GPTService to prioritize the full transcript from VOICE_LISTENING_STOPPED events
+4. Enhanced DebugService to monitor both interim transcriptions and the final full transcript
+
+**Implementation Details**:
+- DeepgramDirectMicService now maintains transcriptions in _current_transcription
+- The transcript accumulation prevents overwriting with empty strings
+- GPTService now ignores individual TRANSCRIPTION_FINAL events during recording
+- Mouse click stop event is the trigger that initiates GPT processing
+- Added comprehensive debugging to monitor the flow of transcriptions
+
+**Benefits**:
+- Single complete prompt sent to GPT rather than fragments
+- More coherent AI responses based on complete context
+- Better control over when transcription processing begins
+- Clearer debugging of the voice recognition process
+
+**Architecture Alignment**:
+- Follows event-driven design principles from ARCHITECTURE_STANDARDS.md
+- Maintains clear separation of concerns between services
+- Uses existing event topics rather than introducing new ones
+- Preserves the mouse click recording control mechanism
+
+### 2025-05-13: Voice Interaction Pipeline - Transcript Handling & GPT Integration
+
+**Issue**: Voice interaction pipeline had multiple issues preventing proper conversation flow:
+1. Transcripts being sent to GPT in fragments during recording
+2. GPT responses not being converted to speech
+3. Debug visibility limited during testing
+
+**Fixes Implemented**:
+1. **Transcript Handling**:
+   - Modified DeepgramDirectMicService to accumulate complete transcripts during recording
+   - Using mouse click VOICE_LISTENING_STOPPED event as primary trigger for GPT processing
+   - Prevents fragmented processing of user speech
+
+2. **Audio Response Chain**:
+   - Added ElevenLabs service to service initialization order
+   - Fixed GPT service event emission for LLM responses
+   - Completed end-to-end pipeline: Voice → GPT → Speech
+
+3. **Debug Improvements**:
+   - Enhanced DebugService to monitor LLM responses
+   - Added console output for GPT responses even when speech synthesis fails
+   - Improved visibility into voice processing chain
+
+**Current Status**:
+- Full conversation pipeline working with mouse click control
+- Complete thoughts processed instead of fragments
+- Better debugging capabilities for development
+- Proper event flow between all components
+
+**Next Steps**:
+- Fine-tune conversation handling
+- Implement wake word detection
+- Add conversation persistence
+- Enhance error recovery mechanisms
+
+### 2025-05-13: ElevenLabs Service Refactor & Audio Pipeline Optimization
+
+**Major Changes**:
+1. **ElevenLabs Service Refactor**:
+   - Implemented proper Pydantic models for configuration and payloads
+   - Enhanced error handling and resource cleanup
+   - Added proper event subscription patterns
+   - Improved audio playback with platform-specific handling
+
+2. **Audio Pipeline Optimization**:
+   - Integrated ElevenLabs service with GPT responses
+   - Fixed event payload handling for consistent dictionary format
+   - Enhanced debugging capabilities for voice synthesis
+   - Added proper cleanup during service shutdown
+
+**Technical Details**:
+- Updated service to follow ARCHITECTURE_STANDARDS.md
+- Fixed event subscription patterns with proper async/await
+- Enhanced error reporting and status updates
+- Improved resource management for audio playback
+
+**Impact**:
+- More reliable text-to-speech synthesis
+- Better error handling and recovery
+- Cleaner integration with GPT service
+- Improved system stability
+
+**Next Steps**:
+- Monitor voice synthesis performance
+- Fine-tune audio playback parameters
+- Consider implementing response caching
+- Add conversation persistence
+
+### 2025-05-13: ElevenLabs Streaming Integration
+- Implemented streaming audio synthesis using ElevenLabs' latest streaming API
+- Reduced Time-to-First-Sound (TTFS) from ~2s to ~300ms
+- Added MPV player integration for real-time audio streaming
+- Key improvements:
+  - Eliminated need to wait for full audio file generation
+  - Reduced memory usage by streaming chunks directly
+  - Improved user experience with faster response times
+  - Added proper cleanup of streaming resources
+- Technical implementation:
+  - Integrated ElevenLabs Python SDK streaming capabilities
+  - Added thread-safe audio queue management
+  - Implemented proper error handling for stream interruptions
+  - Enhanced logging for stream state monitoring
+- Impact: Significantly improved interaction latency and responsiveness

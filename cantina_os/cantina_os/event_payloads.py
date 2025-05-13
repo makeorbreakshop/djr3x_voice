@@ -7,7 +7,7 @@ Each payload inherits from BaseEventPayload to ensure consistent metadata across
 
 import time
 import uuid
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, Union
 from enum import Enum
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -43,11 +43,22 @@ class ServiceStatus(str, Enum):
 
 class LogLevel(str, Enum):
     """Enumeration of log levels for service status messages."""
+    DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
-    DEBUG = "DEBUG"
+
+    @property
+    def value(self) -> int:
+        """Get the numeric value for level comparison."""
+        return {
+            LogLevel.DEBUG: 0,
+            LogLevel.INFO: 1,
+            LogLevel.WARNING: 2,
+            LogLevel.ERROR: 3,
+            LogLevel.CRITICAL: 4
+        }[self]
 
 class ServiceStatusPayload(BaseEventPayload):
     """Payload for service status update events."""
@@ -55,10 +66,6 @@ class ServiceStatusPayload(BaseEventPayload):
     status: ServiceStatus = Field(..., description="Current status of the service")
     message: Optional[str] = Field(None, description="Optional status message")
     severity: Optional[LogLevel] = Field(None, description="Optional severity level")
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now().isoformat(),
-        description="ISO format timestamp of the status update"
-    )
 
 class AudioChunkPayload(BaseEventPayload):
     """Payload for raw audio chunk events."""
@@ -89,6 +96,7 @@ class SpeechGenerationRequestPayload(BaseEventPayload):
     model_id: Optional[str] = Field(None, description="ID of the TTS model to use (uses service default if None)")
     stability: Optional[float] = Field(None, description="Voice stability setting (0.0-1.0)")
     similarity_boost: Optional[float] = Field(None, description="Voice similarity boost setting (0.0-1.0)")
+    speed: Optional[float] = Field(None, description="Speech speed multiplier (0.5-2.0)")
     
 class SpeechGenerationCompletePayload(BaseEventPayload):
     """Payload for speech generation completion events."""
@@ -184,20 +192,12 @@ class ModeChangedPayload(BaseEventPayload):
     mode: str = Field(..., description="The new mode")
     previous_mode: Optional[str] = Field(None, description="The previous mode")
     message: Optional[str] = Field(None, description="Optional message about the mode change")
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now().isoformat(),
-        description="ISO format timestamp of the mode change"
-    )
 
 class ModeTransitionStartedPayload(BaseEventPayload):
     """Payload for mode transition started events."""
     target_mode: str = Field(..., description="The target mode to transition to")
     current_mode: str = Field(..., description="The current mode transitioning from")
     message: Optional[str] = Field(None, description="Optional message about the transition")
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now().isoformat(),
-        description="ISO format timestamp of the transition start"
-    )
 
 class CliCommandPayload(BaseEventPayload):
     """Payload for CLI command events."""
@@ -240,7 +240,29 @@ class ModeTransitionPayload(BaseEventPayload):
     new_mode: str = Field(..., description="The new system mode")
     status: str = Field(..., description="The transition status (started/complete)")
     message: Optional[str] = Field(None, description="Optional message about the transition")
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now().isoformat(),
-        description="ISO format timestamp of the transition"
-    ) 
+
+class DebugLogPayload(BaseEventPayload):
+    level: LogLevel
+    component: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+class CommandTracePayload(BaseEventPayload):
+    command: str
+    service: str
+    execution_time_ms: float
+    status: str
+    details: Optional[Dict[str, Any]] = None
+
+class PerformanceMetricPayload(BaseEventPayload):
+    metric_name: str
+    value: float
+    unit: str
+    component: str
+    details: Optional[Dict[str, Any]] = None
+
+class DebugConfigPayload(BaseEventPayload):
+    component: str
+    log_level: LogLevel
+    enable_tracing: bool = True
+    enable_metrics: bool = True 

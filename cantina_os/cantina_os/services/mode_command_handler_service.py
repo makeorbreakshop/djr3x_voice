@@ -89,13 +89,17 @@ class ModeCommandHandlerService(BaseService):
                         error_msg,
                         severity=LogLevel.ERROR
                     )
+                    
+                    # Fix: Convert the CliResponsePayload to dict before passing to emit_error_response
+                    response_payload = CliResponsePayload(
+                        message=error_msg,
+                        is_error=True,
+                        command=None
+                    ).model_dump()
+                    
                     await self.emit_error_response(
                         EventTopics.CLI_RESPONSE,
-                        CliResponsePayload(
-                            message=error_msg,
-                            is_error=True,
-                            command=None
-                        )
+                        response_payload
                     )
                     return
                 
@@ -122,6 +126,7 @@ class ModeCommandHandlerService(BaseService):
                 response_msg = f"Current System Mode: {current_mode.name}"
                 
             elif command == "help":
+                self.logger.debug("Generating help text for help command")
                 response_msg = self._get_help_text()
                 
             elif command == "reset":
@@ -132,12 +137,21 @@ class ModeCommandHandlerService(BaseService):
             # Only send a response for commands that don't trigger a mode change
             # Mode change responses will be handled by _handle_mode_change
             if response_msg:
+                self.logger.debug(f"Sending response for command '{command}': {response_msg[:30]}...")
+                
+                # Create the CliResponsePayload
+                cli_response = CliResponsePayload(
+                    message=response_msg,
+                    command=command
+                )
+                
+                # Important: Convert the Pydantic model to a dictionary with model_dump()
+                cli_response_dict = cli_response.model_dump()
+                
+                # Emit the dictionary, not the model directly
                 await self.emit(
                     EventTopics.CLI_RESPONSE,
-                    CliResponsePayload(
-                        message=response_msg,
-                        command=command
-                    )
+                    cli_response_dict
                 )
             # No need for the else case with default confirmation message
                 
@@ -149,13 +163,17 @@ class ModeCommandHandlerService(BaseService):
                 error_msg,
                 severity=LogLevel.ERROR
             )
+            
+            # Fix: Convert the CliResponsePayload to dict before passing to emit_error_response
+            response_payload = CliResponsePayload(
+                message=error_msg,
+                is_error=True,
+                command=command if 'command' in locals() else None
+            ).model_dump()
+            
             await self.emit_error_response(
                 EventTopics.CLI_RESPONSE,
-                CliResponsePayload(
-                    message=error_msg,
-                    is_error=True,
-                    command=command if 'command' in locals() else None
-                )
+                response_payload
             )
             
     async def _handle_mode_change(self, payload: Dict[str, Any]) -> None:
@@ -184,11 +202,11 @@ class ModeCommandHandlerService(BaseService):
                     response_msg = (
                         f"Interactive voice mode engaged. Using microphone: {mic_info['name']} "
                         f"({mic_info['max_input_channels']} channels)\n"
-                        "Type 'rec' to start recording, then 'done' when finished speaking."
+                        "Click once to start recording, then click again to stop."
                     )
                 except Exception as e:
                     self.logger.warning(f"Could not get microphone info: {e}")
-                    response_msg = "Interactive voice mode engaged. Type 'rec' to start recording, then 'done' when finished speaking."
+                    response_msg = "Interactive voice mode engaged. Click once to start recording, then click again to stop."
             
             elif new_mode_name == SystemMode.AMBIENT.name:
                 response_msg = "Ambient show mode activated. Music will play continuously."
@@ -198,12 +216,21 @@ class ModeCommandHandlerService(BaseService):
             
             # Send response if we have one
             if response_msg:
+                self.logger.debug(f"Sending mode change response for {new_mode_name}: {response_msg[:30]}...")
+                
+                # Create the CliResponsePayload
+                cli_response = CliResponsePayload(
+                    message=response_msg,
+                    command=f"mode_change_{new_mode_name.lower()}"
+                )
+                
+                # Important: Convert the Pydantic model to a dictionary with model_dump()
+                cli_response_dict = cli_response.model_dump()
+                
+                # Emit the dictionary, not the model directly
                 await self.emit(
                     EventTopics.CLI_RESPONSE,
-                    CliResponsePayload(
-                        message=response_msg,
-                        command=f"mode_change_{new_mode_name.lower()}"
-                    )
+                    cli_response_dict
                 )
                 
         except Exception as e:
@@ -234,13 +261,22 @@ class ModeCommandHandlerService(BaseService):
             
             # Send error message
             error_msg = f"Error changing mode to {new_mode}: {error}"
+            self.logger.debug(f"Sending mode transition error: {error_msg}")
+            
+            # Create the CliResponsePayload
+            cli_response = CliResponsePayload(
+                message=error_msg,
+                is_error=True,
+                command=f"mode_change_{new_mode.lower()}"
+            )
+            
+            # Important: Convert the Pydantic model to a dictionary with model_dump()
+            cli_response_dict = cli_response.model_dump()
+            
+            # Emit the dictionary, not the model directly
             await self.emit(
                 EventTopics.CLI_RESPONSE,
-                CliResponsePayload(
-                    message=error_msg,
-                    is_error=True,
-                    command=f"mode_change_{new_mode.lower()}"
-                )
+                cli_response_dict
             )
                 
         except Exception as e:

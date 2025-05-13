@@ -173,6 +173,57 @@ class BaseService:
             }
         )
 
+    def debug_payload(self, payload: Any, prefix: str = "") -> None:
+        """Debug helper for event payloads.
+        
+        Args:
+            payload: The payload to debug
+            prefix: Optional prefix for the log message
+        """
+        try:
+            # Get payload type information
+            payload_type = type(payload).__name__
+            
+            # Check if it's a Pydantic model
+            is_pydantic = hasattr(payload, "model_dump") or hasattr(payload, "dict")
+            
+            # Try to get some payload content for debugging
+            if isinstance(payload, dict):
+                payload_keys = list(payload.keys())
+                self.logger.debug(
+                    f"{prefix}Payload is a dict with keys: {payload_keys}"
+                )
+                
+                # Check for timestamp format
+                if "timestamp" in payload:
+                    self.logger.debug(
+                        f"{prefix}timestamp value: {payload['timestamp']} (type: {type(payload['timestamp']).__name__})"
+                    )
+                    
+            elif is_pydantic:
+                # It's a Pydantic model
+                model_attrs = dir(payload)
+                field_names = [attr for attr in model_attrs if not attr.startswith("_") and not callable(getattr(payload, attr))]
+                self.logger.debug(
+                    f"{prefix}Payload is a Pydantic model ({payload_type}) with fields: {field_names}"
+                )
+                
+                # Check for timestamp format if it exists
+                if hasattr(payload, "timestamp"):
+                    timestamp = getattr(payload, "timestamp")
+                    self.logger.debug(
+                        f"{prefix}timestamp value: {timestamp} (type: {type(timestamp).__name__})"
+                    )
+                    
+            else:
+                # Some other type
+                self.logger.debug(
+                    f"{prefix}Payload is type {payload_type}, content: {str(payload)[:100]}"
+                )
+                
+        except Exception as e:
+            self.logger.debug(f"{prefix}Error debugging payload: {e}")
+
     async def emit(self, event: str, payload: Any) -> None:
         """Emit an event on the event bus.
         
@@ -182,6 +233,19 @@ class BaseService:
         """
         if not self._event_bus:
             raise RuntimeError("Event bus not set")
+        
+        # Debug payload if it's going to CLI_RESPONSE
+        if event == "cli_response":
+            self.debug_payload(payload, prefix="emit: ")
+        
+        # Convert Pydantic models to dictionaries if needed
+        if hasattr(payload, "model_dump"):
+            self.logger.debug(f"Converting Pydantic model to dict for event {event}")
+            payload = payload.model_dump()
+        elif hasattr(payload, "dict"):
+            self.logger.debug(f"Converting Pydantic model to dict using .dict() for event {event}")
+            payload = payload.dict()
+        
         self._event_bus.emit(event, payload)
 
     async def subscribe(self, event: str, handler: Callable) -> None:
@@ -240,4 +304,57 @@ class BaseService:
             try:
                 self.logger.error(f"Failed payload: {payload}")
             except:
-                self.logger.error("Could not serialize error payload") 
+                self.logger.error("Could not serialize error payload")
+
+    async def debug_log(self, level: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """Send a debug log message via the event system."""
+        await self.emit(
+            EventTopics.DEBUG_LOG,
+            {
+                "level": level,
+                "component": self._service_name,
+                "message": message,
+                "details": details
+            }
+        )
+
+    async def debug_trace_command(self, command: str, execution_time_ms: float, 
+                                status: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """Trace a command execution via the event system."""
+        await self.emit(
+            EventTopics.DEBUG_COMMAND_TRACE,
+            {
+                "command": command,
+                "service": self._service_name,
+                "execution_time_ms": execution_time_ms,
+                "status": status,
+                "details": details
+            }
+        )
+
+    async def debug_performance_metric(self, metric_name: str, value: float, 
+                                    unit: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """Report a performance metric via the event system."""
+        await self.emit(
+            EventTopics.DEBUG_PERFORMANCE,
+            {
+                "metric_name": metric_name,
+                "value": value,
+                "unit": unit,
+                "component": self._service_name,
+                "details": details
+            }
+        )
+
+    async def debug_state_transition(self, from_state: str, to_state: str, 
+                                   details: Optional[Dict[str, Any]] = None) -> None:
+        """Report a state transition for debugging."""
+        await self.emit(
+            EventTopics.DEBUG_STATE_TRANSITION,
+            {
+                "component": self._service_name,
+                "from_state": from_state,
+                "to_state": to_state,
+                "details": details
+            }
+        ) 

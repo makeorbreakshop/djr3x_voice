@@ -90,6 +90,8 @@ class EventTopics:
     # Transcription Events
     TRANSCRIPTION_FINAL = "/transcription/final"
     TRANSCRIPTION_INTERIM = "/transcription/interim"
+    TRANSCRIPTION_ERROR = "/transcription/error"
+    TRANSCRIPTION_METRICS = "/transcription/metrics"
     
     # Tool Execution Events
     TOOL_REGISTRATION_REQUEST = "/tools/registration/request"
@@ -109,4 +111,27 @@ class EventTopics:
     # Speech synthesis events
     SPEECH_SYNTHESIS_REQUESTED = "/speech/synthesis/requested"
     SPEECH_SYNTHESIS_COMPLETED = "/speech/synthesis/completed"
-    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up" 
+    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up"
+    
+    # Debug topics
+    DEBUG_LOG = "/debug/log"
+    DEBUG_COMMAND_TRACE = "/debug/command/trace"
+    DEBUG_PERFORMANCE = "/debug/performance"
+    DEBUG_STATE_TRANSITION = "/debug/state/transition"
+    DEBUG_CONFIG = "/debug/config"
+
+    # New topics from the code block
+    SERVICE_STATUS = "service.status"
+    VOICE_LISTENING_STARTED = "voice.listening.started"
+    VOICE_LISTENING_STOPPED = "voice.listening.stopped"
+    VOICE_TRANSCRIPTION_INTERIM = "voice.transcription.interim"
+    VOICE_TRANSCRIPTION_FINAL = "voice.transcription.final"
+    DEBUG_LOG = "debug.log"
+    DEBUG_COMMAND_TRACE = "debug.command.trace"
+    DEBUG_PERFORMANCE = "debug.performance"
+    DEBUG_STATE_TRANSITION = "debug.state.transition"
+    DEBUG_CONFIG = "debug.config"
+
+    # Mouse Input Events
+    MIC_RECORDING_START = "/mic/recording/start"
+    MIC_RECORDING_STOP = "/mic/recording/stop" 

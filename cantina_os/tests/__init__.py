@@ -11,4 +11,4 @@ This package contains tests for the CantinaOS system, including:
 CantinaOS test package.
 """
 
-"""Test package for CantinaOS.""" 
+"""Tests package for CantinaOS.""" 

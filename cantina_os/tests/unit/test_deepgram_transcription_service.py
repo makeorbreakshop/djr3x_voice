@@ -1,227 +1,308 @@
 """
 Tests for DeepgramTranscriptionService
 
-These tests verify the functionality of the Deepgram transcription service,
-including initialization, websocket connection handling, and transcription events.
+These tests validate that the DeepgramTranscriptionService correctly handles various
+response patterns from Deepgram, properly recovers from errors, and maintains the
+closed-loop audio processing architecture.
 """
 
 import asyncio
 import pytest
-import json
-from unittest.mock import patch, AsyncMock, MagicMock
-import aiohttp
-from aiohttp import WSMessage, WSMsgType
 import time
+from unittest.mock import AsyncMock, MagicMock, patch, call
+import numpy as np
 
 from cantina_os.services.deepgram_transcription_service import DeepgramTranscriptionService
 from cantina_os.event_topics import EventTopics
-from cantina_os.event_payloads import ServiceStatus, TranscriptionTextPayload
+from cantina_os.event_payloads import ServiceStatus
+
+# Sample response formats to test robustness
+OBJECT_STYLE_RESULT = MagicMock()
+OBJECT_STYLE_RESULT.is_final = True
+OBJECT_STYLE_RESULT.channel.alternatives = [MagicMock()]
+OBJECT_STYLE_RESULT.channel.alternatives[0].transcript = "This is object style"
+
+DICT_STYLE_RESULT = {
+    "type": "Results",
+    "channel": {
+        "alternatives": [
+            {"transcript": "This is dictionary style"}
+        ]
+    },
+    "is_final": True
+}
+
+ALT_DICT_STYLE_RESULT = {
+    "channel": {
+        "alternatives": [
+            {"transcript": "This is alternative dictionary style"}
+        ]
+    },
+    "is_final": True
+}
 
 @pytest.fixture
-def mock_deepgram_client():
+def event_bus():
+    """Create a mock event bus for testing."""
+    bus = MagicMock()
+    bus.emit = AsyncMock()
+    return bus
+
+@pytest.fixture
+def config():
+    """Create test configuration."""
+    return {
+        "DEEPGRAM_API_KEY": "test_api_key",
+        "DEEPGRAM_MODEL": "test-model",
+        "DEEPGRAM_LANGUAGE": "en-US",
+        "SAMPLE_RATE": 16000,
+        "CHANNELS": 1,
+        "MAX_RECONNECT_ATTEMPTS": 2,
+        "SILENCE_THRESHOLD": 1.0
+    }
+
+@pytest.fixture
+def logger():
+    """Create a mock logger."""
+    return MagicMock()
+
+@pytest.fixture
+def mock_client():
     """Create a mock Deepgram client."""
-    with patch("cantina_os.services.deepgram_transcription_service.DeepgramClient") as mock_client:
-         # Create a mock connection
-         mock_connection = Mock()
-         mock_client.return_value.listen.transcription.live.return_value = mock_connection
-         
-         yield mock_client
+    client = MagicMock()
+    connection = MagicMock()
+    client.listen.websocket.v.return_value = connection
+    return client, connection
+
+@pytest.fixture
+def service(event_bus, config, logger, mock_client):
+    """Create a DeepgramTranscriptionService with mocks."""
+    service = DeepgramTranscriptionService(
+        event_bus=event_bus,
+        config=config,
+        logger=logger
+    )
+    
+    # Setup necessary mocks
+    client, connection = mock_client
+    service._client = client
+    service._connection = connection
+    service.emit = AsyncMock()
+    service._emit_status = AsyncMock()
+    
+    return service
 
 @pytest.mark.asyncio
-async def test_deepgram_service_initialization(event_bus, test_config, mock_deepgram_client):
-    """Test service initialization."""
-    mock_client, _ = mock_deepgram_client
+async def test_initialize_success(service, mock_client):
+    """Test successful initialization."""
+    client, connection = mock_client
     
-    service = DeepgramTranscriptionService(event_bus, test_config)
+    with patch('deepgram.DeepgramClient', return_value=client):
+        await service._initialize()
     
-    # Verify initial state
-    assert service.service_name == "deepgram_transcription"
-    assert not service.is_started
-    assert service.status == ServiceStatus.INITIALIZING
+    # Verify client and connection setup
+    assert service._client is not None
+    assert service._connection is not None
     
-    # Start service
-    await service.start()
-    
-    # Verify started state
-    assert service.is_started
-    assert service.status == ServiceStatus.RUNNING
-    
-    # Verify Deepgram client was created
-    mock_client.assert_called_once_with(test_config["DEEPGRAM_API_KEY"])
-    
-    # Stop service
-    await service.stop()
-    assert not service.is_started
-
-@pytest.mark.asyncio
-async def test_streaming_lifecycle(event_bus, test_config, mock_deepgram_client):
-    """Test streaming start/stop cycle."""
-    _, mock_connection = mock_deepgram_client
-    
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
-    
-    # Start streaming
-    await service.start_streaming()
-    assert service._is_streaming is True
-    assert service._connection is mock_connection
-    
-    # Verify event handlers were registered
-    assert mock_connection.on.call_count >= 5  # At least 5 event handlers
+    # Verify event handlers were set up
+    assert connection.on.call_count >= 4  # At least 4 event handlers
     
     # Verify connection was started
-    mock_connection.start.assert_called_once()
+    assert connection.start.called
     
-    # Stop streaming
-    await service.stop_streaming()
-    assert service._is_streaming is False
-    mock_connection.finish.assert_called_once()
-    
-    await service.stop()
+    # Verify error counter was reset
+    assert service._errors == 0
 
 @pytest.mark.asyncio
-async def test_audio_chunk_handling(event_bus, test_config, mock_deepgram_client):
-    """Test handling of audio chunks."""
-    _, mock_connection = mock_deepgram_client
+async def test_initialize_failure(service, mock_client, logger):
+    """Test initialization failure handling."""
+    client, connection = mock_client
     
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
+    # Simulate failure
+    client.listen.websocket.v.side_effect = Exception("Test connection failure")
     
-    # Create test audio data
-    audio_chunk = {
-        "samples": b'test_audio_data',
-        "timestamp": time.time(),
-        "sample_rate": 16000,
-        "channels": 1
-    }
+    with patch('deepgram.DeepgramClient', return_value=client):
+        with pytest.raises(Exception):
+            await service._initialize()
     
-    # Send audio chunk
-    await service._handle_audio_chunk(audio_chunk)
+    # Verify error counter was incremented
+    assert service._errors > 0
     
-    # Verify streaming was started and audio was sent
-    assert service._is_streaming is True
-    mock_connection.send.assert_called_once_with(audio_chunk["samples"])
-    
-    await service.stop()
+    # Verify error was logged
+    assert any("Failed to initialize" in str(args[0]) for args, _ in logger.error.call_args_list)
 
 @pytest.mark.asyncio
-async def test_transcript_handling(event_bus, test_config, mock_deepgram_client):
-    """Test handling of transcript events."""
-    _, mock_connection = mock_deepgram_client
+async def test_on_transcript_object_style(service, event_bus):
+    """Test transcript handling with object-style results."""
+    # Setup
+    service._current_conversation_id = "test_conv_id"
     
-    # Track emitted events
-    transcript_events = []
+    # Use the loop trick to allow asyncio.run_coroutine_threadsafe to work in tests
+    loop = asyncio.get_event_loop()
     
-    def collect_event(event):
-        transcript_events.append(event)
+    with patch('asyncio.get_event_loop', return_value=loop):
+        # Call the handler with object-style result
+        service._on_transcript(None, OBJECT_STYLE_RESULT)
+        
+        # Allow the task to complete
+        await asyncio.sleep(0.1)
     
-    event_bus.on(EventTopics.AUDIO_TRANSCRIPTION_FINAL, collect_event)
+    # Verify event was emitted with the correct parameters
+    service.emit.assert_called_once()
+    topic, payload = service.emit.call_args[0]
     
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
-    await service.start_streaming()
-    
-    # Generate mock transcript data
-    transcript_data = {
-        "channel": {
-            "alternatives": [
-                {
-                    "transcript": "This is a test transcript",
-                    "confidence": 0.95
-                }
-            ]
-        },
-        "is_final": True,
-        "start": time.time() - 0.5  # 500ms ago
-    }
-    
-    # Call transcript handler directly
-    service._on_transcript(None, json.dumps(transcript_data))
-    
-    # Give time for async events to process
-    await asyncio.sleep(0.1)
-    
-    # Verify transcript event was emitted
-    assert len(transcript_events) == 1
-    event = transcript_events[0]
-    assert event["text"] == "This is a test transcript"
-    assert event["source"] == "deepgram"
-    assert event["is_final"] is True
-    assert event["confidence"] == 0.95
-    assert event["conversation_id"] is not None
-    
-    await service.stop()
+    assert topic == EventTopics.TRANSCRIPTION_FINAL
+    assert payload["text"] == "This is object style"
+    assert payload["is_final"] is True
+    assert payload["conversation_id"] == "test_conv_id"
 
 @pytest.mark.asyncio
-async def test_conversation_id_propagation(event_bus, test_config, mock_deepgram_client):
-    """Test conversation ID generation and propagation."""
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
+async def test_on_transcript_dict_style(service, event_bus):
+    """Test transcript handling with dictionary-style results."""
+    # Setup
+    service._current_conversation_id = "test_conv_id"
     
-    # Initially no conversation ID
-    assert service._current_conversation_id is None
+    # Use the loop trick to allow asyncio.run_coroutine_threadsafe to work in tests
+    loop = asyncio.get_event_loop()
     
-    # Starting streaming should generate a conversation ID
-    await service.start_streaming()
-    assert service._current_conversation_id is not None
-    first_id = service._current_conversation_id
+    with patch('asyncio.get_event_loop', return_value=loop):
+        # Call the handler with dict-style result
+        service._on_transcript(None, DICT_STYLE_RESULT)
+        
+        # Allow the task to complete
+        await asyncio.sleep(0.1)
     
-    # Resetting conversation ID should generate a new one
+    # Verify event was emitted with the correct parameters
+    service.emit.assert_called_once()
+    topic, payload = service.emit.call_args[0]
+    
+    assert topic == EventTopics.TRANSCRIPTION_FINAL
+    assert payload["text"] == "This is dictionary style"
+    assert payload["is_final"] is True
+
+@pytest.mark.asyncio
+async def test_on_transcript_alt_dict_style(service, event_bus):
+    """Test transcript handling with alternative dictionary-style results."""
+    # Setup
+    service._current_conversation_id = "test_conv_id"
+    
+    # Use the loop trick to allow asyncio.run_coroutine_threadsafe to work in tests
+    loop = asyncio.get_event_loop()
+    
+    with patch('asyncio.get_event_loop', return_value=loop):
+        # Call the handler with alternative dict-style result
+        service._on_transcript(None, ALT_DICT_STYLE_RESULT)
+        
+        # Allow the task to complete
+        await asyncio.sleep(0.1)
+    
+    # Verify event was emitted with the correct parameters
+    service.emit.assert_called_once()
+    topic, payload = service.emit.call_args[0]
+    
+    assert topic == EventTopics.TRANSCRIPTION_FINAL
+    assert payload["text"] == "This is alternative dictionary style"
+    assert payload["is_final"] is True
+
+@pytest.mark.asyncio
+async def test_handle_audio_chunk_success(service):
+    """Test successful audio chunk handling."""
+    # Setup
+    service._is_streaming = True
+    service._connection.send = MagicMock()
+    
+    # Create test payload
+    audio_data = np.zeros((1024, 1), dtype=np.int16)
+    payload = MagicMock()
+    payload.samples = audio_data.tobytes()
+    
+    # Call handler
+    await service._handle_audio_chunk(payload)
+    
+    # Verify audio was sent to Deepgram
+    assert service._connection.send.called
+    assert service._connection.send.call_args[0][0] == payload.samples
+    
+    # Verify error counter reset
+    assert service._errors == 0
+
+@pytest.mark.asyncio
+async def test_handle_audio_chunk_error(service):
+    """Test audio chunk error handling."""
+    # Setup
+    service._is_streaming = True
+    service._connection.send.side_effect = Exception("Test send error")
+    service._attempt_reconnect = AsyncMock()
+    
+    # Create test payload
+    audio_data = np.zeros((1024, 1), dtype=np.int16)
+    payload = MagicMock()
+    payload.samples = audio_data.tobytes()
+    
+    # Call handler 6 times to exceed error threshold
+    for _ in range(6):
+        await service._handle_audio_chunk(payload)
+    
+    # Verify error counter incremented
+    assert service._errors > 5
+    
+    # Verify reconnect was attempted after exceeding threshold
+    assert service._attempt_reconnect.called
+
+@pytest.mark.asyncio
+async def test_attempt_reconnect_success(service):
+    """Test successful reconnection attempt."""
+    # Setup mocks
+    service._cleanup = AsyncMock()
+    service._initialize = AsyncMock()
+    service._reconnect_attempts = 0
+    service._max_reconnect_attempts = 3
+    
+    # Call reconnect
+    await service._attempt_reconnect()
+    
+    # Verify cleanup and initialize were called
+    assert service._cleanup.called
+    assert service._initialize.called
+    
+    # Verify reconnect counter was incremented then reset
+    assert service._reconnect_attempts == 0  # Reset to 0 after successful reconnect
+    
+    # Verify status was updated
+    assert service._emit_status.called
+    status_call = service._emit_status.call_args_list[-1]
+    assert status_call[0][0] == ServiceStatus.RUNNING
+
+@pytest.mark.asyncio
+async def test_attempt_reconnect_max_retries(service):
+    """Test reconnection max retries handling."""
+    # Setup mocks
+    service._cleanup = AsyncMock()
+    service._initialize = AsyncMock()
+    service._initialize.side_effect = Exception("Test reconnect failure")
+    service._reconnect_attempts = service._max_reconnect_attempts
+    
+    # Call reconnect
+    await service._attempt_reconnect()
+    
+    # Verify status was updated to ERROR
+    assert service._emit_status.called
+    status_call = service._emit_status.call_args_list[-1]
+    assert status_call[0][0] == ServiceStatus.ERROR
+    
+    # Verify initialize was not called (we exceeded max attempts)
+    assert not service._initialize.called
+
+@pytest.mark.asyncio
+async def test_reset_conversation_id(service):
+    """Test conversation ID reset."""
+    # Setup
+    service._current_conversation_id = None
+    
+    # Reset the conversation ID
     service.reset_conversation_id()
-    assert service._current_conversation_id != first_id
     
-    await service.stop()
-
-@pytest.mark.asyncio
-async def test_error_handling(event_bus, test_config, mock_deepgram_client):
-    """Test handling of connection errors."""
-    _, mock_connection = mock_deepgram_client
-    
-    # Make send() raise an exception
-    mock_connection.send.side_effect = Exception("Test connection error")
-    
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
-    
-    # Patch the reconnection method to avoid actual delays
-    with patch.object(service, '_handle_connection_error', 
-                     return_value=asyncio.Future()) as mock_reconnect:
-        mock_reconnect.return_value.set_result(None)
-        
-        # Send audio chunk to trigger error
-        await service._handle_audio_chunk({
-            "samples": b'test_audio_data',
-            "timestamp": time.time()
-        })
-        
-        # Verify reconnection was attempted
-        mock_reconnect.assert_called_once()
-    
-    await service.stop()
-
-@pytest.mark.asyncio
-async def test_latency_stats(event_bus, test_config, mock_deepgram_client):
-    """Test latency statistics tracking."""
-    service = DeepgramTranscriptionService(event_bus, test_config)
-    await service.start()
-    
-    # Initially empty
-    stats = service.get_latency_stats()
-    assert stats["count"] == 0
-    
-    # Add some test measurements
-    now = time.time()
-    service._latency_measurements = [
-        {"audio_start": now - 0.5, "transcript_time": now, "latency": 0.5, "is_final": True},
-        {"audio_start": now - 0.3, "transcript_time": now, "latency": 0.3, "is_final": False},
-        {"audio_start": now - 0.7, "transcript_time": now, "latency": 0.7, "is_final": True}
-    ]
-    
-    # Check stats
-    stats = service.get_latency_stats()
-    assert stats["count"] == 3
-    assert stats["min"] == 0.3
-    assert stats["max"] == 0.7
-    assert stats["avg"] == 0.5
-    
-    await service.stop() 
+    # Verify ID was set and is a string
+    assert service._current_conversation_id is not None
+    assert isinstance(service._current_conversation_id, str)
+    assert len(service._current_conversation_id) > 0 

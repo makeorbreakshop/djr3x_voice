@@ -15,6 +15,9 @@ from .yoda_mode_manager_service import YodaModeManagerService
 from .voice_manager_service import VoiceManagerService
 from .mode_change_sound_service import ModeChangeSoundService
 from .music_controller_service import MusicControllerService
+from .debug_service import DebugService
+from .mouse_input_service import MouseInputService
+from .deepgram_direct_mic_service import DeepgramDirectMicService
 
 __all__ = [
     "MicInputService",
@@ -26,5 +29,8 @@ __all__ = [
     "YodaModeManagerService",
     "VoiceManagerService",
     "ModeChangeSoundService",
-    "MusicControllerService"
+    "MusicControllerService",
+    "DebugService",
+    "MouseInputService",
+    "DeepgramDirectMicService"
 ] 

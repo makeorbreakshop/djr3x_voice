@@ -32,7 +32,8 @@ class ServiceTemplate(BaseService):
         self,
         event_bus,
         config: Optional[Dict[str, Any]] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        name: str = "service_template"
     ):
         """Initialize the service.
         
@@ -40,9 +41,10 @@ class ServiceTemplate(BaseService):
             event_bus: Event bus instance
             config: Optional configuration dictionary
             logger: Optional logger instance
+            name: Service name for logging
         """
         # Always use a consistent service name for logging
-        super().__init__("service_name", event_bus, logger)
+        super().__init__(name, event_bus, logger)
         
         # Store configuration
         self._config = config or {}

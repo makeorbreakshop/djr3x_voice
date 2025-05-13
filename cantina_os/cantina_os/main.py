@@ -18,15 +18,17 @@ from .event_topics import EventTopics
 from .event_payloads import ServiceStatus, LogLevel
 from .utils.audio_utils import play_audio_file
 from .services import (
-    MicInputService, 
-    DeepgramTranscriptionService, 
+    # MicInputService,  # Commented out as we're replacing with DeepgramDirectMicService
+    # DeepgramTranscriptionService,  # Commented out as we're replacing with DeepgramDirectMicService
+    DeepgramDirectMicService,  # New service for direct microphone access
     GPTService,
     ElevenLabsService,
     EyeLightControllerService,
     CLIService,
     YodaModeManagerService,
     ModeChangeSoundService,
-    MusicControllerService
+    MusicControllerService,
+    MouseInputService
 )
 from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
@@ -51,9 +53,13 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logging.root.addHandler(handler)
 
-# Set specific logger levels
-logging.getLogger('cantina_os.deepgram_transcription').setLevel(logging.DEBUG)
-logging.getLogger('cantina_os.mic_input').setLevel(logging.DEBUG)
+# Set specific logger levels for detailed debugging
+logging.getLogger('cantina_os.mode_command_handler').setLevel(logging.DEBUG)
+logging.getLogger('cantina_os.command_dispatcher').setLevel(logging.DEBUG)
+logging.getLogger('cantina_os.base_service').setLevel(logging.DEBUG)
+logging.getLogger('cantina_os.cli').setLevel(logging.DEBUG)
+# Keep these less verbose to avoid too much noise
+logging.getLogger('cantina_os.deepgram_direct_mic').setLevel(logging.INFO)  # Updated logger name
 
 class CantinaOS:
     """
@@ -62,19 +68,96 @@ class CantinaOS:
     
     def __init__(self, config: Dict[str, Any] = None):
         """Initialize the CantinaOS system."""
-        self.event_bus = AsyncIOEventEmitter()
-        self.services: Dict[str, BaseService] = {}
+        self._event_bus = AsyncIOEventEmitter()
+        self._services: Dict[str, BaseService] = {}
         self._shutdown_event = asyncio.Event()
-        self._load_config()
-        self._config = config or {}
+        self._logger = logging.getLogger("cantina_os.main")
+        self._load_config()  # Load values from .env file
+        
+        # Merge provided config with loaded values instead of replacing them
+        if config:
+            self._config.update(config)  # Update with any provided values, preserving loaded ones
+        
+    @property
+    def event_bus(self):
+        """Get the event bus."""
+        return self._event_bus
+        
+    @property
+    def logger(self):
+        """Get the logger for this application."""
+        return self._logger
         
     def _load_config(self) -> None:
         """Load configuration from environment variables."""
+        # Load environment variables from .env file if present
         load_dotenv()
+        
+        # Initialize config dictionary
+        self._config = {}
+        
+        # Get Deepgram API key
+        deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+        if deepgram_api_key:
+            self._config["DEEPGRAM_API_KEY"] = deepgram_api_key
+            self.logger.info(f"Using Deepgram API key: {deepgram_api_key[:5]}...{deepgram_api_key[-5:]}")
+        else:
+            self.logger.warning("DEEPGRAM_API_KEY not found in environment")
+        
+        # Get OpenAI API key
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key:
+            self._config["OPENAI_API_KEY"] = openai_api_key
+            self.logger.info(f"Using OpenAI API key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
+        else:
+            self.logger.warning("OPENAI_API_KEY not found in environment")
+        
+        # Get ElevenLabs API key
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        if elevenlabs_api_key:
+            self._config["ELEVENLABS_API_KEY"] = elevenlabs_api_key
+            self.logger.info(f"Using ElevenLabs API key: {elevenlabs_api_key[:5]}...{elevenlabs_api_key[-5:]}")
+        else:
+            self.logger.warning("ELEVENLABS_API_KEY not found in environment")
+        
+        # Get OpenAI model
+        openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        self._config["OPENAI_MODEL"] = openai_model
         
         # Set log level from environment or default to INFO
         log_level = os.getenv("LOG_LEVEL", "INFO")
         logging.getLogger("cantina_os").setLevel(log_level)
+        
+        # Load API keys and configuration into self._config
+        self._config = {
+            "DEEPGRAM_API_KEY": os.getenv("DEEPGRAM_API_KEY", ""),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
+            "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
+            "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
+            "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
+            "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
+        }
+        
+        # Log loaded configuration (masking API keys for security)
+        self.logger.info("Loaded configuration from environment")
+        if self._config["DEEPGRAM_API_KEY"]:
+            key = self._config["DEEPGRAM_API_KEY"]
+            self.logger.info(f"Using Deepgram API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+        else:
+            self.logger.warning("No Deepgram API key found in environment")
+        
+        if self._config["OPENAI_API_KEY"]:
+            key = self._config["OPENAI_API_KEY"]
+            self.logger.info(f"Using OpenAI API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+        else:
+            self.logger.warning("No OpenAI API key found in environment")
+        
+        if self._config["ELEVENLABS_API_KEY"]:
+            key = self._config["ELEVENLABS_API_KEY"]
+            self.logger.info(f"Using ElevenLabs API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+        else:
+            self.logger.warning("No ElevenLabs API key found in environment")
         
     async def _register_commands(self, dispatcher: CommandDispatcherService) -> None:
         """Register command handlers with the dispatcher.
@@ -82,6 +165,8 @@ class CantinaOS:
         Args:
             dispatcher: The command dispatcher service
         """
+        self.logger.info("Registering commands with dispatcher")
+        
         # Mode commands
         await dispatcher.register_command(
             "engage",
@@ -117,6 +202,7 @@ class CantinaOS:
         )
         
         # Music commands
+        self.logger.info("Registering music commands")
         await dispatcher.register_command(
             "list music",
             "music_controller",
@@ -132,6 +218,7 @@ class CantinaOS:
             "music_controller",
             EventTopics.MUSIC_COMMAND
         )
+        self.logger.info("Music commands registered")
         
         # Help command
         await dispatcher.register_command(
@@ -140,22 +227,41 @@ class CantinaOS:
             EventTopics.MODE_COMMAND
         )
         
+        # Debug commands
+        await dispatcher.register_command(
+            "debug level",
+            "debug",
+            "/debug/command"
+        )
+        await dispatcher.register_command(
+            "debug trace",
+            "debug",
+            "/debug/command"
+        )
+        await dispatcher.register_command(
+            "debug performance",
+            "debug",
+            "/debug/command"
+        )
+        
+        self.logger.info("Command registration complete")
+        
     async def _initialize_services(self) -> None:
         """Initialize all services."""
-        self.logger.info("EyeLightControllerService running in mock mode (no hardware)")
-        
-        # Dictionary to hold initialized services
-        self._services = {}
+        self.logger.info("Initializing services")
         
         # Define the service initialization order
         service_order = [
             "mode_manager",
             "command_dispatcher",
             "mode_command_handler",
-            "mic_input",
-            "transcription",
+            "mouse_input",  # Keep mouse input service for click control
+            "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
+            "elevenlabs",  # Add ElevenLabs service to convert LLM responses to speech
             "mode_change_sound",
+            "music_controller",
+            "debug",  # Add debug service for LLM response logging
             "cli"
         ]
         
@@ -225,6 +331,16 @@ class CantinaOS:
             
             # Initialize services
             await self._initialize_services()
+            
+            # Register commands with the command dispatcher
+            self.logger.info("Registering commands")
+            command_dispatcher = self._services.get("command_dispatcher")
+            if command_dispatcher:
+                await self._register_commands(command_dispatcher)
+                self.logger.info("Commands registered successfully")
+            else:
+                self.logger.error("Cannot register commands - command_dispatcher service not found")
+                
             logger.info("CantinaOS system initialized successfully")
             
             # Play startup sound once all services are initialized
@@ -235,11 +351,18 @@ class CantinaOS:
                 "startours_ding.mp3"
             )
             
+            # Add debug event listener for TRANSCRIPTION_FINAL events
+            async def debug_transcription_handler(payload):
+                logger.info(f"DEBUG EVENT MONITOR - Received TRANSCRIPTION_FINAL event: {str(payload)[:200]}...")
+            
+            self._event_bus.on(EventTopics.TRANSCRIPTION_FINAL, debug_transcription_handler)
+            logger.info(f"Added debug monitor for TRANSCRIPTION_FINAL events - topic value: '{str(EventTopics.TRANSCRIPTION_FINAL)}'")
+            
             if os.path.exists(startup_sound_path):
                 logger.info("Playing startup sound")
                 await play_audio_file(startup_sound_path, blocking=False)
                 # Emit a system event to notify about startup sound
-                self.event_bus.emit(
+                self._event_bus.emit(
                     EventTopics.SYSTEM_STARTUP,
                     {"message": "System fully initialized, startup sound played"}
                 )
@@ -256,7 +379,7 @@ class CantinaOS:
                     logger.info("Playing startup sound (alternate path)")
                     await play_audio_file(alternate_path, blocking=False)
                     # Emit a system event to notify about startup sound
-                    self.event_bus.emit(
+                    self._event_bus.emit(
                         EventTopics.SYSTEM_STARTUP,
                         {"message": "System fully initialized, startup sound played"}
                     )
@@ -276,64 +399,73 @@ class CantinaOS:
             logger.info("CantinaOS system shutdown complete")
             
     def _create_service(self, service_name: str):
-        """Create a service instance by name.
-        
-        Args:
-            service_name: The name of the service to create
-            
-        Returns:
-            The service instance
-        """
-        # Load environment variables for service configuration
-        config = {
-            "DEEPGRAM_API_KEY": os.getenv("DEEPGRAM_API_KEY"),
-            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
-            "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY"),
-            "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
-            "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
-            "GPT_MODEL": os.getenv("GPT_MODEL", "gpt-4o"),
-            "SYSTEM_PROMPT": os.getenv("SYSTEM_PROMPT", 
-                "You are DJ R3X, a helpful and enthusiastic Star Wars droid DJ assistant."),
-            "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-            "ELEVENLABS_MODEL_ID": os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2"),
-            "MODE_CHANGE_GRACE_PERIOD_MS": int(os.getenv("MODE_CHANGE_GRACE_PERIOD_MS", "100")),
-            "CLI_MAX_HISTORY": int(os.getenv("CLI_MAX_HISTORY", "100"))
-        }
-        
-        # Create and return the appropriate service
+        """Create a service instance based on the service name."""
         if service_name == "mode_manager":
-            from .services.yoda_mode_manager_service import YodaModeManagerService
-            return YodaModeManagerService(self.event_bus, config, self.logger)
+            return YodaModeManagerService(self._event_bus)
             
         elif service_name == "command_dispatcher":
-            from .services.command_dispatcher_service import CommandDispatcherService
-            return CommandDispatcherService(self.event_bus, config, self.logger)
+            return CommandDispatcherService(self._event_bus)
             
         elif service_name == "mode_command_handler":
-            from .services.mode_command_handler_service import ModeCommandHandlerService
-            # Get the mode manager service
+            # Get reference to mode manager service
             mode_manager = self._services.get("mode_manager")
-            return ModeCommandHandlerService(self.event_bus, mode_manager, config, self.logger)
+            if not mode_manager:
+                raise RuntimeError("ModeManagerService must be initialized before ModeCommandHandlerService")
+            return ModeCommandHandlerService(self._event_bus, mode_manager)
             
-        elif service_name == "mic_input":
-            from .services.mic_input_service import MicInputService
-            return MicInputService(self.event_bus, config, self.logger)
+        elif service_name == "mouse_input":
+            return MouseInputService(self._event_bus)
             
-        elif service_name == "transcription":
-            from .services.deepgram_transcription_service import DeepgramTranscriptionService
-            return DeepgramTranscriptionService(self.event_bus, config, self.logger)
+        elif service_name == "deepgram_direct_mic":
+            return DeepgramDirectMicService(
+                self._event_bus,
+                config={
+                    "DEEPGRAM_API_KEY": self._config["DEEPGRAM_API_KEY"],
+                    "METRICS_INTERVAL": 1.0
+                }
+            )
             
         elif service_name == "gpt":
-            from .services.gpt_service import GPTService
-            return GPTService(self.event_bus, config, self.logger)
+            return GPTService(
+                self._event_bus,
+                config={
+                    "OPENAI_API_KEY": self._config["OPENAI_API_KEY"],
+                    "OPENAI_MODEL": self._config["OPENAI_MODEL"]
+                }
+            )
             
         elif service_name == "mode_change_sound":
-            from .services.mode_change_sound_service import ModeChangeSoundService
-            return ModeChangeSoundService(self.event_bus, config, self.logger)
+            return ModeChangeSoundService(self._event_bus)
+            
+        elif service_name == "music_controller":
+            # Use the correct music directory path relative to the package
+            music_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "cantina_os",
+                "assets",
+                "music"
+            )
+            return MusicControllerService(self._event_bus, music_dir=music_dir)
+            
+        elif service_name == "debug":
+            from .debug_service import DebugService
+            # Create debug service with default configuration
+            return DebugService(
+                event_bus=self._event_bus,
+                config={
+                    "default_log_level": LogLevel.INFO,
+                    "component_log_levels": {
+                        "gpt_service": LogLevel.DEBUG,  # Set GPT service to DEBUG level
+                        "elevenlabs_service": LogLevel.DEBUG  # Set ElevenLabs service to DEBUG level
+                    },
+                    "trace_enabled": True,
+                    "metrics_enabled": True,
+                    "log_file": None  # Set to a path if you want file logging
+                }
+            )
             
         elif service_name == "cli":
-            from .services.cli_service import CLIService
-            return CLIService(self.event_bus, config, self.logger)
+            return CLIService(self._event_bus)
             
         elif service_name == "eye_light_controller":
             from .services.eye_light_controller_service import EyeLightControllerService
@@ -342,7 +474,7 @@ class CantinaOS:
             serial_port = os.getenv("ARDUINO_SERIAL_PORT", None)
             
             return EyeLightControllerService(
-                self.event_bus,
+                self._event_bus,
                 serial_port=serial_port,
                 baud_rate=int(os.getenv("ARDUINO_BAUD_RATE", "115200")),
                 mock_mode=mock_mode
@@ -355,31 +487,25 @@ class CantinaOS:
             playback_method_str = os.getenv("AUDIO_PLAYBACK_METHOD", "auto").lower()
             if playback_method_str == "auto":
                 try:
-                    import sounddevice as sd
+                    import sounddevice
                     playback_method = SpeechPlaybackMethod.SOUNDDEVICE
                 except ImportError:
-                    self.logger.info("Sounddevice not available, falling back to system audio playback")
                     playback_method = SpeechPlaybackMethod.SYSTEM
             elif playback_method_str == "sounddevice":
                 playback_method = SpeechPlaybackMethod.SOUNDDEVICE
             else:
                 playback_method = SpeechPlaybackMethod.SYSTEM
-            
+                
             return ElevenLabsService(
-                event_bus=self.event_bus,
-                api_key=config.get("ELEVENLABS_API_KEY"),
-                voice_id=config.get("ELEVENLABS_VOICE_ID"),
-                model_id=config.get("ELEVENLABS_MODEL_ID"),
-                playback_method=playback_method,
-                stability=float(os.getenv("ELEVENLABS_STABILITY", "0.71")),
-                similarity_boost=float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.5"))
-            )
-            
-        elif service_name == "music_controller":
-            from .services.music_controller_service import MusicControllerService
-            return MusicControllerService(
-                self.event_bus, 
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")
+                event_bus=self._event_bus,
+                config={
+                    "ELEVENLABS_API_KEY": self._config["ELEVENLABS_API_KEY"],
+                    "VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+                    "MODEL_ID": os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2"),
+                    "PLAYBACK_METHOD": playback_method
+                },
+                name="elevenlabs_service",
+                logger=logging.getLogger("cantina_os.elevenlabs_service")
             )
             
         else:

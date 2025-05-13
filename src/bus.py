@@ -7,6 +7,11 @@ from typing import Any, Dict, Optional, Callable, Coroutine
 from pyee.asyncio import AsyncIOEventEmitter
 import asyncio
 import inspect
+import logging
+
+from cantina_os.event_topics import EventTopics
+
+logger = logging.getLogger(__name__)
 
 class SystemMode(Enum):
     """System operation modes for DJ R3X."""

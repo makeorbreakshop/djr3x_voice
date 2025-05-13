@@ -10,10 +10,10 @@ import logging
 import queue
 import sounddevice as sd
 import numpy as np
+import threading
+import time
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
-from threading import Thread, Event
-import time
 
 from ..base_service import BaseService
 from ..event_topics import EventTopics
@@ -33,13 +33,6 @@ class AudioConfig:
     blocksize: int = 1024  # Samples per block
     latency: float = 0.1   # Device latency in seconds
 
-class AudioChunkPayload(BaseEventPayload):
-    """Payload for raw audio chunk events."""
-    samples: bytes  # Raw audio samples as bytes
-    timestamp: float  # Capture timestamp
-    sample_rate: int  # Sample rate in Hz
-    channels: int  # Number of channels
-    dtype: str  # NumPy dtype string
 
 class MicInputService(BaseService):
     """
@@ -66,14 +59,22 @@ class MicInputService(BaseService):
         
         # Audio capture state
         self._stream: Optional[sd.InputStream] = None
-        self._audio_queue = asyncio.Queue(maxsize=100)  # Use asyncio.Queue instead of threading.Queue
-        self._stop_event = Event()
-        self._capture_thread: Optional[Thread] = None
+        self._audio_queue = asyncio.Queue(maxsize=100)
+        self._stop_flag = threading.Event()
         self._is_capturing = False
         self._processing_task: Optional[asyncio.Task] = None
         
-        # Store the current event loop for use in the audio callback
-        self._loop = asyncio.get_event_loop()
+        # Store the event loop for thread-safe operations
+        self._event_loop = asyncio.get_event_loop()
+        
+        # Error tracking
+        self._errors = 0
+        self._max_errors = 10
+        self._paused_due_to_errors = False
+        
+        # Statistics
+        self._chunks_processed = 0
+        self._processing_start_time = 0
         
     def _load_config(self, config: Dict[str, Any]) -> AudioConfig:
         """Load audio configuration from provided dict or environment."""
@@ -87,8 +88,6 @@ class MicInputService(BaseService):
         
     async def _start(self) -> None:
         """Initialize audio resources on service start."""
-        # Update loop reference to ensure we're using the correct loop
-        self._loop = asyncio.get_running_loop()
         await self._initialize()
         self._setup_subscriptions()
         self.logger.info("MicInputService started and subscribed to voice events")
@@ -96,18 +95,22 @@ class MicInputService(BaseService):
     async def _initialize(self) -> None:
         """Initialize audio resources."""
         try:
+            # Reset error counter
+            self._errors = 0
+            self._paused_due_to_errors = False
+            
             # Verify audio device is available
             devices = sd.query_devices()
             if not devices:
                 error_msg = "No audio devices found"
                 self.logger.error(error_msg)
-                self._emit_status(ServiceStatus.ERROR, error_msg)
+                await self._emit_status(ServiceStatus.ERROR, error_msg)
                 raise ValueError(error_msg)
             
             if self._config.device_index >= len(devices):
                 error_msg = f"Audio device index {self._config.device_index} not found"
                 self.logger.error(error_msg)
-                self._emit_status(ServiceStatus.ERROR, error_msg)
+                await self._emit_status(ServiceStatus.ERROR, error_msg)
                 raise ValueError(error_msg)
                 
             # Create audio stream
@@ -123,13 +126,14 @@ class MicInputService(BaseService):
             
             self.logger.info(
                 f"Initialized audio capture: {self._config.sample_rate}Hz, "
-                f"{self._config.channels} channel(s)"
+                f"{self._config.channels} channel(s), block size: {self._config.blocksize}"
             )
             
         except Exception as e:
             error_msg = f"Failed to initialize audio: {str(e)}"
             self.logger.error(error_msg)
-            self._emit_status(ServiceStatus.ERROR, error_msg)
+            await self._emit_status(ServiceStatus.ERROR, error_msg)
+            self._errors += 1
             raise
             
     async def _cleanup(self) -> None:
@@ -151,213 +155,214 @@ class MicInputService(BaseService):
             if self._stream is not None:
                 self._stream.close()
                 self._stream = None
-                
+            
             self.logger.info("Cleaned up audio resources")
             
         except Exception as e:
             self.logger.error(f"Error cleaning up audio resources: {str(e)}")
             
-    def _audio_callback(self, indata, frames, time, status):
-        """Handle incoming audio data from sounddevice."""
+    def _audio_callback(self, indata, frames, time_info, status):
+        """Handle incoming audio data from sounddevice.
+        This runs in a separate thread - keep it minimal and thread-safe."""
         if status:
-            self.logger.warning(f"Audio callback status: {status}")
+            self._event_loop.call_soon_threadsafe(
+                lambda: self.logger.warning(f"Audio callback status: {status}")
+            )
             return
-        
+            
         try:
-            # Add audio data to queue with timestamp
-            if self._is_capturing:
-                # Calculate and log audio levels
-                max_amp = np.max(np.abs(indata))
+            if self._is_capturing and not self._paused_due_to_errors:
+                # Create a copy of the data and get timestamp
+                data_copy = indata.copy()
+                current_time = getattr(time_info, 'inputBufferAdcTime', 
+                                     getattr(time_info, 'currentTime', time.time()))
                 
-                # Fix for NaN RMS - ensure we have non-zero values before sqrt
-                squared = np.mean(indata**2)
-                rms = np.sqrt(squared) if squared > 0 else 0
-                
-                # Track stats
-                if not hasattr(self, '_max_amplitude'):
-                    self._max_amplitude = 0
-                    self._rms_levels = []
-                    self._chunk_count = 0
-                
-                self._chunk_count += 1
-                if max_amp > self._max_amplitude:
-                    self._max_amplitude = max_amp
-                self._rms_levels.append(rms)
-                
-                # Log occasionally for debugging
-                if self._chunk_count % 20 == 0:
-                    self.logger.debug(f"Audio chunk {self._chunk_count}: max_amp={max_amp:.4f}, rms={rms:.4f}")
-                
-                # Use the proper time field from PortAudio timeinfo structure
-                # The 'time' parameter is a PaStreamCallbackTimeInfo struct, which has:
-                # - inputBufferAdcTime: the time when the first sample was captured
-                # - currentTime: the time when the callback was invoked
-                # - outputBufferDacTime: the time when the first sample will be output
-                
-                current_time = time.inputBufferAdcTime if hasattr(time, 'inputBufferAdcTime') else time.currentTime
-                
-                # Use the stored event loop instead of trying to get the current one
-                if self._loop and not self._loop.is_closed():
-                    asyncio.run_coroutine_threadsafe(
-                        self._audio_queue.put((indata.copy(), current_time)),
-                        self._loop
+                # Single thread crossing with timeout
+                if self._event_loop and not self._event_loop.is_closed():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._audio_queue.put((data_copy, current_time)),
+                        self._event_loop
                     )
-                    if self._chunk_count % 100 == 0:
-                        self.logger.debug(f"Queue size: {self._audio_queue.qsize()}")
-                else:
-                    self.logger.warning("Event loop is not available or closed")
+                    # Wait with timeout to avoid blocking
+                    try:
+                        future.result(timeout=0.1)
+                    except Exception as e:
+                        self._event_loop.call_soon_threadsafe(
+                            lambda: self.logger.error(f"Queue put failed: {e}")
+                        )
+                        
         except Exception as e:
-            self.logger.error(f"Error in audio callback: {str(e)}")
+            self._event_loop.call_soon_threadsafe(
+                lambda: self.logger.error(f"Error in audio callback: {e}")
+            )
 
-    async def _process_audio(self) -> None:
-        """Process audio data from the queue and emit events."""
-        self.logger.info("Starting audio processing task")
-        chunks_emitted = 0
+    async def _process_audio_queue(self):
+        """Process audio data in the event loop context."""
+        self.logger.info("Starting audio queue processing")
+        self._chunks_processed = 0
+        self._processing_start_time = time.time()
         
         try:
-            while self._is_capturing:
+            while self._is_capturing and not self._paused_due_to_errors:
                 try:
-                    # Use wait_for to make queue.get cancellable
+                    # Get data from queue with timeout
                     data, timestamp = await asyncio.wait_for(
                         self._audio_queue.get(),
                         timeout=0.1
                     )
                     
-                    # Convert NumPy array to bytes
-                    samples_bytes = data.tobytes()
-                    
-                    # Create and emit event
-                    payload = AudioChunkPayload(
-                        samples=samples_bytes,
-                        timestamp=timestamp,
-                        sample_rate=self._config.sample_rate,
-                        channels=self._config.channels,
-                        dtype=str(self._config.dtype)
-                    )
-                    
-                    # Log sample size occasionally
-                    if chunks_emitted == 0 or chunks_emitted % 50 == 0:
-                        self.logger.info(f"Emitting audio chunk: {len(samples_bytes)} bytes, format: {self._config.dtype}, rate: {self._config.sample_rate}Hz")
-                        
-                    await self.emit(EventTopics.AUDIO_RAW_CHUNK, payload)
-                    chunks_emitted += 1
-                    
-                    # Log emission progress
-                    if chunks_emitted % 20 == 0:
-                        self.logger.debug(f"Emitted {chunks_emitted} audio chunks")
+                    # Process in event loop context
+                    await self._process_audio_chunk(data, timestamp)
+                    self._audio_queue.task_done()
                     
                 except asyncio.TimeoutError:
-                    # Check if we should continue processing
-                    if not self._is_capturing:
-                        break
                     continue
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
-                    self.logger.error(f"Error processing audio: {str(e)}")
-                    if not self._is_capturing:
-                        break
+                    self.logger.error(f"Error processing audio: {e}")
+                    await asyncio.sleep(0.1)  # Prevent tight error loop
                     
         except asyncio.CancelledError:
-            self.logger.info("Audio processing task cancelled")
+            self.logger.info("Audio processing cancelled")
             raise
         finally:
-            # Clear the queue
-            while not self._audio_queue.empty():
-                try:
-                    self._audio_queue.get_nowait()
-                except:
-                    pass
-            self.logger.info(f"Audio processing task stopped. Emitted {chunks_emitted} chunks.")
-        
-    async def start_capture(self) -> None:
+            # Log statistics
+            elapsed = time.time() - self._processing_start_time
+            rate = self._chunks_processed / elapsed if elapsed > 0 else 0
+            self.logger.info(f"Audio processing stopped after {self._chunks_processed} chunks "
+                           f"({rate:.2f} chunks/sec)")
+
+    async def _process_audio_chunk(self, data: np.ndarray, timestamp: float):
+        """Process a single audio chunk in the event loop context."""
+        try:
+            # Convert to bytes
+            samples_bytes = data.tobytes()
+            
+            # Calculate audio levels for monitoring
+            max_amp = np.max(np.abs(data))
+            rms = np.sqrt(np.mean(data**2)) if np.mean(data**2) > 0 else 0
+            
+            # Log occasionally
+            if self._chunks_processed % 50 == 0:
+                self.logger.debug(f"Audio chunk {self._chunks_processed}: "
+                                f"max_amp={max_amp:.4f}, rms={rms:.4f}")
+            
+            # Emit audio chunk event
+            await self.emit(EventTopics.AUDIO_RAW_CHUNK, {
+                "samples": samples_bytes,
+                "timestamp": timestamp,
+                "sample_rate": self._config.sample_rate,
+                "channels": self._config.channels,
+                "dtype": str(self._config.dtype)
+            })
+            
+            self._chunks_processed += 1
+            
+        except Exception as e:
+            self.logger.error(f"Error processing audio chunk: {e}")
+            raise
+
+    async def start_capture(self):
         """Start audio capture."""
         if self._is_capturing:
-            self.logger.warning("Audio capture already active")
             return
             
         try:
-            if not self._stream:
-                error_msg = "Audio stream not initialized"
-                self.logger.error(error_msg)
-                await self._emit_status(ServiceStatus.ERROR, error_msg)
-                raise RuntimeError(error_msg)
+            # Initialize if needed
+            if self._stream is None:
+                await self._initialize()
                 
+            # Reset state
             self._is_capturing = True
+            self._paused_due_to_errors = False
+            self._stop_flag.clear()
+            self._chunks_processed = 0
+            self._processing_start_time = time.time()
+            
+            # Start stream
             self._stream.start()
             
-            # Start processing task
-            self._processing_task = asyncio.create_task(self._process_audio())
+            # Start processing in event loop
+            self._processing_task = asyncio.create_task(self._process_audio_queue())
             
-            self.logger.info("Started audio capture")
+            self.logger.info("Audio capture started")
             await self._emit_status(ServiceStatus.RUNNING, "Audio capture started")
             
         except Exception as e:
             self._is_capturing = False
-            error_msg = f"Failed to start audio capture: {str(e)}"
+            error_msg = f"Failed to start audio capture: {e}"
             self.logger.error(error_msg)
             await self._emit_status(ServiceStatus.ERROR, error_msg)
-            raise
-            
-    async def stop_capture(self) -> None:
+
+    async def stop_capture(self):
         """Stop audio capture."""
         if not self._is_capturing:
             return
             
         try:
+            # Signal stop
             self._is_capturing = False
+            self._stop_flag.set()
             
-            if self._stream is not None and self._stream.active:
+            # Stop stream
+            if self._stream and self._stream.active:
                 self._stream.stop()
-                
-            # Cancel and wait for processing task
-            if self._processing_task is not None:
+            
+            # Cancel processing task
+            if self._processing_task:
                 self._processing_task.cancel()
                 try:
-                    await asyncio.wait_for(self._processing_task, timeout=1.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    await self._processing_task
+                except asyncio.CancelledError:
                     pass
                 self._processing_task = None
             
-            # Log audio statistics if available    
-            if hasattr(self, '_rms_levels') and self._rms_levels:
-                avg_rms = sum(self._rms_levels) / len(self._rms_levels)
-                self.logger.info(f"Audio capture summary:")
-                self.logger.info(f"  Chunks processed: {self._chunk_count}")
-                self.logger.info(f"  Max amplitude: {self._max_amplitude:.4f}")
-                self.logger.info(f"  Average RMS: {avg_rms:.4f}")
-                self.logger.info(f"  Is signal present: {'YES' if self._max_amplitude > 0.01 else 'NO - very quiet'}")
-                
-            self.logger.info("Stopped audio capture")
-            await self._emit_status(ServiceStatus.RUNNING, "Audio capture stopped")
+            # Clear queue
+            while not self._audio_queue.empty():
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            
+            self.logger.info("Audio capture stopped")
+            await self._emit_status(ServiceStatus.STOPPED, "Audio capture stopped")
             
         except Exception as e:
-            error_msg = f"Error stopping audio capture: {str(e)}"
-            self.logger.error(error_msg)
-            await self._emit_status(ServiceStatus.ERROR, error_msg)
-            raise
-            
+            self.logger.error(f"Error stopping audio capture: {e}")
+
     def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
         # Subscribe to voice control events
         asyncio.create_task(self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started))
         asyncio.create_task(self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped))
+        asyncio.create_task(self.subscribe(EventTopics.MIC_RECORDING_START, self._handle_recording_start))
+        asyncio.create_task(self.subscribe(EventTopics.MIC_RECORDING_STOP, self._handle_recording_stop))
         self.logger.info("Set up subscriptions for voice events")
         
     async def _handle_voice_listening_started(self, payload: Any) -> None:
-        """
-        Handle voice listening started event.
-        
-        Args:
-            payload: Event payload (not used)
-        """
-        self.logger.info("Voice listening started event received, starting audio capture")
+        """Handle voice listening started event."""
+        self.logger.info("Received voice listening started event")
         await self.start_capture()
         
     async def _handle_voice_listening_stopped(self, payload: Any) -> None:
-        """
-        Handle voice listening stopped event.
+        """Handle voice listening stopped event."""
+        self.logger.info("Received voice listening stopped event")
+        await self.stop_capture()
         
-        Args:
-            payload: Event payload (may contain transcript)
-        """
-        self.logger.info("Voice listening stopped event received, stopping audio capture")
-        await self.stop_capture() 
+    async def _handle_recording_start(self, payload: Any) -> None:
+        """Handle recording start event."""
+        self.logger.info("Received recording start event")
+        await self.start_capture()
+        
+    async def _handle_recording_stop(self, payload: Any) -> None:
+        """Handle recording stop event."""
+        self.logger.info("Received recording stop event")
+        await self.stop_capture()
+    
+    async def _stop(self) -> None:
+        """Service-specific cleanup logic."""
+        await self.stop_capture()
+        await self._cleanup()
+        self.logger.info("MicInputService stopped") 

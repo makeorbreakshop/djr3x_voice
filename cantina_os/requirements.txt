@@ -8,7 +8,7 @@ httpx>=0.25.0   # Modern async HTTP client for API requests
 # Audio Processing
 sounddevice>=0.4.6  # Audio capture and playback
 numpy>=1.24.0    # Audio data manipulation
-deepgram-sdk>=2.12.0  # Streaming ASR
+deepgram-sdk>=2.12.0  # Latest stable version with microphone support
 openai-whisper>=20231117  # Local ASR (optional)
 python-vlc>=3.0.20000  # VLC media player integration for music playback
 

@@ -92,10 +92,16 @@ class CommandDispatcherService(BaseService):
             event_topic: Event topic to emit for this command
         """
         self._command_handlers[command.lower()] = (handler_service, event_topic)
-        self.logger.debug(
+        self.logger.info(
             f"Registered command '{command}' to service '{handler_service}' "
             f"with topic '{event_topic}'"
         )
+        
+        # Log all registered commands for debugging
+        if command.lower() == "stop music":
+            all_commands = list(self._command_handlers.keys())
+            self.logger.info(f"Current registered commands: {all_commands}")
+            self.logger.info(f"Current shortcuts: {self._shortcuts}")
         
     async def _handle_command(self, payload: dict) -> None:
         """Handle a command from the CLI.
@@ -109,23 +115,66 @@ class CommandDispatcherService(BaseService):
             raw_input = payload.get("raw_input", "")
             conversation_id = payload.get("conversation_id")
             
+            self.logger.debug(f"Processing command: '{command}' with args: {args}")
+            
+            # First try the full command (command + first arg if present)
+            full_command = None
+            if args:
+                full_command = f"{command} {args[0]}"
+                self.logger.debug(f"Checking full command: '{full_command}'")
+                
+            # Check if we have a handler for the full command before applying shortcuts
+            if full_command and full_command in self._command_handlers:
+                self.logger.debug(f"Found handler for full command: '{full_command}'")
+                # We have a direct match, use it without shortcut expansion
+                handler_service, event_topic = self._command_handlers[full_command]
+                # Remove the first arg since it's part of the command
+                updated_args = args[1:]
+                
+                self.logger.info(f"Dispatching '{full_command}' to {handler_service} on {event_topic}")
+                await self.emit(
+                    event_topic,
+                    {
+                        "command": command,
+                        "args": updated_args,
+                        "raw_input": raw_input,
+                        "conversation_id": conversation_id
+                    }
+                )
+                return
+                
             # Apply shortcuts if applicable
+            original_command = command
             if command in self._shortcuts:
                 expanded = self._shortcuts[command]
                 parts = expanded.split()
                 command = parts[0]
                 args = parts[1:] + args
+                self.logger.debug(f"Expanded shortcut to: command='{command}', args={args}")
                 
-            # Build full command for handler lookup
-            full_command = f"{command}"
+            # Try different command formats
+            handler_info = None
+            
+            # First try the full command with first arg if present
             if args:
                 full_command = f"{command} {args[0]}"
+                self.logger.debug(f"Trying full command: '{full_command}'")
+                handler_info = self._command_handlers.get(full_command)
+                if handler_info:
+                    self.logger.debug(f"Found handler for full command: {handler_info}")
+                    # Remove the first arg since it's part of the command
+                    args = args[1:]
             
-            # Find handler for command
-            handler_info = self._command_handlers.get(full_command)
+            # If not found, try just the command
+            if not handler_info:
+                self.logger.debug(f"Trying command only: '{command}'")
+                handler_info = self._command_handlers.get(command)
+                if handler_info:
+                    self.logger.debug(f"Found handler for command: {handler_info}")
             
             if handler_info:
                 handler_service, event_topic = handler_info
+                self.logger.info(f"Dispatching '{command}' to {handler_service} on {event_topic} with args: {args}")
                 # Emit event to appropriate handler
                 await self.emit(
                     event_topic,
@@ -137,11 +186,15 @@ class CommandDispatcherService(BaseService):
                     }
                 )
             else:
-                self.logger.warning(f"Unknown command: '{command}'")
+                # Log all registered commands for debugging when a command is not found
+                all_commands = list(self._command_handlers.keys())
+                self.logger.warning(f"Unknown command: '{original_command}' (tried with args: {args})")
+                self.logger.warning(f"Available commands: {all_commands}")
+                
                 await self.emit(
                     EventTopics.CLI_RESPONSE,
                     {
-                        "message": f"Error: Unknown command: {command}",
+                        "message": f"Error: Unknown command: {original_command}",
                         "is_error": True
                     }
                 )
@@ -196,9 +249,18 @@ Available commands:
         Args:
             message: Response message to emit
         """
+        self.logger.debug(f"Emitting response: {message[:30]}...")
+        
+        # Create the CliResponsePayload
+        response_payload = CliResponsePayload(message=message)
+        
+        # Important: Convert the Pydantic model to a dictionary with model_dump()
+        response_dict = response_payload.model_dump()
+        
+        # Emit the dictionary, not the model directly
         await self.emit(
             EventTopics.CLI_RESPONSE,
-            CliResponsePayload(message=message)
+            response_dict
         )
         
     async def _emit_error(self, message: str, command: Optional[str] = None) -> None:
@@ -209,11 +271,19 @@ Available commands:
             command: The command that caused the error (if any)
         """
         self.logger.debug(f"Emitting error: {message}")
+        
+        # Create the CliResponsePayload
+        response_payload = CliResponsePayload(
+            message=f"Error: {message}",
+            is_error=True,
+            command=command
+        )
+        
+        # Important: Convert the Pydantic model to a dictionary with model_dump()
+        response_dict = response_payload.model_dump()
+        
+        # Emit the dictionary, not the model directly
         await self.emit(
             EventTopics.CLI_RESPONSE,
-            CliResponsePayload(
-                message=f"Error: {message}",
-                is_error=True,
-                command=command
-            )
+            response_dict
         ) 

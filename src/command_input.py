@@ -8,9 +8,10 @@ import threading
 import logging
 import time
 import sys
+import uuid
 from typing import Optional, List, Dict, Any
 
-from src.bus import EventBus, EventTypes
+from src.bus import EventBus, EventTypes, EventTopics
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -120,8 +121,16 @@ class CommandInputThread(threading.Thread):
             # List music command
             asyncio.run_coroutine_threadsafe(
                 self.event_bus.emit(
-                    EventTypes.MUSIC_CONTROL_COMMAND,
-                    {"action": "list"}
+                    EventTopics.MUSIC_COMMAND,
+                    {
+                        "command": "list",
+                        "args": ["music"],
+                        "raw_input": user_input,
+                        "timestamp": time.time(),
+                        "event_id": str(uuid.uuid4()),
+                        "conversation_id": None,
+                        "schema_version": "1.0"
+                    }
                 ),
                 self.loop
             )
@@ -138,8 +147,16 @@ class CommandInputThread(threading.Thread):
             
             asyncio.run_coroutine_threadsafe(
                 self.event_bus.emit(
-                    EventTypes.MUSIC_CONTROL_COMMAND,
-                    {"action": "play", "track_name": track_name}
+                    EventTopics.MUSIC_COMMAND,
+                    {
+                        "command": "play",
+                        "args": ["music", track_name],
+                        "raw_input": user_input,
+                        "timestamp": time.time(),
+                        "event_id": str(uuid.uuid4()),
+                        "conversation_id": None,
+                        "schema_version": "1.0"
+                    }
                 ),
                 self.loop
             )
@@ -149,8 +166,16 @@ class CommandInputThread(threading.Thread):
             # Stop music command
             asyncio.run_coroutine_threadsafe(
                 self.event_bus.emit(
-                    EventTypes.MUSIC_CONTROL_COMMAND,
-                    {"action": "stop"}
+                    EventTopics.MUSIC_COMMAND,
+                    {
+                        "command": "stop",
+                        "args": ["music"],
+                        "raw_input": user_input,
+                        "timestamp": time.time(),
+                        "event_id": str(uuid.uuid4()),
+                        "conversation_id": None,
+                        "schema_version": "1.0"
+                    }
                 ),
                 self.loop
             )

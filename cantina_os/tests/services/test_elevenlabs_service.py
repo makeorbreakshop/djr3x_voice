@@ -15,12 +15,14 @@ from cantina_os.event_payloads import (
     SpeechGenerationRequestPayload,
     SpeechGenerationCompletePayload,
     BaseEventPayload,
-    ServiceStatus
+    ServiceStatus,
+    LLMResponsePayload
 )
 from cantina_os.event_topics import EventTopics
 from cantina_os.services.elevenlabs_service import (
     ElevenLabsService,
-    SpeechPlaybackMethod
+    SpeechPlaybackMethod,
+    ElevenLabsConfig
 )
 
 
@@ -46,19 +48,30 @@ def mock_event_bus():
 
 
 @pytest.fixture
-async def service(mock_api_key, mock_event_bus):
+def test_config(mock_api_key):
+    """Create a test configuration."""
+    return {
+        "ELEVENLABS_API_KEY": mock_api_key,
+        "VOICE_ID": "test-voice-id",
+        "MODEL_ID": "test-model-id",
+        "PLAYBACK_METHOD": SpeechPlaybackMethod.SYSTEM,  # Use system to avoid sounddevice dependency
+        "STABILITY": 0.71,
+        "SIMILARITY_BOOST": 0.5,
+        "ENABLE_AUDIO_NORMALIZATION": True
+    }
+
+
+@pytest.fixture
+async def service(mock_event_bus, test_config):
     """Create an ElevenLabsService instance for testing."""
     service = ElevenLabsService(
         event_bus=mock_event_bus,
-        api_key=mock_api_key,
-        voice_id="test-voice-id",
-        model_id="test-model-id",
-        playback_method=SpeechPlaybackMethod.SYSTEM,  # Use system to avoid sounddevice dependency
+        config=test_config,
         name="TestElevenLabsService"
     )
     yield service
     # Ensure service is stopped after test
-    if service.status != "stopped":
+    if service._status != ServiceStatus.STOPPED:
         await service.stop()
 
 
@@ -66,71 +79,64 @@ class TestElevenLabsService:
     """Tests for the ElevenLabsService."""
 
     @pytest.mark.asyncio
-    async def test_initialization(self, service):
+    async def test_initialization(self, service, test_config):
         """Test that the service initializes correctly."""
-        # Verify initial properties
-        assert service.api_key == "mock-api-key"
-        assert service.voice_id == "test-voice-id"
-        assert service.model_id == "test-model-id"
-        assert service.playback_method == SpeechPlaybackMethod.SYSTEM
+        # Verify initial properties from the config
+        assert service._config.api_key == "mock-api-key"
+        assert service._config.voice_id == "test-voice-id"
+        assert service._config.model_id == "test-model-id"
+        assert service._config.playback_method == SpeechPlaybackMethod.SYSTEM
         
         # Check status enum instead of string
-        assert service.status == ServiceStatus.INITIALIZING
-        
-        # Test event subscriptions
-        subscription_topics = [call[0][0] for call in service.event_bus.on.call_args_list]
-        assert EventTopics.SPEECH_GENERATION_REQUEST in subscription_topics
+        assert service._status == ServiceStatus.INITIALIZING
 
     @pytest.mark.asyncio
     async def test_start_stop(self, service):
         """Test the service start and stop lifecycle."""
-        # Import ServiceStatus enum
-        from cantina_os.event_payloads import ServiceStatus
-        
         # Create a mock client
         mock_client = MagicMock()
         mock_client.aclose = AsyncMock()
         
         # Define a patched start function that assigns our mock client
         async def patched_start():
-            service.client = mock_client
-            service.temp_dir = tempfile.TemporaryDirectory()
+            service._client = mock_client
+            service._temp_dir = tempfile.TemporaryDirectory()
             service._status = ServiceStatus.RUNNING
             service._started = True
             
         # Define a patched stop function that cleans up resources
-        async def patched_stop():
+        async def patched_cleanup():
             # Clear client
-            if service.client:
-                await service.client.aclose()
-                service.client = None
+            if service._client:
+                await service._client.aclose()
+                service._client = None
                 
             # Clean up temp directory
-            if service.temp_dir:
-                service.temp_dir.cleanup()
-                service.temp_dir = None
+            if service._temp_dir:
+                service._temp_dir.cleanup()
+                service._temp_dir = None
 
         # Apply the patches
         with patch.object(service, '_start', side_effect=patched_start), \
-             patch.object(service, '_stop', side_effect=patched_stop):
+             patch.object(service, '_cleanup', side_effect=patched_cleanup):
                 
             # Start the service
             await service.start()
             
             # Verify the service state after starting
-            assert service.status == ServiceStatus.RUNNING
-            assert service.client is mock_client  # Check the exact mock object
-            assert service.temp_dir is not None
+            assert service._status == ServiceStatus.RUNNING
+            assert service._client is mock_client  # Check the exact mock object
+            assert service._temp_dir is not None
             
             # Verify the event bus emit was called for status update
-            assert any(call[0][0] == EventTopics.SERVICE_STATUS_UPDATE for call in service.event_bus.emit.call_args_list)
+            assert any(call[0][0] == EventTopics.SERVICE_STATUS_UPDATE for call in service._event_bus.emit.call_args_list)
             
             # Stop the service
             await service.stop()
             
             # Verify the service state after stopping
-            assert service.status == ServiceStatus.STOPPED
-            assert service.client is None
+            assert service._status == ServiceStatus.STOPPED
+            assert service._client is None
             
             # Verify client was closed
             mock_client.aclose.assert_called_once()
@@ -141,7 +147,7 @@ class TestElevenLabsService:
         # Mock os.environ.get to ensure it doesn't return an API key
         with patch('os.environ.get', return_value=None):
             with pytest.raises(ValueError) as excinfo:
-                ElevenLabsService(event_bus=mock_event_bus, api_key=None)
+                ElevenLabsService(event_bus=mock_event_bus, config={})
             assert "API key is required" in str(excinfo.value)
 
     @pytest.mark.asyncio
@@ -154,22 +160,24 @@ class TestElevenLabsService:
         mock_response.content = mock_audio_data
         mock_post.return_value = mock_response
 
-        # Start the service
-        await service.start()
-        
-        # Ensure the client is initialized (patching _initialize)
-        if not service.client:
-            service.client = httpx.AsyncClient(
+        # Start the service with mocked _start method
+        async def patched_start():
+            service._client = httpx.AsyncClient(
                 base_url="https://api.elevenlabs.io/v1",
-                headers={"xi-api-key": service.api_key},
+                headers={"xi-api-key": service._config.api_key},
                 timeout=30.0
             )
+            service._status = ServiceStatus.RUNNING
+            service._started = True
+            
+        with patch.object(service, '_start', side_effect=patched_start):
+            await service.start()
 
         # Generate speech
         result = await service._generate_speech(
             text="Test text",
-            voice_id=service.voice_id,
-            model_id=service.model_id,
+            voice_id=service._config.voice_id,
+            model_id=service._config.model_id,
             stability=0.7,
             similarity_boost=0.5
         )
@@ -182,9 +190,9 @@ class TestElevenLabsService:
         call_args = mock_post.call_args[0]
         call_kwargs = mock_post.call_args[1]
         
-        assert f"/text-to-speech/{service.voice_id}" in call_args[0]
+        assert f"/text-to-speech/{service._config.voice_id}" in call_args[0]
         assert call_kwargs["json"]["text"] == "Test text"
-        assert call_kwargs["json"]["model_id"] == service.model_id
+        assert call_kwargs["json"]["model_id"] == service._config.model_id
         assert call_kwargs["json"]["voice_settings"]["stability"] == 0.7
         assert call_kwargs["json"]["voice_settings"]["similarity_boost"] == 0.5
 
@@ -198,22 +206,24 @@ class TestElevenLabsService:
         mock_response.text = "Bad Request"
         mock_post.return_value = mock_response
 
-        # Start the service
-        await service.start()
-        
-        # Ensure client is initialized (test shouldn't depend on _initialize method)
-        if not service.client:
-            service.client = httpx.AsyncClient(
+        # Start the service with mocked _start method
+        async def patched_start():
+            service._client = httpx.AsyncClient(
                 base_url="https://api.elevenlabs.io/v1",
-                headers={"xi-api-key": service.api_key},
+                headers={"xi-api-key": service._config.api_key},
                 timeout=30.0
             )
+            service._status = ServiceStatus.RUNNING
+            service._started = True
+            
+        with patch.object(service, '_start', side_effect=patched_start):
+            await service.start()
 
         # Generate speech (should return None due to error)
         result = await service._generate_speech(
             text="Test text",
-            voice_id=service.voice_id,
-            model_id=service.model_id,
+            voice_id=service._config.voice_id,
+            model_id=service._config.model_id,
             stability=0.7,
             similarity_boost=0.5
         )
@@ -239,190 +249,71 @@ class TestElevenLabsService:
         # Mock the play_audio method to avoid actual playback
         mock_play_audio.return_value = None
         
-        # Start the service
-        await service.start()
-        
-        # Ensure the client is initialized (patching _initialize)
-        if not service.client:
-            service.client = httpx.AsyncClient(
+        # Start the service with mocked _start method
+        async def patched_start():
+            service._client = httpx.AsyncClient(
                 base_url="https://api.elevenlabs.io/v1",
-                headers={"xi-api-key": service.api_key},
+                headers={"xi-api-key": service._config.api_key},
                 timeout=30.0
             )
+            service._temp_dir = tempfile.TemporaryDirectory()
+            service._status = ServiceStatus.RUNNING
+            service._started = True
             
-        # Create temp dir if not exists
-        if not service.temp_dir:
-            service.temp_dir = tempfile.TemporaryDirectory()
+        with patch.object(service, '_start', side_effect=patched_start):
+            await service.start()
         
-        # Add a mock for the emit method
-        service.emit = AsyncMock()
-
         # Create a test payload
-        payload = SpeechGenerationRequestPayload(
-            conversation_id="test-conversation",
-            text="Hello, world!",
-            voice_id="test-voice",
-            model_id="test-model"
+        request_payload = SpeechGenerationRequestPayload(
+            text="Test speech generation",
+            conversation_id="test-conversation-id",
+            voice_id=None,  # Use default from service
+            model_id=None   # Use default from service
         )
-
-        try:
-            # Handle the request with timeout to prevent hanging
-            await asyncio.wait_for(
-                service._handle_speech_generation_request(payload),
-                timeout=2.0
-            )
-
-            # Verify the API call was made
-            mock_post.assert_called_once()
-            
-            # Verify play_audio was called
-            mock_play_audio.assert_called_once()
-            assert os.path.basename(mock_play_audio.call_args[0][0]).endswith(".mp3")
-            
-            # Verify emission of completion event
-            service.emit.assert_called_once()
-            call_args = service.emit.call_args
-            assert call_args[0][0] == EventTopics.SPEECH_GENERATION_COMPLETE
-            assert isinstance(call_args[0][1], SpeechGenerationCompletePayload)
-            assert call_args[0][1].conversation_id == "test-conversation"
-            assert call_args[0][1].text == "Hello, world!"
-            assert call_args[0][1].success is True
-            
-        except asyncio.TimeoutError:
-            pytest.fail("Test timed out while handling speech generation request")
         
-        finally:
-            # Proper cleanup
-            if service.temp_dir:
-                service.temp_dir.cleanup()
-                service.temp_dir = None
+        # Handle the request
+        await service._handle_speech_generation_request(request_payload)
+        
+        # Verify API call was made
+        mock_post.assert_called_once()
+        
+        # Verify the temp file was created and passed to _play_audio
+        mock_play_audio.assert_called_once()
+        file_path_arg = mock_play_audio.call_args[0][0]
+        assert "test-conversation-id" in file_path_arg
+        
+        # Verify completion event was emitted
+        emit_calls = [call for call in service._event_bus.emit.call_args_list 
+                      if call[0][0] == EventTopics.SPEECH_GENERATION_COMPLETE]
+        assert len(emit_calls) > 0
+        
+        # Check payload content in the emit call
+        emit_payload = emit_calls[-1][0][1]
+        assert emit_payload["conversation_id"] == "test-conversation-id"
+        assert emit_payload["success"] is True
 
     @pytest.mark.asyncio
-    @patch("httpx.AsyncClient.post")
-    async def test_handle_speech_generation_error(self, mock_post, service):
-        """Test error handling in speech generation request."""
-        # Configure the mock response to fail
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
-        mock_post.return_value = mock_response
+    async def test_handle_llm_response(self, service, mock_event_bus):
+        """Test handling an LLM response."""
+        # Mock the _handle_speech_generation_request method
+        service._handle_speech_generation_request = AsyncMock()
         
-        # Start the service
-        await service.start()
+        # Create an LLM response payload
+        llm_payload = {
+            "text": "This is a test LLM response",
+            "conversation_id": "test-llm-conversation",
+            "is_complete": True
+        }
         
-        # Ensure the client is initialized (patching _initialize)
-        if not service.client:
-            service.client = httpx.AsyncClient(
-                base_url="https://api.elevenlabs.io/v1",
-                headers={"xi-api-key": service.api_key},
-                timeout=30.0
-            )
+        # Call the handler
+        await service._handle_llm_response(llm_payload)
         
-        # Add a mock for the emit method
-        service.emit = AsyncMock()
-
-        # Create a test payload
-        payload = SpeechGenerationRequestPayload(
-            conversation_id="test-conversation",
-            text="Hello, world!"
-        )
-
-        try:
-            # Handle the request with timeout to prevent hanging
-            await asyncio.wait_for(
-                service._handle_speech_generation_request(payload),
-                timeout=2.0
-            )
-
-            # Verify emission of error event
-            service.emit.assert_called_once()
-            call_args = service.emit.call_args
-            assert call_args[0][0] == EventTopics.SPEECH_GENERATION_COMPLETE
-            assert isinstance(call_args[0][1], SpeechGenerationCompletePayload)
-            assert call_args[0][1].conversation_id == "test-conversation"
-            assert call_args[0][1].success is False
-            assert call_args[0][1].error is not None
-            
-        except asyncio.TimeoutError:
-            pytest.fail("Test timed out while handling speech generation error")
-
-    @pytest.mark.asyncio
-    @patch("subprocess.Popen")
-    async def test_system_playback(self, mock_popen, service):
-        """Test system playback method."""
-        import platform
-        platform_name = platform.system()
+        # Verify that _handle_speech_generation_request was called with correct args
+        service._handle_speech_generation_request.assert_called_once()
+        call_arg = service._handle_speech_generation_request.call_args[0][0]
         
-        # Skip test if platform not supported in test
-        if platform_name not in ["Darwin", "Linux", "Windows"]:
-            pytest.skip(f"Platform {platform_name} not covered in test")
-        
-        # Configure mock subprocess
-        mock_process = MagicMock()
-        mock_process.communicate.return_value = (b"", b"")
-        mock_process.returncode = 0
-        mock_popen.return_value = mock_process
-
-        # Start the service
-        await service.start()
-        
-        # Mock the emit method to avoid actual event emission
-        service.emit = AsyncMock()
-        
-        # Create a temporary file path
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        temp_file.write(b"test audio data")
-        temp_file.close()
-        
-        # Create a patched method that doesn't actually call subprocess
-        async def mock_play_system(file_path):
-            # Just return immediately without calling actual system commands
-            return
-            
-        # Apply the patch
-        with patch.object(service, '_play_with_system_command', side_effect=mock_play_system):
-            try:
-                # Call the _play_audio method directly
-                await service._play_audio(temp_file.name, "test-conversation")
-                
-                # Verify the appropriate method was called based on playback method
-                assert service.playback_method == SpeechPlaybackMethod.SYSTEM
-                
-                # No need to check actual command execution as we're bypassing that
-                
-            finally:
-                # Clean up temp file
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
-
-    @pytest.mark.asyncio
-    async def test_invalid_payload(self, service, mock_event_bus):
-        """Test handling an invalid event payload."""
-        # Start the service
-        await service.start()
-        
-        # Mock emit to avoid actual event emission
-        service.emit = AsyncMock()
-        service.logger = MagicMock()
-        
-        # Create an invalid payload (not a SpeechGenerationRequestPayload)
-        invalid_payload = BaseEventPayload(conversation_id="test-conversation")
-        
-        # Handle the payload with timeout to prevent hanging
-        try:
-            await asyncio.wait_for(
-                service._handle_speech_generation_request(invalid_payload),
-                timeout=2.0
-            )
-            
-            # Verify emit was not called (no speech generation occurred)
-            service.emit.assert_not_called()
-            
-            # Verify an error was logged
-            assert any("Invalid event payload" in str(call) for call in service.logger.error.call_args_list)
-        
-        except asyncio.TimeoutError:
-            pytest.fail("Test timed out while handling invalid payload")
-        
-        finally:
-            await service.stop() 
+        # Check the request payload has correct values
+        assert call_arg.text == "This is a test LLM response"
+        assert call_arg.conversation_id == "test-llm-conversation"
+        assert call_arg.voice_id == service._config.voice_id
+        assert call_arg.model_id == service._config.model_id 

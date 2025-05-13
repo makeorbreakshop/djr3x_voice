@@ -10,11 +10,12 @@ requires-python = ">=3.11"
 dependencies = [
     "pytest",
     "pytest-asyncio",
-    "pydantic"
+    "pydantic",
+    "pyee"
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "cantina_os/tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
 asyncio_mode = "strict"
@@ -23,4 +24,4 @@ asyncio_mode = "strict"
 asyncio_fixture_loop_scope = "function"
 
 [tool.setuptools]
-packages = ["src"] 
+packages = ["cantina_os"] 

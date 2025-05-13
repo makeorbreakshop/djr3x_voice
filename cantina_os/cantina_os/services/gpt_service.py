@@ -150,13 +150,37 @@ class GPTService(BaseService):
         if "OPENAI_API_KEY" not in config:
             self.logger.warning("OPENAI_API_KEY not provided, service will fail to initialize")
             
+        # Try to load DJ R3X persona from config path or common locations
+        persona_paths = [
+            config.get("PERSONA_FILE_PATH"),  # First try config-provided path
+            "dj_r3x-persona.txt",             # Try current directory
+            "cantina_os/dj_r3x-persona.txt",  # Try cantina_os directory
+            "../dj_r3x-persona.txt",          # Try parent directory
+        ]
+        
+        system_prompt = None
+        for path in persona_paths:
+            if not path:
+                continue
+            try:
+                with open(path, "r") as f:
+                    system_prompt = f.read().strip()
+                self.logger.info(f"Successfully loaded DJ R3X persona from {path}")
+                break
+            except Exception as e:
+                self.logger.debug(f"Could not load persona from {path}: {str(e)}")
+                
+        if not system_prompt:
+            self.logger.warning("Failed to load DJ R3X persona from any location, using default")
+            system_prompt = "You are DJ R3X, a helpful and enthusiastic Star Wars droid DJ assistant."
+            
         return {
             "OPENAI_API_KEY": config.get("OPENAI_API_KEY", ""),
-            "MODEL": config.get("GPT_MODEL", "gpt-4o"),
+            "MODEL": config.get("GPT_MODEL", "gpt-4.1-mini"),
             "MAX_TOKENS": config.get("MAX_TOKENS", 4000),
             "MAX_MESSAGES": config.get("MAX_MESSAGES", 20),
             "TEMPERATURE": config.get("TEMPERATURE", 0.7),
-            "SYSTEM_PROMPT": config.get("SYSTEM_PROMPT", "You are DJ R3X, a helpful and enthusiastic Star Wars droid DJ assistant."),
+            "SYSTEM_PROMPT": system_prompt,
             "TIMEOUT": config.get("TIMEOUT", 30),  # seconds
             "RATE_LIMIT_REQUESTS": config.get("RATE_LIMIT_REQUESTS", 50),
             "STREAMING": config.get("STREAMING", True)
@@ -174,12 +198,41 @@ class GPTService(BaseService):
             self._max_requests_per_window = self._config["RATE_LIMIT_REQUESTS"]
             self._request_timestamps = []
             
+            # Note: We're no longer calling _setup_subscriptions here, it will be called from _start
+            # as required by architecture standards
+            
             self.logger.info(
                 f"Initialized GPT service with model={self._config['MODEL']}"
             )
             
         except Exception as e:
             error_msg = f"Failed to initialize GPT service: {str(e)}"
+            self.logger.error(error_msg)
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                error_msg
+            )
+            raise
+            
+    # Adding _start method to comply with architecture standards
+    async def _start(self) -> None:
+        """Start the GPT service following architecture standards.
+        
+        This method is called by BaseService.start() and ensures proper service lifecycle.
+        """
+        self.logger.info("GPTService _start method called - setting up service properly")
+        
+        try:
+            # Initialize resources
+            await self._initialize()
+            
+            # Set up event subscriptions
+            await self._setup_subscriptions()
+            
+            self.logger.info("GPTService started successfully")
+            
+        except Exception as e:
+            error_msg = f"Failed to start GPT service: {str(e)}"
             self.logger.error(error_msg)
             await self._emit_status(
                 ServiceStatus.ERROR,
@@ -199,58 +252,78 @@ class GPTService(BaseService):
         except Exception as e:
             self.logger.error(f"Error cleaning up GPT service resources: {str(e)}")
             
-    def _setup_subscriptions(self) -> None:
+    async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
-        self.subscribe(
-            EventTopics.AUDIO_TRANSCRIPTION_FINAL,
+        # Get the topic values directly from the enum for comparison
+        from ..event_topics import EventTopics
+        transcription_final = EventTopics.TRANSCRIPTION_FINAL
+        
+        self.logger.info("GPTService attempting to set up subscriptions.") # Log entry for method call
+        self.logger.info(f"SUBSCRIPTION DEBUG: TRANSCRIPTION_FINAL topic value: '{str(transcription_final)}', id: {id(transcription_final)}")
+        self.logger.info(f"SUBSCRIPTION DEBUG: Module name: {transcription_final.__class__.__module__}")
+        
+        # Removed redundant subscription to raw_topic_value as the enum subscription is working.
+        # asyncio.create_task(self.subscribe(
+        #     raw_topic_value,  # Use raw string value instead of enum
+        #     self._handle_transcription
+        # ))
+        
+        # Subscribe using the EventTopics enum
+        asyncio.create_task(self.subscribe(
+            EventTopics.TRANSCRIPTION_FINAL, 
             self._handle_transcription
-        )
+        ))
+        self.logger.info(f"GPTService: Subscription tasks created for TRANSCRIPTION_FINAL.")
         
         # Add subscription for CLI text-based recording
-        self.subscribe(
+        voice_listening_stopped_topic_value = str(EventTopics.VOICE_LISTENING_STOPPED)
+        self.logger.info(f"GPTService subscribing to VOICE_LISTENING_STOPPED, actual string: '{voice_listening_stopped_topic_value}'")
+        asyncio.create_task(self.subscribe(
             EventTopics.VOICE_LISTENING_STOPPED,
             self._handle_voice_transcript
-        )
+        ))
+        self.logger.info(f"GPTService: Subscription task created for VOICE_LISTENING_STOPPED.")
         
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
-        """Handle text transcript from the CLI recording mode."""
+        """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
         try:
             # Extract text from payload
-            if not payload or "transcript" not in payload:
+            if not payload:
+                self.logger.warning("Received empty payload in VOICE_LISTENING_STOPPED event")
+                return
+                
+            transcript = payload.get("transcript", "")
+            if not transcript:
                 self.logger.warning("Received empty transcript in VOICE_LISTENING_STOPPED event")
                 return
                 
-            transcript = payload["transcript"]
-            self.logger.info(f"Received text transcript: {transcript}")
+            self.logger.info(f"Processing final transcript from mouse click: {transcript}")
             
-            # Process with GPT
+            # Always reset conversation state for a new voice interaction turn from mouse click.
+            # This ensures each utterance is treated as a fresh start with the LLM.
+            self.logger.info("Resetting conversation state for new voice input.")
+            await self.reset_conversation() 
+
+            # Process the transcript with the now-reset conversation state
             await self._process_with_gpt(transcript)
             
         except Exception as e:
-            error_msg = f"Error handling voice transcript: {str(e)}"
-            self.logger.error(error_msg)
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                error_msg
-            )
+            self.logger.error(f"Error processing voice transcript: {e}", exc_info=True)
+            # Optionally, emit an error event or handle more gracefully
             
     async def _handle_transcription(self, payload: Dict[str, Any]) -> None:
-        """Handle transcription text from the speech recognition service."""
+        """Handle transcription text from the speech recognition service.
+        
+        Note: When using mouse clicks, this method will collect interim transcriptions
+        but they won't be processed until the mouse click stop event triggers
+        _handle_voice_transcript.
+        """
+        self.logger.debug(f"Received transcription: {str(payload)[:200]}...")
+        
         try:
-            # Extract text from payload
-            transcription = TranscriptionTextPayload(**payload)
-            
-            # Update conversation ID if needed
-            if transcription.conversation_id:
-                self._current_conversation_id = transcription.conversation_id
-            elif not self._current_conversation_id:
-                await self.reset_conversation()
-            
-            # Add user message to memory
-            self._memory.add_message("user", transcription.text)
-            
-            # Process with GPT
-            await self._process_with_gpt(transcription.text)
+            # We're not processing individual transcriptions when using mouse clicks
+            # The final accumulated transcript will be sent via VOICE_LISTENING_STOPPED event
+            self.logger.debug("Individual transcription received but not processing - waiting for mouse click stop event")
             
         except Exception as e:
             error_msg = f"Error handling transcription: {str(e)}"
@@ -265,9 +338,6 @@ class GPTService(BaseService):
         if not self._current_conversation_id:
             await self.reset_conversation()
 
-        # Add user message to memory
-        self._memory.add_message("user", user_input)
-
         # Check rate limiting
         current_time = time.time()
         self._request_timestamps = [t for t in self._request_timestamps 
@@ -278,6 +348,10 @@ class GPTService(BaseService):
 
         self._request_timestamps.append(current_time)
 
+        # Add the user's input as a message to memory BEFORE making the API call
+        self._memory.add_message("user", user_input)
+        self.logger.info(f"Added user message to memory: {user_input}")
+
         # Prepare API request
         api_url = "https://api.openai.com/v1/chat/completions"
         request_data = {
@@ -287,19 +361,33 @@ class GPTService(BaseService):
             "stream": self._config["STREAMING"],
         }
 
+        # Log debug info about the messages being sent
+        messages_for_api = self._memory.get_messages_for_api()
+        self.logger.info(f"Sending {len(messages_for_api)} messages to API")
+        for i, msg in enumerate(messages_for_api):
+            self.logger.info(f"Message {i}: role={msg['role']}, content preview={msg['content'][:50]}...")
+
         # Add tool configurations if any are registered
         if self._tool_schemas:
             request_data["tools"] = self._tool_schemas
             request_data["tool_choice"] = "auto"
 
+        # Log API request preparation
+        self.logger.info(f"Preparing OpenAI API request with model: {self._config['MODEL']}")
+        self.logger.debug(f"Request data: {json.dumps(request_data, indent=2)[:500]}...")
+
         try:
+            self.logger.info("Making API call to OpenAI...")
             if self._config["STREAMING"]:
                 await self._stream_gpt_response(api_url, request_data)
             else:
                 await self._get_gpt_response(api_url, request_data)
+            self.logger.info("API call completed successfully")
         except Exception as e:
             error_msg = f"Error processing with GPT: {str(e)}"
             self.logger.error(error_msg)
+            # Include more details in the error message
+            self.logger.error(f"Request details: URL={api_url}, Model={self._config['MODEL']}")
             await self._emit_status(
                 ServiceStatus.ERROR,
                 error_msg
@@ -316,31 +404,44 @@ class GPTService(BaseService):
             "Content-Type": "application/json"
         }
 
-        async with self._session.post(api_url, json=request_data, headers=headers) as response:
-            if response.status != 200:
-                error_msg = f"API request failed with status {response.status}"
-                self.logger.error(error_msg)
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    error_msg
+        self.logger.info(f"Making non-streaming API request to {api_url}")
+        
+        try:
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                self.logger.info(f"Received API response with status: {response.status}")
+                
+                if response.status != 200:
+                    response_text = await response.text()
+                    error_msg = f"API request failed with status {response.status}: {response_text[:200]}"
+                    self.logger.error(error_msg)
+                    await self._emit_status(
+                        ServiceStatus.ERROR,
+                        error_msg
+                    )
+                    raise Exception(error_msg)
+
+                response_data = await response.json()
+                self.logger.info(f"Successfully parsed API response")
+                self.logger.debug(f"Response data: {json.dumps(response_data, indent=2)[:500]}...")
+                
+                message = response_data["choices"][0]["message"]
+                
+                # Add assistant message to memory
+                self._memory.add_message(
+                    role="assistant",
+                    content=message["content"],
+                    tool_calls=message.get("tool_calls")
                 )
-                raise Exception(error_msg)
 
-            response_data = await response.json()
-            message = response_data["choices"][0]["message"]
-            
-            # Add assistant message to memory
-            self._memory.add_message(
-                role="assistant",
-                content=message["content"],
-                tool_calls=message.get("tool_calls")
-            )
-
-            # Emit response
-            await self._emit_llm_response(
-                message["content"],
-                tool_calls=message.get("tool_calls")
-            )
+                # Emit response
+                self.logger.info(f"Emitting LLM response: {message['content'][:50]}...")
+                await self._emit_llm_response(
+                    message["content"],
+                    tool_calls=message.get("tool_calls")
+                )
+        except Exception as e:
+            self.logger.error(f"Error in _get_gpt_response: {str(e)}")
+            raise
             
     async def _stream_gpt_response(self, api_url: str, request_data: Dict[str, Any]) -> None:
         """Stream responses from the GPT API."""
@@ -353,52 +454,71 @@ class GPTService(BaseService):
             "Accept": "text/event-stream"
         }
 
-        async with self._session.post(api_url, json=request_data, headers=headers) as response:
-            if response.status != 200:
-                error_msg = f"API request failed with status {response.status}"
-                self.logger.error(error_msg)
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    error_msg
-                )
-                raise Exception(error_msg)
+        self.logger.info(f"Making streaming API request to {api_url}")
+        
+        try:
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                self.logger.info(f"Established streaming connection with status: {response.status}")
+                
+                if response.status != 200:
+                    response_text = await response.text()
+                    error_msg = f"API request failed with status {response.status}: {response_text[:200]}"
+                    self.logger.error(error_msg)
+                    await self._emit_status(
+                        ServiceStatus.ERROR,
+                        error_msg
+                    )
+                    raise Exception(error_msg)
 
-            full_content = ""
-            tool_calls = []
-            is_complete = False
+                full_content = ""
+                tool_calls = []
+                is_complete = False
+                chunk_count = 0
 
-            async for line in response.content:
-                if line:
-                    try:
-                        line = line.decode("utf-8").strip()
-                        if line.startswith("data: ") and line != "data: [DONE]":
-                            data = json.loads(line[6:])
-                            delta = data["choices"][0]["delta"]
-                            
-                            if "content" in delta:
-                                content = delta["content"]
-                                full_content += content
-                                await self._emit_llm_stream_chunk(content, is_complete=False)
-                            
-                            if "tool_calls" in delta:
-                                tool_calls.extend(delta["tool_calls"])
+                self.logger.info("Starting to process streaming response chunks...")
+                async for line in response.content:
+                    if line:
+                        try:
+                            line = line.decode("utf-8").strip()
+                            if line.startswith("data: ") and line != "data: [DONE]":
+                                data = json.loads(line[6:])
+                                delta = data["choices"][0]["delta"]
+                                chunk_count += 1
                                 
-                    except Exception as e:
-                        self.logger.error(f"Error processing stream chunk: {str(e)}")
+                                if "content" in delta:
+                                    content = delta["content"]
+                                    full_content += content
+                                    if chunk_count % 10 == 0:  # Log periodically to avoid spam
+                                        self.logger.debug(f"Processed {chunk_count} chunks, current content: {full_content[:50]}...")
+                                    await self._emit_llm_stream_chunk(content, is_complete=False)
+                                
+                                if "tool_calls" in delta:
+                                    tool_calls.extend(delta["tool_calls"])
+                                    self.logger.info(f"Received tool call in stream")
+                                    
+                        except Exception as e:
+                            self.logger.error(f"Error processing stream chunk: {str(e)}")
+                
+                self.logger.info(f"Completed streaming response with {chunk_count} chunks")
+                self.logger.info(f"Final response: {full_content[:100]}...")
 
-            # Add complete message to memory
-            self._memory.add_message(
-                role="assistant",
-                content=full_content,
-                tool_calls=tool_calls if tool_calls else None
-            )
+                # Add complete message to memory
+                self._memory.add_message(
+                    role="assistant",
+                    content=full_content,
+                    tool_calls=tool_calls if tool_calls else None
+                )
 
-            # Emit final chunk
-            await self._emit_llm_stream_chunk(
-                full_content,
-                tool_calls=tool_calls if tool_calls else None,
-                is_complete=True
-            )
+                # Emit final chunk
+                self.logger.info("Emitting final LLM response chunk")
+                await self._emit_llm_stream_chunk(
+                    full_content,
+                    tool_calls=tool_calls if tool_calls else None,
+                    is_complete=True
+                )
+        except Exception as e:
+            self.logger.error(f"Error in _stream_gpt_response: {str(e)}")
+            raise
 
     async def _emit_llm_response(
         self, 
@@ -420,10 +540,12 @@ class GPTService(BaseService):
             conversation_id=self._current_conversation_id
         )
         
-        # Add the message to memory for context
-        self._memory.add_message("assistant", response_text)
+        # Note: We no longer add the message to memory here as it's already done
+        # in the _get_gpt_response or _stream_gpt_response methods
+        # This prevents duplicate message storage
         
         # Emit the event
+        self.logger.info(f"Emitting LLM_RESPONSE event with {len(response_text)} chars")
         await self.emit(EventTopics.LLM_RESPONSE, payload)
         
     async def _emit_llm_stream_chunk(

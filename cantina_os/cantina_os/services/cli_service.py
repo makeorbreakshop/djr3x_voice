@@ -13,6 +13,7 @@ from typing import Dict, Optional, Any, List, Callable
 from datetime import datetime
 import uuid
 import signal
+import time  # Added import for time module
 
 from pyee.asyncio import AsyncIOEventEmitter
 
@@ -101,6 +102,11 @@ class CLIService(BaseService):
         self._is_recording = False
         self._recording_text = ""
         self._mic_recording_active = False
+        
+    @property
+    def event_bus(self):
+        """Get the event bus with public accessor."""
+        return self._event_bus
         
     async def _start(self) -> None:
         """Initialize the service."""
@@ -295,7 +301,7 @@ class CLIService(BaseService):
                 
             # Handle quit command
             if command in ['quit', 'exit']:
-                self.event_bus.emit(EventTopics.SYSTEM_SHUTDOWN, {})
+                self._event_bus.emit(EventTopics.SYSTEM_SHUTDOWN, {})
                 return
             
             # Handle 'done' command to stop recording
@@ -331,7 +337,7 @@ class CLIService(BaseService):
             # Handle mode commands
             if command in self.MODE_COMMANDS:
                 self.logger.debug(f"Processing mode command: {command}")
-                self.event_bus.emit(
+                self._event_bus.emit(
                     EventTopics.SYSTEM_SET_MODE_REQUEST,
                     {"mode": self.MODE_COMMANDS[command]}
                 )
@@ -356,12 +362,12 @@ class CLIService(BaseService):
                 command=command,
                 args=args,
                 raw_command=full_command,
-                timestamp=datetime.now().timestamp(),
+                timestamp=time.time(),  # Fixed: Using time.time() instead of datetime.now().timestamp()
                 command_id=str(uuid.uuid4())
             )
             
             # Emit command event
-            self.event_bus.emit(event_topic, payload.model_dump())
+            self._event_bus.emit(event_topic, payload.model_dump())
             
         except Exception as e:
             self.logger.error(f"Error processing command '{user_input}': {e}")
@@ -372,7 +378,7 @@ class CLIService(BaseService):
             payload = CliResponsePayload(
                 message=error_msg,
                 success=False,
-                timestamp=datetime.now().timestamp(),
+                timestamp=time.time(),  # Fixed: Using time.time() instead of datetime.now().timestamp()
                 severity=LogLevel.ERROR
             )
             await self.emit_error_response(EventTopics.CLI_RESPONSE, payload)
@@ -428,7 +434,7 @@ class CLIService(BaseService):
             "service_name": self.service_name,
             "status": status,
             "message": message,
-            "timestamp": datetime.now().timestamp(),
+            "timestamp": time.time(),  # Fixed: Using time.time() instead of datetime.now().timestamp()
             "severity": severity
         }
         
