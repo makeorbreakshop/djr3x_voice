@@ -17,7 +17,7 @@ from ..base_service import BaseService
 from ..event_topics import EventTopics
 from ..event_payloads import (
     LogLevel, DebugLogPayload, CommandTracePayload,
-    PerformanceMetricPayload, DebugConfigPayload
+    PerformanceMetricPayload, DebugConfigPayload, DebugCommandPayload
 )
 
 class DebugServiceConfig(BaseModel):
@@ -117,6 +117,10 @@ class DebugService(BaseService):
         asyncio.create_task(self.subscribe(
             EventTopics.DEBUG_LOG,
             self._handle_debug_log
+        ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.DEBUG_COMMAND,
+            self.handle_debug_level_command
         ))
         asyncio.create_task(self.subscribe(
             EventTopics.DEBUG_COMMAND_TRACE,
@@ -326,4 +330,66 @@ class DebugService(BaseService):
                 print("="*50 + "\n")
                 
         except Exception as e:
-            self.logger.error(f"Error handling LLM response: {str(e)}") 
+            self.logger.error(f"Error handling LLM response: {str(e)}")
+
+    async def handle_debug_level_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle debug level command.
+        
+        Args:
+            payload: DebugCommandPayload as dictionary
+            
+        Returns:
+            Dict containing response message
+        """
+        try:
+            # Convert payload to DebugCommandPayload model
+            debug_payload = DebugCommandPayload(**payload)
+            
+            # Convert LogLevel enum to Python's logging level
+            python_log_level = {
+                LogLevel.DEBUG: logging.DEBUG,
+                LogLevel.INFO: logging.INFO,
+                LogLevel.WARNING: logging.WARNING,
+                LogLevel.ERROR: logging.ERROR,
+                LogLevel.CRITICAL: logging.CRITICAL
+            }.get(debug_payload.level, logging.INFO)
+            
+            if debug_payload.component.lower() == "all":
+                # Set the default log level for all components
+                old_default = self._default_log_level
+                self._default_log_level = debug_payload.level
+                # Clear component-specific levels to ensure all use the default
+                self._component_log_levels.clear()
+                
+                # Update root logger and all existing loggers
+                logging.getLogger().setLevel(python_log_level)
+                
+                # Update all existing loggers
+                for logger_name in logging.root.manager.loggerDict:
+                    logger = logging.getLogger(logger_name)
+                    logger.setLevel(python_log_level)
+                
+                self.logger.debug(
+                    f"Changed default log level from {old_default} (value: {old_default.value}) "
+                    f"to {debug_payload.level} (value: {debug_payload.level.value})"
+                )
+                return {"message": f"Successfully set ALL components log level to {debug_payload.level.name}"}
+            else:
+                # Set specific component log level
+                old_level = self._component_log_levels.get(debug_payload.component, self._default_log_level)
+                self._component_log_levels[debug_payload.component] = debug_payload.level
+                
+                # Try to update the specific logger if it exists
+                logger = logging.getLogger(debug_payload.component)
+                logger.setLevel(python_log_level)
+                
+                self.logger.debug(
+                    f"Changed log level for {debug_payload.component} from {old_level} (value: {old_level.value}) "
+                    f"to {debug_payload.level} (value: {debug_payload.level.value})"
+                )
+                return {"message": f"Successfully set {debug_payload.component} log level to {debug_payload.level.name}"}
+                
+        except Exception as e:
+            error_msg = f"Error setting log level: {str(e)}"
+            self.logger.error(error_msg)
+            return {"message": error_msg, "is_error": True} 
