@@ -333,98 +333,30 @@ class DebugService(BaseService):
             self.logger.error(f"Error handling LLM response: {str(e)}")
 
     async def handle_debug_level_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle debug level command.
-        
-        Args:
-            payload: DebugCommandPayload as dictionary
-            
-        Returns:
-            Dict containing response message
-        """
+        """Handle debug level command by emitting an event to set global log level."""
         try:
-            # Convert payload to DebugCommandPayload model
             debug_payload = DebugCommandPayload(**payload)
+            level_name = debug_payload.level.name # Get the string name of the level (e.g., "WARNING")
+
+            # Emit an event to tell main.py to set the global log level
+            await self.emit(EventTopics.DEBUG_SET_GLOBAL_LEVEL, {"level": level_name})
             
-            # Convert LogLevel enum to Python's logging level
-            python_log_level = {
-                LogLevel.DEBUG: logging.DEBUG,
-                LogLevel.INFO: logging.INFO,
-                LogLevel.WARNING: logging.WARNING,
-                LogLevel.ERROR: logging.ERROR,
-                LogLevel.CRITICAL: logging.CRITICAL
-            }.get(debug_payload.level, logging.INFO)
-            
+            # Update internal state for component-specific logging if needed in the future
+            # For now, global level is the primary control
             if debug_payload.component.lower() == "all":
-                # Set the default log level for all components
-                old_default = self._default_log_level
                 self._default_log_level = debug_payload.level
-                # Clear component-specific levels to ensure all use the default
                 self._component_log_levels.clear()
-                
-                # Get the root logger
-                root_logger = logging.getLogger()
-                
-                # Update root logger level
-                root_logger.setLevel(python_log_level)
-                
-                # Update all handlers on the root logger
-                for handler in root_logger.handlers:
-                    handler.setLevel(python_log_level)
-                
-                # Update all existing loggers and their handlers
-                for logger_name in logging.root.manager.loggerDict:
-                    logger = logging.getLogger(logger_name)
-                    logger.setLevel(python_log_level)
-                    
-                    # Also update all handlers for this logger
-                    for handler in logger.handlers:
-                        handler.setLevel(python_log_level)
-                
-                # Create a temporary StreamHandler to override the default handler
-                if debug_payload.level in [LogLevel.WARNING, LogLevel.ERROR, LogLevel.CRITICAL]:
-                    # The trick is to add a high-level filter to the root logger's handlers
-                    for handler in root_logger.handlers:
-                        if isinstance(handler, logging.StreamHandler):
-                            # Remove any existing filters we might have added
-                            handler.filters = [f for f in handler.filters if not hasattr(f, '_dj_r3x_level_filter')]
-                            
-                            # Add a new filter that blocks messages below our level
-                            class LevelFilter(logging.Filter):
-                                def __init__(self, level):
-                                    super().__init__()
-                                    self.level = level
-                                    self._dj_r3x_level_filter = True
-                                    
-                                def filter(self, record):
-                                    return record.levelno >= self.level
-                            
-                            handler.addFilter(LevelFilter(python_log_level))
-                
-                self.logger.debug(
-                    f"Changed default log level from {old_default} (value: {old_default.value}) "
-                    f"to {debug_payload.level} (value: {debug_payload.level.value})"
-                )
-                return {"message": f"Successfully set ALL components log level to {debug_payload.level.name}"}
+                message = f"Request to set ALL components log level to {level_name} emitted."
             else:
-                # Set specific component log level
-                old_level = self._component_log_levels.get(debug_payload.component, self._default_log_level)
+                # If we want to support component-specific levels again, this is where it'd go
+                # For now, this will also be handled by the global level change
                 self._component_log_levels[debug_payload.component] = debug_payload.level
-                
-                # Try to update the specific logger if it exists
-                logger = logging.getLogger(debug_payload.component)
-                logger.setLevel(python_log_level)
-                
-                # Update handlers for this logger
-                for handler in logger.handlers:
-                    handler.setLevel(python_log_level)
-                
-                self.logger.debug(
-                    f"Changed log level for {debug_payload.component} from {old_level} (value: {old_level.value}) "
-                    f"to {debug_payload.level} (value: {debug_payload.level.value})"
-                )
-                return {"message": f"Successfully set {debug_payload.component} log level to {debug_payload.level.name}"}
-                
+                message = f"Request to set {debug_payload.component} log level to {level_name} (via global) emitted."
+
+            self.logger.info(message) # Log action in DebugService itself
+            return {"message": message.replace(" emitted", " processed")}
+            
         except Exception as e:
-            error_msg = f"Error setting log level: {str(e)}"
+            error_msg = f"Error processing debug level command: {str(e)}"
             self.logger.error(error_msg)
             return {"message": error_msg, "is_error": True} 

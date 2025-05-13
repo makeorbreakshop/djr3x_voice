@@ -36,30 +36,53 @@ from .services.command_dispatcher_service import CommandDispatcherService
 from .services.mode_command_handler_service import ModeCommandHandlerService
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    force=True  # Force reconfiguration of the root logger
-)
-logger = logging.getLogger("cantina_os.main")
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#     force=True  # Force reconfiguration of the root logger
+# )
+# logger = logging.getLogger("cantina_os.main")
 
 # Prevent duplicate logging by removing handlers from the root logger
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
+# for handler in logging.root.handlers[:]:
+# logging.root.removeHandler(handler)
 
 # Add a single handler to the root logger
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logging.root.addHandler(handler)
+# handler = logging.StreamHandler()
+# formatter = logging.Formatter(\'%(asctime)s - %(name)s - %(levelname)s - %(message)s\')
+# handler.setFormatter(formatter)
+# logging.root.addHandler(handler)
 
 # Set specific logger levels for detailed debugging
-logging.getLogger('cantina_os.mode_command_handler').setLevel(logging.DEBUG)
-logging.getLogger('cantina_os.command_dispatcher').setLevel(logging.DEBUG)
-logging.getLogger('cantina_os.base_service').setLevel(logging.DEBUG)
-logging.getLogger('cantina_os.cli').setLevel(logging.DEBUG)
+# logging.getLogger(\'cantina_os.mode_command_handler\').setLevel(logging.DEBUG)
+# logging.getLogger(\'cantina_os.command_dispatcher\').setLevel(logging.DEBUG)
+# logging.getLogger(\'cantina_os.base_service\').setLevel(logging.DEBUG)
+# logging.getLogger(\'cantina_os.cli\').setLevel(logging.DEBUG)
 # Keep these less verbose to avoid too much noise
-logging.getLogger('cantina_os.deepgram_direct_mic').setLevel(logging.INFO)  # Updated logger name
+# logging.getLogger(\'cantina_os.deepgram_direct_mic\').setLevel(logging.INFO)  # Updated logger name
+
+def set_global_log_level(level: int) -> None:
+    """Sets the global logging level for the root logger and all handlers."""
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
+    # Also update all existing loggers
+    for logger_name in logging.root.manager.loggerDict:
+        logger_instance = logging.getLogger(logger_name)
+        logger_instance.setLevel(level)
+        for h in logger_instance.handlers:
+            h.setLevel(level)
+    logging.info(f"Global log level set to: {logging.getLevelName(level)}")
+
+# Initial logging setup
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True # Force reconfiguration
+)
+set_global_log_level(logging.INFO) # Default to INFO
+
+logger = logging.getLogger("cantina_os.main")
 
 class CantinaOS:
     """
@@ -77,6 +100,9 @@ class CantinaOS:
         # Merge provided config with loaded values instead of replacing them
         if config:
             self._config.update(config)  # Update with any provided values, preserving loaded ones
+        
+        # Subscribe to global log level changes
+        self._event_bus.on(EventTopics.DEBUG_SET_GLOBAL_LEVEL, self._handle_set_global_log_level)
         
     @property
     def event_bus(self):
@@ -229,19 +255,24 @@ class CantinaOS:
         
         # Debug commands
         await dispatcher.register_command(
+            "debug",
+            "debug",
+            EventTopics.DEBUG_COMMAND
+        )
+        await dispatcher.register_command(
             "debug level",
             "debug",
-            "/debug/command"
+            EventTopics.DEBUG_COMMAND
         )
         await dispatcher.register_command(
             "debug trace",
             "debug",
-            "/debug/command"
+            EventTopics.DEBUG_COMMAND
         )
         await dispatcher.register_command(
             "debug performance",
             "debug",
-            "/debug/command"
+            EventTopics.DEBUG_COMMAND
         )
         
         self.logger.info("Command registration complete")
@@ -510,6 +541,22 @@ class CantinaOS:
             
         else:
             raise ValueError(f"Unknown service: {service_name}")
+
+    async def _handle_set_global_log_level(self, payload: Dict[str, Any]) -> None:
+        """Handles the event to set the global log level."""
+        try:
+            level_name = payload.get("level")
+            if level_name:
+                python_log_level = getattr(logging, level_name.upper(), None)
+                if python_log_level is not None:
+                    set_global_log_level(python_log_level)
+                    self.logger.info(f"Global log level changed to {level_name.upper()} via event.")
+                else:
+                    self.logger.warning(f"Invalid log level received in event: {level_name}")
+            else:
+                self.logger.warning("No log level provided in DEBUG_SET_GLOBAL_LEVEL event payload.")
+        except Exception as e:
+            self.logger.error(f"Error handling DEBUG_SET_GLOBAL_LEVEL event: {e}")
 
 def main() -> None:
     """Entry point for the application."""

@@ -37,11 +37,14 @@ class EventTopics:
     # Voice events
     VOICE_COMMAND = "/voice/command"
     VOICE_RESPONSE = "/voice/response"
-    VOICE_LISTENING_STARTED = "/voice/listening/started"
-    VOICE_LISTENING_STOPPED = "/voice/listening/stopped"
+    VOICE_LISTENING_STARTED = "voice.listening.started"  # Used by services
+    VOICE_LISTENING_STOPPED = "voice.listening.stopped"  # Used by services
     VOICE_PROCESSING_STARTED = "/voice/processing/started"
     VOICE_PROCESSING_COMPLETE = "/voice/processing/complete"
     VOICE_ERROR = "/voice/error"
+    VOICE_AUDIO_RECEIVED = "/voice/audio/received"
+    VOICE_AUDIO_LEVEL = "/voice/audio/level"
+    VOICE_INPUT_CLEANED_UP = "/voice/input/cleaned_up"
     
     # Music events
     MUSIC_COMMAND = "/music/command"
@@ -72,6 +75,9 @@ class EventTopics:
     SPEECH_SYNTHESIS_STARTED = "/speech/synthesis/started"
     SPEECH_SYNTHESIS_AMPLITUDE = "/speech/synthesis/amplitude"
     SPEECH_SYNTHESIS_ENDED = "/speech/synthesis/ended"
+    SPEECH_SYNTHESIS_REQUESTED = "/speech/synthesis/requested"
+    SPEECH_SYNTHESIS_COMPLETED = "/speech/synthesis/completed"
+    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up"
     
     # Speech Generation Events (ElevenLabs)
     SPEECH_GENERATION_REQUEST = "/speech/generation/request"
@@ -103,22 +109,18 @@ class EventTopics:
     # System mode events
     SYSTEM_SHUTDOWN_REQUESTED = "/system/shutdown/requested"
     
-    # Voice events
-    VOICE_AUDIO_RECEIVED = "/voice/audio/received"
-    VOICE_AUDIO_LEVEL = "/voice/audio/level"
-    VOICE_INPUT_CLEANED_UP = "/voice/input/cleaned_up"
-    
-    # Speech synthesis events
-    SPEECH_SYNTHESIS_REQUESTED = "/speech/synthesis/requested"
-    SPEECH_SYNTHESIS_COMPLETED = "/speech/synthesis/completed"
-    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up"
-    
     # Debug topics
     DEBUG_LOG = "/debug/log"
+    DEBUG_COMMAND = "/debug/command"  # Added for debug level commands
     DEBUG_COMMAND_TRACE = "/debug/command/trace"
     DEBUG_PERFORMANCE = "/debug/performance"
-    DEBUG_STATE_TRANSITION = "/debug/state/transition"
+    DEBUG_STATE_TRANSITION = "/debug/state_transition"
     DEBUG_CONFIG = "/debug/config"
+    DEBUG_SET_GLOBAL_LEVEL = "/debug/set_global_level" # New event for global log level
+
+    # Mouse Input Events
+    MIC_RECORDING_START = "/mic/recording/start"
+    MIC_RECORDING_STOP = "/mic/recording/stop"
 
     # New topics from the code block
     SERVICE_STATUS = "service.status"
@@ -131,6 +133,23 @@ class EventTopics:
     DEBUG_PERFORMANCE = "debug.performance"
     DEBUG_STATE_TRANSITION = "debug.state.transition"
     DEBUG_CONFIG = "debug.config"
+
+    # Speech synthesis events
+    SPEECH_SYNTHESIS_REQUESTED = "/speech/synthesis/requested"
+    SPEECH_SYNTHESIS_COMPLETED = "/speech/synthesis/completed"
+    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up"
+    
+    # Speech synthesis events
+    SPEECH_SYNTHESIS_REQUESTED = "/speech/synthesis/requested"
+    SPEECH_SYNTHESIS_COMPLETED = "/speech/synthesis/completed"
+    SPEECH_SYNTHESIS_CLEANED_UP = "/speech/synthesis/cleaned_up"
+    
+    # Debug topics
+    DEBUG_LOG = "/debug/log"
+    DEBUG_COMMAND_TRACE = "/debug/command/trace"
+    DEBUG_PERFORMANCE = "/debug/performance"
+    DEBUG_STATE_TRANSITION = "/debug/state/transition"
+    DEBUG_CONFIG = "/debug/config"
 
     # Mouse Input Events
     MIC_RECORDING_START = "/mic/recording/start"
