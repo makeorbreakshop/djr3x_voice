@@ -361,13 +361,44 @@ class DebugService(BaseService):
                 # Clear component-specific levels to ensure all use the default
                 self._component_log_levels.clear()
                 
-                # Update root logger and all existing loggers
-                logging.getLogger().setLevel(python_log_level)
+                # Get the root logger
+                root_logger = logging.getLogger()
                 
-                # Update all existing loggers
+                # Update root logger level
+                root_logger.setLevel(python_log_level)
+                
+                # Update all handlers on the root logger
+                for handler in root_logger.handlers:
+                    handler.setLevel(python_log_level)
+                
+                # Update all existing loggers and their handlers
                 for logger_name in logging.root.manager.loggerDict:
                     logger = logging.getLogger(logger_name)
                     logger.setLevel(python_log_level)
+                    
+                    # Also update all handlers for this logger
+                    for handler in logger.handlers:
+                        handler.setLevel(python_log_level)
+                
+                # Create a temporary StreamHandler to override the default handler
+                if debug_payload.level in [LogLevel.WARNING, LogLevel.ERROR, LogLevel.CRITICAL]:
+                    # The trick is to add a high-level filter to the root logger's handlers
+                    for handler in root_logger.handlers:
+                        if isinstance(handler, logging.StreamHandler):
+                            # Remove any existing filters we might have added
+                            handler.filters = [f for f in handler.filters if not hasattr(f, '_dj_r3x_level_filter')]
+                            
+                            # Add a new filter that blocks messages below our level
+                            class LevelFilter(logging.Filter):
+                                def __init__(self, level):
+                                    super().__init__()
+                                    self.level = level
+                                    self._dj_r3x_level_filter = True
+                                    
+                                def filter(self, record):
+                                    return record.levelno >= self.level
+                            
+                            handler.addFilter(LevelFilter(python_log_level))
                 
                 self.logger.debug(
                     f"Changed default log level from {old_default} (value: {old_default.value}) "
@@ -382,6 +413,10 @@ class DebugService(BaseService):
                 # Try to update the specific logger if it exists
                 logger = logging.getLogger(debug_payload.component)
                 logger.setLevel(python_log_level)
+                
+                # Update handlers for this logger
+                for handler in logger.handlers:
+                    handler.setLevel(python_log_level)
                 
                 self.logger.debug(
                     f"Changed log level for {debug_payload.component} from {old_level} (value: {old_level.value}) "
