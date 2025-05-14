@@ -26,6 +26,7 @@ class EventTopics:
     CLI_RESPONSE = "/cli/response"
     CLI_HELP_REQUEST = "/cli/help/request"
     CLI_STATUS_REQUEST = "/cli/status/request"
+    REGISTER_COMMAND = "/cli/register/command"  # New topic for registering commands
     
     # Mode events
     MODE_COMMAND = "/mode/command"
@@ -33,6 +34,22 @@ class EventTopics:
     MODE_TRANSITION_COMPLETE = "/mode/transition/complete"
     MODE_TRANSITION_COMPLETED = "/mode/transition/completed"
     MODE_TRANSITION_FAILED = "/mode/transition/failed"
+    
+    # Eye events
+    EYE_COMMAND = "/eye/command"  # Added for eye control commands
+    
+    # LED events
+    LED_COMMAND = "/led/command"  # Added for LED control commands
+    LED_COMMAND_SUCCESS = "/led/command/success"
+    LED_COMMAND_FAILURE = "/led/command/failure"
+    LED_RESPONSE = "/led/response"
+    LED_PATTERN_STARTED = "/led/pattern/started"
+    LED_PATTERN_STOPPED = "/led/pattern/stopped"
+    LED_ERROR = "/led/error"
+    
+    # Arduino events
+    ARDUINO_COMMAND = "/arduino/command"  # Added for Arduino control commands
+    ARDUINO_RESPONSE = "/arduino/response"
     
     # Voice events
     VOICE_COMMAND = "/voice/command"
@@ -53,13 +70,8 @@ class EventTopics:
     MUSIC_PLAYBACK_STOPPED = "/music/playback/stopped"
     MUSIC_VOLUME_CHANGED = "/music/volume/changed"
     MUSIC_ERROR = "/music/error"
-    
-    # LED events
-    LED_COMMAND = "/led/command"
-    LED_RESPONSE = "/led/response"
-    LED_PATTERN_STARTED = "/led/pattern/started"
-    LED_PATTERN_STOPPED = "/led/pattern/stopped"
-    LED_ERROR = "/led/error"
+    MUSIC_PLAY = "/music/play"  # Added for backward compatibility
+    MUSIC_STOP = "/music/stop"  # Added for backward compatibility
     
     # Audio events
     AUDIO_DUCKING_START = "/audio/ducking/start"
@@ -92,6 +104,7 @@ class EventTopics:
     LLM_SENTIMENT_ANALYZED = "/llm/sentiment/analyzed"
     LLM_PROCESSING_STARTED = "/llm/processing/started"
     LLM_PROCESSING_ENDED = "/llm/processing/ended"
+    INTENT_DETECTED = "/llm/intent/detected"  # New event for detected intents from LLM
     
     # Transcription Events
     TRANSCRIPTION_FINAL = "/transcription/final"
@@ -121,6 +134,7 @@ class EventTopics:
     # Mouse Input Events
     MIC_RECORDING_START = "/mic/recording/start"
     MIC_RECORDING_STOP = "/mic/recording/stop"
+    MOUSE_RECORDING_STOPPED = "/mouse/recording/stopped"  # New event for immediate eye pattern changes
 
     # New topics from the code block
     SERVICE_STATUS = "service.status"

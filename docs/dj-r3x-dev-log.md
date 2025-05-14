@@ -2768,3 +2768,164 @@ Each service should have a single responsibility and communicate through events 
   - Implemented proper error handling for stream interruptions
   - Enhanced logging for stream state monitoring
 - Impact: Significantly improved interaction latency and responsiveness
+
+### 2025-05-13: Enhanced Debugging System Implementation
+
+**Major Improvements**:
+- Implemented comprehensive DebugService for centralized system observability:
+  - Component-level log level control
+  - Command tracing for execution path tracking
+  - Performance metrics collection
+  - State transition monitoring
+  - Real-time LLM response visibility
+
+**Key Features**:
+- Added CLI commands:
+  - `debug level <component> <level>`: Control logging granularity
+  - `debug trace`: Track command execution paths
+  - `debug performance`: Monitor system metrics
+- Enhanced event monitoring:
+  - Real-time visibility of LLM responses in console
+  - Transcription flow tracking
+  - Service state transitions
+  - Audio pipeline debugging
+
+**Technical Implementation**:
+- Integrated with event bus architecture for non-intrusive monitoring
+- Added support for both streaming and complete response tracking
+- Implemented conversation ID tracking for streaming responses
+- Enhanced error detection and reporting capabilities
+- Added comprehensive logging for audio pipeline debugging
+
+**Impact**:
+- Significantly improved system observability
+- Faster issue resolution through better debugging tools
+- Clear visibility into voice processing chain
+- Enhanced development and testing workflow
+
+**Next Steps**:
+- Add performance benchmarking
+- Implement log persistence
+- Enhance metrics visualization
+- Add system health monitoring dashboard
+
+### 2025-05-13: Arduino Eye Light Controller Optimization
+
+**Key Changes**:
+- Simplified Arduino communication protocol:
+  - Single-character commands for patterns (I=idle, L=listening, T=thinking, S=speaking, etc.)
+  - Simple '+' success / '-' error responses
+  - ~20ms latency, minimal memory usage
+  - Eliminated complex JSON parsing on Arduino side
+- Enhanced pattern support:
+  - IDLE: Default state
+  - STARTUP: System initialization
+  - LISTENING: Voice input active
+  - THINKING: Processing input
+  - SPEAKING: Delivering responses
+  - HAPPY/SAD/ANGRY/SURPRISED: Sentiment-based
+  - ERROR: System error state
+- Improved hardware detection:
+  - Auto-detection of Arduino port
+  - Graceful fallback to mock mode
+  - Multiple connection retry attempts
+  - Better error handling and recovery
+- Technical details:
+  - Hardware: Arduino Mega 2560
+  - LED: Dual MAX7219 matrices
+  - Pins: DIN=51, CLK=52, CS=53
+  - Baud rate: 115200
+
+**Impact**: More reliable eye animations with lower latency and better error recovery. System now gracefully handles hardware presence/absence without explicit configuration.
+
+## [2024-05-14] Command Handling Inconsistency Investigation
+
+### Issue Identified
+- Discovered inconsistency in command handling between services (specifically EyeLightControllerService vs MusicControllerService)
+- MusicControllerService correctly handles multi-word commands ("play music 3", "list music")
+- EyeLightControllerService fails to properly parse multi-word commands ("eye pattern sad")
+
+### Root Cause Analysis
+- Command registration and dispatch mismatch:
+  - Commands registered as "eye pattern" but dispatched as command="eye", args=["pattern", "sad"]
+  - No standardized approach for handling compound commands across services
+  - Inconsistent payload processing between services
+
+### Next Steps
+- [ ] Implement standardized CommandPayload model
+- [ ] Update CommandDispatcherService to handle compound commands
+- [ ] Refactor existing services to use new command handling pattern
+- [ ] Add tests to verify consistent command handling
+- [ ] Update documentation to reflect new command structure
+
+### Impact
+This change will:
+- Ensure consistent command handling across all services
+- Improve code maintainability and reduce bugs
+- Better align with our architecture standards
+- Maintain backward compatibility with existing CLI interface
+
+## [2024-05-14] Command Handling Fixes Implemented
+
+Based on the investigation of command handling inconsistencies, we've implemented several fixes:
+
+1. Modified CommandDispatcherService to maintain backward compatibility while supporting the new StandardCommandPayload format
+2. Updated EyeLightControllerService to handle both old command formats and the new standardized format
+3. Fixed MusicControllerService to more robustly process commands in any format
+4. Added better error handling and improved index validation in music playback commands
+
+The new approach preserves all existing functionality while adding a more standardized structure through StandardCommandPayload. This makes the system more robust and consistent across different command types while ensuring backward compatibility with existing code.
+
+Each service can now handle command parsing in a consistent way regardless of whether the command comes as:
+- A compound command string (e.g., "eye pattern")
+- A base command with the subcommand in args (e.g., command="eye", args=["pattern", "sad"])
+- A structured payload with explicit command/subcommand fields
+
+## [2024-05-14] Arduino Communication Protocol Fix
+
+After implementing the command handling standardization, we discovered issues with the Arduino communication. The problem was unrelated to our command handling changes but rather with how commands were being sent to the Arduino.
+
+### Issues Identified
+- Commands were being rejected by the Arduino
+- Communication protocol expectations were inconsistent
+
+### Root Cause Analysis
+- Arduino expected newline-terminated ('\n') commands, but we were sending bare characters
+- No handling for different Arduino firmware expectations (some expect newlines, others don't)
+- Inadequate buffer clearing between command attempts
+
+### Fixes Implemented
+1. Added newline characters to all Arduino commands
+2. Improved connection sequence to try both with and without newlines
+3. Added additional buffer clearing to prevent communication corruption
+4. Enhanced error recovery with alternative command formats
+5. Added more extensive logging for Arduino communication
+
+These changes greatly improve the robustness of the Arduino connection process and should prevent the "Command rejected by Arduino" errors seen previously. The system now properly falls back to mock mode when hardware isn't available, without affecting the command handling changes.
+
+## 2025-05-14: IntentRouter Integration Progress
+
+### Unit & Integration Test Status
+- Unit tests for both GPTService intent extraction and IntentRouterService are now passing
+- Integration tests are still failing when testing the end-to-end flow
+- Identified issues:
+  1. Fixed event topic mismatch: TRANSCRIPTION_TEXT → TRANSCRIPTION_FINAL
+  2. Found that GPTService is handling transcriptions via VOICE_LISTENING_STOPPED event rather than TRANSCRIPTION_FINAL
+  3. Successfully getting the GPTService to process the transcript, but not yet emitting INTENT_DETECTED events
+  4. Need to properly mock the OpenAI API response to include tool calls
+
+### Next Steps
+- Fix the mock implementation of _get_gpt_response to properly emit tool calls
+- Ensure proper propagation of events from GPTService → IntentRouterService → hardware command events
+- Complete integration tests
+- Update documentation
+
+### Integration Test Challenges
+After several attempts to fix the integration tests, we've identified these specific issues:
+
+1. Our mocking approach needs revision. When patching `_get_gpt_response`, the mock is not being used correctly.
+2. We need to either:
+   - Mock `_process_with_gpt` instead, since that's the actual method that gets called when a voice transcript is received
+   - Or find a way to override `_get_gpt_response` at a deeper level to ensure our mock is used
+
+The current testing approach works for unit tests but struggles with integration tests where the end-to-end flow includes complex async interactions between multiple services.

@@ -14,7 +14,7 @@ import uuid
 from typing import Optional, Dict, Any, List, Deque
 from collections import deque
 import aiohttp
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ..base_service import BaseService
 from ..event_topics import EventTopics
@@ -22,9 +22,11 @@ from ..event_payloads import (
     BaseEventPayload,
     TranscriptionTextPayload,
     LLMResponsePayload,
+    IntentPayload,
     ServiceStatus,
     LogLevel
 )
+from ..llm.command_functions import get_all_function_definitions, function_name_to_model_map
 
 class Message(BaseModel):
     """Model for a conversation message."""
@@ -107,6 +109,7 @@ class GPTService(BaseService):
     - Tool calling support
     - Streaming responses
     - Conversation persistence
+    - Intent detection through function calling
     """
     
     def __init__(
@@ -198,8 +201,9 @@ class GPTService(BaseService):
             self._max_requests_per_window = self._config["RATE_LIMIT_REQUESTS"]
             self._request_timestamps = []
             
-            # Note: We're no longer calling _setup_subscriptions here, it will be called from _start
-            # as required by architecture standards
+            # Register command functions
+            self._register_command_functions()
+            self.logger.info("Registered command functions for intent detection")
             
             self.logger.info(
                 f"Initialized GPT service with model={self._config['MODEL']}"
@@ -371,6 +375,7 @@ class GPTService(BaseService):
         if self._tool_schemas:
             request_data["tools"] = self._tool_schemas
             request_data["tool_choice"] = "auto"
+            self.logger.info(f"Including {len(self._tool_schemas)} tools in request")
 
         # Log API request preparation
         self.logger.info(f"Preparing OpenAI API request with model: {self._config['MODEL']}")
@@ -429,14 +434,18 @@ class GPTService(BaseService):
                 # Add assistant message to memory
                 self._memory.add_message(
                     role="assistant",
-                    content=message["content"],
+                    content=message["content"] or "",
                     tool_calls=message.get("tool_calls")
                 )
 
+                # Process tool calls if any
+                if message.get("tool_calls"):
+                    await self._process_tool_calls(message["tool_calls"], message["content"] or "")
+
                 # Emit response
-                self.logger.info(f"Emitting LLM response: {message['content'][:50]}...")
+                self.logger.info(f"Emitting LLM response: {message['content'][:50] if message['content'] else ''}...")
                 await self._emit_llm_response(
-                    message["content"],
+                    message["content"] or "",
                     tool_calls=message.get("tool_calls")
                 )
         except Exception as e:
@@ -471,7 +480,9 @@ class GPTService(BaseService):
                     raise Exception(error_msg)
 
                 full_content = ""
-                tool_calls = []
+                tool_calls_collection = []
+                current_tool_call = None
+                current_tool_index = -1
                 is_complete = False
                 chunk_count = 0
 
@@ -492,12 +503,44 @@ class GPTService(BaseService):
                                         self.logger.debug(f"Processed {chunk_count} chunks, current content: {full_content[:50]}...")
                                     await self._emit_llm_stream_chunk(content, is_complete=False)
                                 
+                                # Handle tool calls in streaming mode
                                 if "tool_calls" in delta:
-                                    tool_calls.extend(delta["tool_calls"])
-                                    self.logger.info(f"Received tool call in stream")
+                                    for tool_call_delta in delta["tool_calls"]:
+                                        index = tool_call_delta.get("index")
+                                        
+                                        # Start new tool call
+                                        if "id" in tool_call_delta:
+                                            current_tool_index = index
+                                            current_tool_call = {
+                                                "id": tool_call_delta["id"],
+                                                "type": "function",
+                                                "function": {"name": "", "arguments": ""}
+                                            }
+                                            # Ensure we have room for this tool call
+                                            while len(tool_calls_collection) <= index:
+                                                tool_calls_collection.append(None)
+                                            tool_calls_collection[index] = current_tool_call
+                                        
+                                        # Add to existing tool call
+                                        elif current_tool_index == index and current_tool_call:
+                                            if "function" in tool_call_delta:
+                                                func_delta = tool_call_delta["function"]
+                                                if "name" in func_delta:
+                                                    current_tool_call["function"]["name"] += func_delta["name"]
+                                                if "arguments" in func_delta:
+                                                    current_tool_call["function"]["arguments"] += func_delta["arguments"]
                                     
+                                    self.logger.info(f"Received tool call chunk in stream")
+                            elif line == "data: [DONE]":
+                                is_complete = True
+                                await self._emit_llm_stream_chunk("", tool_calls=None, is_complete=True)
+                                self.logger.info("Received [DONE] in stream")
+                                
                         except Exception as e:
                             self.logger.error(f"Error processing stream chunk: {str(e)}")
+                
+                # Clean up any None values in tool calls
+                tool_calls_collection = [tc for tc in tool_calls_collection if tc is not None]
                 
                 self.logger.info(f"Completed streaming response with {chunk_count} chunks")
                 self.logger.info(f"Final response: {full_content[:100]}...")
@@ -506,16 +549,16 @@ class GPTService(BaseService):
                 self._memory.add_message(
                     role="assistant",
                     content=full_content,
-                    tool_calls=tool_calls if tool_calls else None
+                    tool_calls=tool_calls_collection if tool_calls_collection else None
                 )
+
+                # Process tool calls if any
+                if tool_calls_collection:
+                    await self._process_tool_calls(tool_calls_collection, full_content)
 
                 # Emit final chunk
                 self.logger.info("Emitting final LLM response chunk")
-                await self._emit_llm_stream_chunk(
-                    full_content,
-                    tool_calls=tool_calls if tool_calls else None,
-                    is_complete=True
-                )
+                
         except Exception as e:
             self.logger.error(f"Error in _stream_gpt_response: {str(e)}")
             raise
@@ -599,3 +642,54 @@ class GPTService(BaseService):
     def current_conversation_id(self) -> Optional[str]:
         """Get the current conversation ID."""
         return self._current_conversation_id 
+
+    def _register_command_functions(self) -> None:
+        """Register all command functions for intent detection."""
+        function_definitions = get_all_function_definitions()
+        for function_def in function_definitions:
+            self.register_tool(function_def)
+        
+        self.logger.info(f"Registered {len(function_definitions)} command functions")
+
+    async def _process_tool_calls(self, tool_calls: List[Dict[str, Any]], response_text: str) -> None:
+        """Process and emit intents from tool calls."""
+        for tool_call in tool_calls:
+            try:
+                if tool_call["type"] != "function":
+                    self.logger.warning(f"Unsupported tool call type: {tool_call['type']}")
+                    continue
+                
+                function_name = tool_call["function"]["name"]
+                function_args_str = tool_call["function"]["arguments"]
+                
+                try:
+                    # Parse the arguments JSON
+                    function_args = json.loads(function_args_str)
+                    
+                    # Validate arguments against the Pydantic model if available
+                    model_map = function_name_to_model_map()
+                    if function_name in model_map:
+                        param_model = model_map[function_name]
+                        # Validate the parameters
+                        validated_params = param_model(**function_args)
+                        function_args = validated_params.model_dump()
+                        self.logger.info(f"Validated parameters for function {function_name}")
+                    
+                    # Create and emit the intent payload
+                    intent_payload = IntentPayload(
+                        intent_name=function_name,
+                        parameters=function_args,
+                        original_text=response_text,
+                        conversation_id=self._current_conversation_id
+                    )
+                    
+                    self.logger.info(f"Emitting intent: {function_name} with params: {function_args}")
+                    await self.emit(EventTopics.INTENT_DETECTED, intent_payload)
+                    
+                except json.JSONDecodeError:
+                    self.logger.error(f"Invalid JSON in function arguments: {function_args_str}")
+                except ValidationError as e:
+                    self.logger.error(f"Parameter validation error for {function_name}: {e}")
+                
+            except Exception as e:
+                self.logger.error(f"Error processing tool call: {e}") 

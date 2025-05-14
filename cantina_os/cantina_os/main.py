@@ -28,7 +28,8 @@ from .services import (
     YodaModeManagerService,
     ModeChangeSoundService,
     MusicControllerService,
-    MouseInputService
+    MouseInputService,
+    IntentRouterService
 )
 from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
@@ -103,6 +104,9 @@ class CantinaOS:
         
         # Subscribe to global log level changes
         self._event_bus.on(EventTopics.DEBUG_SET_GLOBAL_LEVEL, self._handle_set_global_log_level)
+        
+        # Subscribe to system shutdown events
+        self._event_bus.on(EventTopics.SYSTEM_SHUTDOWN_REQUESTED, self._handle_shutdown_requested)
         
     @property
     def event_bus(self):
@@ -193,89 +197,58 @@ class CantinaOS:
         """
         self.logger.info("Registering commands with dispatcher")
         
-        # Mode commands
-        await dispatcher.register_command(
-            "engage",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
-        await dispatcher.register_command(
-            "ambient",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
-        await dispatcher.register_command(
-            "disengage",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
-        await dispatcher.register_command(
-            "status",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
-        await dispatcher.register_command(
-            "reset",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
+        # The current issue is that main.py believes the dispatcher handles all registrations,
+        # but it doesn't. We need to manually register the missing commands.
         
-        # Voice recording command
-        await dispatcher.register_command(
-            "record",
-            "cli",
-            EventTopics.CLI_COMMAND
-        )
+        # Register basic commands that aren't being auto-registered by the dispatcher
+        if "help" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("help", EventTopics.CLI_HELP_REQUEST)
+            
+        if "reset" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("reset", EventTopics.CLI_STATUS_REQUEST)
         
+        # Additional commands that might need registration
+        if "status" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("status", EventTopics.CLI_STATUS_REQUEST)
+        
+        if "debug" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("debug", EventTopics.DEBUG_COMMAND)
+        
+        # Handle mode commands
+        for mode_cmd in ["engage", "disengage", "ambient", "idle"]:
+            if mode_cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command_handler(mode_cmd, EventTopics.SYSTEM_SET_MODE_REQUEST)
+        
+        # Basic music and eye commands
+        if "music" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("music", EventTopics.MUSIC_COMMAND)
+            
+        if "eye" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("eye", EventTopics.EYE_COMMAND)
+        
+        # Compound commands
         # Music commands
-        self.logger.info("Registering music commands")
-        await dispatcher.register_command(
-            "list music",
-            "music_controller",
-            EventTopics.MUSIC_COMMAND
-        )
-        await dispatcher.register_command(
-            "play music",
-            "music_controller",
-            EventTopics.MUSIC_COMMAND
-        )
-        await dispatcher.register_command(
-            "stop music",
-            "music_controller",
-            EventTopics.MUSIC_COMMAND
-        )
-        self.logger.info("Music commands registered")
+        for cmd in ["play music", "stop music", "list music"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_compound_command(cmd, EventTopics.MUSIC_COMMAND)
         
-        # Help command
-        await dispatcher.register_command(
-            "help",
-            "mode_command_handler",
-            EventTopics.MODE_COMMAND
-        )
+        # Eye commands
+        for cmd in ["eye pattern", "eye test", "eye status"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_compound_command(cmd, EventTopics.EYE_COMMAND)
         
         # Debug commands
-        await dispatcher.register_command(
-            "debug",
-            "debug",
-            EventTopics.DEBUG_COMMAND
-        )
-        await dispatcher.register_command(
-            "debug level",
-            "debug",
-            EventTopics.DEBUG_COMMAND
-        )
-        await dispatcher.register_command(
-            "debug trace",
-            "debug",
-            EventTopics.DEBUG_COMMAND
-        )
-        await dispatcher.register_command(
-            "debug performance",
-            "debug",
-            EventTopics.DEBUG_COMMAND
-        )
+        for cmd in ["debug level", "debug trace"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_compound_command(cmd, EventTopics.DEBUG_COMMAND)
         
-        self.logger.info("Command registration complete")
+        # Log registered commands for debugging
+        commands = dispatcher.get_registered_commands()
+        self.logger.info(f"Registered commands: {', '.join(commands)}")
+        
+        # Log command shortcuts
+        shortcuts = dispatcher.get_shortcut_map()
+        self.logger.info(f"Command shortcuts: {shortcuts}")
         
     async def _initialize_services(self) -> None:
         """Initialize all services."""
@@ -289,9 +262,11 @@ class CantinaOS:
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
+            "intent_router",  # Add IntentRouterService to route LLM intents to hardware commands
             "elevenlabs",  # Add ElevenLabs service to convert LLM responses to speech
             "mode_change_sound",
             "music_controller",
+            "eye_light_controller",  # Add eye light controller service for LED control
             "debug",  # Add debug service for LLM response logging
             "cli"
         ]
@@ -352,6 +327,13 @@ class CantinaOS:
     async def _handle_shutdown(self, sig: signal.Signals) -> None:
         """Handle system shutdown signals."""
         logger.info(f"Received shutdown signal: {sig.name}")
+        self._shutdown_event.set()
+        
+    async def _handle_shutdown_requested(self, payload: Dict[str, Any]) -> None:
+        """Handle system shutdown requests from events."""
+        reason = payload.get('reason', 'Unknown reason')
+        restart = payload.get('restart', False)
+        logger.info(f"Received shutdown request event: {reason}, restart={restart}")
         self._shutdown_event.set()
         
     async def run(self) -> None:
@@ -430,117 +412,61 @@ class CantinaOS:
             logger.info("CantinaOS system shutdown complete")
             
     def _create_service(self, service_name: str):
-        """Create a service instance based on the service name."""
-        if service_name == "mode_manager":
-            return YodaModeManagerService(self._event_bus)
+        """Create and configure a service instance for the given name."""
+        service_class_map = {
+            "deepgram_direct_mic": DeepgramDirectMicService,
+            "gpt": GPTService,
+            "elevenlabs": ElevenLabsService,
+            "eye_light_controller": EyeLightControllerService,
+            "cli": CLIService,
+            "yoda_mode_manager": YodaModeManagerService,
+            "mode_change_sound": ModeChangeSoundService,
+            "music_controller": MusicControllerService,
+            "mouse_input": MouseInputService,
+            "intent_router": IntentRouterService
+        }
+        
+        # Early return if service doesn't exist in map
+        if service_name not in service_class_map:
+            self.logger.warning(f"No service class found for {service_name}")
+            return None
             
-        elif service_name == "command_dispatcher":
-            return CommandDispatcherService(self._event_bus)
-            
-        elif service_name == "mode_command_handler":
-            # Get reference to mode manager service
-            mode_manager = self._services.get("mode_manager")
-            if not mode_manager:
-                raise RuntimeError("ModeManagerService must be initialized before ModeCommandHandlerService")
-            return ModeCommandHandlerService(self._event_bus, mode_manager)
-            
-        elif service_name == "mouse_input":
-            return MouseInputService(self._event_bus)
-            
-        elif service_name == "deepgram_direct_mic":
-            return DeepgramDirectMicService(
-                self._event_bus,
-                config={
-                    "DEEPGRAM_API_KEY": self._config["DEEPGRAM_API_KEY"],
-                    "METRICS_INTERVAL": 1.0
-                }
-            )
-            
-        elif service_name == "gpt":
-            return GPTService(
-                self._event_bus,
-                config={
-                    "OPENAI_API_KEY": self._config["OPENAI_API_KEY"],
-                    "OPENAI_MODEL": self._config["OPENAI_MODEL"]
-                }
-            )
-            
-        elif service_name == "mode_change_sound":
-            return ModeChangeSoundService(self._event_bus)
-            
-        elif service_name == "music_controller":
-            # Use the correct music directory path relative to the package
-            music_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "cantina_os",
-                "assets",
-                "music"
-            )
-            return MusicControllerService(self._event_bus, music_dir=music_dir)
-            
-        elif service_name == "debug":
-            from .debug_service import DebugService
-            # Create debug service with default configuration
-            return DebugService(
-                event_bus=self._event_bus,
-                config={
-                    "default_log_level": LogLevel.INFO,
-                    "component_log_levels": {
-                        "gpt_service": LogLevel.DEBUG,  # Set GPT service to DEBUG level
-                        "elevenlabs_service": LogLevel.DEBUG  # Set ElevenLabs service to DEBUG level
-                    },
-                    "trace_enabled": True,
-                    "metrics_enabled": True,
-                    "log_file": None  # Set to a path if you want file logging
-                }
-            )
-            
-        elif service_name == "cli":
-            return CLIService(self._event_bus)
-            
-        elif service_name == "eye_light_controller":
-            from .services.eye_light_controller_service import EyeLightControllerService
-            # Configure LED controller
-            mock_mode = os.getenv("MOCK_LED_CONTROLLER", "true").lower() == "true"
-            serial_port = os.getenv("ARDUINO_SERIAL_PORT", None)
-            
-            return EyeLightControllerService(
-                self._event_bus,
-                serial_port=serial_port,
-                baud_rate=int(os.getenv("ARDUINO_BAUD_RATE", "115200")),
-                mock_mode=mock_mode
-            )
-            
-        elif service_name == "elevenlabs":
-            from .services.elevenlabs_service import ElevenLabsService, SpeechPlaybackMethod
-            
-            # Determine playback method for ElevenLabs
-            playback_method_str = os.getenv("AUDIO_PLAYBACK_METHOD", "auto").lower()
-            if playback_method_str == "auto":
-                try:
-                    import sounddevice
-                    playback_method = SpeechPlaybackMethod.SOUNDDEVICE
-                except ImportError:
-                    playback_method = SpeechPlaybackMethod.SYSTEM
-            elif playback_method_str == "sounddevice":
-                playback_method = SpeechPlaybackMethod.SOUNDDEVICE
-            else:
-                playback_method = SpeechPlaybackMethod.SYSTEM
+        service_class = service_class_map[service_name]
+        
+        # Get service config by name or empty dict if not found
+        service_config = self._config.get(service_name, {})
+        
+        # Special config handling for specific services
+        if service_name == "gpt":
+            # Ensure GPT service has OpenAI API key
+            if "OPENAI_API_KEY" not in service_config:
+                service_config["OPENAI_API_KEY"] = self._config.get("OPENAI_API_KEY", "")
+            if "GPT_MODEL" not in service_config:
+                service_config["GPT_MODEL"] = self._config.get("OPENAI_MODEL", "gpt-4o")
                 
-            return ElevenLabsService(
-                event_bus=self._event_bus,
-                config={
-                    "ELEVENLABS_API_KEY": self._config["ELEVENLABS_API_KEY"],
-                    "VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-                    "MODEL_ID": os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2"),
-                    "PLAYBACK_METHOD": playback_method
-                },
-                name="elevenlabs_service",
-                logger=logging.getLogger("cantina_os.elevenlabs_service")
-            )
+        elif service_name == "elevenlabs":
+            # Ensure ElevenLabs service has API key and other configuration
+            if "ELEVENLABS_API_KEY" not in service_config:
+                service_config["ELEVENLABS_API_KEY"] = self._config.get("ELEVENLABS_API_KEY", "")
+            if "VOICE_ID" not in service_config:
+                service_config["VOICE_ID"] = self._config.get("ELEVENLABS_VOICE_ID", "")
+                
+        elif service_name == "deepgram_direct_mic":
+            # Ensure Deepgram service has API key and audio configuration
+            if "DEEPGRAM_API_KEY" not in service_config:
+                service_config["DEEPGRAM_API_KEY"] = self._config.get("DEEPGRAM_API_KEY", "")
+            if "SAMPLE_RATE" not in service_config:
+                service_config["SAMPLE_RATE"] = self._config.get("AUDIO_SAMPLE_RATE", 16000)
+            if "CHANNELS" not in service_config:
+                service_config["CHANNELS"] = self._config.get("AUDIO_CHANNELS", 1)
             
-        else:
-            raise ValueError(f"Unknown service: {service_name}")
+        # All services need the global event bus
+        try:
+            service = service_class(self._event_bus, service_config)
+            return service
+        except Exception as e:
+            self.logger.error(f"Error creating service {service_name}: {str(e)}")
+            return None
 
     async def _handle_set_global_log_level(self, payload: Dict[str, Any]) -> None:
         """Handles the event to set the global log level."""

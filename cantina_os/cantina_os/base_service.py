@@ -246,7 +246,8 @@ class BaseService:
             self.logger.debug(f"Converting Pydantic model to dict using .dict() for event {event}")
             payload = payload.dict()
         
-        self._event_bus.emit(event, payload)
+        # Use await to ensure the event emission is properly awaited
+        await self._event_bus.emit(event, payload)
 
     async def subscribe(self, event: str, handler: Callable) -> None:
         """Subscribe to an event on the event bus.
@@ -263,8 +264,8 @@ class BaseService:
             self._event_handlers[event] = []
         self._event_handlers[event].append(handler)
         
-        # Add the handler to the event bus
-        self._event_bus.on(event, handler)
+        # Add the handler to the event bus with await
+        await self._event_bus.on(event, handler)
 
     @property
     def status(self) -> ServiceStatus:

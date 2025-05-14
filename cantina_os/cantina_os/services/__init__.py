@@ -18,6 +18,7 @@ from .music_controller_service import MusicControllerService
 from .debug_service import DebugService
 from .mouse_input_service import MouseInputService
 from .deepgram_direct_mic_service import DeepgramDirectMicService
+from .intent_router_service import IntentRouterService
 
 __all__ = [
     "MicInputService",
@@ -32,5 +33,6 @@ __all__ = [
     "MusicControllerService",
     "DebugService",
     "MouseInputService",
-    "DeepgramDirectMicService"
+    "DeepgramDirectMicService",
+    "IntentRouterService"
 ] 

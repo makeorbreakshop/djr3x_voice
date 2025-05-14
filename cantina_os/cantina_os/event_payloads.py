@@ -60,6 +60,22 @@ class LogLevel(str, Enum):
             LogLevel.CRITICAL: 4
         }[self]
 
+class IntentPayload(BaseEventPayload):
+    """Payload for intent detection events."""
+    intent_name: str = Field(..., description="Name of the detected intent")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict, 
+        description="Parameters for the intent"
+    )
+    confidence: Optional[float] = Field(
+        None, 
+        description="Optional confidence score"
+    )
+    original_text: str = Field(
+        ..., 
+        description="The text that triggered the intent"
+    )
+
 class ServiceStatusPayload(BaseEventPayload):
     """Payload for service status update events."""
     service_name: str = Field(..., description="Name of the service")
@@ -205,6 +221,176 @@ class CliCommandPayload(BaseEventPayload):
     args: List[str] = Field(default_factory=list, description="Command arguments")
     raw_input: Optional[str] = Field(None, description="Raw command input")
 
+class StandardCommandPayload(BaseModel):
+    """Standardized payload for all command events"""
+    command: str = Field(..., description="Primary command (e.g., 'eye', 'music')")
+    subcommand: Optional[str] = Field(None, description="Subcommand (e.g., 'pattern', 'test')")
+    args: List[str] = Field(default_factory=list, description="Additional arguments")
+    raw_input: str = Field(..., description="Original raw command input")
+    conversation_id: Optional[str] = Field(None, description="Associated conversation ID if any")
+
+    class Config:
+        frozen = True  # Make immutable to prevent accidental modifications
+
+    @classmethod
+    def from_legacy_format(cls, payload: dict) -> "StandardCommandPayload":
+        """Convert legacy command format to StandardCommandPayload
+        
+        This improved implementation better handles compound commands with proper
+        extraction of subcommands.
+        """
+        command = payload.get("command", "")
+        args = payload.get("args", [])
+        raw_input = payload.get("raw_input", "")
+        
+        # Ensure args is a list
+        if isinstance(args, str):
+            args = args.split()
+        
+        # Handle compound commands (e.g., "eye pattern")
+        parts = command.split(" ", 1) if " " in command else [command]
+        main_command = parts[0]
+        subcommand = parts[1] if len(parts) > 1 else None
+        
+        # If we don't have a subcommand extracted from the command but have args,
+        # check if the first arg might be a subcommand
+        if not subcommand and args:
+            # Common subcommands for different command types
+            subcommand_map = {
+                "eye": ["pattern", "test", "status"],
+                "music": ["play", "stop", "list"],
+                "debug": ["level", "trace", "performance"]
+            }
+            
+            # If the main command has known subcommands and the first arg matches one
+            if main_command in subcommand_map and args[0] in subcommand_map[main_command]:
+                subcommand = args[0]
+                args = args[1:]  # Remove the subcommand from args
+        
+        # Further improve raw_input parsing if needed
+        if not subcommand and not args and raw_input:
+            # Try to extract info from raw_input if payload is incomplete
+            parts = raw_input.strip().split()
+            if len(parts) > 1 and parts[0] == main_command:
+                # Check if second part might be a subcommand
+                potential_subcommand = parts[1]
+                subcommand_map = {
+                    "eye": ["pattern", "test", "status"],
+                    "music": ["play", "stop", "list"],
+                    "debug": ["level", "trace", "performance"]
+                }
+                if main_command in subcommand_map and potential_subcommand in subcommand_map[main_command]:
+                    subcommand = potential_subcommand
+                    args = parts[2:]  # Remaining parts become args
+        
+        return cls(
+            command=main_command,
+            subcommand=subcommand,
+            args=args,
+            raw_input=raw_input,
+            conversation_id=payload.get("conversation_id")
+        )
+        
+    @classmethod
+    def from_raw_input(cls, raw_input: str, conversation_id: Optional[str] = None) -> "StandardCommandPayload":
+        """
+        Parse a raw command string into StandardCommandPayload
+        
+        This provides direct parsing from a raw command string without going through a dict.
+        Used for direct command creation from user input.
+        
+        Args:
+            raw_input: The raw command string (e.g., "eye pattern happy")
+            conversation_id: Optional ID for the conversation context
+            
+        Returns:
+            StandardCommandPayload: The parsed command payload
+        """
+        parts = raw_input.strip().split()
+        if not parts:
+            return cls(command="", args=[], raw_input=raw_input, conversation_id=conversation_id)
+            
+        command = parts[0].lower()
+        
+        # Handle special cases for compound commands
+        if len(parts) >= 2:
+            # Check for known compound command patterns (eye pattern, play music, etc.)
+            compound_commands = ["eye pattern", "eye test", "eye status", 
+                                "play music", "stop music", "list music",
+                                "debug level", "debug trace"]
+                                
+            possible_compound = f"{parts[0]} {parts[1]}"
+            if possible_compound in compound_commands:
+                return cls(
+                    command=parts[0],
+                    subcommand=parts[1],
+                    args=parts[2:],
+                    raw_input=raw_input,
+                    conversation_id=conversation_id
+                )
+        
+        # Standard single command
+        return cls(
+            command=command,
+            subcommand=None,
+            args=parts[1:],
+            raw_input=raw_input,
+            conversation_id=conversation_id
+        )
+    
+    def get_full_command(self) -> str:
+        """Get the full command string including subcommand if present."""
+        if self.subcommand:
+            return f"{self.command} {self.subcommand}"
+        return self.command
+        
+    def validate_arg_count(self, min_count: int = 0, max_count: Optional[int] = None) -> bool:
+        """
+        Validate that the number of arguments is within the specified range.
+        
+        Args:
+            min_count: Minimum number of arguments required
+            max_count: Maximum number of arguments allowed (None for unlimited)
+            
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        if len(self.args) < min_count:
+            return False
+            
+        if max_count is not None and len(self.args) > max_count:
+            return False
+            
+        return True
+        
+    def get_arg_as_int(self, index: int, default: Optional[int] = None) -> Optional[int]:
+        """
+        Get an argument as an integer with validation.
+        
+        Args:
+            index: Index of the argument to convert
+            default: Default value if argument is missing or invalid
+            
+        Returns:
+            int or None: The parsed integer or default value
+        """
+        if index >= len(self.args):
+            return default
+            
+        try:
+            return int(self.args[index])
+        except (ValueError, TypeError):
+            return default
+            
+    def __str__(self) -> str:
+        """String representation of the command"""
+        result = self.command
+        if self.subcommand:
+            result += f" {self.subcommand}"
+        if self.args:
+            result += f" {' '.join(self.args)}"
+        return result
+
 class CliResponsePayload(BaseEventPayload):
     """Payload for CLI response events."""
     message: str = Field(..., description="Response message")
@@ -265,4 +451,12 @@ class DebugConfigPayload(BaseEventPayload):
     component: str
     log_level: LogLevel
     enable_tracing: bool = True
-    enable_metrics: bool = True 
+    enable_metrics: bool = True
+
+class DebugCommandPayload(BaseEventPayload):
+    """Payload for debug command events."""
+    command: str = Field(..., description="Debug command (level, trace, etc.)")
+    component: str = Field(..., description="Target component name or 'all'")
+    level: Optional[LogLevel] = Field(None, description="Log level for level command")
+    enable: Optional[bool] = Field(None, description="Enable/disable flag for trace/metrics")
+    args: List[str] = Field(default_factory=list, description="Additional command arguments") 
