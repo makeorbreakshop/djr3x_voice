@@ -48,10 +48,22 @@ ENV/
 ehthumbs.db
 Thumbs.db
 
-# Logs and data
+# Logs and data directories
 logs/
-data/
 *.log
+vector_creation_*.log
+
+# Data directories - too large for git
+/data/
+/clusters_full/
+/holocron_export_*.csv
+
+# Large files
+*.parquet
+*.dylib
+*.so
+*.bin
+*.pack
 
 # Test files
 test_output.log
@@ -61,5 +73,10 @@ test_*.py
 .coverage
 test_articles/
 test_vectors/
+test_data/
 test_status.json
 path/
+
+# Wookiepedia exports and large XML files
+*.xml
+*.7z
