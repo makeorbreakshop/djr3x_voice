@@ -52,11 +52,22 @@ Thumbs.db
 logs/
 *.log
 vector_creation_*.log
+e5_migration_*.log
 
 # Data directories - too large for git
 /data/
 /clusters_full/
 /holocron_export_*.csv
+/e5_vectors*/
+/e5_vectors_full*/
+
+# Vector files and checkpoints
+*vectors_*.jsonl
+*_checkpoint.json
+*_checkpoint.json.bak.*
+processed_ids.txt
+bert_embeddings.jsonl
+bert_sample.json
 
 # Large files
 *.parquet
@@ -64,6 +75,7 @@ vector_creation_*.log
 *.so
 *.bin
 *.pack
+*.csv
 
 # Test files
 test_output.log
@@ -76,7 +88,13 @@ test_vectors/
 test_data/
 test_status.json
 path/
+test_batch_results_*.json
+test_batch_jsonl/
 
 # Wookiepedia exports and large XML files
 *.xml
 *.7z
+
+# Batch processing files
+batch_test_*.log
+batch_test_results_*.json
