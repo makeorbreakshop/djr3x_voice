@@ -129,8 +129,9 @@ void setPattern(char pattern) {
       break;
       
     case 'S': // SPEAKING pattern
-      // Vertical line
+      // Initial wave pattern (animation will cycle through patterns)
       for (int device = 0; device < 2; device++) {
+        // Start with vertical line pattern
         lc.setLed(device, CENTER-1, CENTER, true);
         lc.setLed(device, CENTER, CENTER, true);
         lc.setLed(device, CENTER+1, CENTER, true);
@@ -145,13 +146,16 @@ void setPattern(char pattern) {
       break;
       
     case 'L': // LISTENING pattern
-      // Full 3x3 grid (animation will pulse)
+      // Full 3x3 grid with pulsing brightness (animation will handle the rest)
       for (int device = 0; device < 2; device++) {
+        // Show all LEDs in the 3x3 grid
         for (int row = CENTER-1; row <= CENTER+1; row++) {
           for (int col = CENTER-1; col <= CENTER+1; col++) {
             lc.setLed(device, row, col, true);
           }
         }
+        // Start with higher brightness
+        lc.setIntensity(device, min(15, currentBrightness + 2));
       }
       break;
       
@@ -197,8 +201,8 @@ void setPattern(char pattern) {
 }
 
 void updateEyeAnimation() {
-  // Only update every 100ms
-  if (millis() - lastUpdate < 100) {
+  // Only update every 80ms (slightly faster than original 100ms for smoother animations)
+  if (millis() - lastUpdate < 80) {
     return;
   }
   
@@ -207,45 +211,107 @@ void updateEyeAnimation() {
   // Update animation based on the current pattern
   switch (currentPattern) {
     case 'T': // THINKING animation
-      // Rotating dot pattern
-      clearEyes();
-      int positions[4][2] = {
-        {-1, 0}, {0, 1}, {1, 0}, {0, -1}
-      };
-      for (int device = 0; device < 2; device++) {
-        int pos = animationStep % 4;
-        lc.setLed(device, CENTER + positions[pos][0], 
-                       CENTER + positions[pos][1], true);
-        lc.setLed(device, CENTER, CENTER, true);
+      {
+        // Rotating dot pattern (keeping original as it works well)
+        clearEyes();
+        int positions[4][2] = {
+          {-1, 0}, {0, 1}, {1, 0}, {0, -1}
+        };
+        for (int device = 0; device < 2; device++) {
+          int pos = animationStep % 4;
+          lc.setLed(device, CENTER + positions[pos][0], 
+                         CENTER + positions[pos][1], true);
+          lc.setLed(device, CENTER, CENTER, true);
+        }
+        animationStep = (animationStep + 1) % 4;
       }
-      animationStep = (animationStep + 1) % 4;
       break;
       
-    case 'S': // SPEAKING animation
-      // Pulse up and down
-      clearEyes();
-      for (int device = 0; device < 2; device++) {
-        // Always show center
-        lc.setLed(device, CENTER, CENTER, true);
+    case 'S': // SPEAKING animation - Enhanced wave pattern
+      {
+        // Create a more dynamic speaking animation that suggests audio waveforms
+        clearEyes();
         
-        // Show additional LEDs based on animation step
-        if (animationStep < 2) {
-          lc.setLed(device, CENTER-1, CENTER, true);
+        // 8 animation steps for a more fluid looking waveform
+        int speakingPatterns[8][9] = {
+          // Format: top-left, top-center, top-right, mid-left, mid-center, mid-right, bottom-left, bottom-center, bottom-right
+          {0, 1, 0, 0, 1, 0, 0, 1, 0}, // Vertical line
+          {0, 0, 0, 1, 1, 1, 0, 0, 0}, // Horizontal line
+          {0, 1, 0, 1, 1, 1, 0, 1, 0}, // Plus shape
+          {1, 0, 1, 0, 1, 0, 1, 0, 1}, // X shape
+          {0, 1, 0, 0, 1, 0, 0, 1, 0}, // Vertical line (repeat)
+          {0, 0, 0, 1, 1, 1, 0, 0, 0}, // Horizontal line (repeat)
+          {1, 1, 1, 0, 0, 0, 1, 1, 1}, // Top and bottom rows
+          {1, 0, 1, 1, 0, 1, 1, 0, 1}  // Checkerboard
+        };
+        
+        int patternIndex = animationStep % 8;
+        int ledIndex = 0;
+        
+        for (int device = 0; device < 2; device++) {
+          for (int row = CENTER-1; row <= CENTER+1; row++) {
+            for (int col = CENTER-1; col <= CENTER+1; col++) {
+              if (speakingPatterns[patternIndex][ledIndex]) {
+                lc.setLed(device, row, col, true);
+              }
+              ledIndex++;
+            }
+          }
+          ledIndex = 0; // Reset for the second eye
         }
-        if (animationStep >= 1) {
-          lc.setLed(device, CENTER+1, CENTER, true); 
-        }
+        
+        animationStep = (animationStep + 1) % 8;
       }
-      animationStep = (animationStep + 1) % 3;
       break;
       
-    case 'L': // LISTENING animation
-      // Pulsing pattern
-      int brightness = (animationStep % 2) ? currentBrightness : currentBrightness / 2;
-      for (int device = 0; device < 2; device++) {
-        lc.setIntensity(device, brightness);
+    case 'L': // LISTENING animation - Pulsing wipe effect
+      {
+        // Create a pulsing wipe effect that moves across the grid
+        clearEyes();
+        
+        // Always show the full 3x3 grid but vary brightness in a wave pattern
+        for (int device = 0; device < 2; device++) {
+          for (int row = CENTER-1; row <= CENTER+1; row++) {
+            for (int col = CENTER-1; col <= CENTER+1; col++) {
+              lc.setLed(device, row, col, true);
+            }
+          }
+        }
+        
+        // Create a wave-like brightness effect with 6 states
+        // Calculate base brightness level for the animation step
+        int baseIntensity = currentBrightness - 2; // Base brightness level
+        
+        // We'll have 6 different animation frames for the pulsing effect
+        int pulseStep = animationStep % 6;
+        
+        for (int device = 0; device < 2; device++) {
+          // Different brightness levels for each column based on animation step
+          // This creates a wave of brightness moving across the eyes
+          switch (pulseStep) {
+            case 0: // Bright left column, medium center, dim right
+              lc.setIntensity(device, min(15, baseIntensity + 4));
+              break;
+            case 1: // Medium left, bright center, medium right
+              lc.setIntensity(device, min(15, baseIntensity + 3));
+              break;
+            case 2: // Dim left, medium center, bright right
+              lc.setIntensity(device, min(15, baseIntensity + 2));
+              break;
+            case 3: // Medium left, dim center, medium right
+              lc.setIntensity(device, max(0, baseIntensity));
+              break;
+            case 4: // Bright left, medium center, dim right (repeat with less intensity)
+              lc.setIntensity(device, min(15, baseIntensity + 1));
+              break;
+            case 5: // All columns at medium brightness (resting state)
+              lc.setIntensity(device, min(15, baseIntensity + 2));
+              break;
+          }
+        }
+        
+        animationStep = (animationStep + 1) % 6;
       }
-      animationStep = (animationStep + 1) % 2;
       break;
   }
 }
