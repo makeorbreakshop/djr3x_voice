@@ -76,6 +76,34 @@ class IntentPayload(BaseEventPayload):
         description="The text that triggered the intent"
     )
 
+class IntentExecutionResultPayload(BaseEventPayload):
+    """Payload for intent execution result events."""
+    intent_name: str = Field(..., description="Name of the executed intent")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters used in the intent execution"
+    )
+    result: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Results of the intent execution"
+    )
+    success: bool = Field(
+        default=True,
+        description="Whether the intent execution was successful"
+    )
+    error_message: Optional[str] = Field(
+        None,
+        description="Error message if execution failed"
+    )
+    tool_call_id: Optional[str] = Field(
+        None,
+        description="Original tool call ID for context tracking"
+    )
+    original_text: Optional[str] = Field(
+        None,
+        description="The original text that triggered the intent"
+    )
+
 class ServiceStatusPayload(BaseEventPayload):
     """Payload for service status update events."""
     service_name: str = Field(..., description="Name of the service")

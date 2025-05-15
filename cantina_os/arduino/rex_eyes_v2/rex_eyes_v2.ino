@@ -68,6 +68,7 @@ void processCommand(char cmd) {
     case 'S': // SPEAKING
     case 'T': // THINKING
     case 'L': // LISTENING
+    case 'E': // ENGAGED
     case 'H': // HAPPY
     case 'D': // SAD (Down)
     case 'A': // ANGRY
@@ -183,6 +184,17 @@ void setPattern(char pattern) {
         lc.setLed(device, CENTER-1, CENTER-1, true);
         lc.setLed(device, CENTER, CENTER, true);
         lc.setLed(device, CENTER+1, CENTER+1, true);
+      }
+      break;
+      
+    case 'E': // ENGAGED pattern
+      // Start with a gentle diamond pattern
+      for (int device = 0; device < 2; device++) {
+        lc.setLed(device, CENTER-1, CENTER, true);  // Top
+        lc.setLed(device, CENTER, CENTER-1, true);  // Left
+        lc.setLed(device, CENTER, CENTER, true);    // Center
+        lc.setLed(device, CENTER, CENTER+1, true);  // Right
+        lc.setLed(device, CENTER+1, CENTER, true);  // Bottom
       }
       break;
       
@@ -311,6 +323,34 @@ void updateEyeAnimation() {
         }
         
         animationStep = (animationStep + 1) % 6;
+      }
+      break;
+      
+    case 'E': // ENGAGED animation - Gentle breathing diamond
+      {
+        clearEyes();
+        
+        // Create a gentle breathing effect with the diamond pattern
+        // 8 steps of animation for smooth transition
+        int breathStep = animationStep % 8;
+        int baseIntensity = currentBrightness - 3; // Start a bit dimmer
+        
+        // Calculate brightness based on breath step (sine wave pattern)
+        int breathIntensity = baseIntensity + (breathStep < 4 ? breathStep : 7 - breathStep);
+        
+        // Set the brightness for this frame
+        for (int device = 0; device < 2; device++) {
+          lc.setIntensity(device, min(15, max(0, breathIntensity)));
+          
+          // Draw the diamond pattern
+          lc.setLed(device, CENTER-1, CENTER, true);  // Top
+          lc.setLed(device, CENTER, CENTER-1, true);  // Left
+          lc.setLed(device, CENTER, CENTER, true);    // Center
+          lc.setLed(device, CENTER, CENTER+1, true);  // Right
+          lc.setLed(device, CENTER+1, CENTER, true);  // Bottom
+        }
+        
+        animationStep = (animationStep + 1) % 8;
       }
       break;
   }

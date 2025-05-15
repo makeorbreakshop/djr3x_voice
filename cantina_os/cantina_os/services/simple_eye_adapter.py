@@ -17,6 +17,7 @@ class EyePattern(str, Enum):
     """Enumeration of available eye LED patterns."""
     IDLE = "idle"
     STARTUP = "startup"
+    ENGAGED = "engaged"  # New pattern for interactive mode ready state
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
@@ -40,6 +41,7 @@ class SimpleEyeAdapter:
     PATTERN_MAP = {
         EyePattern.IDLE: 'I',      # Idle pattern
         EyePattern.STARTUP: 'I',    # Use Idle for startup
+        EyePattern.ENGAGED: 'E',    # Engaged pattern (ready for interaction)
         EyePattern.LISTENING: 'L',  # Listening pattern
         EyePattern.THINKING: 'T',   # Thinking pattern
         EyePattern.SPEAKING: 'S',   # Speaking pattern

@@ -39,6 +39,7 @@ class EyePattern(str, Enum):
     """Enumeration of available eye LED patterns."""
     IDLE = "idle"
     STARTUP = "startup"
+    ENGAGED = "engaged"  # New pattern for interactive mode ready state
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
@@ -1075,8 +1076,10 @@ class EyeLightControllerService(BaseService):
                 await self.set_pattern(EyePattern.HAPPY)
                 
             elif new_mode == "INTERACTIVE":
-                # Voice interactive mode - start with listening pattern
-                await self.set_pattern(EyePattern.LISTENING)
+                # Voice interactive mode - start with engaged pattern
+                # This pattern indicates DJ R3X is ready for interaction
+                # but not yet actively listening
+                await self.set_pattern(EyePattern.ENGAGED)
                 
             elif new_mode == "SLEEPING":
                 # If we implement a sleeping mode, use idle pattern at low brightness

@@ -105,6 +105,7 @@ class EventTopics:
     LLM_PROCESSING_STARTED = "/llm/processing/started"
     LLM_PROCESSING_ENDED = "/llm/processing/ended"
     INTENT_DETECTED = "/llm/intent/detected"  # New event for detected intents from LLM
+    INTENT_EXECUTION_RESULT = "/llm/intent/execution_result"  # New event for intent execution results
     
     # Transcription Events
     TRANSCRIPTION_FINAL = "/transcription/final"

@@ -304,6 +304,19 @@ class MusicControllerService(BaseService):
         try:
             self.logger.debug(f"Received music command payload: {payload}")
             
+            # Handle payload that directly specifies a song_query from IntentRouter
+            if isinstance(payload, dict) and "song_query" in payload:
+                song_query = payload.get("song_query")
+                action = payload.get("action", "play")
+                
+                if action == "play" and song_query:
+                    self.logger.info(f"Direct song query received: {song_query}")
+                    await self._smart_play_track(song_query)
+                    return
+                elif action == "stop":
+                    await self._stop_playback()
+                    return
+                
             # Always convert to StandardCommandPayload for consistent processing
             command = StandardCommandPayload.from_legacy_format(payload)
             self.logger.debug(f"Standardized command: {command}")
@@ -326,7 +339,7 @@ class MusicControllerService(BaseService):
                         if len(parts) >= 3:
                             track_num = parts[2]
                             self.logger.info(f"Extracted track number from raw_input: {track_num}")
-                            await self._play_track(track_num)
+                            await self._smart_play_track(track_num)
                             return
                             
                     # No track number found
@@ -334,9 +347,9 @@ class MusicControllerService(BaseService):
                     return
                     
                 # Get track number from args and play
-                track_num = command.args[0]
-                self.logger.info(f"Playing track number: {track_num}")
-                await self._play_track(track_num)
+                track_query = command.args[0]
+                self.logger.info(f"Playing track query: {track_query}")
+                await self._smart_play_track(track_query)
                 
             elif full_command == "install music" or command.command == "install":
                 # Install sample music files
@@ -421,31 +434,86 @@ class MusicControllerService(BaseService):
             self.logger.error(f"Error handling install music command: {e}")
             await self._send_error(f"Error installing music: {str(e)}")
 
-    async def _play_track(self, track_num: str) -> None:
-        """Play a specific track"""
+    async def _smart_play_track(self, track_query: str) -> None:
+        """
+        Smart track selection and playback
+        
+        Args:
+            track_query: Track number, name, or search query
+        """
         try:
-            # Better input validation with detailed logging
-            self.logger.info(f"Attempting to play track number: '{track_num}'")
+            self.logger.info(f"Smart track selection for query: '{track_query}'")
             
-            # First check if track_num is None or empty
-            if not track_num:
-                await self._send_error("Track number is required")
+            # If tracks list is empty, return error
+            if not self.tracks:
+                await self._send_error("No music tracks available. Please install music first.")
                 return
                 
-            # Check if track_num is a valid number
-            if not isinstance(track_num, str) or not track_num.isdigit():
-                await self._send_error(f"Invalid track number: '{track_num}'. Must be a number between 1 and {len(self.tracks)}.")
+            # Check if it's a valid track number
+            if track_query.isdigit():
+                track_num_int = int(track_query)
+                if 1 <= track_num_int <= len(self.tracks):
+                    # Convert to 0-based index
+                    track_index = track_num_int - 1
+                    track_name = list(self.tracks.keys())[track_index]
+                    track = self.tracks[track_name]
+                    self.logger.info(f"Found track #{track_query}: {track.name}")
+                    await self._play_track_by_name(track.name)
+                    return
+                else:
+                    await self._send_error(f"Track number {track_query} out of range. Must be 1-{len(self.tracks)}.")
+                    return
+                    
+            # Check for direct track name match
+            if track_query in self.tracks:
+                self.logger.info(f"Found exact track name match: {track_query}")
+                await self._play_track_by_name(track_query)
                 return
                 
-            # Check if the track number is in range
-            track_num_int = int(track_num)
-            if track_num_int < 1 or track_num_int > len(self.tracks):
-                await self._send_error(f"Track number out of range: {track_num}. Must be between 1 and {len(self.tracks)}.")
+            # Try fuzzy matching by track name
+            matches = []
+            track_query_lower = track_query.lower()
+            
+            for name in self.tracks.keys():
+                name_lower = name.lower()
+                # Check for substring matches
+                if track_query_lower in name_lower:
+                    matches.append((name, 100 - (len(name_lower) - len(track_query_lower))))
+                # Check for partial word matches
+                elif any(track_query_lower in word for word in name_lower.split('_')):
+                    matches.append((name, 50))
+                
+            # Sort by match score (descending)
+            matches.sort(key=lambda x: x[1], reverse=True)
+            
+            if matches:
+                best_match = matches[0][0]
+                self.logger.info(f"Found fuzzy match for '{track_query}': '{best_match}'")
+                await self._play_track_by_name(best_match)
                 return
                 
-            # Get the actual track from the loaded tracks
-            track_index = track_num_int - 1  # Convert to 0-based index
-            track_name = list(self.tracks.keys())[track_index]
+            # No matches found, default to first track
+            self.logger.warning(f"No matches found for '{track_query}', playing first track")
+            first_track = list(self.tracks.keys())[0]
+            await self._play_track_by_name(first_track)
+                
+        except Exception as e:
+            self.logger.error(f"Error in smart track selection: {e}")
+            await self._send_error(f"Error selecting track: {str(e)}")
+
+    async def _play_track_by_name(self, track_name: str) -> None:
+        """
+        Play a track by its exact name
+        
+        Args:
+            track_name: Exact name of the track to play
+        """
+        try:
+            if track_name not in self.tracks:
+                self.logger.error(f"Track not found: {track_name}")
+                await self._send_error(f"Track not found: {track_name}")
+                return
+                
             track = self.tracks[track_name]
             
             self.logger.info(f"Playing track: {track.name} (path: {track.path})")
@@ -473,12 +541,11 @@ class MusicControllerService(BaseService):
                 EventTopics.MUSIC_PLAYBACK_STARTED,
                 {
                     "track_name": track.name,
-                    "track_index": track_index,
                     "duration": track.duration
                 }
             )
             
-            await self._send_success(f"Playing track {track_num}: {track.name}")
+            await self._send_success(f"Playing track: {track.name}")
             
         except Exception as e:
             self.logger.error(f"Error playing track: {str(e)}", exc_info=True)

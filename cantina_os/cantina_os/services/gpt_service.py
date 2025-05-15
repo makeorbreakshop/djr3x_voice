@@ -288,6 +288,14 @@ class GPTService(BaseService):
         ))
         self.logger.info(f"GPTService: Subscription task created for VOICE_LISTENING_STOPPED.")
         
+        # Add subscription for intent execution results
+        self.logger.info("GPTService subscribing to INTENT_EXECUTION_RESULT")
+        asyncio.create_task(self.subscribe(
+            EventTopics.INTENT_EXECUTION_RESULT,
+            self._process_intent_execution_result
+        ))
+        self.logger.info("GPTService: Subscription task created for INTENT_EXECUTION_RESULT.")
+
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
         try:
@@ -819,4 +827,180 @@ class GPTService(BaseService):
         # This ensures ElevenLabs gets the text content for speech synthesis
         if response_text:
             self.logger.info(f"Emitting LLM response with text ({len(response_text)} chars) and {len(tool_calls)} tool calls")
-            await self._emit_llm_response(response_text, tool_calls) 
+            await self._emit_llm_response(response_text, tool_calls)
+
+    async def _process_intent_execution_result(self, payload: Dict[str, Any]) -> None:
+        """
+        Process intent execution results to generate verbal feedback.
+        
+        This method is called when the IntentRouterService completes execution
+        of an intent and emits the results. We use this to generate a natural
+        language response about the action that was taken.
+        
+        Args:
+            payload: Intent execution result payload
+        """
+        try:
+            # Convert dict to Pydantic model for validation
+            from ..event_payloads import IntentExecutionResultPayload
+            result_payload = IntentExecutionResultPayload(**payload)
+            
+            # Extract information from the payload
+            intent_name = result_payload.intent_name
+            parameters = result_payload.parameters
+            success = result_payload.success
+            result = result_payload.result
+            tool_call_id = result_payload.tool_call_id
+            
+            self.logger.info(f"Processing execution result for intent: {intent_name}")
+            self.logger.info(f"Result success: {success}, parameters: {parameters}")
+            
+            # Add the tool response to conversation memory 
+            # This helps the model understand what happened with its tool call
+            response_content = json.dumps(result) if result else "Action completed successfully."
+            if not success and result_payload.error_message:
+                response_content = f"Error: {result_payload.error_message}"
+                
+            # Add tool response as a message
+            if tool_call_id:
+                self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")
+                self._memory.add_message(
+                    role="tool", 
+                    content=response_content,
+                    tool_call_id=tool_call_id,
+                    name=intent_name
+                )
+            else:
+                self.logger.warning("No tool_call_id in payload, using generic tool response")
+                self._memory.add_message(
+                    role="system", 
+                    content=f"Tool execution result for {intent_name}: {response_content}"
+                )
+                
+            # Now generate a verbal response about the action
+            await self._get_verbal_response_for_intent(intent_name, parameters, result, success)
+                
+        except Exception as e:
+            self.logger.error(f"Error processing intent execution result: {e}", exc_info=True)
+            
+    async def _get_verbal_response_for_intent(
+        self, 
+        intent_name: str, 
+        parameters: Dict[str, Any],
+        result: Dict[str, Any],
+        success: bool
+    ) -> None:
+        """
+        Generate a verbal response about an executed intent.
+        
+        Makes a second GPT call specifically for generating natural verbal feedback
+        about an action that was just executed.
+        
+        Args:
+            intent_name: The name of the intent that was executed
+            parameters: The parameters used in the intent execution
+            result: The result of the intent execution
+            success: Whether the execution was successful
+        """
+        self.logger.info(f"Generating verbal response for intent: {intent_name}")
+        
+        try:
+            # Prepare API request
+            api_url = "https://api.openai.com/v1/chat/completions"
+            
+            # Load the specialized verbal feedback persona
+            verbal_feedback_persona = None
+            persona_paths = [
+                "dj_r3x-verbal-feedback-persona.txt",            # Try current directory
+                "cantina_os/dj_r3x-verbal-feedback-persona.txt", # Try cantina_os directory
+                "../dj_r3x-verbal-feedback-persona.txt",         # Try parent directory
+            ]
+            
+            for path in persona_paths:
+                try:
+                    with open(path, "r") as f:
+                        verbal_feedback_persona = f.read().strip()
+                    self.logger.info(f"Successfully loaded verbal feedback persona from {path}")
+                    break
+                except Exception as e:
+                    self.logger.debug(f"Could not load verbal feedback persona from {path}: {str(e)}")
+            
+            if not verbal_feedback_persona:
+                self.logger.warning("Failed to load verbal feedback persona, using default instruction")
+                verbal_feedback_persona = (
+                    f"You are DJ R-3X, a Star Wars droid DJ. Generate a brief verbal response about the "
+                    f"{intent_name} action that was just performed. Be natural, conversational, and specific "
+                    f"about what was done. Keep your response short and enthusiastic as if you're DJ R3X speaking to a guest."
+                )
+            
+            # Get current conversation context
+            messages = []  # Start with empty messages - we don't need the full conversation history here
+            
+            # Add the system prompt with verbal feedback persona
+            messages.append({
+                "role": "system",
+                "content": verbal_feedback_persona
+            })
+
+            # Add specific details about the intent execution
+            intent_details = (
+                f"Intent executed: {intent_name}\n"
+                f"Parameters: {json.dumps(parameters)}\n"
+                f"Result: {json.dumps(result)}\n"
+                f"Success: {success}"
+            )
+            
+            messages.append({
+                "role": "user",
+                "content": intent_details
+            })
+            
+            request_data = {
+                "model": self._config["MODEL"],
+                "messages": messages,
+                "temperature": 0.7,  # Slightly higher temperature for more varied responses
+                "stream": False,  # No streaming for the verbal response
+                "tool_choice": "none"  # Force text-only response, no function calls
+            }
+            
+            # Add tools parameter since it's required when tool_choice is specified
+            # Either include the actual tools or an empty list
+            if self._tool_schemas:
+                request_data["tools"] = self._tool_schemas
+                self.logger.info(f"Including {len(self._tool_schemas)} tools in request with tool_choice='none'")
+            else:
+                # Even with tool_choice="none", OpenAI requires a tools parameter
+                request_data["tools"] = []
+                self.logger.info("Including empty tools list in request with tool_choice='none'")
+            
+            self.logger.info(f"Making verbal response API call for {intent_name}")
+            
+            if not self._session:
+                raise RuntimeError("No active session for API request")
+    
+            headers = {
+                "Authorization": f"Bearer {self._config['OPENAI_API_KEY']}",
+                "Content-Type": "application/json"
+            }
+            
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                if response.status != 200:
+                    response_text = await response.text()
+                    error_msg = f"API request failed with status {response.status}: {response_text[:200]}"
+                    self.logger.error(error_msg)
+                    raise Exception(error_msg)
+    
+                response_data = await response.json()
+                
+                # Extract the text response
+                verbal_response = response_data["choices"][0]["message"]["content"]
+                self.logger.info(f"Generated verbal response: {verbal_response}")
+                
+                # Emit the verbal response
+                await self._emit_llm_response(verbal_response)
+                
+        except Exception as e:
+            self.logger.error(f"Error generating verbal response: {e}", exc_info=True)
+            # Emit a fallback response
+            fallback_msg = f"Action completed successfully."
+            await self._emit_llm_response(fallback_msg) 

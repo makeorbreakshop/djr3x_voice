@@ -413,25 +413,82 @@ This fix completes the speech response enhancement without requiring changes to 
 
 This solution maintains our simplified architecture (non-streaming GPT, streaming ElevenLabs) while ensuring DJ R3X both speaks and takes actions appropriately without requiring custom text generation. 
 
-## [2025-05-18] OpenAI Tool Calling Behavior Analysis
+## [2025-05-19] Two-Step Tool Call Implementation
 
-### Key Finding: Speech vs Tool Call Separation
-1. **API Response Pattern**:
-   - OpenAI's API typically returns EITHER text content OR tool calls, rarely both robustly
-   - When tool calls are present, the `content` field is often `null` or minimal
-   - This explains our "missing speech" issue when actions are performed
+### Problem
+- OpenAI API typically returns either text content OR tool calls, but rarely both robustly
+- DJ R3X would execute commands silently without verbal feedback
+- Verbal feedback was missing for important actions like playing music or changing eye colors
 
-2. **Solution Strategy**:
-   - Implement two-step API call process:
-     1. First call: Get and execute tool calls
-     2. Second call: Feed tool results back to get verbal response
-   - This ensures both action execution AND proper verbal feedback
-   - More reliable than trying to get both in single response
+### Solution Implementation
+1. **Event System Enhancement**:
+   - Added new `INTENT_EXECUTION_RESULT` event topic
+   - Created `IntentExecutionResultPayload` model for structured result data
+   - Updated `IntentRouterService` to emit execution results after handling intents
 
-3. **Implementation Impact**:
-   - Need to modify GPTService to handle two-step flow
-   - Will improve reliability of DJ R3X's verbal feedback
-   - Better aligns with OpenAI's API design patterns
-   - Should resolve the "silent actions" issue we've been seeing
+2. **GPT Service Enhancement**:
+   - Added processing of tool execution results
+   - Implemented second GPT call specifically for verbal feedback
+   - Forces text-only responses with `tool_choice="none"`
+   - Adds execution results to conversation memory for context
+
+3. **Benefits**:
+   - Clean separation between action execution and verbal feedback
+   - Maintains DJ R3X's personality in responses
+   - Provides natural feedback for all actions
+   - Preserves conversation context through both steps
+
+The solution ensures DJ R3X both executes commands and provides engaging verbal feedback, enhancing the user experience while maintaining character consistency.
+
+## [2025-05-19] Two-Step Tool Call Implementation Complete
+
+### Implementation Details
+1. **New Event Topics Added**:
+   - Added `INTENT_EXECUTION_RESULT` to EventTopics for tool execution feedback
+   - Created `IntentExecutionResultPayload` model with tool execution context
+
+2. **IntentRouterService Enhancements**:
+   - Updated handlers to return result data (success/fail, parameters, messages)
+   - Added `_emit_intent_execution_result()` method to standardize result emission
+   - Ensured tool_call_id is preserved from original request to response
+   - Added proper error handling and fallbacks
+
+3. **GPTService Enhancements**:
+   - Added subscription to `INTENT_EXECUTION_RESULT` events
+   - Implemented `_process_intent_execution_result()` to handle execution results
+   - Created `_get_verbal_response_for_intent()` for second GPT call
+   - Uses tool_choice="none" to force verbal-only response
+   - Added proper context injection for natural responses
+
+4. **Testing Results**:
+   - Successfully tested voice commands with commands like "play some music"
+   - System now executes the command AND provides verbal feedback
+   - DJ R3X responds naturally about executed actions (e.g. "Spinning up the cantina tunes for you!")
+   - Maintains conversation context through both steps
+
+This implementation delivers a more natural and engaging experience where DJ R3X both performs actions and provides conversational feedback about those actions. The two-step approach aligns with OpenAI's API behavior while maintaining our architectural standards.
 
 This finding helps explain our previous challenges with verbal feedback and provides a clear path forward for implementing more reliable speech + action behavior. 
+
+## [2025-05-19] Verbal Feedback Enhancement Complete
+
+### Implementation Overview
+1. **Two-Step Tool Call Process**:
+   - First call: Execute tool/action with `tool_choice="auto"`
+   - Second call: Generate verbal feedback with `tool_choice="none"`
+   - Maintains clean separation between action execution and verbal response
+   - Ensures both actions work AND natural verbal feedback is provided
+
+2. **Verbal Feedback Persona**:
+   - Created specialized `dj_r3x-verbal-feedback-persona.txt`
+   - Focuses on providing natural responses about actions just performed
+   - Maintains DJ R3X's character while being specific about executed actions
+   - Example: "Spinning up 'Kra Mer 5' for you! CANTINA VIBES!"
+
+3. **Event Flow**:
+   - Tool execution triggers `INTENT_EXECUTION_RESULT` event
+   - Result details fed into second GPT call for verbal feedback
+   - Ensures DJ R3X can reference specific details about what was just done
+   - Maintains conversation context through both steps
+
+This solution resolves the issue of getting either actions OR speech, now providing both reliably while maintaining DJ R3X's character and providing specific, contextual responses about executed actions. 
