@@ -151,7 +151,7 @@ async def test_help_command(service, event_bus):
     event_bus.on(EventTopics.CLI_RESPONSE, response_future)
     
     event_bus.emit(
-        EventTopics.MODE_COMMAND,
+        EventTopics.CLI_HELP_REQUEST,
         CliCommandPayload(command="help").model_dump()
     )
     

@@ -10,7 +10,7 @@ DEBUG_CONFIG = {
     "component_levels": {
         "AudioService": "DEBUG",  # More detailed logging for audio
         "NetworkService": "WARNING",  # Less noise from network
-        "StateService": "INFO"
+        "StateService": "DEBUG"
     },
     
     # Feature flags

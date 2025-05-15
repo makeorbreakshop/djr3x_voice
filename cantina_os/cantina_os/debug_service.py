@@ -98,6 +98,10 @@ class DebugService(StandardService):
             self._handle_debug_log
         ))
         asyncio.create_task(self.subscribe(
+            EventTopics.DEBUG_COMMAND,
+            self._handle_debug_command
+        ))
+        asyncio.create_task(self.subscribe(
             EventTopics.DEBUG_COMMAND_TRACE,
             self._handle_command_trace
         ))
@@ -278,29 +282,91 @@ class DebugService(StandardService):
         except Exception as e:
             self.logger.error(f"Error handling debug config: {str(e)}")
     
+    async def _handle_debug_command(self, payload: Dict[str, Any]) -> None:
+        """Handle debug commands from CLI.
+        
+        Args:
+            payload: Command payload with command and args
+        """
+        try:
+            command = payload.get("command", "")
+            args = payload.get("args", [])
+            
+            self.logger.debug(f"Handling debug command: {command} with args: {args}")
+            
+            # Route to the appropriate handler based on command
+            response = None
+            
+            # The first arg is the debug subcommand (level, trace, performance)
+            if command == "debug" and len(args) >= 1:
+                subcommand = args[0].lower()
+                subcommand_args = args[1:]
+                
+                if subcommand == "level":
+                    response = await self.handle_debug_level_command(subcommand_args)
+                elif subcommand == "trace":
+                    response = await self.handle_debug_trace_command(subcommand_args)
+                elif subcommand == "performance":
+                    response = await self.handle_debug_performance_command(subcommand_args)
+                else:
+                    response = {"message": f"Unknown debug subcommand: {subcommand}"}
+            else:
+                response = {"message": "Invalid debug command format"}
+                
+            # Send response if any
+            if response:
+                await self.emit(
+                    EventTopics.CLI_RESPONSE,
+                    response
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error handling debug command: {str(e)}")
+            await self.emit(
+                EventTopics.CLI_RESPONSE,
+                {"message": f"Error: {str(e)}", "is_error": True}
+            )
+    
     async def handle_debug_level_command(self, args: List[str]) -> Dict[str, Any]:
         """Handle debug level command."""
         if len(args) != 2:
-            return {"message": "Usage: debug level <component> <level>"}
+            return {"message": "Usage: debug level <component|all> <level> (DEBUG/INFO/WARNING/ERROR)"}
         
         component, level = args
         try:
             # Convert level to uppercase and validate it's a valid LogLevel
             level_upper = level.upper()
             if not hasattr(LogLevel, level_upper):
-                return {"message": f"Invalid log level: {level}"}
+                return {"message": f"Invalid log level: {level}. Use DEBUG/INFO/WARNING/ERROR"}
             
-            # Set the component log level
+            # Get the log level enum value
             new_level = LogLevel[level_upper]
-            old_level = self._component_log_levels.get(component, self._default_log_level)
-            self._component_log_levels[component] = new_level
             
-            self.logger.debug(
-                f"Changed log level for {component} from {old_level} (value: {old_level.value}) "
-                f"to {new_level} (value: {new_level.value})"
-            )
-            
-            return {"message": f"Successfully set {component} log level to {level_upper}"}
+            # Special handling for "all" component
+            if component.lower() == "all":
+                old_level = self._default_log_level
+                self._default_log_level = new_level
+                
+                # Clear component-specific levels to ensure all use the default
+                self._component_log_levels.clear()
+                
+                self.logger.debug(
+                    f"Changed default log level from {old_level} (value: {old_level.value}) "
+                    f"to {new_level} (value: {new_level.value})"
+                )
+                
+                return {"message": f"Successfully set ALL components log level to {level_upper}"}
+            else:
+                # Set the component log level
+                old_level = self._component_log_levels.get(component, self._default_log_level)
+                self._component_log_levels[component] = new_level
+                
+                self.logger.debug(
+                    f"Changed log level for {component} from {old_level} (value: {old_level.value}) "
+                    f"to {new_level} (value: {new_level.value})"
+                )
+                
+                return {"message": f"Successfully set {component} log level to {level_upper}"}
         except Exception as e:
             return {"message": f"Error setting log level: {str(e)}"}
     

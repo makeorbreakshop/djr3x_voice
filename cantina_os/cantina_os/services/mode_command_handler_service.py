@@ -295,6 +295,7 @@ Available Commands:
   System Control:
     engage      (e) - Engage DJ R3X (Press SPACE to talk)
     disengage   (d) - Disengage DJ R3X
+    idle        (i) - Enter idle mode (same as disengage)
     ambient     (a) - Enter ambient mode
     status     (st) - Show system status
     reset       (r) - Reset system state
@@ -304,6 +305,26 @@ Available Commands:
     list music      (l) - List available music
     play music <n>  (p) - Play specified music
     stop music      (s) - Stop music playback
+    
+  Debug Control:
+    debug level <component|all> <level> - Set log level (DEBUG/INFO/WARNING/ERROR) for a component or all components
+    
+  Eye Control:
+    eye status           - Show current eye light controller status
+    eye pattern <name>   - Set a specific eye pattern (see patterns below)
+    eye test             - Run a test sequence of all eye patterns
+
+    Available Eye Patterns:
+      • idle      - Default state, shows a static 3x3 grid
+      • startup   - Initial startup animation
+      • listening - Pulsing animation when listening for voice input
+      • thinking  - Rotating animation while processing input
+      • speaking  - Animated pattern while speaking
+      • happy     - Upward curved pattern showing happiness
+      • sad       - Downward curved pattern showing sadness
+      • angry     - Angled lines showing anger
+      • surprised - Special pattern for surprise reactions
+      • error     - X pattern indicating an error state
     
   Voice Control (in Interactive Mode):
     record    (rec) - Enter text-based recording mode

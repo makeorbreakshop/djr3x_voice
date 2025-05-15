@@ -216,6 +216,9 @@ class MouseInputService(BaseService):
                 )
             else:
                 self.logger.info("Mouse click detected - stopping recording")
+                # Emit our new event for immediate eye pattern transition
+                await self.emit(EventTopics.MOUSE_RECORDING_STOPPED, {})
+                # Then emit the standard event for the microphone service
                 await self.emit(EventTopics.MIC_RECORDING_STOP, {})
                 await self._emit_status(
                     ServiceStatus.RUNNING,

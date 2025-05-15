@@ -24,7 +24,8 @@ from ..event_payloads import (
     CliResponsePayload,
     ServiceStatus,
     LogLevel,
-    SystemModeChangePayload
+    SystemModeChangePayload,
+    DebugCommandPayload
 )
 
 class CLIService(BaseService):
@@ -88,15 +89,19 @@ class CLIService(BaseService):
         self._running = False
         self._input_task: Optional[asyncio.Task] = None
         
-        # I/O functions (only output and error, input is handled by asyncio)
+        # I/O functions - use async-friendly versions that won't block
         self._io = io_functions or {
-            'output': lambda x: sys.stdout.write(str(x) + '\n'),
-            'error': lambda x: sys.stderr.write(str(x) + '\n')
+            'output': self._async_write_output,
+            'error': self._async_write_error
         }
         
         # Stdin/stdout reader/writer
         self._stdin_reader: Optional[asyncio.StreamReader] = None
         self._stdout_writer: Optional[asyncio.StreamWriter] = None
+        
+        # Output queue to prevent blocking
+        self._output_queue = asyncio.Queue()
+        self._output_task = None
         
         # Recording mode state
         self._is_recording = False
@@ -125,12 +130,16 @@ class CLIService(BaseService):
         # Set up stdin reader
         await self._setup_stdin_reader()
         
+        # Start output processor task
+        self._output_task = asyncio.create_task(self._output_processor())
+        
         # Display startup message
-        self._io['output']("\nDJ R3X Voice Control CLI")
-        self._io['output']("Type 'help' for available commands\n")
+        await self._async_write_output("\nDJ R3X Voice Control CLI")
+        await self._async_write_output("Type 'help' for available commands\n")
         
         # Explicitly display initial prompt - ensure it's on a new line and properly flushed
-        print("DJ-R3X> ", end="", flush=True)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
         
         # Start the async input processing task
         self._input_task = asyncio.create_task(self._process_input())
@@ -183,6 +192,14 @@ class CLIService(BaseService):
             except asyncio.CancelledError:
                 self.logger.info("Input processing task cancelled")
                 
+        # Cancel the output processing task
+        if self._output_task and not self._output_task.done():
+            self._output_task.cancel()
+            try:
+                await self._output_task
+            except asyncio.CancelledError:
+                self.logger.info("Output processing task cancelled")
+        
     async def _process_input(self) -> None:
         """Process input from stdin asynchronously."""
         self.logger.debug("Starting async input processing")
@@ -282,6 +299,10 @@ class CLIService(BaseService):
         
         Args:
             user_input: Raw user input string
+            
+        This method handles initial command processing and emits all commands 
+        to the CLI_COMMAND topic for the CommandDispatcherService to handle.
+        It no longer routes commands directly to service-specific topics.
         """
         try:
             # Add to history
@@ -314,14 +335,14 @@ class CLIService(BaseService):
                     return
                 else:
                     self.logger.info("'done' command received but no recording is active")
-                    self._io['output']("No recording is currently active.")
+                    await self._async_write_output("No recording is currently active.")
                     return
                 
             # Handle record command
             if command == 'record':
                 if self._mic_recording_active:
                     self.logger.info("Recording already active")
-                    self._io['output']("Recording is already active. Type 'done' when finished.")
+                    await self._async_write_output("Recording is already active. Type 'done' when finished.")
                     return
                 
                 self.logger.info("Activating microphone recording")
@@ -331,78 +352,63 @@ class CLIService(BaseService):
                 # Emit voice listening started event to trigger microphone capture
                 self.logger.debug("Emitting VOICE_LISTENING_STARTED event")
                 await self.emit(EventTopics.VOICE_LISTENING_STARTED, {})
-                self._io['output']("[Microphone recording active - type 'done' when finished speaking]")
+                await self._async_write_output("[Microphone recording active - type 'done' when finished speaking]")
                 return
                 
-            # Handle mode commands
-            if command in self.MODE_COMMANDS:
-                self.logger.debug(f"Processing mode command: {command}")
-                self._event_bus.emit(
-                    EventTopics.SYSTEM_SET_MODE_REQUEST,
-                    {"mode": self.MODE_COMMANDS[command]}
-                )
-                return
-                
-            # Handle other commands
-            event_topic = EventTopics.CLI_COMMAND
-            if command in ['status', 'help', 'reset']:
-                event_topic = EventTopics.MODE_COMMAND
-            elif command.startswith('play') or command.startswith('list') or command == 'stop music':
-                event_topic = EventTopics.MUSIC_COMMAND
-                
-            self.logger.debug(f"Emitting command on topic {event_topic}: {command} {args}")
-            
-            # Combine command and args into single command string for payload
-            full_command = command
-            if args:
-                full_command += " " + " ".join(args)
-                
-            # Create command payload
+            # Handle all other commands by emitting to CLI_COMMAND
+            # Create command payload with original command, args, and full raw_input
             payload = CliCommandPayload(
                 command=command,
                 args=args,
-                raw_command=full_command,
-                timestamp=time.time(),  # Fixed: Using time.time() instead of datetime.now().timestamp()
+                raw_input=user_input,
+                timestamp=time.time(),
                 command_id=str(uuid.uuid4())
             )
             
-            # Emit command event
-            self._event_bus.emit(event_topic, payload.model_dump())
+            # Log the command being emitted
+            self.logger.info(f"CLIService emitting to CLI_COMMAND: {payload.model_dump(exclude_none=True)}")
+            
+            # Emit to CLI_COMMAND topic - all commands go through this single path
+            await self.emit(EventTopics.CLI_COMMAND, payload.model_dump())
             
         except Exception as e:
             self.logger.error(f"Error processing command '{user_input}': {e}")
             error_msg = f"Error: {str(e)}"
-            self._io['error'](error_msg)
+            await self._async_write_error(error_msg)
             
             # Emit error response
             payload = CliResponsePayload(
                 message=error_msg,
                 success=False,
-                timestamp=time.time(),  # Fixed: Using time.time() instead of datetime.now().timestamp()
+                timestamp=time.time(),
                 severity=LogLevel.ERROR
             )
             await self.emit_error_response(EventTopics.CLI_RESPONSE, payload)
             
     async def _handle_response(self, payload: Dict[str, Any]) -> None:
-        """Handle a response event and display it to the user.
+        """Handle response events from other services."""
+        is_error = payload.get("is_error", False)
+        message = payload.get("message", "")
+        command_context = payload.get("command", "N/A") # Get command context if available
+
+        self.logger.info(f"CLI received response. Error: {is_error}, Command context: '{command_context}', Message: '{message[:100]}...'") # Added INFO log
         
-        Args:
-            payload: Response payload, should contain 'message' and optionally 'success'
-        """
-        message = payload.get('message', '')
-        success = payload.get('success', True)
-        severity = payload.get('severity', LogLevel.INFO)
-        
-        # Format based on success/severity
-        if not success or severity in [LogLevel.ERROR, LogLevel.CRITICAL]:
-            self._io['error'](message)
+        if is_error:
+            # Format error message
+            await self._async_write_error(message)
         else:
-            self._io['output'](message)
+            await self._async_write_output(message)
             
         # Display prompt again after response - make sure it's properly flushed
         if not self._is_recording and not self._mic_recording_active:
-            print("DJ-R3X> ", end="", flush=True)
+            # Use run_in_executor for potentially blocking operation
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
             
+        # Set service status to RUNNING
+        self._status = ServiceStatus.RUNNING
+        await self._emit_status(ServiceStatus.RUNNING, "CLI service ready")
+        
     def _add_to_history(self, command: str) -> None:
         """Add a command to the history.
         
@@ -459,3 +465,41 @@ class CLIService(BaseService):
         """
         self.logger.debug("Received VOICE_LISTENING_STOPPED event")
         self._mic_recording_active = False
+
+    async def _async_write_output(self, message: str) -> None:
+        """Non-blocking output function that respects asyncio principles.
+        
+        Args:
+            message: The message to output
+        """
+        await self._output_queue.put((message, False))
+        
+    async def _async_write_error(self, message: str) -> None:
+        """Non-blocking error output function that respects asyncio principles.
+        
+        Args:
+            message: The error message to output
+        """
+        await self._output_queue.put((message, True))
+        
+    async def _output_processor(self) -> None:
+        """Process output messages from the queue to avoid blocking."""
+        try:
+            while self._running:
+                message, is_error = await self._output_queue.get()
+                try:
+                    # Use loop.run_in_executor for potentially blocking operations
+                    loop = asyncio.get_running_loop()
+                    if is_error:
+                        await loop.run_in_executor(None, lambda: sys.stderr.write(str(message) + '\n'))
+                        await loop.run_in_executor(None, sys.stderr.flush)
+                    else:
+                        await loop.run_in_executor(None, lambda: sys.stdout.write(str(message) + '\n'))
+                        await loop.run_in_executor(None, sys.stdout.flush)
+                except Exception as e:
+                    self.logger.error(f"Error writing output: {e}")
+                finally:
+                    self._output_queue.task_done()
+        except asyncio.CancelledError:
+            self.logger.debug("Output processor task cancelled")
+            raise

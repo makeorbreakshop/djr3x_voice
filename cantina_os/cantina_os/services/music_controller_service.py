@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from pyee.asyncio import AsyncIOEventEmitter
 import time
 import uuid
+import glob
+import math
 
 from ..base_service import BaseService
 from ..event_topics import EventTopics
@@ -22,7 +24,8 @@ from ..event_payloads import (
     ServiceStatusPayload,
     ServiceStatus,
     SystemModePayload,
-    LogLevel
+    LogLevel,
+    StandardCommandPayload
 )
 
 class MusicTrack(BaseModel):
@@ -203,350 +206,105 @@ class MusicControllerService(BaseService):
             )
             
     async def _handle_music_command(self, payload):
-        """Handle music commands from CLI or other sources."""
+        """
+        Handle music commands from CLI or other sources
+        
+        Args:
+            payload: Command payload from the dispatcher
+        """
         try:
-            # Add detailed debugging about the received payload
             self.logger.debug(f"Received music command payload: {payload}")
             
-            # Convert to proper payload type if needed
-            if not isinstance(payload, MusicCommandPayload):
-                self.logger.debug(f"Converting raw payload to MusicCommandPayload: {payload}")
-                # Extract command and args from CLI input
-                if isinstance(payload, dict):
-                    command = payload.get("command", "").strip().lower()
-                    args = payload.get("args", [])
-                    raw_input = payload.get("raw_input", "")
-                    conversation_id = payload.get("conversation_id")
-                    
-                    self.logger.debug(f"Processing command: '{command}' with args: {args}")
-                    self.logger.debug(f"Raw input: '{raw_input}'")
-                    
-                    # Handle list music command
-                    if command == "list" and args and args[0] == "music":
-                        self.logger.debug("Processing 'list music' command")
-                        await self._handle_list_music(conversation_id)
-                        return
-                        
-                    # Handle play music command
-                    if command == "play" and args and args[0] == "music":
-                        self.logger.debug("Processing 'play music' command")
-                        if len(args) < 2:
-                            # Create the error payload as a dictionary
-                            error_payload = {
-                                "message": "Please specify a track number or name: play music <number/name>",
-                                "is_error": True,
-                                "timestamp": time.time(),
-                                "event_id": str(uuid.uuid4()),
-                                "command": "play music"
-                            }
-                            
-                            await self.emit(
-                                EventTopics.CLI_RESPONSE,
-                                error_payload
-                            )
+            # Always convert to StandardCommandPayload for consistent processing
+            command = StandardCommandPayload.from_legacy_format(payload)
+            self.logger.debug(f"Standardized command: {command}")
+            
+            # Get the full compound command if available
+            full_command = command.get_full_command()
+            
+            # Handle different command patterns
+            if full_command == "list music" or command.command == "list":
+                # List available tracks
+                await self._list_tracks()
+                
+            elif full_command == "play music" or command.command == "play":
+                # Check for track number in args
+                if not command.validate_arg_count(1):
+                    # Try extracting from raw_input as fallback for "play music N" pattern
+                    raw_input = command.raw_input
+                    if raw_input and raw_input.strip().lower().startswith("play music "):
+                        parts = raw_input.strip().split()
+                        if len(parts) >= 3:
+                            track_num = parts[2]
+                            self.logger.info(f"Extracted track number from raw_input: {track_num}")
+                            await self._play_track(track_num)
                             return
                             
-                        # Get the track identifier (remaining args)
-                        track_identifier = args[1]  # This could be a number or name
-                        self.logger.debug(f"Track identifier: {track_identifier}")
-                        try:
-                            # Try to parse as number first
-                            track_index = int(track_identifier) - 1  # Convert to 0-based index
-                            self.logger.debug(f"Parsed as track index: {track_index}")
-                            await self._handle_play_by_index(track_index, conversation_id)
-                        except ValueError:
-                            # Not a number, try as name
-                            track_name = " ".join(args[1:])  # Join all remaining args as name
-                            self.logger.debug(f"Using as track name: '{track_name}'")
-                            await self._handle_play_by_name(track_name, conversation_id)
-                        return
-                        
-                    # Handle stop music command - now handles both formats
-                    if command == "stop" or (command == "stop" and args and args[0] == "music") or (command == "stop music"):
-                        self.logger.debug(f"Processing 'stop music' command. Current player state: {self.player is not None}")
-                        await self._handle_stop_request(
-                            MusicCommandPayload(
-                                action="stop",
-                                conversation_id=conversation_id
-                            )
-                        )
-                        
-                        # Create confirmation response as a dictionary
-                        response_payload = {
-                            "message": "Music playback stopped",
-                            "is_error": False,
-                            "timestamp": time.time(),
-                            "event_id": str(uuid.uuid4()),
-                            "command": "stop music"
-                        }
-                        
-                        await self.emit(
-                            EventTopics.CLI_RESPONSE,
-                            response_payload
-                        )
-                        return
-                        
-                # Handle standard action payload
-                if hasattr(payload, 'action'):
-                    self.logger.debug(f"Processing action: {payload.action}")
-                    if payload.action == "play":
-                        await self._handle_play_request(payload)
-                    elif payload.action == "stop":
-                        await self._handle_stop_request(payload)
-                    else:
-                        self.logger.warning(f"Unknown music command action: {payload.action}")
-                else:
-                    self.logger.warning(f"Unhandled music command payload: {payload}")
-                
-        except Exception as e:
-            self.logger.error(f"Error handling music command: {e}")
-            # Send error response to CLI
-            
-            # Create error response as a dictionary
-            error_payload = {
-                "message": f"Error handling music command: {e}",
-                "is_error": True,
-                "timestamp": time.time(),
-                "event_id": str(uuid.uuid4()),
-                "command": "music command"
-            }
-            
-            await self.emit(
-                EventTopics.CLI_RESPONSE,
-                error_payload
-            )
-            
-    async def _handle_list_music(self, conversation_id=None):
-        """List available music tracks and send to CLI."""
-        try:
-            tracks = await self.get_track_list()
-            if not tracks:
-                message = "No music tracks found"
-            else:
-                # Format the list with numbers
-                track_list = "\nAvailable Music Tracks:\n"
-                for i, track in enumerate(tracks):
-                    duration_str = f"{int(track['duration'] // 60)}:{int(track['duration'] % 60):02d}" if track.get('duration') else "?"
-                    track_list += f"  {i+1}. {track['name']} ({duration_str})\n"
-                
-                message = track_list
-                
-            # Log the response for debugging
-            self.logger.debug(f"Sending music list response: {message[:50]}...")
-            
-            # Create the CliResponsePayload as a dictionary directly
-            response_payload = {
-                "message": message,
-                "is_error": False,
-                "timestamp": time.time(),
-                "event_id": str(uuid.uuid4()),
-                "command": "list music"
-            }
-            
-            # Send response to CLI
-            await self.emit(
-                EventTopics.CLI_RESPONSE,
-                response_payload
-            )
-        except Exception as e:
-            self.logger.error(f"Error listing music tracks: {e}")
-            
-            # Create error response as a dictionary
-            error_payload = {
-                "message": f"Error listing music tracks: {e}",
-                "is_error": True,
-                "timestamp": time.time(),
-                "event_id": str(uuid.uuid4()),
-                "command": "list music"
-            }
-            
-            await self.emit(
-                EventTopics.CLI_RESPONSE,
-                error_payload
-            )
-            
-    async def _handle_play_by_index(self, index, conversation_id=None):
-        """Play a track by its index in the track list."""
-        try:
-            tracks = list(self.tracks.keys())
-            if 0 <= index < len(tracks):
-                track_name = tracks[index]
-                await self._handle_play_request(
-                    MusicCommandPayload(
-                        action="play",
-                        song_query=track_name,
-                        conversation_id=conversation_id
-                    )
-                )
-                
-                # Log the response for debugging
-                self.logger.debug(f"Sending play confirmation: track {track_name}")
-                
-                # Create the response payload as a dictionary
-                response_payload = {
-                    "message": f"Now playing: {track_name}",
-                    "is_error": False,
-                    "timestamp": time.time(),
-                    "event_id": str(uuid.uuid4()),
-                    "command": "play music"
-                }
-                
-                # Send confirmation to CLI
-                await self.emit(
-                    EventTopics.CLI_RESPONSE,
-                    response_payload
-                )
-            else:
-                # Create error response as a dictionary
-                error_payload = {
-                    "message": f"Invalid track number: {index+1}. Please choose between 1 and {len(tracks)}",
-                    "is_error": True,
-                    "timestamp": time.time(),
-                    "event_id": str(uuid.uuid4()),
-                    "command": "play music"
-                }
-                
-                await self.emit(
-                    EventTopics.CLI_RESPONSE,
-                    error_payload
-                )
-        except Exception as e:
-            self.logger.error(f"Error playing track by index: {e}")
-            
-            # Create error response as a dictionary
-            error_payload = {
-                "message": f"Error playing music: {e}",
-                "is_error": True,
-                "timestamp": time.time(),
-                "event_id": str(uuid.uuid4()),
-                "command": "play music"
-            }
-            
-            await self.emit(
-                EventTopics.CLI_RESPONSE,
-                error_payload
-            )
-            
-    async def _handle_play_by_name(self, name, conversation_id=None):
-        """Play a track by matching its name."""
-        try:
-            # Find matching track
-            name_lower = name.lower()
-            matches = []
-            
-            for track_name in self.tracks.keys():
-                if name_lower in track_name.lower():
-                    matches.append(track_name)
+                    # No track number found
+                    await self._send_error("Track number required. Usage: play music <track_number>")
+                    return
                     
-            if len(matches) == 1:
-                # Exact one match found
-                track_name = matches[0]
-                await self._handle_play_request(
-                    MusicCommandPayload(
-                        action="play",
-                        song_query=track_name,
-                        conversation_id=conversation_id
-                    )
-                )
+                # Get track number from args and play
+                track_num = command.args[0]
+                self.logger.info(f"Playing track number: {track_num}")
+                await self._play_track(track_num)
                 
-                # Log the response for debugging
-                self.logger.debug(f"Sending play confirmation: track {track_name}")
+            elif full_command == "stop music" or command.command == "stop":
+                # Stop playback
+                await self._stop_playback()
                 
-                # Create the response payload as a dictionary
-                response_payload = {
-                    "message": f"Now playing: {track_name}",
-                    "is_error": False,
-                    "timestamp": time.time(),
-                    "event_id": str(uuid.uuid4()),
-                    "command": "play music"
-                }
+            # Handle legacy "music" command without subcommand
+            elif command.command == "music" and not command.subcommand:
+                await self._send_error("Music command requires a subcommand: play, stop, or list")
                 
-                # Send confirmation to CLI
-                await self.emit(
-                    EventTopics.CLI_RESPONSE,
-                    response_payload
-                )
-            elif len(matches) > 1:
-                # Multiple matches
-                match_list = "\nMultiple matches found. Please be more specific or use track number:\n"
-                for i, track_name in enumerate(matches):
-                    match_list += f"  • {track_name}\n"
-                
-                # Create the response payload as a dictionary
-                response_payload = {
-                    "message": match_list,
-                    "is_error": False,
-                    "timestamp": time.time(),
-                    "event_id": str(uuid.uuid4()),
-                    "command": "play music"
-                }
-                
-                await self.emit(
-                    EventTopics.CLI_RESPONSE,
-                    response_payload
-                )
             else:
-                # No matches
-                # Create error response as a dictionary
-                error_payload = {
-                    "message": f"No tracks found matching '{name}'",
-                    "is_error": True,
-                    "timestamp": time.time(),
-                    "event_id": str(uuid.uuid4()),
-                    "command": "play music"
-                }
+                # Unknown command
+                await self._send_error(f"Unknown music command: {command}")
                 
-                await self.emit(
-                    EventTopics.CLI_RESPONSE,
-                    error_payload
-                )
         except Exception as e:
-            self.logger.error(f"Error playing track by name: {e}")
-            
-            # Create error response as a dictionary
-            error_payload = {
-                "message": f"Error playing music: {e}",
-                "is_error": True,
-                "timestamp": time.time(),
-                "event_id": str(uuid.uuid4()),
-                "command": "play music"
-            }
-            
-            await self.emit(
-                EventTopics.CLI_RESPONSE,
-                error_payload
-            )
-            
-    async def _handle_play_request(self, payload: MusicCommandPayload):
-        """Handle a request to play music."""
+            self.logger.error(f"Error handling music command: {e}", exc_info=True)
+            await self._send_error(f"Error processing music command: {str(e)}")
+
+    async def _play_track(self, track_num: str) -> None:
+        """Play a specific track"""
         try:
-            if not payload.song_query:
-                self.logger.warning("No song query provided in play request")
+            # Better input validation with detailed logging
+            self.logger.info(f"Attempting to play track number: '{track_num}'")
+            
+            # First check if track_num is None or empty
+            if not track_num:
+                await self._send_error("Track number is required")
                 return
                 
-            # Find matching track
-            track = None
-            query = payload.song_query.lower()
-            for t in self.tracks.values():
-                if query in t.name.lower():
-                    track = t
-                    break
-                    
-            if not track:
-                self.logger.warning(f"No matching track found for query: {payload.song_query}")
+            # Check if track_num is a valid number
+            if not isinstance(track_num, str) or not track_num.isdigit():
+                await self._send_error(f"Invalid track number: '{track_num}'. Must be a number between 1 and {len(self.tracks)}.")
                 return
                 
-            # Stop current playback if any
+            # Check if the track number is in range
+            track_num_int = int(track_num)
+            if track_num_int < 1 or track_num_int > len(self.tracks):
+                await self._send_error(f"Track number out of range: {track_num}. Must be between 1 and {len(self.tracks)}.")
+                return
+                
+            # Get the actual track from the loaded tracks
+            track_index = track_num_int - 1  # Convert to 0-based index
+            track_name = list(self.tracks.keys())[track_index]
+            track = self.tracks[track_name]
+            
+            self.logger.info(f"Playing track: {track.name} (path: {track.path})")
+            
+            # Create and configure a new player if needed
             if self.player:
                 self.player.stop()
-                self.player.release()
+                await self._cleanup_player(self.player)
                 
-            # Create new media player
+            # Create a new player for this track
             self.player = self.vlc_instance.media_player_new()
             media = self.vlc_instance.media_new(track.path)
             self.player.set_media(media)
             
-            # Set initial volume based on current state
+            # Set volume based on current mode and ducking state
             volume = self.ducking_volume if self.is_ducking else self.normal_volume
             self.player.audio_set_volume(volume)
             
@@ -554,65 +312,88 @@ class MusicControllerService(BaseService):
             self.player.play()
             self.current_track = track
             
-            # Emit state change event
+            # Send play command event
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_STARTED,
-                BaseEventPayload(
-                    conversation_id=payload.conversation_id
-                )
+                {
+                    "track_name": track.name,
+                    "track_index": track_index,
+                    "duration": track.duration
+                }
             )
+            
+            await self._send_success(f"Playing track {track_num}: {track.name}")
             
         except Exception as e:
-            self.logger.error(f"Error handling play request: {e}")
-            
-            # Clean up resources on error
-            if self.player:
-                try:
-                    self.player.stop()
-                    self.player.release()
-                except Exception as cleanup_error:
-                    self.logger.error(f"Error during player cleanup: {cleanup_error}")
-                finally:
-                    self.player = None
-                    self.current_track = None
-            
-            await self.emit(
-                EventTopics.MUSIC_ERROR,
-                BaseEventPayload(
-                    conversation_id=payload.conversation_id
-                )
-            )
-            
-    async def _handle_stop_request(self, payload: MusicCommandPayload):
-        """Handle a request to stop music playback."""
+            self.logger.error(f"Error playing track: {str(e)}", exc_info=True)
+            await self._send_error(f"Error playing track: {str(e)}")
+
+    async def _stop_playback(self) -> None:
+        """Stop music playback"""
         try:
-            self.logger.debug(f"Handling stop request. Current player: {self.player is not None}")
-            if self.player:
-                self.logger.debug("Stopping and releasing player")
-                self.player.stop()
-                self.player.release()
-                self.player = None
-                self.current_track = None
+            if not self.player:
+                await self._send_success("No music is currently playing")
+                return
                 
-                self.logger.debug("Emitting playback stopped event")
-                await self.emit(
-                    EventTopics.MUSIC_PLAYBACK_STOPPED,
-                    BaseEventPayload(
-                        conversation_id=payload.conversation_id
-                    )
-                )
-            else:
-                self.logger.debug("No active player to stop")
-                
-        except Exception as e:
-            self.logger.error(f"Error handling stop request: {e}")
+            # Stop the player
+            self.player.stop()
+            
+            # Get track info before cleanup
+            track_name = self.current_track.name if self.current_track else "Unknown"
+            
+            # Clean up the player
+            await self._cleanup_player(self.player)
+            self.player = None
+            self.current_track = None
+            
+            # Emit stopped event
             await self.emit(
-                EventTopics.MUSIC_ERROR,
-                BaseEventPayload(
-                    conversation_id=payload.conversation_id
-                )
+                EventTopics.MUSIC_PLAYBACK_STOPPED,
+                {
+                    "track_name": track_name
+                }
             )
             
+            await self._send_success("Stopped music playback")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping playback: {str(e)}", exc_info=True)
+            await self._send_error(f"Error stopping playback: {str(e)}")
+
+    async def _list_tracks(self) -> None:
+        """List available tracks"""
+        try:
+            tracks = self._get_available_tracks()
+            track_list = "\n".join([f"{i+1}. {track}" for i, track in enumerate(tracks)])
+            await self._send_success(f"Available tracks:\n{track_list}")
+        except Exception as e:
+            await self._send_error(f"Error listing tracks: {str(e)}")
+
+    async def _send_success(self, message: str) -> None:
+        """Send a success response"""
+        await self.emit(
+            EventTopics.CLI_RESPONSE,
+            {
+                "message": message,
+                "is_error": False
+            }
+        )
+
+    async def _send_error(self, message: str) -> None:
+        """Send an error response"""
+        await self.emit(
+            EventTopics.CLI_RESPONSE,
+            {
+                "message": message,
+                "is_error": True
+            }
+        )
+
+    def _get_available_tracks(self) -> List[str]:
+        """Get list of available tracks"""
+        # Use the actual loaded tracks instead of hardcoded list
+        return [track.name for track in self.tracks.values()]
+        
     async def _handle_mode_change(self, payload: Dict[str, Any]):
         """Handle system mode changes."""
         # Use new_mode field from the payload (not SystemModePayload.mode)

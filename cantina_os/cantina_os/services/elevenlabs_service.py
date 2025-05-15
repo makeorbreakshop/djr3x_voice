@@ -38,7 +38,7 @@ class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service."""
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X")
-    model_id: str = Field("eleven_turbo_v2", description="Model ID")
+    model_id: str = Field("eleven_turbo_v2", description="Model ID") # eleven_turbo_v2 or eleven_flash_v2_5
     stability: float = Field(0.60, description="Voice stability (0.0-1.0)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.2, description="Speech speed multiplier (0.7-1.2)")
@@ -111,6 +111,22 @@ class ElevenLabsService(BaseService):
         self._audio_thread = None
         self._stop_event = threading.Event()
         self._event_loop = None
+
+        # Buffer for accumulating LLM responses before sending to TTS
+        self._llm_response_buffer: str = ""
+        self._llm_response_buffer_conversation_id: Optional[str] = None
+        self._sentence_terminators = (".", "!", "?", "\n")
+        
+        # Flag to wait for full response - set to False for true streaming
+        self._wait_for_complete_response = True
+        
+        # Buffering config
+        self._min_buffer_size = 20  # Minimum characters before considering a flush
+        self._preferred_chunk_size = 100  # Target size for each TTS chunk
+        self._max_buffer_size = 200  # Maximum buffer size before forced flush
+        
+        # Track processed text to avoid duplicates
+        self._processed_text_chunks: Dict[str, List[str]] = {}
     
     async def _start(self) -> None:
         """Start the service following architecture standards."""
@@ -274,6 +290,26 @@ class ElevenLabsService(BaseService):
                     speed = min(max(speed, 0.7), 1.2)
                     
                     self.logger.info(f"Audio thread processing speech request: {len(text)} chars with speed {speed}")
+                    self.logger.debug(f"Speech text content (first 100 chars): '{text[:100]}...'")
+                    
+                    # Skip empty text to avoid errors
+                    if not text or not text.strip():
+                        self.logger.warning("Received empty text for TTS. Skipping synthesis.")
+                        
+                        # Emit completion event for empty text
+                        async def emit_empty_complete():
+                            payload = SpeechGenerationCompletePayload(
+                                conversation_id=conversation_id,
+                                text=text,
+                                audio_length_seconds=0.0,
+                                success=True
+                            )
+                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
+                        asyncio.run_coroutine_threadsafe(emit_empty_complete(), self._event_loop)
+                        
+                        # Mark task as done
+                        self._speech_request_queue.task_done()
+                        continue
                     
                     # Emit event that we're starting audio generation
                     async def emit_started():
@@ -486,103 +522,95 @@ class ElevenLabsService(BaseService):
             await self._emit_status(ServiceStatus.ERROR, error_msg, LogLevel.ERROR)
     
     async def _handle_llm_response(self, payload: Union[Dict[str, Any], LLMResponsePayload]) -> None:
-        """
-        Handle a response from the LLM to convert to speech.
-        
-        Args:
-            payload: The LLM response payload
-        """
+        """Handle LLM response events by converting text to speech."""
+        self.logger.info(f"Received LLM_RESPONSE event: {type(payload)}")
+
         try:
-            self.logger.info(f"Received LLM_RESPONSE event: {type(payload)}")
-            
-            # Log current playback method for debugging
-            self.logger.info(f"Current playback method: {self._config.playback_method}")
-            
-            # Convert to Pydantic model if needed
             if isinstance(payload, dict):
-                try:
-                    model_payload = LLMResponsePayload.model_validate(payload)
-                except ValidationError as e:
-                    # If standard validation fails, try a more lenient approach
-                    self.logger.warning(f"Could not validate LLM payload as LLMResponsePayload: {e}")
-                    if "text" not in payload:
-                        self.logger.error("LLM payload missing required 'text' field")
-                        return
+                event_data = LLMResponsePayload.model_validate(payload)
             elif isinstance(payload, LLMResponsePayload):
-                model_payload = payload
+                event_data = payload
             else:
-                self.logger.error(f"Unsupported payload type: {type(payload)}")
+                self.logger.error(f"Invalid payload type for LLM_RESPONSE: {type(payload)}")
                 return
+        except ValidationError as e:
+            self.logger.error(f"Validation error processing LLM_RESPONSE payload: {e}")
+            return
+        
+        text_chunk = event_data.text
+        conversation_id = event_data.conversation_id
+        is_complete_chunk = event_data.is_complete
+
+        self.logger.info(f"Current playback method: {self._config.playback_method}, chunk: '{text_chunk[:50]}...', final: {is_complete_chunk}")
+
+        if not conversation_id:
+            self.logger.error("LLM_RESPONSE event has no conversation_id. Skipping.")
+            return
+
+        # If conversation ID has changed, or if it's the first chunk for a new conversation
+        if self._llm_response_buffer_conversation_id != conversation_id:
+            # Reset buffer for new conversation
+            self._llm_response_buffer_conversation_id = conversation_id
+            self._llm_response_buffer = ""
             
-            # Extract required fields
-            if isinstance(payload, dict):
-                text = payload.get("text", "")
-                conversation_id = payload.get("conversation_id", str(asyncio.get_event_loop().time()))
-                is_complete = payload.get("is_complete", True)
-            else:
-                text = model_payload.text
-                conversation_id = model_payload.conversation_id or str(asyncio.get_event_loop().time())
-                is_complete = model_payload.is_complete
+            # Reset processed chunks for new conversation
+            self._processed_text_chunks[conversation_id] = []
+
+        # Accumulate the text chunks
+        if text_chunk:
+            self._llm_response_buffer = text_chunk if is_complete_chunk else self._llm_response_buffer + text_chunk
+            self.logger.debug(f"Buffering response text. Current buffer length: {len(self._llm_response_buffer)}")
+
+        # Only process when we have the complete response
+        if is_complete_chunk and self._wait_for_complete_response:
+            self.logger.info(f"Complete response received ({len(self._llm_response_buffer)} chars). Generating speech.")
             
-            # Only process if text is not empty
-            if not text:
-                self.logger.warning("Received empty text in LLM_RESPONSE event")
+            # Perform a duplicate check to ensure this hasn't already been processed
+            if conversation_id in self._processed_text_chunks and self._processed_text_chunks[conversation_id] and \
+               self._llm_response_buffer in self._processed_text_chunks[conversation_id]:
+                self.logger.info("Exact duplicate of already processed text. Skipping TTS generation.")
                 return
                 
-            # Process smaller chunks to improve responsiveness (was 20 chars)
-            if not is_complete and len(text) < 10:
-                self.logger.debug(f"Skipping very small incomplete LLM chunk: '{text}'")
-                return
+            await self._flush_complete_response(conversation_id, self._llm_response_buffer)
             
-            # Ensure speed is within valid range
-            speed = min(max(self._config.speed, 0.7), 1.2)
+            # Clear buffer after processing
+            self._llm_response_buffer = ""
+
+    async def _flush_complete_response(self, conversation_id: str, text: str) -> None:
+        """Process a complete response by sending to TTS."""
+        if not text or not text.strip():
+            self.logger.debug("Empty text, nothing to process")
+            return
             
-            self.logger.info(f"Converting LLM response to speech: {len(text)} chars, conversation_id: {conversation_id}, method: {self._config.playback_method}, speed: {speed}")
-            
-            # Special handling for streaming mode
-            if self._config.playback_method == SpeechPlaybackMethod.STREAMING and self._audio_thread and self._audio_thread.is_alive():
-                self.logger.info("Using streaming audio thread directly for speech generation")
-                # Create request data for streaming thread
-                request_data = {
-                    "text": text,
-                    "conversation_id": conversation_id,
-                    "voice_id": self._config.voice_id,
-                    "model_id": self._config.model_id,
-                    "stability": self._config.stability,
-                    "similarity_boost": self._config.similarity_boost,
-                    "speed": speed
-                }
-                
-                # Send to audio thread for processing
+        # Track this as processed to avoid duplicates
+        if conversation_id not in self._processed_text_chunks:
+            self._processed_text_chunks[conversation_id] = []
+        self._processed_text_chunks[conversation_id].append(text)
+        
+        text_to_speak = text.strip()
+        self.logger.info(f"Sending complete response to TTS: {len(text_to_speak)} chars, text: '{text_to_speak[:50]}...'")
+        
+        speech_request_payload = SpeechGenerationRequestPayload(
+            text=text_to_speak,
+            conversation_id=conversation_id,
+            voice_id=self._config.voice_id,
+            model_id=self._config.model_id,
+            stability=self._config.stability,
+            similarity_boost=self._config.similarity_boost,
+            speed=self._config.speed
+        )
+
+        if self._config.playback_method == SpeechPlaybackMethod.STREAMING:
+            if self._audio_thread and self._audio_thread.is_alive():
+                # Convert to dict using model_dump() per architecture standards
+                request_data = speech_request_payload.model_dump()
                 self._speech_request_queue.put(request_data)
-                self.logger.info(f"Sent speech request directly to streaming audio thread, skipping _handle_speech_generation_request")
-                return
-            
-            # If not using streaming or thread not available, follow regular path
-            self.logger.info("Following regular speech generation request path")
-            
-            # Create speech generation request
-            request = SpeechGenerationRequestPayload(
-                text=text,
-                conversation_id=conversation_id,
-                voice_id=self._config.voice_id,
-                model_id=self._config.model_id,
-                stability=self._config.stability,
-                similarity_boost=self._config.similarity_boost,
-                speed=speed
-            )
-            
-            # Process the speech generation request
-            await self._handle_speech_generation_request(request)
-            
-        except Exception as e:
-            error_msg = f"Error handling LLM response: {str(e)}"
-            self.logger.error(error_msg)
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                error_msg,
-                severity=LogLevel.ERROR
-            )
+                self.logger.info(f"Sent complete response ({len(text_to_speak)} chars) to streaming audio thread.")
+            else:
+                self.logger.error("Audio worker thread not running, cannot stream response. Falling back.")
+                await self._handle_speech_generation_request(speech_request_payload)
+        else:
+            await self._handle_speech_generation_request(speech_request_payload)
     
     async def _generate_speech(
         self,
