@@ -246,8 +246,8 @@ class BaseService:
             self.logger.debug(f"Converting Pydantic model to dict using .dict() for event {event}")
             payload = payload.dict()
         
-        # Use await to ensure the event emission is properly awaited
-        await self._event_bus.emit(event, payload)
+        # The emit method of pyee.AsyncIOEventEmitter returns a boolean, not a coroutine
+        self._event_bus.emit(event, payload)
 
     async def subscribe(self, event: str, handler: Callable) -> None:
         """Subscribe to an event on the event bus.
@@ -264,8 +264,9 @@ class BaseService:
             self._event_handlers[event] = []
         self._event_handlers[event].append(handler)
         
-        # Add the handler to the event bus with await
-        await self._event_bus.on(event, handler)
+        # Add the handler to the event bus - don't await since pyee.AsyncIOEventEmitter.on is not a coroutine
+        self._event_bus.on(event, handler)
+        self.logger.debug(f"Subscribed to event: {event}")
 
     @property
     def status(self) -> ServiceStatus:

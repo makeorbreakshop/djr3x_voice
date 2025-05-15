@@ -41,33 +41,41 @@ class SetEyeColorParams(BaseModel):
 
 class FunctionDefinition(BaseModel):
     """Model for OpenAI function definition structure."""
-    name: str
-    description: str
-    parameters: Dict[str, Any]
+    type: str = "function"
+    function: Dict[str, Any]
 
 # Define the function specifications
 def create_play_music_function() -> Dict[str, Any]:
     """Create the play_music function definition for OpenAI."""
     return {
-        "name": "play_music",
-        "description": "Play a specific song or music genre",
-        "parameters": PlayMusicParams.model_json_schema()
+        "type": "function",
+        "function": {
+            "name": "play_music",
+            "description": "Play a specific song or music genre",
+            "parameters": PlayMusicParams.model_json_schema()
+        }
     }
 
 def create_stop_music_function() -> Dict[str, Any]:
     """Create the stop_music function definition for OpenAI."""
     return {
-        "name": "stop_music",
-        "description": "Stop the currently playing music",
-        "parameters": StopMusicParams.model_json_schema()
+        "type": "function",
+        "function": {
+            "name": "stop_music",
+            "description": "Stop the currently playing music",
+            "parameters": StopMusicParams.model_json_schema()
+        }
     }
 
 def create_set_eye_color_function() -> Dict[str, Any]:
     """Create the set_eye_color function definition for OpenAI."""
     return {
-        "name": "set_eye_color",
-        "description": "Change the color of DJ R3X's LED eyes",
-        "parameters": SetEyeColorParams.model_json_schema()
+        "type": "function",
+        "function": {
+            "name": "set_eye_color",
+            "description": "Change the color of DJ R3X's LED eyes",
+            "parameters": SetEyeColorParams.model_json_schema()
+        }
     }
 
 # Collection of all available functions

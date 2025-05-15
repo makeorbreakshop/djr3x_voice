@@ -374,8 +374,10 @@ class GPTService(BaseService):
         # Add tool configurations if any are registered
         if self._tool_schemas:
             request_data["tools"] = self._tool_schemas
+            # Allow the model to decide whether to call a function or generate text.
+            # "auto" is the default when tools are present.
             request_data["tool_choice"] = "auto"
-            self.logger.info(f"Including {len(self._tool_schemas)} tools in request")
+            self.logger.info(f"Including {len(self._tool_schemas)} tools in request, tool_choice set to 'auto'")
 
         # Log API request preparation
         self.logger.info(f"Preparing OpenAI API request with model: {self._config['MODEL']}")
@@ -431,6 +433,18 @@ class GPTService(BaseService):
                 
                 message = response_data["choices"][0]["message"]
                 
+                # Add detailed debugging for tool call responses
+                if message.get("tool_calls"):
+                    self.logger.info("=== TOOL CALL RESPONSE DEBUG ===")
+                    self.logger.info(f"Response message structure: {json.dumps(message, indent=2)}")
+                    self.logger.info(f"Content field (raw): '{message.get('content')}'")
+                    self.logger.info(f"Content field type: {type(message.get('content'))}")
+                    self.logger.info(f"Content field length: {len(message.get('content') or '')}")
+                    self.logger.info(f"Tool calls count: {len(message.get('tool_calls', []))}")
+                    for i, tool_call in enumerate(message.get("tool_calls", [])):
+                        self.logger.info(f"Tool call {i+1}: {tool_call['function']['name']}")
+                    self.logger.info("=== END DEBUG ===")
+                
                 # Add assistant message to memory
                 self._memory.add_message(
                     role="assistant",
@@ -480,11 +494,13 @@ class GPTService(BaseService):
                     raise Exception(error_msg)
 
                 full_content = ""
-                tool_calls_collection = []
+                tool_calls_collection = {}  # Dictionary to track tool calls by ID
+                incomplete_tool_calls = set()  # Set to track incomplete tool calls
+                complete_tool_calls = []  # List to store completed tool calls
                 current_tool_call = None
-                current_tool_index = -1
-                is_complete = False
                 chunk_count = 0
+                has_tool_calls = False
+                is_complete = False
 
                 self.logger.info("Starting to process streaming response chunks...")
                 async for line in response.content:
@@ -496,8 +512,9 @@ class GPTService(BaseService):
                                 delta = data["choices"][0]["delta"]
                                 chunk_count += 1
                                 
+                                # Process text content
                                 if "content" in delta:
-                                    content = delta["content"]
+                                    content = delta.get("content") or ""
                                     full_content += content
                                     if chunk_count % 10 == 0:  # Log periodically to avoid spam
                                         self.logger.debug(f"Processed {chunk_count} chunks, current content: {full_content[:50]}...")
@@ -505,32 +522,91 @@ class GPTService(BaseService):
                                 
                                 # Handle tool calls in streaming mode
                                 if "tool_calls" in delta:
-                                    for tool_call_delta in delta["tool_calls"]:
-                                        index = tool_call_delta.get("index")
-                                        
-                                        # Start new tool call
-                                        if "id" in tool_call_delta:
-                                            current_tool_index = index
-                                            current_tool_call = {
-                                                "id": tool_call_delta["id"],
-                                                "type": "function",
-                                                "function": {"name": "", "arguments": ""}
-                                            }
-                                            # Ensure we have room for this tool call
-                                            while len(tool_calls_collection) <= index:
-                                                tool_calls_collection.append(None)
-                                            tool_calls_collection[index] = current_tool_call
-                                        
-                                        # Add to existing tool call
-                                        elif current_tool_index == index and current_tool_call:
-                                            if "function" in tool_call_delta:
-                                                func_delta = tool_call_delta["function"]
-                                                if "name" in func_delta:
-                                                    current_tool_call["function"]["name"] += func_delta["name"]
-                                                if "arguments" in func_delta:
-                                                    current_tool_call["function"]["arguments"] += func_delta["arguments"]
+                                    has_tool_calls = True
+                                    self.logger.debug(f"Processing tool call chunk {chunk_count}")
                                     
-                                    self.logger.info(f"Received tool call chunk in stream")
+                                    for tool_call_delta in delta["tool_calls"]:
+                                        # Get tool call ID if present
+                                        tool_call_id = tool_call_delta.get("id")
+                                        
+                                        if tool_call_id:
+                                            # Start new tool call
+                                            if tool_call_id not in tool_calls_collection:
+                                                tool_calls_collection[tool_call_id] = {
+                                                    "id": tool_call_id,
+                                                    "type": "function",
+                                                    "function": {"name": "", "arguments": ""}
+                                                }
+                                                incomplete_tool_calls.add(tool_call_id)
+                                                self.logger.info(f"Started new tool call with id: {tool_call_id}")
+                                            current_tool_call = tool_calls_collection[tool_call_id]
+                                        
+                                        # Process function data if present
+                                        if "function" in tool_call_delta and current_tool_call:
+                                            func_delta = tool_call_delta["function"]
+                                            if "name" in func_delta:
+                                                name_chunk = func_delta.get("name") or ""
+                                                current_tool_call["function"]["name"] += name_chunk
+                                                self.logger.debug(f"Appended to function name: {name_chunk}")
+                                            if "arguments" in func_delta:
+                                                args_chunk = func_delta.get("arguments") or ""
+                                                current_tool_call["function"]["arguments"] += args_chunk
+                                                args_preview = args_chunk[:30] + "..." if len(args_chunk) > 30 else args_chunk
+                                                self.logger.debug(f"Appended to function arguments: {args_preview}")
+                                            
+                                            # Check if this tool call is complete
+                                            if (current_tool_call["function"]["name"] and 
+                                                current_tool_call["function"]["arguments"] and 
+                                                tool_call_id in incomplete_tool_calls):
+                                                try:
+                                                    # Log the exact arguments string for debugging
+                                                    args_str = current_tool_call["function"]["arguments"]
+                                                    self.logger.info(f"Attempting to validate arguments JSON: '{args_str}'")
+                                                    
+                                                    # Try to parse the JSON arguments
+                                                    json_args = json.loads(args_str)
+                                                    
+                                                    # If we get here, JSON is valid
+                                                    self.logger.info(f"Valid JSON arguments parsed: {json_args}")
+                                                    
+                                                    # Tool call is complete
+                                                    incomplete_tool_calls.remove(tool_call_id)
+                                                    complete_tool_calls.append(current_tool_call)
+                                                    self.logger.info(f"Completed tool call: {current_tool_call['function']['name']} with args: {json_args}")
+                                                    
+                                                    # Process this tool call immediately
+                                                    await self._process_tool_calls([current_tool_call], full_content)
+                                                except json.JSONDecodeError as e:
+                                                    self.logger.debug(f"Tool call {tool_call_id} has incomplete arguments: {e}")
+                                                    # If JSON is invalid but ends with a closing brace, it might be complete
+                                                    # but with formatting issues - try cleanup and retry
+                                                    if args_str.endswith('}'):
+                                                        self.logger.info("Arguments end with '}', attempting JSON cleanup and retry")
+                                                        try:
+                                                            # Try to clean up common JSON errors
+                                                            # 1. Missing quotes around property names
+                                                            # 2. Single quotes instead of double quotes
+                                                            # This is a simple approach - more sophisticated JSON repair could be added
+                                                            import re
+                                                            # Replace single quotes with double quotes
+                                                            cleaned = args_str.replace("'", "\"")
+                                                            json_args = json.loads(cleaned)
+                                                            
+                                                            self.logger.info(f"JSON cleanup successful! Parsed: {json_args}")
+                                                            
+                                                            # Update the arguments with the cleaned version
+                                                            current_tool_call["function"]["arguments"] = cleaned
+                                                            
+                                                            # Mark as complete and process
+                                                            incomplete_tool_calls.remove(tool_call_id)
+                                                            complete_tool_calls.append(current_tool_call)
+                                                            self.logger.info(f"Completed tool call after cleanup: {current_tool_call['function']['name']}")
+                                                            
+                                                            # Process this tool call immediately
+                                                            await self._process_tool_calls([current_tool_call], full_content)
+                                                        except Exception as cleanup_error:
+                                                            self.logger.debug(f"JSON cleanup failed: {cleanup_error}")
+                                            
                             elif line == "data: [DONE]":
                                 is_complete = True
                                 await self._emit_llm_stream_chunk("", tool_calls=None, is_complete=True)
@@ -539,22 +615,43 @@ class GPTService(BaseService):
                         except Exception as e:
                             self.logger.error(f"Error processing stream chunk: {str(e)}")
                 
-                # Clean up any None values in tool calls
-                tool_calls_collection = [tc for tc in tool_calls_collection if tc is not None]
+                # Final attempt to process any remaining tool calls that look complete
+                for tool_id in list(incomplete_tool_calls):
+                    tool_call = tool_calls_collection[tool_id]
+                    if tool_call["function"]["name"] and tool_call["function"]["arguments"]:
+                        self.logger.info(f"Final attempt to process tool call: {tool_call['function']['name']}")
+                        try:
+                            # Try direct processing without JSON validation
+                            incomplete_tool_calls.remove(tool_id)
+                            complete_tool_calls.append(tool_call)
+                            self.logger.info(f"Processing tool call directly: {tool_call['function']['name']}")
+                            await self._process_tool_calls([tool_call], full_content)
+                        except Exception as e:
+                            self.logger.error(f"Failed to process tool call in final attempt: {e}")
                 
+                # Log final statistics
                 self.logger.info(f"Completed streaming response with {chunk_count} chunks")
-                self.logger.info(f"Final response: {full_content[:100]}...")
+                self.logger.info(f"Processed {len(complete_tool_calls)} complete tool calls")
+                if incomplete_tool_calls:
+                    self.logger.warning(f"Found {len(incomplete_tool_calls)} incomplete tool calls")
+                    for tool_id in incomplete_tool_calls:
+                        tool_call = tool_calls_collection[tool_id]
+                        self.logger.warning(f"Incomplete tool call: {tool_call}")
 
                 # Add complete message to memory
                 self._memory.add_message(
                     role="assistant",
                     content=full_content,
-                    tool_calls=tool_calls_collection if tool_calls_collection else None
+                    tool_calls=complete_tool_calls if complete_tool_calls else None
                 )
 
-                # Process tool calls if any
-                if tool_calls_collection:
-                    await self._process_tool_calls(tool_calls_collection, full_content)
+                # Emit the final LLM response with both text and tool calls
+                # This ensures ElevenLabs gets the text content for speech synthesis
+                # OpenAI will provide both tool calls AND text content in the same response
+                self.logger.info(f"Emitting final LLM response with text: '{full_content[:50]}...' and {len(complete_tool_calls)} tool calls")
+                
+                # Always emit text content, even if empty, to ensure proper event flow
+                await self._emit_llm_response(full_content, tool_calls=complete_tool_calls)
 
                 # Emit final chunk
                 self.logger.info("Emitting final LLM response chunk")
@@ -622,7 +719,7 @@ class GPTService(BaseService):
         
     def register_tool(self, tool_schema: Dict[str, Any]) -> None:
         """Register a tool for use with the GPT model."""
-        tool_name = tool_schema["name"]
+        tool_name = tool_schema["function"]["name"]  # Updated to get name from function property
         self._tools[tool_name] = tool_schema
         self._tool_schemas = list(self._tools.values())
         self.logger.info(f"Registered tool: {tool_name}")
@@ -653,7 +750,14 @@ class GPTService(BaseService):
 
     async def _process_tool_calls(self, tool_calls: List[Dict[str, Any]], response_text: str) -> None:
         """Process and emit intents from tool calls."""
-        for tool_call in tool_calls:
+        if not tool_calls:
+            self.logger.warning("No tool calls to process - skipping intent emission")
+            return
+            
+        self.logger.info(f"Processing {len(tool_calls)} tool calls")
+        processed_count = 0
+        
+        for i, tool_call in enumerate(tool_calls):
             try:
                 if tool_call["type"] != "function":
                     self.logger.warning(f"Unsupported tool call type: {tool_call['type']}")
@@ -662,34 +766,57 @@ class GPTService(BaseService):
                 function_name = tool_call["function"]["name"]
                 function_args_str = tool_call["function"]["arguments"]
                 
-                try:
-                    # Parse the arguments JSON
-                    function_args = json.loads(function_args_str)
+                if not function_name:
+                    self.logger.warning(f"Tool call {i+1} has empty function name - skipping")
+                    continue
                     
-                    # Validate arguments against the Pydantic model if available
-                    model_map = function_name_to_model_map()
-                    if function_name in model_map:
-                        param_model = model_map[function_name]
-                        # Validate the parameters
-                        validated_params = param_model(**function_args)
-                        function_args = validated_params.model_dump()
-                        self.logger.info(f"Validated parameters for function {function_name}")
+                if not function_args_str:
+                    self.logger.warning(f"Tool call {i+1} ({function_name}) has empty arguments - using empty dict")
+                    function_args = {}
+                else:
+                    self.logger.info(f"Processing tool call {i+1}/{len(tool_calls)}: {function_name}")
                     
-                    # Create and emit the intent payload
-                    intent_payload = IntentPayload(
-                        intent_name=function_name,
-                        parameters=function_args,
-                        original_text=response_text,
-                        conversation_id=self._current_conversation_id
-                    )
-                    
-                    self.logger.info(f"Emitting intent: {function_name} with params: {function_args}")
-                    await self.emit(EventTopics.INTENT_DETECTED, intent_payload)
-                    
-                except json.JSONDecodeError:
-                    self.logger.error(f"Invalid JSON in function arguments: {function_args_str}")
-                except ValidationError as e:
-                    self.logger.error(f"Parameter validation error for {function_name}: {e}")
+                    try:
+                        # Parse the arguments JSON
+                        function_args = json.loads(function_args_str)
+                        self.logger.debug(f"Parsed arguments for {function_name}: {json.dumps(function_args)[:100]}...")
+                        
+                        # Validate arguments against the Pydantic model if available
+                        model_map = function_name_to_model_map()
+                        if function_name in model_map:
+                            param_model = model_map[function_name]
+                            # Validate the parameters
+                            validated_params = param_model(**function_args)
+                            function_args = validated_params.model_dump()
+                            self.logger.info(f"Validated parameters for function {function_name}")
+                        else:
+                            self.logger.warning(f"No parameter model found for function {function_name}")
+                        
+                        # Create and emit the intent payload
+                        intent_payload = IntentPayload(
+                            intent_name=function_name,
+                            parameters=function_args,
+                            original_text=response_text,
+                            conversation_id=self._current_conversation_id
+                        )
+                        
+                        self.logger.info(f"Emitting intent: {function_name} with params: {function_args}")
+                        await self.emit(EventTopics.INTENT_DETECTED, intent_payload)
+                        self.logger.info(f"Successfully emitted {function_name} intent")
+                        processed_count += 1
+                        
+                    except json.JSONDecodeError:
+                        self.logger.error(f"Invalid JSON in function arguments: {function_args_str}")
+                    except ValidationError as e:
+                        self.logger.error(f"Parameter validation error for {function_name}: {e}")
                 
             except Exception as e:
-                self.logger.error(f"Error processing tool call: {e}") 
+                self.logger.error(f"Error processing tool call: {e}")
+                
+        self.logger.info(f"Completed processing {processed_count}/{len(tool_calls)} tool calls successfully")
+        
+        # Make sure we emit the LLM response with both text and tool calls
+        # This ensures ElevenLabs gets the text content for speech synthesis
+        if response_text:
+            self.logger.info(f"Emitting LLM response with text ({len(response_text)} chars) and {len(tool_calls)} tool calls")
+            await self._emit_llm_response(response_text, tool_calls) 

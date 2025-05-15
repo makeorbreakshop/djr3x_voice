@@ -72,10 +72,9 @@ class YodaModeManagerService(BaseService):
         start_time = asyncio.get_event_loop().time()
         
         try:
-            # Subscribe to mode change requests
-            self.logger.debug("Subscribing to mode change requests")
-            await self.subscribe(EventTopics.SYSTEM_SET_MODE_REQUEST, self._handle_mode_request)
-            self.logger.debug(f"Subscription completed at +{asyncio.get_event_loop().time() - start_time:.3f}s")
+            # Set up event subscriptions properly
+            await self._setup_subscriptions()
+            self.logger.debug(f"Subscriptions completed at +{asyncio.get_event_loop().time() - start_time:.3f}s")
             
             # Emit initial status update
             self.logger.debug("Emitting initial status update")
@@ -304,3 +303,15 @@ class YodaModeManagerService(BaseService):
     def current_mode(self) -> SystemMode:
         """Get the current system mode."""
         return self._current_mode 
+
+    async def _setup_subscriptions(self) -> None:
+        """Set up event subscriptions following architecture standards."""
+        self.logger.debug("Setting up subscriptions")
+        
+        # Use asyncio.create_task to wrap subscription as per ARCHITECTURE_STANDARDS.md
+        asyncio.create_task(self.subscribe(
+            EventTopics.SYSTEM_SET_MODE_REQUEST, 
+            self._handle_mode_request
+        ))
+        
+        self.logger.debug("Subscribed to mode change requests") 

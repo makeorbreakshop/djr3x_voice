@@ -67,7 +67,7 @@ class DirectCommandTester:
         )
         
         # Store services
-        self.services["mode_manager"] = mode_manager
+        self.services["yoda_mode_manager"] = mode_manager
         self.services["command_dispatcher"] = command_dispatcher
         self.services["mode_command_handler"] = mode_command_handler
         

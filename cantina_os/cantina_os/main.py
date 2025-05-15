@@ -151,7 +151,7 @@ class CantinaOS:
             self.logger.warning("ELEVENLABS_API_KEY not found in environment")
         
         # Get OpenAI model
-        openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+        openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         self._config["OPENAI_MODEL"] = openai_model
         
         # Set log level from environment or default to INFO
@@ -228,7 +228,7 @@ class CantinaOS:
         
         # Compound commands
         # Music commands
-        for cmd in ["play music", "stop music", "list music"]:
+        for cmd in ["play music", "stop music", "list music", "install music"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_compound_command(cmd, EventTopics.MUSIC_COMMAND)
         
@@ -238,7 +238,7 @@ class CantinaOS:
                 dispatcher.register_compound_command(cmd, EventTopics.EYE_COMMAND)
         
         # Debug commands
-        for cmd in ["debug level", "debug trace"]:
+        for cmd in ["debug level", "debug trace", "debug music"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_compound_command(cmd, EventTopics.DEBUG_COMMAND)
         
@@ -256,9 +256,8 @@ class CantinaOS:
         
         # Define the service initialization order
         service_order = [
-            "mode_manager",
+            "yoda_mode_manager",
             "command_dispatcher",
-            "mode_command_handler",
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
@@ -273,14 +272,14 @@ class CantinaOS:
         
         try:
             # Initialize mode manager first - it's required by most services
-            self.logger.info("Starting mode manager service")
-            self._services["mode_manager"] = self._create_service("mode_manager")
-            await self._services["mode_manager"].start()
+            self.logger.info("Starting yoda_mode_manager service")
+            self._services["yoda_mode_manager"] = self._create_service("yoda_mode_manager")
+            await self._services["yoda_mode_manager"].start()
             
             # Initialize the rest of the services in order
             for service_name in service_order:
                 # Skip mode_manager as it's already started
-                if service_name == "mode_manager":
+                if service_name == "yoda_mode_manager":
                     continue
                     
                 self.logger.info(f"Starting {service_name} service")
@@ -294,7 +293,7 @@ class CantinaOS:
                     self.logger.error(f"Failed to start service {service_name}: {e}")
                     
                     # If a critical service fails, we need to abort
-                    if service_name in ["mode_manager", "command_dispatcher", "cli"]:
+                    if service_name in ["yoda_mode_manager", "command_dispatcher", "cli"]:
                         self.logger.error(f"Critical service {service_name} failed to start: {e}")
                         # Clean up any started services
                         await self._cleanup_services()
@@ -423,7 +422,8 @@ class CantinaOS:
             "mode_change_sound": ModeChangeSoundService,
             "music_controller": MusicControllerService,
             "mouse_input": MouseInputService,
-            "intent_router": IntentRouterService
+            "intent_router": IntentRouterService,
+            "command_dispatcher": CommandDispatcherService
         }
         
         # Early return if service doesn't exist in map
@@ -442,7 +442,9 @@ class CantinaOS:
             if "OPENAI_API_KEY" not in service_config:
                 service_config["OPENAI_API_KEY"] = self._config.get("OPENAI_API_KEY", "")
             if "GPT_MODEL" not in service_config:
-                service_config["GPT_MODEL"] = self._config.get("OPENAI_MODEL", "gpt-4o")
+                service_config["GPT_MODEL"] = self._config.get("OPENAI_MODEL", "gpt-4.1-mini")
+            # Disable streaming to ensure proper text and tool call handling
+            service_config["STREAMING"] = False
                 
         elif service_name == "elevenlabs":
             # Ensure ElevenLabs service has API key and other configuration
@@ -460,6 +462,28 @@ class CantinaOS:
             if "CHANNELS" not in service_config:
                 service_config["CHANNELS"] = self._config.get("AUDIO_CHANNELS", 1)
             
+        elif service_name == "music_controller":
+            # Configure music controller with proper music directory
+            # Look in the standard audio/music folder instead
+            music_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "audio", "music")
+            self.logger.info(f"Configuring MusicController with music_dir: {music_dir}")
+            
+            # Fallback to assets directory only if primary does not exist
+            if not os.path.exists(music_dir):
+                fallback_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "music")
+                self.logger.info(f"Primary music directory not found, using fallback: {fallback_dir}")
+                music_dir = fallback_dir
+            
+            # Create music directory if it doesn't exist
+            os.makedirs(music_dir, exist_ok=True)
+            self.logger.info(f"Ensured music directory exists: {music_dir}")
+            
+            # Set the music_dir in the config
+            if isinstance(service_config, dict):
+                service_config["music_dir"] = music_dir
+            else:
+                service_config = {"music_dir": music_dir}
+        
         # All services need the global event bus
         try:
             service = service_class(self._event_bus, service_config)
