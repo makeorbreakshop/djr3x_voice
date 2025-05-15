@@ -1876,3 +1876,177 @@ The script now pre-calculates token usage before making API calls and dynamicall
   - Fine-tune reranking weights based on user feedback
   - Consider implementing hybrid search with sparse vectors
   - Create more specialized reranking for different knowledge domains
+
+### 2025-05-15: Final Vector Creation Configuration for Holocron Knowledge Base
+- **Status**: Ready for full vector creation with optimized settings
+- **Command to Run**:
+  ```bash
+  python scripts/create_vectors_robust.py \
+    --input-dir data/processed_articles \
+    --output-dir data/vectors \
+    --concurrent-requests 2 \
+    --embedding-batch-size 25 \
+    --max-tokens-per-minute 800000 \
+    --rate-limit-delay 0.1 \
+    --batch-size 50
+  ```
+- **Configuration Details**:
+  - Token-based chunking with tiktoken (256 tokens, 64 overlap)
+  - 2 concurrent API requests for stability
+  - 25 chunks per embedding batch
+  - Target rate: 800K tokens/minute
+  - Processing ~200K articles total
+- **Monitoring**: Add to command for logging:
+  ```bash
+  | tee vector_creation_$(date +%Y%m%d%H%M%S).log
+  ```
+- **Next Step**: After completion, run Pinecone upload:
+  ```bash
+  python scripts/upload_with_url_tracking.py \
+    --batch-size 100 \
+    --delay 0.5 \
+    --vectors-dir data/vectors
+  ```
+
+### 2025-05-16: Plan for Full E5 Embedding Migration from `holocron-knowledge` to `holocron-sbert-e5`
+
+- **Objective**: Achieve a complete one-to-one mapping of vectors from the `holocron-knowledge` index (OpenAI embeddings) to the `holocron-sbert-e5` index (E5-small-v2 embeddings), preserving original IDs and metadata.
+
+- **Problem Addressed**: Previous attempts to use sequential ID ranges for fetching from `holocron-knowledge` were ineffective due to the sparse nature of its vector IDs. The `holocron-sbert-e5` index currently contains only a small subset of the total knowledge.
+
+- **Proposed Method**: 
+  1.  **List All Vector IDs**: Utilize the Pinecone Python SDK's `index.list(namespace='')` generator for the `holocron-knowledge` index. This will paginate through and retrieve all existing ~680,000 vector IDs without requiring a prefix.
+  2.  **Batch Fetch Source Vectors**: Iterate through the retrieved IDs in batches (e.g., 100-1000 per batch). For each batch, use `index.fetch(ids=[...])` to get the full vector data, including metadata, from `holocron-knowledge`.
+  3.  **Extract Content & Re-embed**: From each fetched vector's metadata, extract the original text content (e.g., from fields like 'content', 'text', 'chunk_text'). Re-embed this text using the `intfloat/e5-small-v2` model (384 dimensions).
+  4.  **Batch Upsert to Target**: Create new vector objects for `holocron-sbert-e5` consisting of the original ID, the new E5 embedding, and the original metadata (excluding the old OpenAI embedding). Upsert these in batches to `holocron-sbert-e5`.
+
+- **Cost Estimation (One-Time Migration)**:
+  - **Read Operations (from `holocron-knowledge`)**: 
+    - Listing ~680k IDs: Estimated ~680 - 6,800 Read Units (RUs), depending on pagination efficiency.
+    - Fetching ~680k vectors (metadata): Estimated ~68,000 RUs (at 1 RU per 10 records).
+    - Total Read RUs: ~68,680 - 74,800 RUs.
+    - Estimated Read Cost: ~$0.57 - $0.62 (based on an example price of $8.25/million RUs).
+  - **Write Operations (to `holocron-sbert-e5`)**: 
+    - Upserting ~680k new E5 vectors (384-dim + metadata): Estimated ~2,040,000 Write Units (WUs) (at ~3 WUs/vector if batched by 100).
+    - Estimated Write Cost: ~$4.08 (based on an example price of $2.00/million WUs).
+  - **Total Estimated Cost**: ~$4.65 - $4.70 for the full migration.
+  - *Note*: Actual costs depend on the specific Pinecone plan/region pricing for RUs and WUs. This is a one-time cost to populate the `holocron-sbert-e5` index fully.
+
+- **Next Steps**: 
+  - Adapt an existing script (e.g., `scripts/create_bert_index.py` or a new one) to implement this paginated ID listing and batch processing logic.
+  - Execute the script, carefully monitoring Pinecone RU/WU consumption.
+  - Verify data integrity and count in `holocron-sbert-e5` post-migration.
+
+### 2025-05-15: Fixed E5 Migration Script for Full Vector Transfer
+- **Achievement**: Fixed and validated the migration script to transfer all vectors from `holocron-knowledge` (OpenAI embeddings) to `holocron-sbert-e5` (E5 embeddings)
+- **Issues Fixed**:
+  - Corrected Pinecone API response handling in `fetch_vectors` method to properly access `response.vectors` instead of using `.get()`
+  - Updated `upsert_to_target` method to use `getattr(response, "upserted_count", 0)` for proper count tracking
+  - Enhanced error handling throughout the pipeline for better recovery
+- **Testing**: Successfully validated with a 10-vector test batch
+- **Cost Estimation**: Full migration expected to cost ~$4.70 (one-time)
+- **Run Command**:
+  ```bash
+  python scripts/migrate_to_e5_embeddings.py --batch-size 100
+  ```
+- **Features**:
+  - Supports resume via checkpoint file
+  - Can be paused/resumed with Ctrl+C
+  - Detailed logging with cost estimation
+  - Progress tracking with success/failure counts
+
+### 2025-05-16: E5 Migration Script Performance Analysis and Optimization
+- **Issue**: Vector migration script performing poorly (0.12-0.69 vectors/second)
+- **Analysis**:
+  - Initial performance metrics misleading due to incorrect rate calculation
+  - Using static processed_ids count instead of session-specific stats
+  - Actual batch processing faster than reported:
+    - First batch: ~6.86 vectors/sec
+    - Second batch: ~17.68 vectors/sec
+- **Improvements**:
+  - Added session-specific statistics tracking
+  - Fixed rate calculations to show actual processing speed
+  - Added timestamp tracking for better performance monitoring
+  - Added distinction between session and cumulative statistics
+  - Enhanced progress logging with more accurate metrics
+- **Next Steps**:
+  - Monitor performance with new metrics
+  - Consider increasing batch size based on Pinecone recommendations (up to 1000)
+  - Implement more sophisticated rate limiting based on actual token usage
+
+### 2025-05-15: Successfully Implemented E5 Migration Pipeline
+- **Achievement**: Created efficient migration pipeline from OpenAI embeddings to E5-small-v2
+- **Technical Details**:
+  - Source: holocron-knowledge index (679,826 vectors, 1536-dim OpenAI embeddings)
+  - Target: holocron-sbert-e5 index (384-dim E5 embeddings)
+  - Processing speed: ~20 vectors/second with steady performance
+  - Checkpoint system for resumable processing
+  - Proper content extraction and metadata preservation
+- **Implementation**:
+  - Uses random vector sampling for efficient batch retrieval
+  - Automatic deduplication via checkpoint tracking
+  - Robust error handling and progress monitoring
+  - Maintains vector IDs and metadata between indexes
+- **Next Steps**:
+  - Monitor completion of full migration (~677K vectors remaining)
+  - Verify vector quality in target index
+  - Begin transition to E5-based retrieval system
+
+### 2025-05-16: Fixed E5 Migration Hanging Issue - Random Vector Query Problem
+- **Issue**: E5 migration script hanging indefinitely during vector queries to source index
+- **Root Cause**:
+  - Using random vector sampling approach that's causing query timeouts
+  - Code generates random unit vectors and passes them to Pinecone's `.query()` method
+  - These random vectors are unlikely to be similar to any actual vectors in the database
+  - No timeout parameter specified, leading to indefinite hanging
+  - Debug logs show script stops at: "Fetching batch of vectors" stage
+- **Technical Solution**:
+  - Replace random vector query approach with direct ID-based retrieval
+  - Use Pinecone's `index.list()` to paginate through all vector IDs
+  - Process these IDs in batches with `index.fetch()` to get the actual vectors
+  - Implement explicit timeouts for all Pinecone API calls
+  - Add better error handling with exponential backoff
+- **Implementation Details**:
+  ```python
+  # Instead of random vector query:
+  vector_ids = []
+  # Paginate through all IDs in the index
+  for batch in self.source_idx.list(namespace=self.source_namespace):
+      vector_ids.extend(batch.ids)
+      
+  # Process in batches
+  for i in range(0, len(vector_ids), self.batch_size):
+      batch_ids = vector_ids[i:i+self.batch_size]
+      # Fetch vectors by ID with timeout
+      response = self.source_idx.fetch(
+          ids=batch_ids,
+          namespace=self.source_namespace
+      )
+  ```
+- **Expected Results**:
+  - Reliable, predictable fetching of vectors from source index
+  - No more hanging on query operations
+  - Better error handling and recovery
+  - Accurate progress tracking based on actual index size
+
+### 2025-05-15: E5 Embedding Migration Progress
+
+### Migration Script Status
+- Successfully created script to migrate from OpenAI embeddings to E5 embeddings
+- Current working command that saves vectors locally:
+```bash
+python scripts/migrate_to_e5_embeddings.py --batch-size 5000 --num-workers 16 --save-locally --output-dir e5_vectors_full
+```
+
+### Performance Metrics
+- Processing rate: ~11.5 vectors/second
+- Using optimized settings:
+  - Batch size: 5000 (for efficient model inference)
+  - Workers: 16 (for parallel processing)
+  - Local storage to avoid Pinecone rate limits
+  - Using intfloat/e5-small-v2 model
+
+### Next Steps
+- Once vectors are saved locally, they can be batch uploaded to Pinecone
+- Monitor disk space usage in e5_vectors_full directory
+- Consider implementing checkpointing for long-running process
