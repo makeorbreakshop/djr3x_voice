@@ -359,9 +359,144 @@ Structure event payloads consistently:
 3. Include explicit success/error indicators when appropriate
 4. Use descriptive field names
 
-## 9. Audio Processing Standards
+## 9. CLI Command System Standards
 
-### 9.1 Threading Model
+### 9.1 Command Registration
+
+All CLI commands must be registered through the CommandDispatcherService using these guidelines:
+
+1. **Basic Command Registration**:
+```python
+# In main.py during service initialization
+await command_dispatcher.register_command_handler(
+    command="status",
+    handler_topic=EventTopics.CLI_STATUS_REQUEST,
+    description="Display system status"
+)
+```
+
+2. **Compound Command Registration**:
+```python
+# For commands with subcommands like "eye pattern"
+await command_dispatcher.register_compound_command(
+    base_command="eye",
+    subcommand="pattern",
+    handler_topic=EventTopics.EYE_COMMAND,
+    description="Set eye LED pattern"
+)
+```
+
+### 9.2 Command Handler Implementation
+
+Implement command handlers following these standards:
+
+1. **Handler Method Naming**:
+   - Use `_handle_<command>_command` for basic commands
+   - Use `_handle_<service>_command` for service-specific commands
+
+2. **Payload Processing**:
+```python
+async def _handle_eye_command(self, payload: Dict[str, Any]) -> None:
+    try:
+        # Convert to StandardCommandPayload
+        command_payload = StandardCommandPayload(**payload)
+        
+        # Extract command components
+        command = command_payload.command
+        subcommand = command_payload.subcommand
+        args = command_payload.args
+        
+        # Process command
+        if subcommand == "pattern":
+            await self._handle_pattern_command(args)
+        elif subcommand == "test":
+            await self._handle_test_command()
+        else:
+            await self.emit_error_response(
+                EventTopics.EYE_COMMAND_RESPONSE,
+                {"error": f"Unknown subcommand: {subcommand}"}
+            )
+    except Exception as e:
+        await self.emit_error_response(
+            EventTopics.EYE_COMMAND_RESPONSE,
+            {"error": f"Error processing command: {e}"}
+        )
+```
+
+### 9.3 Command Response Standards
+
+Follow these standards for command responses:
+
+1. **Success Response**:
+```python
+await self.emit(
+    EventTopics.COMMAND_RESPONSE,
+    {
+        "success": True,
+        "message": "Command completed successfully",
+        "data": result_data  # Optional
+    }
+)
+```
+
+2. **Error Response**:
+```python
+await self.emit_error_response(
+    EventTopics.COMMAND_RESPONSE,
+    {
+        "error": str(error),
+        "command": command,
+        "args": args
+    }
+)
+```
+
+### 9.4 Command Implementation Checklist
+
+When adding a new command:
+
+- [ ] Define command in EventTopics if needed
+- [ ] Create StandardCommandPayload model if custom fields needed
+- [ ] Register command in main.py
+- [ ] Implement handler in appropriate service
+- [ ] Add command to help text
+- [ ] Add error handling
+- [ ] Test all command variations
+- [ ] Document command in README.md
+
+### 9.5 Command Flow Architecture
+
+Commands must follow this flow:
+
+1. CLIService receives user input
+2. CLIService emits to CLI_COMMAND topic
+3. CommandDispatcherService receives and routes command
+4. Service-specific handler processes command
+5. Handler emits response
+6. CLIService displays response to user
+
+### 9.6 Command Validation
+
+Implement these validation steps:
+
+1. **Input Validation**:
+   - Validate required arguments
+   - Check argument types and ranges
+   - Verify command format
+
+2. **State Validation**:
+   - Check if service is ready
+   - Verify required resources available
+   - Check for conflicting operations
+
+3. **Response Validation**:
+   - Ensure response includes success/error status
+   - Include relevant context in errors
+   - Provide helpful error messages
+
+## 10. Audio Processing Standards
+
+### 10.1 Threading Model
 
 Audio processing services must follow these threading guidelines:
 
@@ -415,7 +550,7 @@ class AudioService(StandardService):
                 self.logger.error(f"Error processing audio: {e}")
 ```
 
-### 9.2 Audio Data Flow
+### 10.2 Audio Data Flow
 
 Follow these patterns for audio data handling:
 
@@ -446,7 +581,7 @@ class AudioProcessor(StandardService):
             )
 ```
 
-### 9.3 Resource Management
+### 10.3 Resource Management
 
 Audio services must properly manage system resources:
 
@@ -478,7 +613,7 @@ async def _stop(self):
         self._audio_device.close()
 ```
 
-### 9.4 Error Handling
+### 10.4 Error Handling
 
 Implement robust error handling for audio operations:
 
@@ -512,7 +647,7 @@ async def _handle_audio_device_error(self, error):
     )
 ```
 
-### 9.5 Thread Synchronization Rules
+### 10.5 Thread Synchronization Rules
 
 To maintain proper thread synchronization:
 
