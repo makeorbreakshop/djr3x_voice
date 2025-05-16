@@ -652,3 +652,93 @@ async def _subscribe(self, topic: EventTopics, handler: Callable) -> None:
 - Event-based synchronization ensures data consistency across services
 - Proper data serialization/deserialization is essential for reliable service communication
 
+## 🔧 DJ Mode Core Intelligence Implementation (#20)
+
+**Implementation Summary**: Completed key BrainService and MemoryService enhancements to support DJ Mode intelligence features, filling in the remaining items from the DJ Mode implementation plan.
+
+**Changes Implemented**:
+
+1. **BrainService DJ Mode Intelligence**:
+   - Added event handler for TRACK_ENDING_SOON to prepare transitions
+   - Implemented just-in-time plan generation for smooth transitions
+   - Added CLI command handling for DJ controls (start, stop, next, queue)
+   - Developed track sequencing algorithm with genre/energy matching
+   - Created DJ commentary generator with style variations
+   - Integrated with CachedSpeechService for pre-rendering transitions
+   - Added intelligence to avoid track repetition
+
+2. **MemoryService DJ Mode Support**:
+   - Implemented DJ mode state persistence
+   - Added track history tracking for repetition avoidance
+   - Created handlers for DJ-related memory events (DJ_MODE_CHANGED, DJ_TRACK_QUEUED)
+   - Added storage for DJ user preferences and transition styles
+
+3. **Advanced DJ Features**:
+   - Genre-aware track selection with relationship mapping
+   - Commentary style rotation (energetic, chill, funny, informative, mysterious, dramatic, galactic)
+   - Weighted selection for better musical flow between genres
+   - Skip vs. regular transition handling with appropriate commentary
+   - Event-driven architecture for timeline coordination
+
+**Architecture Improvements**:
+- Proper service communication with standardized event payloads
+- Clear separation of responsibilities between services
+- Robust error handling and graceful degradation
+- Efficient memory management for track history
+
+With these changes, the system now provides a complete DJ Mode experience with intelligent track sequencing, smooth transitions with appropriate commentary, and proper state management across services.
+
+## 🔧 CachedSpeechService Import and Emission Pattern Fix (#21)
+
+**Issue Summary**: The CachedSpeechService failed to initialize due to import path issues and incompatible method signatures, causing the service to fail during startup.
+
+**Root Cause Analysis**:
+1. **Absolute Import Paths**: The service was using fully-qualified absolute imports (`from cantina_os.services.base import StandardService`) instead of relative imports, conflicting with the development mode package installation.
+2. **Incorrect Service Base Class**: Using `StandardService` instead of `BaseService` causing initialization parameter mismatch.
+3. **Incompatible Method Signatures**: The `_start()` and `_stop()` methods had incorrect signatures, not matching the parent class.
+4. **Emission Method Mismatch**: Using `_emit_dict()` which is not provided by `BaseService` instead of the standard `emit()` method.
+
+**Changes Implemented**:
+1. **Fixed Import Paths**:
+   ```python
+   # Changed from:
+   from cantina_os.services.base import StandardService
+   from cantina_os.event_topics import EventTopics
+   # To:
+   from ..base_service import BaseService
+   from ..event_topics import EventTopics
+   ```
+
+2. **Updated Base Class and Constructor**:
+   ```python
+   # Changed from:
+   class CachedSpeechService(StandardService):
+       def __init__(self, event_bus, config=None, name="cached_speech_service"):
+           super().__init__(event_bus, config, name=name)
+   # To:
+   class CachedSpeechService(BaseService):
+       def __init__(self, event_bus, config=None, name="cached_speech_service"):
+           super().__init__(name, event_bus, logger=None)
+   ```
+
+3. **Updated Service Lifecycle Methods**:
+   - Changed `_stop()` to `stop()` to match the expected BaseService pattern
+   - Updated status emission patterns
+
+4. **Standardized Event Emission**:
+   - Changed all instances of `_emit_dict()` to `emit()` for compatibility
+   - Updated payload formatting to match expected patterns
+
+**Impact**:
+- CachedSpeechService now initializes correctly during application startup
+- Service properly integrates with the event system
+- Consistent with architecture patterns across other services
+- Cache management for DJ mode transitions works properly
+- Event subscriptions for TTS processing work as expected
+
+**Lesson Learned**:
+- Always use relative imports for modules within the same package
+- Follow the established service template patterns consistently
+- Ensure proper inheritance and method signature compatibility
+- Standardize event emission patterns across all services
+
