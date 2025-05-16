@@ -2050,3 +2050,127 @@ python scripts/migrate_to_e5_embeddings.py --batch-size 5000 --num-workers 16 --
 - Once vectors are saved locally, they can be batch uploaded to Pinecone
 - Monitor disk space usage in e5_vectors_full directory
 - Consider implementing checkpointing for long-running process
+
+### 2025-05-16: Fixed E5 Embedding Migration Checkpoint Corruption
+- **Issue**: Migration script failing with `json.decoder.JSONDecodeError` when loading checkpoint file
+- **Root Cause**: Corrupted JSON in `e5_migration_checkpoint.json` (malformed at line 2, column 531503)
+- **Solution**: 
+  - Created backup of corrupted checkpoint file
+  - Generated new checkpoint file with empty processed_ids array
+  - Script now running successfully with fresh tracking state
+- **Commands Used**:
+  ```bash
+  cp e5_migration_checkpoint.json e5_migration_checkpoint.json.corrupted
+  echo '{"processed_ids": [], "timestamp": "'"$(date -Iseconds)"'"}' > e5_migration_checkpoint.json
+  python scripts/migrate_to_e5_embeddings.py --batch-size 5000 --num-workers 16 --save-locally --output-dir e5_vectors_full
+  ```
+- **Impact**: Migration process resumed with local vector storage for later batch upload to Pinecone
+
+### 2025-05-16: E5 Migration Script Performance Issues
+- **Issue**: Migration script showing poor performance (~1.15 vectors/sec) and high memory usage
+- **Root Causes**:
+  - Loading all processed IDs into memory (~680K IDs)
+  - Inefficient checkpoint system using single JSON file
+  - Too many worker processes (16) causing memory contention
+  - Excessive per-ID verification logging
+  - Single large output file becoming bottleneck
+- **Planned Fixes**:
+  - Replace in-memory ID tracking with SQLite
+  - Store checkpoints as batch ranges
+  - Reduce workers to 4-8
+  - Split output into smaller files (5K vectors each)
+  - Add garbage collection after batches
+  - Reduce logging verbosity
+  - Switch to parquet format for better efficiency
+- **Expected Impact**: Significant reduction in memory usage and improved processing speed
+
+### 2025-05-16: E5 Embeddings Migration Script Issues
+
+### Issue: Vector Migration Script Not Properly Tracking Progress
+Working on fixing the `migrate_to_e5_embeddings.py` script that transfers vectors from OpenAI embeddings to E5 embeddings. The script has several issues:
+
+1. Inconsistent field naming between local storage and Pinecone upload:
+   - Local storage uses 'embedding' field
+   - Pinecone upload needs 'values' field
+   - This causes confusion in the data pipeline
+
+2. Stats tracking not properly updating:
+   - Session stats not accurately reflecting processed vectors
+   - Successful upserts count not properly incrementing
+
+3. Vector format issues:
+   - Embeddings not being consistently formatted as 384-dimensional vectors
+   - Metadata not being properly preserved during transfer
+
+### Fix Implementation
+Made several changes to fix these issues:
+
+1. Standardized vector format:
+   - Store both 'values' (for Pinecone) and 'embedding' (for local storage) fields
+   - Ensure consistent 384-dimension vectors throughout pipeline
+
+2. Improved stats tracking:
+   - Added proper session stats updates
+   - Fixed successful upserts counting for both local and Pinecone storage
+
+3. Enhanced error handling:
+   - Better tracking of failed uploads
+   - More detailed logging of vector processing stages
+
+Testing shows the script now correctly:
+- Saves vectors locally with proper 384-dimensional embeddings
+- Uploads to Pinecone with correct format
+- Tracks progress accurately
+- Preserves all metadata
+
+### 2025-05-16: Fixed Vector Migration Script Issues and Performance
+- **Achievement**: Fixed and optimized the E5 embeddings migration script
+- **Key Fixes**:
+  - Replaced inefficient JSON checkpoint system with SQLite for robust progress tracking
+  - Standardized vector field naming ('values' for Pinecone, 'embedding' for local storage)
+  - Fixed vector format to ensure consistent 384-dimensional E5 embeddings
+  - Improved memory management with proper garbage collection
+  - Enhanced error handling and recovery mechanisms
+- **Performance Improvements**:
+  - Reduced worker count from 16 to 4-8 to prevent memory contention
+  - Split output into smaller files (5K vectors each) for better I/O
+  - Implemented batch range checkpointing for efficient resumption
+  - Added proper session stats tracking for accurate progress monitoring
+- **Current Status**:
+  - Successfully processing vectors with proper format and metadata preservation
+  - Reliable progress tracking with SQLite backend
+  - Memory-efficient operation with improved garbage collection
+  - Ready for full migration of remaining vectors
+
+### 2025-05-16 - E5 Migration Progress
+
+### Migration Command
+Successfully running E5 migration with:
+```bash
+python scripts/migrate_to_e5_embeddings.py \
+  --source-index holocron-knowledge \
+  --target-index holocron-sbert-e5-new \
+  --batch-size 100 \
+  --num-workers 4 \
+  --force
+```
+
+### Performance Analysis
+- Current rate: ~20 vectors/sec
+- Potential optimizations:
+  - Increase batch_size from 100 to 500 (Pinecone optimal batch size)
+  - Increase num_workers to 8 (since using MPS/Apple Silicon)
+  - Current bottleneck appears to be embedding generation, not Pinecone upload speed
+
+### Next Steps
+Run with optimized parameters:
+```bash
+python scripts/migrate_to_e5_embeddings.py \
+  --source-index holocron-knowledge \
+  --target-index holocron-sbert-e5-new \
+  --batch-size 500 \
+  --num-workers 8 \
+  --force
+```
+
+This should significantly improve the ~20 vectors/sec current rate.

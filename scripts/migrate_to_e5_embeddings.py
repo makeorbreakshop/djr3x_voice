@@ -3,10 +3,11 @@
 Migrate vectors from holocron-knowledge (OpenAI embeddings) to holocron-sbert-e5 (E5 embeddings).
 
 This script:
-1. Uses a direct approach to fetch vectors from the source index
+1. Uses Pinecone's list() and fetch() methods to efficiently retrieve vectors
 2. Extracts text content from metadata
 3. Generates new E5 embeddings using the intfloat/e5-small-v2 model
 4. Upserts the new embeddings to holocron-sbert-e5 index
+5. Uses SQLite for robust progress tracking
 """
 
 import os
@@ -19,25 +20,23 @@ import json
 from datetime import datetime
 from tqdm import tqdm
 import numpy as np
-import random
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor
 import torch
-
-# Pinecone imports
-from pinecone import Pinecone
-
-# SentenceTransformers for E5 embeddings
+import sqlite3
+import gc
+import pinecone
 from sentence_transformers import SentenceTransformer
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import psutil
+from pinecone import Pinecone
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f"e5_migration_{datetime.now().strftime('%Y%m%d%H%M%S')}.log"),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -54,22 +53,11 @@ class E5Migrator:
         batch_size: int = 1000,
         num_workers: int = 4,
         save_locally: bool = False,
-        output_dir: str = "e5_vectors"
+        output_dir: str = "e5_vectors",
+        force: bool = False,
+        vectors_per_file: int = 5000
     ):
-        """
-        Initialize the migrator.
-        
-        Args:
-            source_index: Name of the source index (OpenAI embeddings)
-            target_index: Name of the target index (E5 embeddings)
-            source_namespace: Namespace in source index
-            target_namespace: Namespace in target index
-            model_name: E5 model name to use
-            batch_size: Number of vectors to process in each batch
-            num_workers: Number of worker processes for parallel embedding generation
-            save_locally: Whether to save vectors locally instead of uploading to Pinecone
-            output_dir: Directory to save vectors to if save_locally is True
-        """
+        """Initialize the E5 migration tool"""
         self.source_index = source_index
         self.target_index = target_index
         self.source_namespace = source_namespace
@@ -77,30 +65,42 @@ class E5Migrator:
         self.model_name = model_name
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.processed_ids: Set[str] = set()
-        self.checkpoint_file = "e5_migration_checkpoint.json"
         self.save_locally = save_locally
         self.output_dir = output_dir
-        self.output_file = None
+        self.force = force
+        self.vectors_per_file = vectors_per_file
         
-        # Create output directory if saving locally
-        if self.save_locally:
-            os.makedirs(self.output_dir, exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-            self.output_file = os.path.join(self.output_dir, f"e5_vectors_{timestamp}.jsonl")
-            logger.info(f"Vectors will be saved locally to: {self.output_file}")
+        # Initialize Pinecone clients
+        pc = Pinecone()  # Uses API key from environment
+        self.source_idx = pc.Index(source_index)
+        if not save_locally:
+            self.target_idx = pc.Index(target_index)
         
-        # Initialize Pinecone
-        self.pc = Pinecone()
-        self.source_idx = self.pc.Index(source_index)
-        if not self.save_locally:
-            self.target_idx = self.pc.Index(target_index)
-        else:
-            self.target_idx = None
-        
-        # Load model
-        logger.info(f"Loading E5 model: {model_name}")
+        # Ensure output directory exists
+        if save_locally:
+            os.makedirs(output_dir, exist_ok=True)
+            
+        # Initialize the model
         self.model = SentenceTransformer(model_name)
+        
+        # Initialize stats
+        self.session_stats = {
+            'processed': 0,
+            'errors': 0,
+            'saved_locally': 0,
+            'uploaded': 0,
+            'start_time': time.time()
+        }
+        
+        # Set up SQLite database - more robust than JSON checkpoints
+        self.db_path = "e5_migration.db"
+        self._init_db()
+        
+        # Stats tracking
+        self.total_processed = 0
+        self.total_errors = 0
+        self.current_file_count = 0
+        self.current_file_vectors = 0
         
         # Optimize model settings
         self.model.max_seq_length = 512  # Increase max sequence length
@@ -123,13 +123,10 @@ class E5Migrator:
         self.process_batch_size = min(5000, batch_size)  # Increased from original
         self.vector_batch_size = min(2000, batch_size)   # For vector processing
         
-        # Load checkpoint if exists
-        self._load_checkpoint()
-        
         # Statistics
         self.stats = {
             "total_vectors_on_source": 0,
-            "processed_ids_cumulative": len(self.processed_ids),
+            "processed_ids_cumulative": self._get_processed_count(),
             "successful_upserts": 0,
             "failed_ids": 0,
             "empty_content_ids": 0,
@@ -156,341 +153,550 @@ class E5Migrator:
             logger.warning(f"Could not get source index stats: {e}. Progress bar total may be based on --limit only.")
             self.stats["total_vectors_on_source"] = 0
 
-    def _load_checkpoint(self):
-        """Load processed IDs from checkpoint file if it exists."""
-        if os.path.exists(self.checkpoint_file):
-            with open(self.checkpoint_file, 'r') as f:
-                checkpoint = json.load(f)
-                self.processed_ids = set(checkpoint.get('processed_ids', []))
-            logger.info(f"Loaded {len(self.processed_ids)} processed IDs from checkpoint")
-            # Print some sample IDs from the checkpoint
-            sample_ids = list(self.processed_ids)[:5]
-            logger.info(f"Sample IDs from checkpoint: {sample_ids}")
-    
-    def _save_checkpoint(self):
-        """Save current progress to checkpoint file."""
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump({
-                'processed_ids': list(self.processed_ids),
-                'timestamp': datetime.now().isoformat()
-            }, f)
+    def _init_db(self):
+        """Initialize SQLite database for tracking processed vectors"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Create tables if they don't exist
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS processed_vectors (
+                        vector_id TEXT PRIMARY KEY,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Add index to speed up lookups
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS processed_vectors_idx 
+                    ON processed_vectors(vector_id)
+                """)
+                
+                # Create a batches table for checkpoint tracking
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS migration_batches (
+                        batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        batch_size INTEGER,
+                        first_id TEXT,
+                        last_id TEXT,
+                        status TEXT
+                    )
+                """)
+                
+                # Add stats table for global metrics
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS migration_stats (
+                        key TEXT PRIMARY KEY,
+                        value TEXT,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error initializing database: {e}")
+            raise
             
-    def reset_checkpoint(self):
-        """Reset the checkpoint file, clearing all processed IDs."""
-        if os.path.exists(self.checkpoint_file):
-            # Create a backup first
-            backup_file = f"{self.checkpoint_file}.bak.{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            os.rename(self.checkpoint_file, backup_file)
-            logger.info(f"Created backup of checkpoint file: {backup_file}")
-        
-        # Clear processed IDs and save empty checkpoint
-        self.processed_ids = set()
-        self._save_checkpoint()
-        logger.info("Checkpoint reset. All IDs will be processed again.")
-    
-    def extract_text_content(self, vector_data: Dict[str, Any]) -> Optional[str]:
+    def _is_processed(self, vector_id: str) -> bool:
+        """Check if a vector has been processed"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM processed_vectors WHERE vector_id = ?", (vector_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking processed status: {e}")
+            return False
+            
+    def _mark_processed(self, vector_ids: List[str]):
+        """Mark vectors as processed in the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Use executemany for better performance
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO processed_vectors (vector_id) VALUES (?)",
+                    [(vid,) for vid in vector_ids]
+                )
+                conn.commit()
+                
+                # Update overall stats
+                self.stats["processed_in_session"] += len(vector_ids)
+                self.stats["processed_ids_cumulative"] = self._get_processed_count()
+        except Exception as e:
+            logger.error(f"Error marking vectors as processed: {e}")
+            
+    def _get_processed_count(self) -> int:
+        """Get total count of processed vectors"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM processed_vectors")
+                return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error getting processed count: {e}")
+            return 0
+            
+    def extract_text_content(self, vector_data) -> Optional[str]:
         """
         Extract text content from vector metadata.
-        This function is simplified since we're now only processing vectors
-        that we know have content.
+        Handles both dictionary-style vector data and Pinecone Vector objects.
         
         Args:
-            vector_data: Vector data including metadata
+            vector_data: Vector data including metadata (can be dict or Pinecone Vector object)
             
         Returns:
             Extracted text content or None if not found
         """
-        metadata = vector_data.get("metadata", {})
-        vector_id = vector_data.get("id", "unknown")
+        vector_id = None
+        metadata = None
         
-        if "content" in metadata and metadata["content"]:
-            return metadata["content"]
+        # Handle Pinecone Vector objects from API response
+        if hasattr(vector_data, 'id'):
+            vector_id = vector_data.id
+            metadata = vector_data.metadata if hasattr(vector_data, 'metadata') else None
+        else:
+            # Handle dictionary format
+            vector_id = vector_data.get("id", "unknown")
+            metadata = vector_data.get("metadata", {})
         
-        # Log that we couldn't find content (shouldn't happen given our filtering)
-        logger.warning(f"Expected content field not found in vector {vector_id}. Available fields: {list(metadata.keys())}")
+        # Try to find content in various fields
+        if metadata is None:
+            logger.warning(f"No metadata found in vector {vector_id}")
+            self.stats["empty_content_ids"] += 1
+            return None
+        
+        # Try to convert metadata to a dictionary if it's not already
+        if not isinstance(metadata, dict):
+            try:
+                # If metadata is an object with attributes
+                metadata_dict = {}
+                for attr in dir(metadata):
+                    # Skip private attributes and methods
+                    if not attr.startswith('_') and not callable(getattr(metadata, attr)):
+                        metadata_dict[attr] = getattr(metadata, attr)
+                metadata = metadata_dict
+            except Exception as e:
+                logger.warning(f"Could not convert metadata to dictionary for vector {vector_id}: {e}")
+                metadata = {}
+        
+        # Check for common content fields
+        content_fields = ["content", "text", "article_text", "chunk_text", "passage", "document", 
+                         "body", "main_text", "full_text", "description"]
+        
+        for field in content_fields:
+            content = None
+            # Try direct access
+            if isinstance(metadata, dict) and field in metadata and metadata[field]:
+                content = metadata[field]
+            # Try attribute access
+            elif hasattr(metadata, field) and getattr(metadata, field):
+                content = getattr(metadata, field)
+                
+            if content:
+                # Ensure content is a string
+                if not isinstance(content, str):
+                    try:
+                        content = str(content)
+                    except Exception as e:
+                        logger.warning(f"Could not convert content to string: {e}")
+                        continue
+                
+                # Limit content length to avoid extremely large texts
+                if len(content) > 10000:
+                    logger.debug(f"Truncating very long content from {len(content)} to 10000 chars")
+                    content = content[:10000]
+                
+                return content
+        
+        # If no content found in primary fields, try secondary approach with likely text fields
+        if isinstance(metadata, dict):
+            # Look for any field that has a string value of reasonable length
+            for k, v in metadata.items():
+                if isinstance(v, str) and len(v) > 50:  # Reasonable length for content
+                    logger.debug(f"Found potential content in field '{k}'")
+                    return v[:10000]  # Limit length for safety
+        
+        # If no content found, log error
+        logger.warning(f"No content found in vector {vector_id}.")
         self.stats["empty_content_ids"] += 1
         return None
     
-    def create_e5_embedding(self, text: str) -> np.ndarray:
-        """
-        Generate E5 embedding for a single text string.
-        
-        Args:
-            text: Text string to embed
-            
-        Returns:
-            E5 embedding (384 dimensions)
-        """
-        return self.model.encode(text)
+
     
-    def process_batch(self, batch_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process a batch of vectors."""
-        try:
-            # Debug: Print metadata structure of first item
-            if batch_data and len(batch_data) > 0:
-                logger.info(f"Sample metadata structure: {json.dumps(batch_data[0].get('metadata', {}), indent=2)}")
+    def process_batch(self, batch_data: List) -> List[Dict[str, Any]]:
+        """Process a batch of vectors"""
+        processed_vectors = []
+        error_count = 0
+        
+        if not batch_data:
+            logger.warning("Empty batch received")
+            return []
             
-            # Extract text content - handle both metadata formats
+        try:
+            # Extract text content for the batch
             texts = []
-            for item in batch_data:
-                metadata = item.get('metadata', {})
-                # Try different possible text field names
-                text = metadata.get('text') or metadata.get('content') or metadata.get('article_text')
-                if not text:
-                    logger.warning(f"No text found in metadata for ID {item['id']}")
+            valid_indices = []
+            valid_vector_ids = []
+            valid_metadata = []
+            
+            # First pass: extract the text content from each vector
+            for i, vector_data in enumerate(batch_data):
+                # Debug logging to check vector structure
+                if i == 0:
+                    logger.debug(f"Sample vector data structure: {type(vector_data)}")
+                
+                # Get vector ID - handle both dict and Pinecone Vector objects
+                vector_id = getattr(vector_data, 'id', None) if hasattr(vector_data, 'id') else vector_data.get('id')
+                if not vector_id:
+                    logger.warning(f"Vector at index {i} has no ID, skipping")
+                    error_count += 1
                     continue
-                texts.append(text)
+                
+                # Extract text content
+                text = self.extract_text_content(vector_data)
+                if text:
+                    texts.append(text)
+                    valid_indices.append(i)
+                    valid_vector_ids.append(vector_id)
+                    
+                    # Get metadata - handle both dict and Pinecone Vector objects
+                    if hasattr(vector_data, 'metadata'):
+                        metadata = vector_data.metadata
+                    else:
+                        metadata = vector_data.get('metadata', {})
+                    
+                    # Ensure metadata is a dict
+                    if not isinstance(metadata, dict):
+                        metadata = {
+                            "original_content": str(metadata),
+                            "converted_from_non_dict": True
+                        }
+                    
+                    # Add embedding model info to metadata
+                    metadata['embedding_model'] = self.model_name
+                    valid_metadata.append(metadata)
+                else:
+                    error_count += 1
+                    logger.warning(f"Could not extract text from vector {vector_id}")
             
             if not texts:
+                logger.warning("No valid texts found in batch")
                 return []
             
-            # Batch encode all texts at once
-            with torch.inference_mode():  # Faster than no_grad
+            # Batch create embeddings for valid texts
+            logger.debug(f"Creating embeddings for {len(texts)} texts")
+            try:
+                # Use the model to encode all texts at once
                 embeddings = self.model.encode(
                     texts,
-                    batch_size=self.process_batch_size,
-                    convert_to_numpy=True,  # Convert to numpy at the end
+                    batch_size=min(len(texts), 32),  # Reasonable batch size
+                    show_progress_bar=False,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True
                 )
+                
+                if isinstance(embeddings, list) and len(embeddings) != len(texts):
+                    logger.warning(f"Embedding count mismatch: got {len(embeddings)}, expected {len(texts)}")
+                
+                logger.debug(f"Created {len(embeddings)} embeddings")
+                
+                # Verify embedding dimensions
+                if len(embeddings) > 0:
+                    first_dim = embeddings[0].shape[0] if hasattr(embeddings[0], 'shape') else len(embeddings[0])
+                    logger.debug(f"Embedding dimensions: {first_dim}")
+                    if first_dim != 384:  # Expected dimension for E5-small-v2
+                        logger.warning(f"Unexpected embedding dimension: {first_dim} (expected 384)")
+                
+            except Exception as e:
+                logger.error(f"Error creating embeddings: {e}")
+                logger.error(traceback.format_exc())
+                return []
             
-            # Process vectors in parallel
-            processed_vectors = []
-            valid_items = [item for item in batch_data if item.get('metadata', {}).get('text') or 
-                                                         item.get('metadata', {}).get('content') or 
-                                                         item.get('metadata', {}).get('article_text')]
-            
-            for item, embedding in zip(valid_items, embeddings):
-                vector_data = {
-                    'id': item['id'],
-                    'values': embedding.tolist(),
-                    'metadata': item['metadata']
+            # Create vector records with both 'values' and 'embedding' fields
+            for i, (vector_id, embedding, metadata) in enumerate(zip(valid_vector_ids, embeddings, valid_metadata)):
+                # Convert to list for serialization
+                embedding_list = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
+                
+                vector_dict = {
+                    'id': vector_id,
+                    'values': embedding_list,      # For Pinecone
+                    'embedding': embedding_list,   # For local storage consistency
+                    'metadata': metadata
                 }
-                processed_vectors.append(vector_data)
+                processed_vectors.append(vector_dict)
             
+            logger.debug(f"Processed {len(processed_vectors)} vectors with {error_count} errors")
             return processed_vectors
             
         except Exception as e:
-            logger.error(f"Error processing batch: {str(e)}")
+            logger.error(f"Error processing batch: {e}")
             logger.error(traceback.format_exc())
             return []
     
     def save_vectors_locally(self, vectors: List[Dict[str, Any]]) -> int:
-        """Save vectors to local file."""
+        """Save vectors to local Parquet files with proper batching and error handling"""
         if not vectors:
             return 0
+
+        # Debug vector structure before saving
+        if vectors:
+            logger.debug(f"First vector ID: {vectors[0]['id']}")
+            logger.debug(f"First vector values type: {type(vectors[0]['values'])}")
+            logger.debug(f"First vector values length: {len(vectors[0]['values'])}")
+            logger.debug(f"First vector metadata keys: {list(vectors[0]['metadata'].keys())}")
+        
+        # Convert vectors to DataFrame with proper structure
+        rows = []
+        for vector in vectors:
+            # Ensure we have both 'values' and 'embedding' fields
+            if 'values' not in vector and 'embedding' in vector:
+                vector['values'] = vector['embedding']
+            elif 'embedding' not in vector and 'values' in vector:
+                vector['embedding'] = vector['values']
+            elif not ('values' in vector or 'embedding' in vector):
+                logger.warning(f"Vector {vector.get('id', 'unknown')} missing both 'values' and 'embedding' fields")
+                continue
+                
+            # Verify vector dimensions
+            embedding = vector.get('embedding', vector.get('values', []))
+            if len(embedding) != 384:
+                logger.warning(f"Vector {vector.get('id', 'unknown')} has incorrect dimensions: {len(embedding)} (expected 384)")
+                continue
             
+            # Ensure metadata is a dictionary
+            if 'metadata' not in vector or vector['metadata'] is None:
+                vector['metadata'] = {}
+            
+            # Add source tracking to metadata
+            vector['metadata']['migrated_at'] = datetime.now().isoformat()
+            vector['metadata']['source_index'] = self.source_index
+            vector['metadata']['target_index'] = self.target_index
+            
+            row = {
+                'id': vector['id'],
+                'embedding': vector['embedding'],
+                'metadata': vector['metadata']
+            }
+            rows.append(row)
+        
+        if not rows:
+            logger.warning("No valid rows to save")
+            return 0
+        
         try:
-            # Use buffered writing for better performance
-            with open(self.output_file, 'a', buffering=8192) as f:
-                for vector in vectors:
-                    f.write(json.dumps(vector) + '\n')
-                    self.processed_ids.add(vector['id'])
-                    
-            return len(vectors)
+            # Create output directory if it doesn't exist
+            os.makedirs(self.output_dir, exist_ok=True)
+            
+            # Check if we should start a new file based on vectors_per_file setting
+            files = sorted(os.listdir(self.output_dir))
+            if not files or self.current_file_vectors >= self.vectors_per_file:
+                # Generate unique filename based on timestamp and batch number
+                self.current_file_vectors = 0
+                self.current_file_count += 1
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"vectors_{timestamp}_{self.current_file_count:04d}.parquet"
+            else:
+                # Use the most recent file if it's not at capacity
+                filename = files[-1]
+                
+            filepath = os.path.join(self.output_dir, filename)
+            
+            # Create DataFrame
+            df = pd.DataFrame(rows)
+            
+            # Check if we're appending to an existing file and it exists
+            if os.path.exists(filepath) and self.current_file_vectors > 0:
+                # If file exists, read it first to ensure schema compatibility
+                try:
+                    existing_df = pd.read_parquet(filepath)
+                    # Append new data
+                    df = pd.concat([existing_df, df], ignore_index=True)
+                    logger.debug(f"Appended {len(rows)} vectors to existing file {filepath}")
+                except Exception as e:
+                    logger.warning(f"Error reading existing file {filepath}, creating new file: {e}")
+                    # Generate a new filename since we couldn't append
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"vectors_{timestamp}_{self.current_file_count:04d}.parquet"
+                    filepath = os.path.join(self.output_dir, filename)
+            
+            # Save to Parquet file with compression
+            df.to_parquet(filepath, index=False, compression='snappy')
+            
+            # Update tracking variables
+            self.current_file_vectors += len(rows)
+            
+            logger.info(f"Saved {len(rows)} vectors to {filepath}")
+            
+            # Mark these vectors as processed in the database
+            vector_ids = [row['id'] for row in rows]
+            self._mark_processed(vector_ids)
+            
+            return len(rows)
+            
         except Exception as e:
-            logger.error(f"Error saving vectors: {str(e)}")
+            logger.error(f"Error saving vectors locally: {e}")
+            logger.error(traceback.format_exc())
             return 0
     
-    def migrate(self, limit: Optional[int] = None):
+    def migrate(self, limit: Optional[int] = None, memory_limit: int = 0):
         """
-        Run the full migration using a streaming ID-based approach.
+        Migrate vectors from source to target index
         
         Args:
-            limit: Optional limit to the number of vectors to process
+            limit: Optional limit on number of vectors to process
+            memory_limit: Memory threshold in MB to trigger garbage collection
         """
-        logger.info(f"Starting migration from {self.source_index} to {self.target_index}")
-        logger.info(f"Using batch size: {self.batch_size}")
-        
-        if self.save_locally:
-            logger.info(f"Vectors will be saved locally to: {self.output_file}")
-        
-        # Reset session-specific stats
-        self.stats["session_start_time"] = time.time()
-        self.stats["processed_in_session"] = 0
-
-        # Determine total for this session
-        remaining_on_source = max(0, self.stats.get("total_vectors_on_source", 0) - len(self.processed_ids))
-        
-        if limit is not None:
-            tqdm_total = min(limit, remaining_on_source)
-            if limit > remaining_on_source and self.stats.get("total_vectors_on_source", 0) > 0:
-                logger.info(f"User limit ({limit}) exceeds estimated remaining vectors ({remaining_on_source})")
-            elif limit <= 0:
-                logger.info("Limit is 0 or less. No vectors will be processed.")
-                self._print_final_results()
-                return
-        else:
-            tqdm_total = remaining_on_source
-
-        if tqdm_total <= 0:
-            logger.info("No vectors to process in this session. Exiting.")
-            self._print_final_results()
-            return
-
-        processed_in_session = 0
-        vectors_to_process = limit if limit is not None else float('inf')
-
         try:
-            # Use tqdm for progress tracking
-            with tqdm(total=tqdm_total, unit="vector", desc="Migrating E5 Embeddings") as pbar:
-                # Process in streaming batches
-                id_batch_count = 0
-                next_checkpoint_save = 100  # Save checkpoint after this many batches
-                
-                for id_batch in self.source_idx.list(namespace=self.source_namespace):
-                    id_batch_count += 1
-                    batch_size = len(id_batch) if id_batch else 0
+            logger.info("Starting migration process...")
+            logger.info(f"Mode: {'Saving locally' if self.save_locally else 'Uploading to Pinecone'}")
+            
+            # Initialize SQLite database for tracking
+            self._init_db()
+            
+            # Get total processed count
+            processed_count = self._get_processed_count()
+            logger.info(f"Found {processed_count} previously processed vectors")
+            
+            # Process vectors in batches
+            batch_number = 0
+            total_processed = 0
+            
+            # Use list and fetch instead of non-existent fetch_vectors
+            for list_batch in self.source_idx.list(namespace=self.source_namespace):
+                try:
+                    batch_number += 1
                     
-                    # Debug info for first few batches
-                    if id_batch_count <= 3:
-                        logger.info(f"Batch {id_batch_count}: Processing batch of {batch_size} IDs")
-                        if batch_size > 0:
-                            sample_ids = id_batch[:min(3, batch_size)]
-                            logger.info(f"Sample IDs: {sample_ids}")
+                    # Check memory usage and perform garbage collection if needed
+                    if memory_limit > 0:
+                        memory_mb = psutil.Process().memory_info().rss / 1024 / 1024
+                        if memory_mb > memory_limit:
+                            logger.warning(f"Memory usage ({memory_mb:.1f}MB) exceeded limit ({memory_limit}MB)")
+                            gc.collect()
                     
-                    # Filter already processed IDs
-                    unprocessed_ids = [id for id in id_batch if id not in self.processed_ids]
+                    # Directly use the list_batch since it's already a list of IDs
+                    vector_ids = list_batch
+                    logger.info(f"Batch {batch_number}: Found {len(vector_ids)} IDs from Pinecone")
                     
-                    # Skip if all IDs already processed
+                    # Skip already processed IDs
+                    unprocessed_ids = []
+                    for vid in vector_ids:
+                        if not self._is_processed(vid):
+                            unprocessed_ids.append(vid)
+                    
                     if not unprocessed_ids:
-                        if id_batch_count <= 5:
-                            logger.info(f"Batch {id_batch_count}: All {batch_size} IDs already processed, skipping")
+                        logger.info(f"Batch {batch_number}: All {len(vector_ids)} vectors already processed, skipping")
                         continue
+                        
+                    logger.info(f"Batch {batch_number}: Processing {len(unprocessed_ids)} unprocessed vectors")
                     
-                    # Limit the number of IDs to process if needed
-                    if len(unprocessed_ids) > vectors_to_process:
-                        unprocessed_ids = unprocessed_ids[:int(vectors_to_process)]
-                        logger.info(f"Reached processing limit, truncating batch to {len(unprocessed_ids)} IDs")
-                    
-                    # Fetch vectors by ID
-                    try:
-                        if id_batch_count <= 5:
-                            logger.info(f"Batch {id_batch_count}: Fetching {len(unprocessed_ids)} vectors")
-                        
-                        response = self.source_idx.fetch(
-                            ids=unprocessed_ids,
-                            namespace=self.source_namespace
-                        )
-                        
-                        if id_batch_count <= 5:
-                            logger.info(f"Batch {id_batch_count}: Fetched {len(response.vectors)} vectors")
-                        
-                        # Track read units - assuming 1 RU per vector
-                        self.stats["ru_count"] += len(response.vectors)
-                        
-                        if not response.vectors:
-                            logger.warning(f"Batch {id_batch_count}: Fetch returned no vectors, skipping")
-                            continue
+                    # Fetch full vector data for unprocessed IDs
+                    if unprocessed_ids:
+                        # Process in sub-batches to avoid API limits
+                        for i in range(0, len(unprocessed_ids), self.batch_size):
+                            sub_batch_ids = unprocessed_ids[i:i + self.batch_size]
                             
-                    except Exception as e:
-                        logger.error(f"Batch {id_batch_count}: Fetch failed: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        logger.info("Waiting 5 seconds before continuing...")
-                        time.sleep(5)
-                        continue
-                    
-                    # Convert fetched vectors to the format expected by process_batch
-                    vectors = []
-                    for id, vector_data in response.vectors.items():
-                        vectors.append({
-                            "id": id,
-                            "values": vector_data.values,
-                            "metadata": vector_data.metadata
-                        })
-                    
-                    # Process the batch
-                    if id_batch_count <= 5:
-                        logger.info(f"Batch {id_batch_count}: Processing {len(vectors)} vectors")
-                    
-                    try:
-                        processed_vectors = self.process_batch(vectors)
-                        if id_batch_count <= 5:
-                            logger.info(f"Batch {id_batch_count}: Processed {len(processed_vectors)} vectors")
-                    except Exception as e:
-                        logger.error(f"Batch {id_batch_count}: Processing error: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        continue
-                    
-                    if processed_vectors:
-                        if self.save_locally:
-                            # Save vectors to local file
                             try:
-                                count = self.save_vectors_locally(processed_vectors)
-                                if id_batch_count <= 5:
-                                    logger.info(f"Batch {id_batch_count}: Saved {count} vectors locally")
-                                    
-                                # Update the successful upserts counter
-                                self.stats["successful_upserts"] += count
-                            except Exception as e:
-                                logger.error(f"Batch {id_batch_count}: Error saving vectors: {str(e)}")
-                                logger.error(traceback.format_exc())
-                                continue
-                        else:
-                            # Upsert to target index
-                            try:
-                                logger.info(f"Batch {id_batch_count}: Upserting vectors to {self.target_index} with namespace '{self.target_namespace}'")
-                                # Debug: print the first vector's structure
-                                if processed_vectors and id_batch_count <= 2:
-                                    sample_vector = processed_vectors[0]
-                                    logger.info(f"Sample vector structure: id={sample_vector['id']}, values (shape)={len(sample_vector['values'])}, metadata keys={list(sample_vector['metadata'].keys() if sample_vector.get('metadata') else {})}")
-                                    
-                                self.target_idx.upsert(
-                                    vectors=processed_vectors,
-                                    namespace=self.target_namespace
+                                logger.debug(f"Fetching {len(sub_batch_ids)} vectors")
+                                response = self.source_idx.fetch(
+                                    ids=sub_batch_ids,
+                                    namespace=self.source_namespace
                                 )
-                                if id_batch_count <= 5:
-                                    logger.info(f"Batch {id_batch_count}: Upserted {len(processed_vectors)} vectors")
                                 
-                                # Update the successful upserts counter
-                                self.stats["successful_upserts"] += len(processed_vectors)
-                                # Track write units - assuming 1 WU per vector
-                                self.stats["wu_count"] += len(processed_vectors)
+                                if not response or not hasattr(response, 'vectors') or not response.vectors:
+                                    logger.warning(f"Empty response or no vectors returned for batch {batch_number}")
+                                    continue
                                 
+                                # Get vectors from the response
+                                batch_data = list(response.vectors.values())
+                                logger.info(f"Batch {batch_number}: Fetched {len(batch_data)} vectors")
+                                
+                                # Process the vectors
+                                processed_vectors = self.process_batch(batch_data)
+                                if not processed_vectors:
+                                    logger.warning("No vectors processed in batch")
+                                    continue
+                                
+                                # Save locally if configured
+                                if self.save_locally:
+                                    saved_count = self.save_vectors_locally(processed_vectors)
+                                    self.session_stats['saved_locally'] += saved_count
+                                else:
+                                    # Upload to Pinecone
+                                    try:
+                                        # Prepare vectors for Pinecone (use 'values' field)
+                                        pinecone_vectors = []
+                                        for v in processed_vectors:
+                                            if 'values' not in v:
+                                                # Ensure values field exists for Pinecone
+                                                v['values'] = v.get('embedding', [])
+                                            
+                                            pinecone_vectors.append({
+                                                'id': v['id'],
+                                                'values': v['values'],
+                                                'metadata': v['metadata']
+                                            })
+                                        
+                                        # Upload batch to Pinecone
+                                        upsert_response = self.target_idx.upsert(
+                                            vectors=pinecone_vectors,
+                                            namespace=self.target_namespace
+                                        )
+                                        self.session_stats['uploaded'] += len(pinecone_vectors)
+                                        # Increment successful_upserts based on Pinecone's response
+                                        if upsert_response and hasattr(upsert_response, 'upserted_count') and upsert_response.upserted_count:
+                                            self.stats['successful_upserts'] += upsert_response.upserted_count
+                                            # Basic WU estimation: 1 WU per vector upserted (this is a simplification)
+                                            self.stats['wu_count'] += upsert_response.upserted_count
+                                        else:
+                                            # If no count, assume all were attempted for WU, but log a warning for successful_upserts
+                                            self.stats['wu_count'] += len(pinecone_vectors) # Estimate based on attempt
+                                            logger.warning(f"Pinecone upsert response did not contain upserted_count. Cannot confirm exact number of successful upserts for this batch.")
+
+                                        logger.info(f"Uploaded {len(pinecone_vectors)} vectors to Pinecone (Confirmed: {upsert_response.upserted_count if upsert_response and hasattr(upsert_response, 'upserted_count') else 'N/A'})")
+                                    except Exception as e:
+                                        logger.error(f"Error uploading to Pinecone: {e}")
+                                        self.session_stats['errors'] += 1
+                                
+                                # Mark vectors as processed and update stats
+                                processed_ids = [v['id'] for v in processed_vectors]
+                                self._mark_processed(processed_ids)
+                                
+                                self.session_stats['processed'] += len(processed_vectors)
+                                total_processed += len(processed_vectors)
+                                
+                                # Print progress
+                                self._print_progress()
+                                
+                                # Check limit
+                                if limit and total_processed >= limit:
+                                    logger.info(f"Reached processing limit of {limit} vectors")
+                                    break
+                                    
                             except Exception as e:
-                                logger.error(f"Batch {id_batch_count}: Upsert error: {str(e)}")
-                                logger.error(traceback.format_exc())
+                                logger.error(f"Error processing sub-batch: {e}")
+                                self.session_stats['errors'] += 1
                                 continue
+                            
+                    # Check limit after each batch
+                    if limit and total_processed >= limit:
+                        break
                     
-                        # Update progress and stats
-                        batch_processed = len(processed_vectors)
-                        processed_in_session += batch_processed
-                        self.stats["processed_in_session"] += batch_processed
-                        self.stats["processed_ids_cumulative"] = len(self.processed_ids)
-                        vectors_to_process -= batch_processed
-                        
-                        # Update progress bar
-                        pbar.update(batch_processed)
-                        
-                        # Save checkpoint periodically
-                        if id_batch_count >= next_checkpoint_save:
-                            self._save_checkpoint()
-                            next_checkpoint_save += 100  # Save every 100 batches
-                        
-                        # Calculate and display current rate
-                        session_elapsed = time.time() - self.stats["session_start_time"]
-                        current_rate = self.stats["processed_in_session"] / session_elapsed if session_elapsed > 0 else 0
-                        pbar.set_postfix_str(f"Rate: {current_rate:.2f} v/sec, Batch: {id_batch_count}")
-                        
-                        # Break if we've reached the processing limit
-                        if vectors_to_process <= 0:
-                            logger.info(f"Reached processing limit of {limit} vectors")
-                            break
-                
-                # Save final checkpoint
-                self._save_checkpoint()
-                logger.info(f"Completed processing {processed_in_session} vectors in {id_batch_count} batches")
+                except KeyboardInterrupt:
+                    logger.info("Received interrupt signal, finishing current batch...")
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing batch: {e}")
+                    self.session_stats['errors'] += 1
+                    continue
             
-            # Final progress update
+            # Print final results
             self._print_final_results()
             
-        except KeyboardInterrupt:
-            logger.info("Migration interrupted by user")
-            self._save_checkpoint()
-            self._print_final_results()
         except Exception as e:
-            logger.error(f"Error during migration: {e}")
-            logger.error(traceback.format_exc())
-            self._save_checkpoint()
-            self._print_final_results()
+            logger.error(f"Migration failed: {e}")
+            raise
     
     def _print_progress(self):
         """Print current migration progress."""
@@ -539,55 +745,63 @@ class E5Migrator:
 
 def main():
     """Main entry point for the script."""
-    parser = argparse.ArgumentParser(description="Migrate vectors from OpenAI embeddings to E5 embeddings")
-    
-    parser.add_argument("--api-key", type=str, help="Pinecone API key")
-    parser.add_argument("--source-index", type=str, default="holocron-knowledge", help="Source index name")
-    parser.add_argument("--target-index", type=str, default="holocron-sbert-e5", help="Target index name")
-    parser.add_argument("--source-namespace", type=str, default="", help="Source namespace")
-    parser.add_argument("--target-namespace", type=str, default="", help="Target namespace")
-    parser.add_argument("--batch-size", type=int, default=1000, help="Batch size for processing")
-    parser.add_argument("--model-name", type=str, default="intfloat/e5-small-v2", help="E5 model name")
-    parser.add_argument("--limit", type=int, help="Limit number of vectors to process")
-    parser.add_argument("--num-workers", type=int, default=4, help="Number of worker processes")
-    parser.add_argument("--reset", action="store_true", help="Reset checkpoint file and process all vectors again")
-    parser.add_argument("--save-locally", action="store_true", help="Save vectors locally instead of uploading to Pinecone")
-    parser.add_argument("--output-dir", type=str, default="e5_vectors", help="Directory to save vectors to if save-locally is True")
+    parser = argparse.ArgumentParser(description='Migrate vectors from OpenAI to E5 embeddings')
+    parser.add_argument('--source-index', type=str, default='holocron-knowledge',
+                      help='Source Pinecone index name')
+    parser.add_argument('--target-index', type=str, default='holocron-sbert-e5',
+                      help='Target Pinecone index name')
+    parser.add_argument('--source-namespace', type=str, default='',
+                      help='Source namespace in Pinecone')
+    parser.add_argument('--target-namespace', type=str, default='',
+                      help='Target namespace in Pinecone')                      
+    parser.add_argument('--batch-size', type=int, default=1000,
+                      help='Batch size for processing')
+    parser.add_argument('--num-workers', type=int, default=4,
+                      help='Number of worker processes')
+    parser.add_argument('--save-locally', action='store_true',
+                      help='Save vectors locally instead of uploading to Pinecone')
+    parser.add_argument('--output-dir', type=str, default='e5_vectors',
+                      help='Output directory for local vector storage')
+    parser.add_argument('--vectors-per-file', type=int, default=5000,
+                      help='Number of vectors to store in each Parquet file')
+    parser.add_argument('--memory-limit', type=int, default=1000,
+                      help='Memory threshold in MB to trigger garbage collection')
+    parser.add_argument('--limit', type=int, default=None,
+                      help='Limit the number of vectors to process')
+    parser.add_argument('--force', action='store_true',
+                      help='Force reprocessing of all vectors')
     
     args = parser.parse_args()
     
-    # If API key not provided, try to get from environment
-    api_key = args.api_key or os.environ.get("PINECONE_API_KEY")
-    if not api_key:
-        raise ValueError("Pinecone API key must be provided through --api-key or PINECONE_API_KEY environment variable")
-    
-    # Inform user about the migration parameters
-    logger.info(f"Starting migration from '{args.source_index}' to '{args.target_index}'")
-    logger.info(f"Using model: {args.model_name} (384 dimensions)")
-    logger.info(f"Batch size: {args.batch_size}")
-    if args.limit:
-        logger.info(f"Processing limit: {args.limit} vectors")
-    if args.reset:
-        logger.info("Reset flag set - will clear checkpoint and process all vectors again")
-    
-    # Create and run migrator
+    # Initialize migrator
     migrator = E5Migrator(
         source_index=args.source_index,
         target_index=args.target_index,
         source_namespace=args.source_namespace,
         target_namespace=args.target_namespace,
-        model_name=args.model_name,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         save_locally=args.save_locally,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        vectors_per_file=args.vectors_per_file,
+        force=args.force
     )
     
-    # Reset checkpoint if requested
-    if args.reset:
-        migrator.reset_checkpoint()
+    # Reset tracking if force flag is set
+    if args.force:
+        migrator._init_db()
     
-    migrator.migrate(limit=args.limit)
+    try:
+        # Run migration
+        migrator.migrate(
+            limit=args.limit,
+            memory_limit=args.memory_limit
+        )
+    except KeyboardInterrupt:
+        logger.info("Migration interrupted by user")
+    except Exception as e:
+        logger.error(f"Migration failed: {str(e)}")
+        raise
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 
