@@ -621,3 +621,34 @@ async def _subscribe(self, topic: EventTopics, handler: Callable) -> None:
 2. Add error handling for cases where MusicControllerService is unavailable
 3. Consider implementing a proper track metadata system with genre tags for better matching
 
+### 🔧 Track Synchronization Issue Fix
+**Issue Identified**: The BrainService was consistently playing the same song even when finding different matches based on user queries.
+
+**Root Cause**: 
+1. BrainService was tracking tracks by name only using a simple list (`self._available_tracks = []`)
+2. MusicControllerService was using a Pydantic MusicTrack model with full path information
+3. When BrainService selected a track, it sent only the name to MusicControllerService
+4. MusicControllerService's fuzzy matching sometimes found the wrong track with a similar name
+5. No shared data model existed between services to ensure consistent track identification
+
+**Fix Applied**:
+1. Created a shared Pydantic model package in `cantina_os/models/`
+2. Implemented shared `MusicTrack` and `MusicLibrary` models with proper validation
+3. Updated MusicControllerService to use absolute file paths for reliable track identification
+4. Modified BrainService to use the shared MusicLibrary model for track management
+5. Added a new `MUSIC_LIBRARY_UPDATED` event topic for synchronization
+6. Enhanced MusicControllerService to emit complete track metadata during library initialization
+7. Updated BrainService to consume the track library updates
+
+**Impact**: 
+- BrainService and MusicControllerService now share the same track data representation
+- Track selection is consistent across services
+- Exact file paths are used for playback, eliminating mismatches
+- The system can now properly play different tracks based on search criteria
+
+**Lesson Learned**:
+- Services that share data models should use common Pydantic schemas
+- Track identification should use unique identifiers (full paths) rather than display names
+- Event-based synchronization ensures data consistency across services
+- Proper data serialization/deserialization is essential for reliable service communication
+

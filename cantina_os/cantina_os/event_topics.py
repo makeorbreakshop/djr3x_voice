@@ -72,6 +72,7 @@ class EventTopics:
     MUSIC_ERROR = "/music/error"
     MUSIC_PLAY = "/music/play"  # Added for backward compatibility
     MUSIC_STOP = "/music/stop"  # Added for backward compatibility
+    MUSIC_LIBRARY_UPDATED = "/music/library/updated"  # New topic for library updates
     
     # Audio events
     AUDIO_DUCKING_START = "/audio/ducking/start"
@@ -168,4 +169,41 @@ class EventTopics:
 
     # Mouse Input Events
     MIC_RECORDING_START = "/mic/recording/start"
-    MIC_RECORDING_STOP = "/mic/recording/stop" 
+    MIC_RECORDING_STOP = "/mic/recording/stop"
+
+    # Plan and timeline events
+    PLAN_READY = "/plan/ready"
+    PLAN_STARTED = "/plan/started"
+    STEP_READY = "/plan/step/ready"
+    STEP_EXECUTED = "/plan/step/executed"
+    PLAN_ENDED = "/plan/ended"
+    
+    # Memory events
+    MEMORY_UPDATED = "/memory/updated"
+    
+    # Intent management events
+    INTENT_CONSUMED = "/llm/intent/consumed"
+    
+    # TTS events for Timeline usage
+    TTS_GENERATE_REQUEST = "/tts/generate/request"
+    TTS_PREGENERATE_REQUEST = "/tts/pregenerate/request"
+    
+    # Direct Brain service communication events
+    BRAIN_MUSIC_REQUEST = "/brain/music_request"
+    BRAIN_MUSIC_STOP = "/brain/music_stop"
+
+    # DJ Mode Events
+    DJ_MODE_CHANGED = "/dj/mode/changed"
+    DJ_MODE_START = "/dj/mode/start"
+    DJ_MODE_STOP = "/dj/mode/stop"
+    DJ_NEXT_TRACK = "/dj/track/next"
+    DJ_QUEUE_TRACK = "/dj/track/queue"
+    DJ_TRACK_ENDING_SOON = "/dj/track/ending_soon"
+    DJ_CROSSFADE_STARTED = "/dj/crossfade/started"
+    DJ_CROSSFADE_COMPLETE = "/dj/crossfade/complete"
+    
+    # Cached Speech Events
+    SPEECH_CACHE_REQUEST = "/speech/cache/request"
+    SPEECH_CACHE_READY = "/speech/cache/ready"
+    SPEECH_CACHE_ERROR = "/speech/cache/error"
+    SPEECH_CACHE_CLEANUP = "/speech/cache/cleanup" 

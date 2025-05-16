@@ -27,12 +27,14 @@ from ..event_payloads import (
     LogLevel,
     StandardCommandPayload
 )
+from ..models.music_models import MusicTrack, MusicLibrary
 
-class MusicTrack(BaseModel):
-    """Model representing a music track."""
-    name: str
-    path: str
-    duration: Optional[float] = None
+# Use MusicTrack class from shared models instead
+# class MusicTrack(BaseModel):
+#     """Model representing a music track."""
+#     name: str
+#     path: str
+#     duration: Optional[float] = None
 
 class MusicControllerConfig(BaseModel):
     """Configuration for the music controller service."""
@@ -92,6 +94,13 @@ class MusicControllerService(BaseService):
         
         await self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_end)
         self.logger.debug("Subscribed to SPEECH_SYNTHESIS_ENDED events")
+        
+        # Add direct audio ducking event subscriptions
+        await self.subscribe(EventTopics.AUDIO_DUCKING_START, self._handle_audio_ducking_start)
+        self.logger.debug("Subscribed to AUDIO_DUCKING_START events")
+        
+        await self.subscribe(EventTopics.AUDIO_DUCKING_STOP, self._handle_audio_ducking_stop)
+        self.logger.debug("Subscribed to AUDIO_DUCKING_STOP events")
         
         self.logger.info("Music controller event subscriptions complete")
         
@@ -191,48 +200,71 @@ class MusicControllerService(BaseService):
                 
                 # Try each potential directory
                 for alt_dir in potential_dirs:
-                    self.logger.info(f"Trying alternate music directory: {alt_dir}")
                     if os.path.exists(alt_dir):
+                        self.logger.info(f"Found alternative music directory: {alt_dir}")
                         self.music_dir = alt_dir
-                        self.logger.info(f"Using alternate music directory: {alt_dir}")
                         break
+            
+            # Now that we've potentially updated self.music_dir, check it exists
+            if not os.path.exists(self.music_dir):
+                self.logger.error(f"Could not find any valid music directory")
+                return
+            
+            # Clear existing tracks
+            self.tracks.clear()
+            
+            # Process .mp3, .wav, and .m4a files
+            for ext in ['.mp3', '.wav', '.m4a']:
+                pattern = os.path.join(self.music_dir, f'*{ext}')
+                self.logger.debug(f"Searching for music files with pattern: {pattern}")
                 
-                # If we still don't have a valid directory
-                if not os.path.exists(self.music_dir):
-                    self.logger.warning(f"No valid music directory found after checking alternatives")
-                    return
+                for filepath in glob.glob(pattern):
+                    try:
+                        # Extract filename without extension for display
+                        filename = os.path.basename(filepath)
+                        name, _ = os.path.splitext(filename)
+                        
+                        # Create media to get duration, safely handled
+                        try:
+                            media = self.vlc_instance.media_new(filepath)
+                            media.parse()
+                            duration_ms = media.get_duration()
+                            duration = duration_ms / 1000.0 if duration_ms > 0 else None
+                        except Exception as e:
+                            self.logger.warning(f"Could not get duration for {filepath}: {e}")
+                            duration = None
+                        
+                        # Create MusicTrack with unique path for consistent identification
+                        # Use absolute path for reliable identification across services
+                        abs_path = os.path.abspath(filepath)
+                        track = MusicTrack(
+                            name=name, 
+                            path=abs_path,
+                            duration=duration
+                        )
+                        
+                        # Use name as key for consistent lookup
+                        self.tracks[name] = track
+                        music_files_count += 1
+                        
+                        self.logger.debug(f"Loaded track: {name} ({abs_path}), duration: {duration}s")
+                    except Exception as e:
+                        self.logger.error(f"Error loading music track {filepath}: {e}")
             
-            # List all files in the directory
-            files = os.listdir(self.music_dir)
-            self.logger.debug(f"Files found in music directory: {files}")
+            self.logger.info(f"Loaded {music_files_count} music tracks from {self.music_dir}")
             
-            # Track the number of music files found
-            music_files_count = 0
-            
-            for filename in files:
-                if filename.endswith(('.mp3', '.wav', '.m4a')):
-                    music_files_count += 1
-                    path = os.path.join(self.music_dir, filename)
-                    name = os.path.splitext(filename)[0]
-                    
-                    # Create media to get duration
-                    media = self.vlc_instance.media_new(path)
-                    media.parse()
-                    duration = media.get_duration() / 1000.0  # Convert ms to seconds
-                    
-                    self.tracks[name] = MusicTrack(
-                        name=name,
-                        path=path,
-                        duration=duration
-                    )
-                    self.logger.debug(f"Loaded track: {name} ({duration:.1f}s)")
-            
+            # Alert if no music found
             if music_files_count == 0:
-                self.logger.warning(f"No music files (.mp3, .wav, .m4a) found in directory: {self.music_dir}")
-                # Log a helpful hint about using install_music_files
-                self.logger.info("To add music files, use the 'install_music_files' command or copy files directly to the music directory")
-                
-            self.logger.info(f"Loaded {len(self.tracks)} music tracks")
+                self.logger.warning("No music files found. Music playback will be unavailable.")
+            
+            # Publish a music library updated event
+            await self.emit(
+                EventTopics.MUSIC_LIBRARY_UPDATED,
+                {
+                    "track_count": music_files_count,
+                    "tracks": await self.get_track_list()  # Send complete track list
+                }
+            )
             
         except Exception as e:
             self.logger.error(f"Error loading music library: {e}")
@@ -434,12 +466,13 @@ class MusicControllerService(BaseService):
             self.logger.error(f"Error handling install music command: {e}")
             await self._send_error(f"Error installing music: {str(e)}")
 
-    async def _smart_play_track(self, track_query: str) -> None:
+    async def _smart_play_track(self, track_query: str, source: str = "cli") -> None:
         """
         Smart track selection and playback
         
         Args:
             track_query: Track number, name, or search query
+            source: Source of the play request (default: "cli" for CLI commands)
         """
         try:
             self.logger.info(f"Smart track selection for query: '{track_query}'")
@@ -458,7 +491,7 @@ class MusicControllerService(BaseService):
                     track_name = list(self.tracks.keys())[track_index]
                     track = self.tracks[track_name]
                     self.logger.info(f"Found track #{track_query}: {track.name}")
-                    await self._play_track_by_name(track.name)
+                    await self._play_track_by_name(track.name, source)
                     return
                 else:
                     await self._send_error(f"Track number {track_query} out of range. Must be 1-{len(self.tracks)}.")
@@ -467,7 +500,7 @@ class MusicControllerService(BaseService):
             # Check for direct track name match
             if track_query in self.tracks:
                 self.logger.info(f"Found exact track name match: {track_query}")
-                await self._play_track_by_name(track_query)
+                await self._play_track_by_name(track_query, source)
                 return
                 
             # Try fuzzy matching by track name
@@ -489,24 +522,25 @@ class MusicControllerService(BaseService):
             if matches:
                 best_match = matches[0][0]
                 self.logger.info(f"Found fuzzy match for '{track_query}': '{best_match}'")
-                await self._play_track_by_name(best_match)
+                await self._play_track_by_name(best_match, source)
                 return
                 
             # No matches found, default to first track
             self.logger.warning(f"No matches found for '{track_query}', playing first track")
             first_track = list(self.tracks.keys())[0]
-            await self._play_track_by_name(first_track)
+            await self._play_track_by_name(first_track, source)
                 
         except Exception as e:
             self.logger.error(f"Error in smart track selection: {e}")
             await self._send_error(f"Error selecting track: {str(e)}")
 
-    async def _play_track_by_name(self, track_name: str) -> None:
+    async def _play_track_by_name(self, track_name: str, source: str = "cli") -> None:
         """
         Play a track by its exact name
         
         Args:
             track_name: Exact name of the track to play
+            source: Source of the play request (default: "cli" for CLI commands)
         """
         try:
             if track_name not in self.tracks:
@@ -541,7 +575,8 @@ class MusicControllerService(BaseService):
                 EventTopics.MUSIC_PLAYBACK_STARTED,
                 {
                     "track_name": track.name,
-                    "duration": track.duration
+                    "duration": track.duration,
+                    "source": source  # Include source in event payload
                 }
             )
             
@@ -639,6 +674,20 @@ class MusicControllerService(BaseService):
                 )
             )
             
+    async def _handle_stop_request(self, payload: MusicCommandPayload):
+        """
+        Handle a stop music request from any source
+        
+        Args:
+            payload: Music command payload with stop action
+        """
+        try:
+            self.logger.info(f"Handling stop music request: {payload}")
+            await self._stop_playback()
+        except Exception as e:
+            self.logger.error(f"Error handling stop music request: {e}")
+            await self._send_error(f"Error stopping music: {str(e)}")
+            
     async def _handle_speech_start(self, payload: BaseEventPayload):
         """Handle speech synthesis start - reduce music volume."""
         if self.player and self.current_mode == "INTERACTIVE":
@@ -655,10 +704,12 @@ class MusicControllerService(BaseService):
         """Get a list of available music tracks."""
         track_info = []
         for track in self.tracks.values():
-            track_info.append({
-                "name": track.name,
-                "duration": track.duration
-            })
+            # Use model_dump() for Pydantic v2 compatibility
+            if hasattr(track, "model_dump"):
+                track_info.append(track.model_dump())
+            else:
+                # Fallback for Pydantic v1
+                track_info.append(track.dict())
         return track_info
         
     async def play_music(self, track_index=None, track_name=None):
@@ -692,6 +743,27 @@ class MusicControllerService(BaseService):
         except Exception as e:
             self.logger.error(f"Error in play_music: {e}")
             return False
+        
+    async def _handle_play_request(self, payload: MusicCommandPayload):
+        """
+        Handle a play music request from any source
+        
+        Args:
+            payload: Music command payload with play action and song_query
+        """
+        try:
+            song_query = payload.song_query
+            self.logger.info(f"Handling play music request for query: {song_query}")
+            
+            # Check if this is from a conversation (voice request)
+            source = "voice" if payload.conversation_id else "cli"
+            
+            # Pass the source to ensure voice requests get proper handling
+            await self._smart_play_track(song_query, source=source)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling play music request: {e}")
+            await self._send_error(f"Error playing music: {str(e)}")
         
     async def _cleanup_player(self, player):
         """
@@ -790,4 +862,16 @@ class MusicControllerService(BaseService):
             
         except Exception as e:
             self.logger.error(f"Error in debug_music_library: {e}")
-            await self._send_error(f"Error debugging music library: {str(e)}") 
+            await self._send_error(f"Error debugging music library: {str(e)}")
+
+    async def _handle_audio_ducking_start(self, payload: BaseEventPayload):
+        """Handle audio ducking start - reduce music volume."""
+        if self.player and self.current_mode == "INTERACTIVE":
+            self.is_ducking = True
+            self.player.audio_set_volume(self.ducking_volume)
+            
+    async def _handle_audio_ducking_stop(self, payload: BaseEventPayload):
+        """Handle audio ducking stop - restore music volume."""
+        if self.player and self.current_mode == "INTERACTIVE":
+            self.is_ducking = False
+            self.player.audio_set_volume(self.normal_volume) 
