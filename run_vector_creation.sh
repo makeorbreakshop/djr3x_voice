@@ -10,7 +10,7 @@ python scripts/create_vectors_optimized.py \
   --output-dir data/vectors_optimized \
   --optimized-dir data/vectors_optimized \
   --batch-size 50 \
-  --concurrent-requests 19 \
+  --concurrent-requests 10 \
   --embedding-batch-size 50 \
   --max-tokens-per-minute 800000 \
   --rate-limit-delay 0.1 \
