@@ -46,4 +46,36 @@ ENV/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+
+# Test files and directories
+test_*.py
+test_*.json
+batch_test_results_*.json
+tests/data/
+test_articles/
+test_batch_jsonl/
+test_vectors/
+.coverage
+
+# Log files
+*.log
+latest_run.log
+logs/
+
+# Vector files and directories
+e5_vectors/
+e5_vectors_full/
+bert_embeddings.jsonl
+bert_sample.json
+vector_creation_*/
+processed_ids.txt
+
+# Checkpoint and backup files
+*_checkpoint.json
+*_checkpoint.json.bak.*
+data/
+path/
+
+# Scripts directory (if these are temporary/test scripts)
+scripts/ 
