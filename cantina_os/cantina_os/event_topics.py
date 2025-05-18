@@ -180,6 +180,9 @@ class EventTopics:
     
     # Memory events
     MEMORY_UPDATED = "/memory/updated"
+    MEMORY_GET = "/memory/get"
+    MEMORY_SET = "/memory/set"
+    MEMORY_VALUE = "/memory/value"
     
     # Intent management events
     INTENT_CONSUMED = "/llm/intent/consumed"
@@ -201,9 +204,21 @@ class EventTopics:
     DJ_TRACK_ENDING_SOON = "/dj/track/ending_soon"
     DJ_CROSSFADE_STARTED = "/dj/crossfade/started"
     DJ_CROSSFADE_COMPLETE = "/dj/crossfade/complete"
+    DJ_TRACK_QUEUED = "/dj/track/queued"
+    
+    # Music-specific events for DJ mode
+    TRACK_ENDING_SOON = "/music/track/ending_soon"
+    CROSSFADE_STARTED = "/music/crossfade/started"
     
     # Cached Speech Events
     SPEECH_CACHE_REQUEST = "/speech/cache/request"
     SPEECH_CACHE_READY = "/speech/cache/ready"
     SPEECH_CACHE_ERROR = "/speech/cache/error"
-    SPEECH_CACHE_CLEANUP = "/speech/cache/cleanup" 
+    SPEECH_CACHE_CLEANUP = "/speech/cache/cleanup"
+    SPEECH_CACHE_PLAYBACK_REQUEST = "/speech/cache/playback/request"
+    SPEECH_CACHE_PLAYBACK_STARTED = "/speech/cache/playback/started"
+    SPEECH_CACHE_PLAYBACK_COMPLETED = "/speech/cache/playback/completed"
+    
+    # TTS Direct events for CachedSpeechService
+    TTS_REQUEST = "/tts/request"
+    TTS_AUDIO_DATA = "/tts/audio_data" 

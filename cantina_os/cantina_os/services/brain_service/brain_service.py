@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Callable, Dict, List, Optional, Set
+import time
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 
 from cantina_os.bus import EventTopics, LogLevel, ServiceStatus
 from ..base import StandardService
@@ -20,7 +21,8 @@ from cantina_os.event_payloads import (
     PlanStep,
     MusicCommandPayload,
     LLMResponsePayload,
-    IntentExecutionResultPayload
+    IntentExecutionResultPayload,
+    SpeechCacheRequestPayload
 )
 from cantina_os.models.music_models import MusicTrack, MusicLibrary
 
@@ -29,10 +31,21 @@ from cantina_os.models.music_models import MusicTrack, MusicLibrary
 # ---------------------------------------------------------------------------
 class _Config(BaseModel):
     """Pydantic‑validated configuration for the brain service."""
-    gpt_model_intro: str = "gpt-3.5-turbo"
-    gpt_temperature_intro: float = 0.7
-    chat_history_max_turns: int = 10
-    handled_intents: List[str] = ["play_music"]
+    gpt_model_intro: str = Field(default="gpt-3.5-turbo", description="GPT model for track intros")
+    gpt_temperature_intro: float = Field(default=0.7, description="Temperature setting for track intros")
+    chat_history_max_turns: int = Field(default=10, description="Maximum chat history turns to maintain")
+    handled_intents: List[str] = Field(default=["play_music"], description="List of intents handled by brain service")
+    dj_mode_transition_lead_time: int = Field(default=15, description="Seconds before track end to prepare transition")
+    dj_commentary_styles: List[str] = Field(
+        default=[
+            "energetic", "chill", "funny", "informative", 
+            "mysterious", "dramatic", "galactic"
+        ],
+        description="Available DJ commentary styles"
+    )
+    dj_transition_cache_enabled: bool = Field(default=True, description="Whether to cache DJ transitions")
+    dj_cache_ttl_seconds: int = Field(default=300, description="How long to keep DJ transitions in cache")
+    dj_skip_transition_duration: float = Field(default=5.0, description="Duration for skip transitions in seconds")
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +54,7 @@ class _Config(BaseModel):
 class BrainService(StandardService):
     """Brain service for DJ R3X.
     
-    Handles intent processing, music commands, and track intro generation.
+    Handles intent processing, music commands, track intro generation, and DJ mode.
     """
 
     def __init__(self, event_bus, config=None, name="brain_service"):
@@ -53,7 +66,6 @@ class BrainService(StandardService):
         # ----- bookkeeping -----
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: List[asyncio.Task] = []
-        self._subs: List[tuple] = []  # For tracking subscriptions
         
         # ----- brain state -----
         self._current_intent: Optional[IntentPayload] = None
@@ -66,7 +78,32 @@ class BrainService(StandardService):
         # Track recently played songs to avoid repetition
         self._recently_played_tracks = []
         # Maximum number of tracks to remember for avoiding repetition
-        self._max_history = 3
+        self._max_history = 5  # Increased for better DJ rotation
+        
+        # ----- DJ mode state -----
+        self._dj_mode_active = False
+        self._dj_next_track: Optional[str] = None
+        self._dj_transition_plan_ready = False
+        self._dj_transition_style = "energetic"  # Default style
+        self._dj_track_history = []  # For more advanced rotation tracking
+        self._dj_current_rotation_index = 0
+        
+        # Cache for recent DJ transitions
+        self._dj_transition_cache = {}
+        
+        # Genre groupings for smarter transitions
+        self._genre_groups = {
+            "upbeat": ["Elem Zadowz - Huttuk Cheeka", "Batuu Boogie", "Mus Kat & Nalpak - Turbulence", 
+                       "Vee Gooda, Ryco - Aloogahoo", "Mus Kat & Nalpak - Bright Suns"],
+            "electronic": ["Droid World", "Duro Droids - Beep Boop Bop", "Mus Kat & Nalpak - Doshka",
+                          "Mus Kat & Nalpak - Turbulence"],
+            "chill": ["Modal Notes", "Moulee-rah", "Doolstan", "Opening"],
+            "traditional": ["Cantina Band", "Mad About Me", "Cantina Song aka Mad About Mad About Me",
+                           "Jabba Flow", "Jedi Rocks"],
+            "alien": ["Yocola Ateema", "Gaya", "Gaya - Oola Shuka", "Bai Tee Tee", 
+                      "Laki Lembeng - Nama Heh", "Zano - Goola Bukee"],
+            "misc": ["Kra Mer 5 - Una Duey Dee", "The Dusty Jawas - Utinni", "Utinni"]
+        }
 
     # ------------------------------------------------------------------
     # Helper methods
@@ -95,13 +132,6 @@ class BrainService(StandardService):
                 LogLevel.ERROR
             )
     
-    async def _subscribe(self, topic: EventTopics, handler: Callable) -> None:
-        """Safe async subscription wrapper that tracks tasks for cleanup."""
-        self._subs.append((topic, handler))
-        task = asyncio.create_task(self.subscribe(topic, handler))
-        self._tasks.append(task)
-        await task  # Ensure the subscription is established before return
-    
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -109,7 +139,7 @@ class BrainService(StandardService):
         """Initialize brain service and set up subscriptions."""
         try:
             self._loop = asyncio.get_running_loop()
-            await self._setup_subscriptions()  # Now using await
+            await self._setup_subscriptions()
             await self._emit_status(ServiceStatus.RUNNING, "Brain service started")
             self.logger.info("BrainService started successfully")
         except Exception as e:
@@ -129,7 +159,10 @@ class BrainService(StandardService):
             await asyncio.wait(self._tasks, timeout=5.0)
             
         self._tasks.clear()
-        self._subs.clear()
+        
+        # Clean up any cached speech data
+        if self._dj_mode_active:
+            await self._emit_dict(EventTopics.SPEECH_CACHE_CLEANUP, {"service": "brain_service"})
         
         self.logger.info("Brain service stopped")
         await self._emit_status(ServiceStatus.STOPPED, "Brain service stopped")
@@ -140,21 +173,53 @@ class BrainService(StandardService):
     async def _setup_subscriptions(self) -> None:
         """Register event-handlers for brain processing."""
         # Subscribe to essential events for the new direct flow
-        await self._subscribe(EventTopics.BRAIN_MUSIC_REQUEST, self._handle_music_request)
-        await self._subscribe(EventTopics.BRAIN_MUSIC_STOP, self._handle_music_stop)
-        await self._subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_started)
+        task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_REQUEST, self._handle_music_request))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_STOP, self._handle_music_stop))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_started))
+        self._tasks.append(task)
         
         # Keep INTENT_DETECTED for legacy/other intents
-        await self._subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected)
+        task = asyncio.create_task(self.subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected))
+        self._tasks.append(task)
         
         # Also subscribe to LLM responses for track intro handling
-        await self._subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
+        task = asyncio.create_task(self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response))
+        self._tasks.append(task)
         
         # Subscribe to memory updates for reactive capabilities
-        await self._subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated)
+        task = asyncio.create_task(self.subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory_value))
+        self._tasks.append(task)
         
         # Subscribe to music library updates to keep track list in sync
-        await self._subscribe(EventTopics.MUSIC_LIBRARY_UPDATED, self._handle_music_library_updated)
+        task = asyncio.create_task(self.subscribe(EventTopics.MUSIC_LIBRARY_UPDATED, self._handle_music_library_updated))
+        self._tasks.append(task)
+        
+        # DJ mode specific events
+        task = asyncio.create_task(self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.TRACK_ENDING_SOON, self._handle_track_ending_soon))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.DJ_NEXT_TRACK, self._handle_dj_next_track))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.DJ_TRACK_QUEUED, self._handle_dj_track_queued))
+        self._tasks.append(task)
+        
+        # Subscribe to cached speech events
+        task = asyncio.create_task(self.subscribe(EventTopics.SPEECH_CACHE_READY, self._handle_speech_cache_ready))
+        self._tasks.append(task)
+        
+        task = asyncio.create_task(self.subscribe(EventTopics.SPEECH_CACHE_ERROR, self._handle_speech_cache_error))
+        self._tasks.append(task)
         
         # Fetch available tracks at startup
         await self._fetch_available_tracks()
@@ -168,7 +233,14 @@ class BrainService(StandardService):
                 
             if "tracks" in payload and isinstance(payload["tracks"], list):
                 tracks_data = payload["tracks"]
-                self._music_library.tracks = tracks_data
+                # Convert the list of tracks to a dictionary
+                track_dict = {}
+                for track_data in tracks_data:
+                    track = MusicTrack.from_dict(track_data)
+                    track_dict[track.name] = track
+                
+                # Update the music library with the dictionary
+                self._music_library.tracks = track_dict
                 self.logger.info(f"Updated music library from event: {len(self._music_library.tracks)} tracks")
         except Exception as e:
             self.logger.error(f"Error handling music library update: {e}")
@@ -178,7 +250,7 @@ class BrainService(StandardService):
         try:
             # Request track list via MUSIC_COMMAND event
             track_list_payload = {"command": "list", "subcommand": None, "args": [], "raw_input": "list music"}
-            await self.emit(EventTopics.MUSIC_COMMAND, track_list_payload)
+            await self._emit_dict(EventTopics.MUSIC_COMMAND, track_list_payload)
             
             # We don't have a direct way to get the response, so we'll use the following approach:
             # Subscribe to CLI_RESPONSE and handle the track list if we get one
@@ -811,3 +883,560 @@ class BrainService(StandardService):
                 f"Error creating track intro plan: {e}",
                 LogLevel.ERROR
             ) 
+
+    # ------------------------------------------------------------------
+    # DJ Mode handlers
+    # ------------------------------------------------------------------
+    async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ mode activation/deactivation.
+        
+        Args:
+            payload: Event payload with dj_mode_active flag
+        """
+        try:
+            is_active = payload.get("dj_mode_active", False)
+            
+            # Update service state
+            self._dj_mode_active = is_active
+            self.logger.info(f"DJ Mode {'activated' if is_active else 'deactivated'}")
+            
+            if is_active:
+                # When activating DJ mode, select a random transition style
+                import random
+                self._dj_transition_style = random.choice(self._config.dj_commentary_styles)
+                self.logger.info(f"Selected DJ transition style: {self._dj_transition_style}")
+                
+                # Reset track history for DJ rotation
+                self._dj_track_history = []
+                
+                # Store DJ mode state in memory service
+                await self._emit_dict(
+                    EventTopics.MEMORY_SET, 
+                    {
+                        "key": "dj_mode_active",
+                        "value": True
+                    }
+                )
+                
+                await self._emit_dict(
+                    EventTopics.MEMORY_SET, 
+                    {
+                        "key": "dj_transition_style",
+                        "value": self._dj_transition_style
+                    }
+                )
+                
+            else:
+                # Clear any pending DJ transitions
+                self._dj_transition_plan_ready = False
+                self._dj_next_track = None
+                
+                # Update memory service
+                await self._emit_dict(
+                    EventTopics.MEMORY_SET, 
+                    {
+                        "key": "dj_mode_active",
+                        "value": False
+                    }
+                )
+                
+                await self._emit_dict(
+                    EventTopics.MEMORY_SET, 
+                    {
+                        "key": "dj_next_track",
+                        "value": None
+                    }
+                )
+        except Exception as e:
+            self.logger.error(f"Error handling DJ mode change: {e}")
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error handling DJ mode change: {e}",
+                LogLevel.ERROR
+            )
+    
+    async def _handle_track_ending_soon(self, payload: Dict[str, Any]) -> None:
+        """Handle TRACK_ENDING_SOON events from MusicControllerService.
+        
+        This is the main trigger for DJ mode transitions.
+        
+        Args:
+            payload: Event payload with track_name and remaining_seconds
+        """
+        try:
+            # Only proceed if DJ mode is active
+            if not self._dj_mode_active:
+                self.logger.info("Track ending soon, but DJ Mode is not active")
+                return
+                
+            track_name = payload.get("track_name", "Unknown Track")
+            remaining_seconds = payload.get("remaining_seconds", 30)
+            
+            self.logger.info(f"Track ending soon: {track_name}, {remaining_seconds}s remaining")
+            
+            # If we already have a transition plan ready, don't create another one
+            if self._dj_transition_plan_ready:
+                self.logger.info("Transition plan already prepared, skipping")
+                return
+            
+            # Check memory service for queued track first
+            await self._emit_dict(
+                EventTopics.MEMORY_GET, 
+                {
+                    "key": "dj_next_track",
+                    "callback_topic": EventTopics.MEMORY_VALUE
+                }
+            )
+            
+            # Wait a short time for the response
+            await asyncio.sleep(0.1)
+            
+            # Check if we have a next track queued (either in memory or local state)
+            if self._dj_next_track:
+                next_track = self._dj_next_track
+                self.logger.info(f"Using queued track for transition: {next_track}")
+            else:
+                # Select the next track to play
+                next_track = await self._select_next_dj_track(track_name)
+                if not next_track:
+                    self.logger.error("Failed to select next track for DJ transition")
+                    await self._emit_status(
+                        ServiceStatus.ERROR,
+                        "DJ transition failed: could not select next track",
+                        LogLevel.ERROR
+                    )
+                    return
+            
+            # Request cached commentary for the transition
+            cache_key = await self._request_cached_dj_commentary(track_name, next_track)
+            
+            # Create a transition plan with the commentary and next track
+            import uuid
+            transition_plan = PlanPayload(
+                plan_id=str(uuid.uuid4()),
+                layer="foreground",
+                steps=[
+                    PlanStep(
+                        id="dj_commentary",
+                        type="speak",
+                        text=cache_key  # Use cache key instead of raw text
+                    ),
+                    PlanStep(
+                        id="next_track",
+                        type="play_music",
+                        genre=next_track
+                    )
+                ]
+            )
+            
+            # Mark that we have a transition plan ready
+            self._dj_transition_plan_ready = True
+            
+            # Emit the plan
+            await self._emit_dict(EventTopics.PLAN_READY, transition_plan)
+            self.logger.info(f"DJ transition plan ready: {track_name} → {next_track}")
+            
+            # Update memory with the track history
+            self._add_to_recently_played(next_track)
+            await self._emit_dict(
+                EventTopics.MEMORY_SET, 
+                {
+                    "key": "dj_track_history",
+                    "value": self._recently_played_tracks
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling track ending soon: {e}")
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"DJ transition error: {e}",
+                LogLevel.ERROR
+            )
+    
+    async def _handle_dj_next_track(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ_NEXT_TRACK events (skip to next track).
+        
+        Args:
+            payload: Event payload
+        """
+        try:
+            # Only proceed if DJ mode is active
+            if not self._dj_mode_active:
+                self.logger.info("DJ next track requested, but DJ Mode is not active")
+                return
+            
+            current_track = self._last_track_meta.get("track_name", "Unknown Track") if self._last_track_meta else "Unknown Track"
+            self.logger.info(f"DJ next track requested. Current track: {current_track}")
+            
+            # Select the next track to play
+            next_track = await self._select_next_dj_track(current_track)
+            if not next_track:
+                self.logger.error("Failed to select next track for DJ skip")
+                await self._emit_status(
+                    ServiceStatus.ERROR,
+                    "DJ skip failed: could not select next track",
+                    LogLevel.ERROR
+                )
+                return
+            
+            # Request cached commentary for the skip (with is_skip=True)
+            cache_key = await self._request_cached_dj_commentary(current_track, next_track, is_skip=True)
+            
+            # Create a transition plan with the commentary and next track
+            import uuid
+            skip_plan = PlanPayload(
+                plan_id=str(uuid.uuid4()),
+                layer="foreground",
+                steps=[
+                    PlanStep(
+                        id="dj_skip_commentary",
+                        type="speak",
+                        text=cache_key  # Use cache key instead of raw text
+                    ),
+                    PlanStep(
+                        id="next_track",
+                        type="play_music",
+                        genre=next_track
+                    )
+                ]
+            )
+            
+            # Emit the skip plan
+            await self._emit_dict(EventTopics.PLAN_READY, skip_plan)
+            self.logger.info(f"DJ skip plan ready: {current_track} → {next_track}")
+            
+            # Update memory
+            self._add_to_recently_played(next_track)
+            await self.emit(EventTopics.MEMORY_SET, {
+                "key": "dj_track_history",
+                "value": self._recently_played_tracks
+            })
+            
+        except Exception as e:
+            self.logger.error(f"Error handling DJ next track: {e}")
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"DJ next track error: {e}",
+                LogLevel.ERROR
+            )
+    
+    async def _handle_dj_track_queued(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ_TRACK_QUEUED events from MusicControllerService.
+        
+        Args:
+            payload: Event payload with track_name and source
+        """
+        try:
+            track_name = payload.get("track_name", "Unknown Track")
+            source = payload.get("source", "unknown")
+            
+            self.logger.info(f"Track queued for DJ mode: {track_name} (source: {source})")
+            
+            # Store the queued track for next transition
+            self._dj_next_track = track_name
+            
+            # Mark that we don't have a transition plan ready yet
+            # This will be created when we get TRACK_ENDING_SOON
+            self._dj_transition_plan_ready = False
+            
+        except Exception as e:
+            self.logger.error(f"Error handling DJ track queued: {e}")
+    
+    async def _select_next_dj_track(self, current_track: str) -> Optional[str]:
+        """Select the next track for DJ mode based on intelligent sequencing.
+        
+        This implements the track sequencing algorithm with genre/energy matching.
+        
+        Args:
+            current_track: The currently playing track
+            
+        Returns:
+            Name of the next track to play
+        """
+        try:
+            # Get all available tracks
+            if not self._music_library.tracks:
+                self.logger.warning("No tracks available for DJ selection")
+                return None
+                
+            # Find all tracks except the current one and recently played
+            available_tracks = list(self._music_library.tracks.keys())
+            
+            # Determine which genre group the current track belongs to
+            current_genre_group = None
+            for genre, tracks in self._genre_groups.items():
+                if current_track in tracks:
+                    current_genre_group = genre
+                    break
+            
+            # Find tracks in the same genre group (for continuity)
+            same_genre_tracks = []
+            if current_genre_group:
+                same_genre_tracks = [
+                    track for track in self._genre_groups[current_genre_group] 
+                    if track in available_tracks and track != current_track and track not in self._recently_played_tracks
+                ]
+            
+            # Also find tracks in related genre groups (for variety)
+            related_genre_tracks = []
+            
+            # Define genre relationships for more natural transitions
+            genre_relationships = {
+                "upbeat": ["electronic", "traditional", "alien"],
+                "electronic": ["upbeat", "alien", "chill"],
+                "chill": ["electronic", "traditional", "misc"],
+                "traditional": ["upbeat", "chill", "misc"],
+                "alien": ["upbeat", "electronic", "misc"],
+                "misc": ["traditional", "alien", "chill"]
+            }
+            
+            if current_genre_group and current_genre_group in genre_relationships:
+                related_genres = genre_relationships[current_genre_group]
+                for genre in related_genres:
+                    if genre in self._genre_groups:
+                        related_genre_tracks.extend([
+                            track for track in self._genre_groups[genre]
+                            if track in available_tracks and track != current_track and track not in self._recently_played_tracks
+                        ])
+            
+            # Combine the pools with preferential weighting
+            selection_pool = []
+            
+            # Add same genre tracks with higher weight (more likely to be selected)
+            selection_pool.extend(same_genre_tracks * 3)  # Add 3 copies for higher weight
+            
+            # Add related genre tracks with normal weight
+            selection_pool.extend(related_genre_tracks)
+            
+            # If we still don't have any tracks, add all tracks except current and recently played
+            if not selection_pool:
+                selection_pool = [
+                    track for track in available_tracks 
+                    if track != current_track and track not in self._recently_played_tracks
+                ]
+            
+            # If we STILL don't have tracks (rare but possible if all played recently)
+            # Then just use all except current
+            if not selection_pool:
+                selection_pool = [track for track in available_tracks if track != current_track]
+                
+            # If we have no tracks at all, use any track
+            if not selection_pool:
+                selection_pool = available_tracks
+            
+            # Select a random track from our weighted pool
+            import random
+            selected_track = random.choice(selection_pool)
+            
+            # Add to recently played to avoid repetition
+            self._add_to_recently_played(selected_track)
+            
+            # Update DJ track history for rotation tracking
+            self._dj_track_history.append(selected_track)
+            
+            self.logger.info(f"Selected next DJ track: {selected_track}")
+            return selected_track
+            
+        except Exception as e:
+            self.logger.error(f"Error selecting next DJ track: {e}")
+            
+            # Fallback to simple random selection
+            try:
+                import random
+                available_tracks = list(self._music_library.tracks.keys())
+                if available_tracks:
+                    return random.choice(available_tracks)
+            except:
+                pass
+                
+            return None
+    
+    async def _request_cached_dj_commentary(self, current_track: str, next_track: str, is_skip: bool = False) -> str:
+        """Generate and cache DJ commentary for track transitions.
+        
+        Args:
+            current_track: Currently playing track name
+            next_track: Next track to play
+            is_skip: Whether this is a skip command (shorter commentary)
+            
+        Returns:
+            Cache key for the generated commentary
+        """
+        try:
+            # Generate the commentary text
+            commentary = await self._generate_dj_commentary(current_track, next_track, is_skip)
+            
+            # Create a unique cache key
+            cache_key = f"dj_commentary_{current_track}_{next_track}_{is_skip}_{int(time.time())}"
+            
+            # Request caching of the commentary
+            await self._emit_dict(
+                EventTopics.SPEECH_CACHE_REQUEST,
+                SpeechCacheRequestPayload(
+                    text=commentary,
+                    cache_key=cache_key,
+                    priority=2 if is_skip else 1,  # Higher priority for skip commands
+                    ttl_seconds=self._config.dj_cache_ttl_seconds,
+                    metadata={
+                        "current_track": current_track,
+                        "next_track": next_track,
+                        "is_skip": is_skip,
+                        "dj_style": self._dj_transition_style
+                    }
+                )
+            )
+            
+            self.logger.info(f"Requested DJ commentary caching with key: {cache_key}")
+            return cache_key
+            
+        except Exception as e:
+            self.logger.error(f"Error requesting cached DJ commentary: {e}")
+            # Return empty cache key to indicate failure
+            return ""
+
+    async def _generate_dj_commentary(self, current_track: str, next_track: str, is_skip: bool = False) -> str:
+        """Generate DJ-style commentary for transitions between tracks.
+        
+        Args:
+            current_track: The currently playing track
+            next_track: The next track to play
+            is_skip: Whether this is a skip command (shorter commentary)
+            
+        Returns:
+            DJ commentary text
+        """
+        try:
+            # In production, this would use GPT or a similar model to generate
+            # custom commentary based on track metadata, time of day, etc.
+            
+            # For now, use a template-based approach with some variety
+            import random
+            
+            # Get transition style from state or randomly select a new one
+            style = self._dj_transition_style
+            if random.random() < 0.3:  # 30% chance to change style
+                style = random.choice(self._config.dj_commentary_styles)
+                self._dj_transition_style = style
+            
+            # Shorter commentary for skip commands
+            if is_skip:
+                skip_templates = [
+                    f"Switching it up! Here comes {next_track}!",
+                    f"You got it! Let's drop {next_track} right now!",
+                    f"Alright, enough of that! Moving to {next_track}!",
+                    f"Skip requested! Here's {next_track} coming at you!",
+                    f"Time for something different! {next_track}, let's go!"
+                ]
+                return random.choice(skip_templates)
+            
+            # Regular transition commentary based on style
+            if style == "energetic":
+                templates = [
+                    f"That was {current_track}! Get ready for the ultimate vibe shift as we drop into {next_track}! Let's GO!",
+                    f"Whoa! {current_track} had the energy flowing! Now keeping the momentum with {next_track}! Put your hands UP!",
+                    f"R3X is taking you on a journey! From {current_track} straight into the incredible {next_track}! Feel the ENERGY!"
+                ]
+            elif style == "chill":
+                templates = [
+                    f"Smooth vibes from {current_track}. Now sliding into the equally smooth {next_track}. Just relax and enjoy.",
+                    f"That was {current_track}. Now let's keep the chill atmosphere going with {next_track}.",
+                    f"R3X keeping it laid back. From {current_track} we flow into {next_track}. Perfect for this moment."
+                ]
+            elif style == "funny":
+                templates = [
+                    f"That was {current_track} - not bad for a droid DJ if I do say so myself! Now here's {next_track} - no applause necessary, just credits!",
+                    f"If you enjoyed {current_track}, you'll probably tolerate {next_track}! I'm kidding, it's actually amazing!",
+                    f"That was {current_track}! Now switching to {next_track} - a track so good, even Jawas would pay full price for it!"
+                ]
+            elif style == "informative":
+                templates = [
+                    f"That was the distinctive sound of {current_track}. Now transitioning to {next_track}, another selection from our galactic playlist.",
+                    f"You've been listening to {current_track}. Up next is {next_track}, a perfect follow-up in terms of rhythm and energy.",
+                    f"R3X music selection: {current_track} complete. Now continuing with {next_track}, carefully selected to maintain the vibe."
+                ]
+            elif style == "mysterious":
+                templates = [
+                    f"The echoes of {current_track} fade into the void... but what emerges? Listen closely to {next_track} and discover its secrets.",
+                    f"As {current_track} completes its journey, the cosmic algorithms reveal our next destination: {next_track}.",
+                    f"The patterns within {current_track} have led us here, to the enigmatic rhythms of {next_track}. Where will it take us?"
+                ]
+            elif style == "dramatic":
+                templates = [
+                    f"The final notes of {current_track} signal a momentous change! Prepare yourselves for the absolutely stunning {next_track}!",
+                    f"What an incredible moment! {current_track} draws to a close, and now, the track you've all been waiting for: {next_track}!",
+                    f"A defining musical moment! Transitioning from the unforgettable {current_track} to the breathtaking {next_track}!"
+                ]
+            else:  # "galactic" or fallback
+                templates = [
+                    f"From across the galaxy, {current_track} has entertained you. Now, jumping to hyperspace with {next_track}!",
+                    f"Star systems align as we transition from {current_track} to the stellar sounds of {next_track}.",
+                    f"R3X's galaxy-famous mix continues! That was {current_track} from the Outer Rim, now flying to {next_track}!"
+                ]
+            
+            return random.choice(templates)
+            
+        except Exception as e:
+            self.logger.error(f"Error generating DJ commentary: {e}")
+            return f"Moving from {current_track} to {next_track}. DJ R3X in the mix!" 
+
+    # Listen for memory values coming back - for async memory coordination
+    async def _handle_memory_value(self, payload: Dict[str, Any]) -> None:
+        """Handle MEMORY_VALUE events from MemoryService."""
+        if isinstance(payload, dict) and "key" in payload and "value" in payload:
+            key = payload.get("key")
+            value = payload.get("value")
+            
+            # Handle DJ next track from memory
+            if key == "dj_next_track" and value is not None:
+                self._dj_next_track = value
+                self.logger.debug(f"Retrieved dj_next_track from memory: {value}") 
+
+    async def _handle_speech_cache_ready(self, payload: Dict[str, Any]) -> None:
+        """Handle SPEECH_CACHE_READY events from CachedSpeechService.
+        
+        Args:
+            payload: Event payload with cache information
+        """
+        try:
+            if not isinstance(payload, dict) or "cache_key" not in payload:
+                return
+            
+            cache_key = payload.get("cache_key")
+            duration_ms = payload.get("duration_ms", 0)
+            metadata = payload.get("metadata", {})
+            
+            # Extract metadata
+            current_track = metadata.get("current_track", "Unknown")
+            next_track = metadata.get("next_track", "Unknown")
+            is_skip = metadata.get("is_skip", False)
+            
+            self.logger.info(
+                f"DJ commentary cached: {cache_key}, duration: {duration_ms}ms, "
+                f"transition: {current_track} → {next_track}"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling speech cache ready: {e}")
+
+    async def _handle_speech_cache_error(self, payload: Dict[str, Any]) -> None:
+        """Handle SPEECH_CACHE_ERROR events from CachedSpeechService.
+        
+        Args:
+            payload: Event payload with error information
+        """
+        try:
+            if not isinstance(payload, dict) or "cache_key" not in payload:
+                return
+            
+            cache_key = payload.get("cache_key")
+            error = payload.get("error", "Unknown error")
+            
+            self.logger.error(f"DJ commentary caching failed: {cache_key}, error: {error}")
+            
+            # Fallback to non-cached commentary if needed
+            if "dj_commentary_" in cache_key:
+                self.logger.info("Using non-cached DJ commentary as fallback")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling speech cache error: {e}") 

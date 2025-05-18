@@ -41,6 +41,9 @@ class MusicControllerConfig(BaseModel):
     music_dir: str = Field(default="assets/music", description="Directory containing music files")
     normal_volume: int = Field(default=70, description="Normal playback volume (0-100)")
     ducking_volume: int = Field(default=30, description="Volume during speech (0-100)")
+    crossfade_duration_ms: int = Field(default=3000, description="Duration of crossfade between tracks in milliseconds")
+    crossfade_steps: int = Field(default=50, description="Number of volume adjustment steps during crossfade")
+    track_ending_threshold_sec: int = Field(default=30, description="Seconds before track end to emit TRACK_ENDING_SOON event")
 
 class MusicControllerService(BaseService):
     """
@@ -51,6 +54,7 @@ class MusicControllerService(BaseService):
     - Audio ducking during speech
     - CLI command integration
     - Resource cleanup
+    - Crossfade between tracks (DJ mode)
     """
     
     def __init__(self, event_bus: AsyncIOEventEmitter, config: Dict[str, Any] = None):
@@ -66,10 +70,15 @@ class MusicControllerService(BaseService):
         self.tracks: Dict[str, MusicTrack] = {}
         self.current_track: Optional[MusicTrack] = None
         self.player: Optional[vlc.MediaPlayer] = None
+        self.secondary_player: Optional[vlc.MediaPlayer] = None  # For crossfade
+        self.next_track: Optional[MusicTrack] = None  # For track preloading
         self.current_mode = "IDLE"
         self.normal_volume = self._config.normal_volume
         self.ducking_volume = self._config.ducking_volume
         self.is_ducking = False
+        self.is_crossfading = False
+        self.dj_mode_active = False
+        self.track_end_timer = None
         
         # Create VLC instance
         self.vlc_instance = vlc.Instance()
@@ -101,6 +110,13 @@ class MusicControllerService(BaseService):
         
         await self.subscribe(EventTopics.AUDIO_DUCKING_STOP, self._handle_audio_ducking_stop)
         self.logger.debug("Subscribed to AUDIO_DUCKING_STOP events")
+
+        # Add DJ mode events
+        await self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
+        self.logger.debug("Subscribed to DJ_MODE_CHANGED events")
+        
+        await self.subscribe(EventTopics.DJ_NEXT_TRACK, self._handle_dj_next_track)
+        self.logger.debug("Subscribed to DJ_NEXT_TRACK events")
         
         self.logger.info("Music controller event subscriptions complete")
         
@@ -328,84 +344,98 @@ class MusicControllerService(BaseService):
 
     async def _handle_music_command(self, payload):
         """
-        Handle music commands from CLI or other sources
+        Handle music command events.
         
-        Args:
-            payload: Command payload from the dispatcher
+        This method parses music command events and dispatches them to the
+        appropriate handlers.
         """
         try:
-            self.logger.debug(f"Received music command payload: {payload}")
-            
-            # Handle payload that directly specifies a song_query from IntentRouter
-            if isinstance(payload, dict) and "song_query" in payload:
-                song_query = payload.get("song_query")
-                action = payload.get("action", "play")
+            # Extract command from payload
+            if isinstance(payload, dict):
+                command = payload.get("command", "").lower()
+                subcommand = payload.get("subcommand")
+                args = payload.get("args", [])
+                conversation_id = payload.get("conversation_id")
                 
-                if action == "play" and song_query:
-                    self.logger.info(f"Direct song query received: {song_query}")
-                    await self._smart_play_track(song_query)
-                    return
-                elif action == "stop":
+                self.logger.info(f"Handling music command: {command} {subcommand} {args}")
+                
+                # Convert to MusicCommandPayload if needed
+                if "action" in payload:
+                    # Already in correct format for play/stop
+                    if payload["action"] == "play":
+                        await self._handle_play_request(MusicCommandPayload(**payload))
+                        return
+                    elif payload["action"] == "stop":
+                        await self._handle_stop_request(MusicCommandPayload(**payload))
+                        return
+                
+                # Handle different commands
+                if command == "play":
+                    # Play specified track or a random one
+                    if args:
+                        track_query = " ".join(args)
+                        await self._smart_play_track(track_query)
+                    else:
+                        await self._send_error("Please specify a track name")
+                
+                elif command == "stop":
+                    # Stop music playback
                     await self._stop_playback()
-                    return
-                
-            # Always convert to StandardCommandPayload for consistent processing
-            command = StandardCommandPayload.from_legacy_format(payload)
-            self.logger.debug(f"Standardized command: {command}")
-            
-            # Get the full compound command if available
-            full_command = command.get_full_command()
-            
-            # Handle different command patterns
-            if full_command == "list music" or command.command == "list":
-                # List available tracks
-                await self._list_tracks()
-                
-            elif full_command == "play music" or command.command == "play":
-                # Check for track number in args
-                if not command.validate_arg_count(1):
-                    # Try extracting from raw_input as fallback for "play music N" pattern
-                    raw_input = command.raw_input
-                    if raw_input and raw_input.strip().lower().startswith("play music "):
-                        parts = raw_input.strip().split()
-                        if len(parts) >= 3:
-                            track_num = parts[2]
-                            self.logger.info(f"Extracted track number from raw_input: {track_num}")
-                            await self._smart_play_track(track_num)
-                            return
-                            
-                    # No track number found
-                    await self._send_error("Track number required. Usage: play music <track_number>")
-                    return
                     
-                # Get track number from args and play
-                track_query = command.args[0]
-                self.logger.info(f"Playing track query: {track_query}")
-                await self._smart_play_track(track_query)
+                elif command == "list":
+                    # List available tracks
+                    await self._list_tracks()
+                    
+                elif command == "install":
+                    # Install music files from a directory
+                    if len(args) > 0:
+                        source_dir = args[0]
+                        await self._handle_install_music_command(args)
+                    else:
+                        await self._send_error("Please specify a source directory")
                 
-            elif full_command == "install music" or command.command == "install":
-                # Install sample music files
-                await self._handle_install_music_command(command.args)
+                elif command == "debug":
+                    # Debug music library issues
+                    await self._debug_music_library()
                 
-            elif full_command == "stop music" or command.command == "stop":
-                # Stop playback
-                await self._stop_playback()
-                
-            elif full_command == "debug music" or (command.command == "debug" and command.subcommand == "music"):
-                # Debug music library
-                await self._debug_music_library()
-                
-            # Handle legacy "music" command without subcommand
-            elif command.command == "music" and not command.subcommand:
-                await self._send_error("Music command requires a subcommand: play, stop, list, install, or debug")
-                
+                # DJ Mode Commands
+                elif command == "dj":
+                    if len(args) == 0:
+                        await self._send_error("Please specify a DJ mode command: start, stop, next, queue")
+                        return
+                    
+                    # Handle DJ subcommands
+                    dj_command = args[0].lower()
+                    
+                    if dj_command == "start":
+                        await self._handle_dj_start_command()
+                    
+                    elif dj_command == "stop":
+                        await self._handle_dj_stop_command()
+                    
+                    elif dj_command == "next":
+                        await self._handle_dj_next_command()
+                    
+                    elif dj_command == "queue":
+                        if len(args) > 1:
+                            track_query = " ".join(args[1:])
+                            await self._handle_dj_queue_command(track_query)
+                        else:
+                            await self._send_error("Please specify a track to queue")
+                    
+                    else:
+                        await self._send_error(f"Unknown DJ command: {dj_command}")
+
+                else:
+                    # Unknown command
+                    await self._send_error(f"Unknown music command: {command}")
+                    
             else:
-                # Unknown command
-                await self._send_error(f"Unknown music command: {command}")
+                self.logger.error(f"Invalid music command payload format: {type(payload)}")
                 
         except Exception as e:
             self.logger.error(f"Error handling music command: {e}", exc_info=True)
-            await self._send_error(f"Error processing music command: {str(e)}")
+            await self._send_error(f"Error: {str(e)}")
 
     async def _handle_install_music_command(self, args):
         """
@@ -536,55 +566,86 @@ class MusicControllerService(BaseService):
 
     async def _play_track_by_name(self, track_name: str, source: str = "cli") -> None:
         """
-        Play a track by its exact name
+        Play a track by its exact name.
         
         Args:
-            track_name: Exact name of the track to play
-            source: Source of the play request (default: "cli" for CLI commands)
+            track_name: The exact name of the track to play
+            source: Source of the play request (cli, voice, dj)
         """
         try:
-            if track_name not in self.tracks:
-                self.logger.error(f"Track not found: {track_name}")
-                await self._send_error(f"Track not found: {track_name}")
-                return
+            # First, try direct lookup
+            track = self.tracks.get(track_name)
+            
+            if not track:
+                # If not found, try fuzzy matching
+                track_names = list(self.tracks.keys())
+                best_match = None
+                best_score = 0
                 
-            track = self.tracks[track_name]
+                for name in track_names:
+                    # Simple case-insensitive substring match
+                    if track_name.lower() in name.lower():
+                        score = len(track_name) / len(name)
+                        if score > best_score:
+                            best_score = score
+                            best_match = name
+                
+                if best_match:
+                    track = self.tracks[best_match]
+                    self.logger.info(f"Fuzzy matched '{track_name}' to '{best_match}'")
+                else:
+                    self.logger.warning(f"No track found matching '{track_name}'")
+                    await self._send_error(f"No track found matching '{track_name}'")
+                    return
             
-            self.logger.info(f"Playing track: {track.name} (path: {track.path})")
+            # If we already have a track playing and DJ mode is active, crossfade
+            if self.player and self.player.is_playing() and self.dj_mode_active:
+                await self._crossfade_to_track(track, source=source)
+                return
             
-            # Create and configure a new player if needed
+            # Otherwise, stop any current playback and play directly
             if self.player:
                 self.player.stop()
                 await self._cleanup_player(self.player)
-                
-            # Create a new player for this track
+            
+            # Create a new media player
             self.player = self.vlc_instance.media_player_new()
+            
+            # Load and play the track
+            self.logger.info(f"Playing track: {track.name} ({track.path})")
             media = self.vlc_instance.media_new(track.path)
             self.player.set_media(media)
             
-            # Set volume based on current mode and ducking state
+            # Set volume based on current state
             volume = self.ducking_volume if self.is_ducking else self.normal_volume
             self.player.audio_set_volume(volume)
             
             # Start playback
             self.player.play()
+            
+            # Update current track
             self.current_track = track
             
-            # Send play command event
+            # Emit event
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_STARTED,
                 {
                     "track_name": track.name,
                     "duration": track.duration,
-                    "source": source  # Include source in event payload
+                    "source": source  # Added to track origin
                 }
             )
             
-            await self._send_success(f"Playing track: {track.name}")
+            # Set up track end detection timer if in DJ mode
+            if self.dj_mode_active and track.duration:
+                self._setup_track_end_timer(track.duration)
+            
+            # Success message to CLI
+            await self._send_success(f"Now playing: {track.name}")
             
         except Exception as e:
-            self.logger.error(f"Error playing track: {str(e)}", exc_info=True)
-            await self._send_error(f"Error playing track: {str(e)}")
+            self.logger.error(f"Error playing track {track_name}: {e}")
+            await self._send_error(f"Error playing music: {str(e)}")
 
     async def _stop_playback(self) -> None:
         """Stop music playback"""
@@ -874,4 +935,375 @@ class MusicControllerService(BaseService):
         """Handle audio ducking stop - restore music volume."""
         if self.player and self.current_mode == "INTERACTIVE":
             self.is_ducking = False
-            self.player.audio_set_volume(self.normal_volume) 
+            self.player.audio_set_volume(self.normal_volume)
+            
+    async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle DJ mode activation/deactivation
+        
+        Args:
+            payload: Event payload with dj_mode_active flag
+        """
+        try:
+            is_active = payload.get("dj_mode_active", False)
+            self.dj_mode_active = is_active
+            
+            self.logger.info(f"DJ Mode {'activated' if is_active else 'deactivated'}")
+            
+            # If DJ mode is activated and we have a track playing, set up the end timer
+            if is_active and self.current_track and self.current_track.duration:
+                # Get current position to calculate remaining time
+                if self.player and self.player.is_playing():
+                    position_ms = self.player.get_time()
+                    if position_ms > 0:
+                        remaining_ms = (self.current_track.duration * 1000) - position_ms
+                        remaining_sec = remaining_ms / 1000
+                        self._setup_track_end_timer(remaining_sec)
+        except Exception as e:
+            self.logger.error(f"Error handling DJ mode change: {e}")
+
+    async def _handle_dj_next_track(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle DJ next track command (skip to next track)
+        
+        Args:
+            payload: Event payload
+        """
+        try:
+            # If next_track is already loaded, crossfade to it
+            if self.next_track and self.dj_mode_active:
+                await self._crossfade_to_track(self.next_track, source="dj")
+            else:
+                # Otherwise, just stop current track - BrainService will select next track
+                await self._stop_playback()
+                await self.emit(EventTopics.MUSIC_PLAYBACK_STOPPED, {})
+        except Exception as e:
+            self.logger.error(f"Error handling DJ next track command: {e}")
+
+    async def _setup_track_end_timer(self, track_duration_sec: float) -> None:
+        """
+        Set up a timer to emit TRACK_ENDING_SOON event before track ends
+        
+        Args:
+            track_duration_sec: Duration of the track in seconds
+        """
+        # Cancel any existing timer
+        if self.track_end_timer:
+            self.track_end_timer.cancel()
+            
+        # Calculate when to emit the event (30 seconds before end)
+        threshold_sec = self._config.track_ending_threshold_sec
+        if track_duration_sec <= threshold_sec:
+            # Track is shorter than our threshold, emit immediately
+            asyncio.create_task(self._emit_track_ending_soon())
+            return
+            
+        # Calculate delay before emitting event
+        delay_sec = track_duration_sec - threshold_sec
+        
+        # Set timer
+        self.logger.debug(f"Setting track end timer for {delay_sec:.1f} seconds")
+        self.track_end_timer = asyncio.create_task(self._delayed_track_ending_event(delay_sec))
+
+    async def _delayed_track_ending_event(self, delay_sec: float) -> None:
+        """
+        Wait for delay and then emit TRACK_ENDING_SOON event
+        
+        Args:
+            delay_sec: Seconds to wait before emitting event
+        """
+        try:
+            await asyncio.sleep(delay_sec)
+            await self._emit_track_ending_soon()
+        except asyncio.CancelledError:
+            # Timer was cancelled, just exit
+            pass
+        except Exception as e:
+            self.logger.error(f"Error in track end timer: {e}")
+
+    async def _emit_track_ending_soon(self) -> None:
+        """Emit TRACK_ENDING_SOON event with current track info"""
+        if not self.current_track:
+            return
+            
+        await self.emit(
+            EventTopics.TRACK_ENDING_SOON,
+            {
+                "track_name": self.current_track.name,
+                "remaining_seconds": self._config.track_ending_threshold_sec
+            }
+        )
+        self.logger.info(f"Emitted TRACK_ENDING_SOON for {self.current_track.name}")
+
+    async def _crossfade_to_track(self, next_track: MusicTrack, source: str = "dj") -> None:
+        """
+        Perform a smooth crossfade between current track and next track
+        
+        Args:
+            next_track: The track to fade to
+            source: Source of the crossfade request
+        """
+        if self.is_crossfading:
+            self.logger.warning("Crossfade already in progress, ignoring request")
+            return
+            
+        self.is_crossfading = True
+        self.logger.info(f"Starting crossfade to: {next_track.name}")
+        
+        try:
+            # Create the secondary player if needed
+            if self.secondary_player:
+                await self._cleanup_player(self.secondary_player)
+                
+            self.secondary_player = self.vlc_instance.media_player_new()
+            
+            # Load the next track
+            media = self.vlc_instance.media_new(next_track.path)
+            self.secondary_player.set_media(media)
+            
+            # Set initial volume to 0
+            self.secondary_player.audio_set_volume(0)
+            
+            # Start playback of next track
+            self.secondary_player.play()
+            
+            # Emit crossfade started event
+            await self.emit(
+                EventTopics.CROSSFADE_STARTED,
+                {
+                    "from_track": self.current_track.name if self.current_track else "none",
+                    "to_track": next_track.name
+                }
+            )
+            
+            # Get crossfade parameters
+            duration_ms = self._config.crossfade_duration_ms
+            steps = self._config.crossfade_steps
+            step_time = duration_ms / steps
+            
+            # Execute the crossfade
+            start_volume = self.normal_volume if not self.is_ducking else self.ducking_volume
+            
+            for i in range(steps + 1):
+                # Calculate current volumes
+                progress = i / steps
+                vol_out = int(start_volume * (1 - progress))
+                vol_in = int(start_volume * progress)
+                
+                # Set volumes
+                if self.player and self.player.is_playing():
+                    self.player.audio_set_volume(vol_out)
+                    
+                if self.secondary_player and self.secondary_player.is_playing():
+                    self.secondary_player.audio_set_volume(vol_in)
+                    
+                # Wait for the next step
+                await asyncio.sleep(step_time / 1000)  # Convert ms to seconds
+                
+            # Stop the old track
+            if self.player:
+                self.player.stop()
+                await self._cleanup_player(self.player)
+                
+            # Swap players
+            self.player = self.secondary_player
+            self.secondary_player = None
+            self.current_track = next_track
+            self.next_track = None
+            
+            # Set up next track end timer
+            if next_track.duration:
+                self._setup_track_end_timer(next_track.duration)
+                
+            # Emit track changed event
+            await self.emit(
+                EventTopics.MUSIC_PLAYBACK_STARTED,
+                {
+                    "track_name": next_track.name,
+                    "duration": next_track.duration,
+                    "source": source,
+                    "crossfaded": True
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error during crossfade: {e}")
+        finally:
+            self.is_crossfading = False
+
+    async def preload_next_track(self, track: MusicTrack) -> None:
+        """
+        Preload the next track for faster crossfade transitions
+        
+        Args:
+            track: The track to preload
+        """
+        try:
+            self.next_track = track
+            self.logger.debug(f"Preloaded next track: {track.name}")
+        except Exception as e:
+            self.logger.error(f"Error preloading track: {e}")
+
+    async def get_track_progress(self) -> Dict[str, Any]:
+        """
+        Get the current track progress information
+        
+        Returns:
+            Dict with position and remaining time info
+        """
+        if not self.player or not self.current_track:
+            return {"position_sec": 0, "position_ms": 0, "remaining_sec": 0, "percent": 0}
+            
+        try:
+            position_ms = self.player.get_time()
+            if position_ms < 0:
+                position_ms = 0
+                
+            position_sec = position_ms / 1000
+            
+            if self.current_track.duration:
+                remaining_sec = max(0, self.current_track.duration - position_sec)
+                percent = min(100, max(0, (position_sec / self.current_track.duration) * 100))
+            else:
+                remaining_sec = 0
+                percent = 0
+                
+            return {
+                "position_sec": position_sec,
+                "position_ms": position_ms,
+                "remaining_sec": remaining_sec,
+                "percent": percent
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting track progress: {e}")
+            return {"position_sec": 0, "position_ms": 0, "remaining_sec": 0, "percent": 0}
+
+    async def _handle_dj_start_command(self) -> None:
+        """Handle the 'dj start' CLI command to activate DJ mode"""
+        try:
+            # Only activate if not already active
+            if self.dj_mode_active:
+                await self._send_error("DJ mode is already active")
+                return
+                
+            # Emit event to activate DJ mode 
+            await self.emit(
+                EventTopics.DJ_MODE_CHANGED,
+                {
+                    "dj_mode_active": True
+                }
+            )
+            
+            # Confirm to user
+            await self._send_success("DJ mode activated - R3X is taking over!")
+            
+            # If no music is playing, start a random track
+            if not self.player or not self.player.is_playing():
+                # Get a random track
+                available_tracks = list(self.tracks.values())
+                if available_tracks:
+                    import random
+                    random_track = random.choice(available_tracks)
+                    await self._play_track_by_name(random_track.name, source="dj")
+                    
+        except Exception as e:
+            self.logger.error(f"Error starting DJ mode: {e}")
+            await self._send_error(f"Error starting DJ mode: {str(e)}")
+
+    async def _handle_dj_stop_command(self) -> None:
+        """Handle the 'dj stop' CLI command to deactivate DJ mode"""
+        try:
+            # Only deactivate if active
+            if not self.dj_mode_active:
+                await self._send_error("DJ mode is not active")
+                return
+                
+            # Emit event to deactivate DJ mode
+            await self.emit(
+                EventTopics.DJ_MODE_CHANGED,
+                {
+                    "dj_mode_active": False
+                }
+            )
+            
+            # Clean up DJ mode resources
+            if self.track_end_timer:
+                self.track_end_timer.cancel()
+                self.track_end_timer = None
+                
+            # Doesn't stop the current music - just disables auto-DJ features
+            
+            # Confirm to user
+            await self._send_success("DJ mode deactivated - Manual control restored")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping DJ mode: {e}")
+            await self._send_error(f"Error stopping DJ mode: {str(e)}")
+
+    async def _handle_dj_next_command(self) -> None:
+        """Handle the 'dj next' CLI command to skip to the next track"""
+        try:
+            # Check if DJ mode is active
+            if not self.dj_mode_active:
+                await self._send_error("DJ mode is not active")
+                return
+                
+            # Emit DJ_NEXT_TRACK event for BrainService to handle
+            await self.emit(EventTopics.DJ_NEXT_TRACK, {})
+            
+            # Confirm to user
+            await self._send_success("Skipping to next track...")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling next track command: {e}")
+            await self._send_error(f"Error skipping track: {str(e)}")
+
+    async def _handle_dj_queue_command(self, track_query: str) -> None:
+        """
+        Handle the 'dj queue' CLI command to queue a specific track
+        
+        Args:
+            track_query: Query to identify the track to queue
+        """
+        try:
+            # Check if DJ mode is active
+            if not self.dj_mode_active:
+                await self._send_error("DJ mode is not active")
+                return
+                
+            # Find the track
+            track_names = list(self.tracks.keys())
+            best_match = None
+            best_score = 0
+            
+            for name in track_names:
+                # Simple case-insensitive substring match
+                if track_query.lower() in name.lower():
+                    score = len(track_query) / len(name)
+                    if score > best_score:
+                        best_score = score
+                        best_match = name
+            
+            if not best_match:
+                await self._send_error(f"No track found matching '{track_query}'")
+                return
+                
+            track = self.tracks[best_match]
+            
+            # Set as next track
+            self.next_track = track
+            
+            # Emit event to indicate track queued
+            await self.emit(
+                EventTopics.DJ_TRACK_QUEUED,
+                {
+                    "track_name": track.name,
+                    "source": "cli"
+                }
+            )
+            
+            # Confirm to user
+            await self._send_success(f"Queued as next track: {track.name}")
+        except Exception as e:
+            self.logger.error(f"Error queuing track: {e}")
+            await self._send_error(f"Error queuing track: {str(e)}")

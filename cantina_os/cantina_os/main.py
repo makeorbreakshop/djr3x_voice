@@ -35,6 +35,12 @@ from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
 from .services.command_dispatcher_service import CommandDispatcherService
 from .services.mode_command_handler_service import ModeCommandHandlerService
+from .services.cached_speech_service import CachedSpeechService
+
+# Import the new layered timeline services
+from .services.brain_service.brain_service import BrainService
+from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
+from .services.memory_service.memory_service import MemoryService
 
 # Configure logging
 # logging.basicConfig(
@@ -258,10 +264,14 @@ class CantinaOS:
         service_order = [
             "yoda_mode_manager",
             "command_dispatcher",
+            "memory_service",  # Initialize memory service early as other services depend on it
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
             "intent_router",  # Add IntentRouterService to route LLM intents to hardware commands
+            "brain_service",  # Add brain service to handle intents and generate plans
+            "timeline_executor_service",  # Add timeline executor to handle layered plans
+            "cached_speech_service",  # Add cached speech service for DJ Mode transitions
             "elevenlabs",  # Add ElevenLabs service to convert LLM responses to speech
             "mode_change_sound",
             "music_controller",
@@ -423,7 +433,12 @@ class CantinaOS:
             "music_controller": MusicControllerService,
             "mouse_input": MouseInputService,
             "intent_router": IntentRouterService,
-            "command_dispatcher": CommandDispatcherService
+            "command_dispatcher": CommandDispatcherService,
+            # Add the new services to the map
+            "brain_service": BrainService,
+            "timeline_executor_service": TimelineExecutorService,
+            "memory_service": MemoryService,
+            "cached_speech_service": CachedSpeechService
         }
         
         # Early return if service doesn't exist in map
@@ -484,8 +499,32 @@ class CantinaOS:
             else:
                 service_config = {"music_dir": music_dir}
         
+        # Timeline services configuration
+        elif service_name == "brain_service":
+            # Configure brain service
+            service_config = {
+                "gpt_model_intro": self._config.get("OPENAI_MODEL", "gpt-4o"),
+                "gpt_temperature_intro": 0.7,
+                "chat_history_max_turns": 10,
+                "handled_intents": ["play_music"]
+            }
+            
+        elif service_name == "timeline_executor_service":
+            # Configure timeline executor service
+            service_config = {
+                "default_ducking_level": 0.3,
+                "ducking_fade_ms": 500
+            }
+            
+        elif service_name == "memory_service":
+            # Configure memory service
+            service_config = {
+                "chat_history_max_turns": 10
+            }
+        
         # All services need the global event bus
         try:
+            # All services share the same initialization pattern: event_bus first, then config
             service = service_class(self._event_bus, service_config)
             return service
         except Exception as e:

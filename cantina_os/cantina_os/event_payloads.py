@@ -7,7 +7,7 @@ Each payload inherits from BaseEventPayload to ensure consistent metadata across
 
 import time
 import uuid
-from typing import Optional, Dict, Any, List, Callable, Union
+from typing import Optional, Dict, Any, List, Callable, Union, Literal
 from enum import Enum
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -184,6 +184,10 @@ class LLMResponsePayload(BaseEventPayload):
     latency: Optional[float] = Field(
         None, 
         description="API request latency in seconds"
+    )
+    response_type: Optional[Literal["filler", "intent_feedback", "track_intro"]] = Field(
+        None,
+        description="Type of response for special handling"
     )
 
 class SentimentPayload(BaseEventPayload):
@@ -487,4 +491,118 @@ class DebugCommandPayload(BaseEventPayload):
     component: str = Field(..., description="Target component name or 'all'")
     level: Optional[LogLevel] = Field(None, description="Log level for level command")
     enable: Optional[bool] = Field(None, description="Enable/disable flag for trace/metrics")
-    args: List[str] = Field(default_factory=list, description="Additional command arguments") 
+    args: List[str] = Field(default_factory=list, description="Additional command arguments")
+
+class PlanStep(BaseModel):
+    """A single step in a layered timeline plan."""
+    id: str
+    type: Literal[
+        "play_music", "speak", "eye_pattern",
+        "move", "wait_for_event", "delay"
+    ]
+    text: Optional[str] = None
+    clip_id: Optional[str] = None
+    genre: Optional[str] = None
+    event: Optional[str] = None
+    delay: Optional[float] = None
+    pattern: Optional[str] = None
+    motion: Optional[str] = None
+
+class PlanPayload(BaseEventPayload):
+    """Payload for PLAN_READY event."""
+    plan_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    layer: Literal["ambient", "foreground", "override"]
+    steps: List[PlanStep]
+
+class PlanStartedPayload(BaseEventPayload):
+    """Payload for PLAN_STARTED event."""
+    plan_id: str
+    layer: str
+    
+class StepReadyPayload(BaseEventPayload):
+    """Payload for STEP_READY event."""
+    plan_id: str
+    step_id: str
+    
+class StepExecutedPayload(BaseEventPayload):
+    """Payload for STEP_EXECUTED event."""
+    plan_id: str
+    step_id: str
+    status: Literal["success", "failure"]
+    details: Optional[Dict[str, Any]] = None
+    
+class PlanEndedPayload(BaseEventPayload):
+    """Payload for PLAN_ENDED event."""
+    plan_id: str
+    layer: str
+    status: Literal["completed", "cancelled", "paused"]
+
+class MemoryUpdatedPayload(BaseEventPayload):
+    """Payload for MEMORY_UPDATED event."""
+    key: str
+    new_value: Any
+    old_value: Optional[Any] = None
+
+class DJModeStatePayload(BaseEventPayload):
+    """Payload for DJ mode state changes."""
+    is_active: bool = Field(description="Whether DJ mode is active")
+    current_track: Optional[str] = Field(default=None, description="Currently playing track")
+    next_track: Optional[str] = Field(default=None, description="Next track in queue")
+    crossfade_active: bool = Field(default=False, description="Whether a crossfade is in progress")
+
+class DJTrackEndingSoonPayload(BaseEventPayload):
+    """Payload for track ending soon notification."""
+    current_track: str = Field(description="Currently playing track")
+    time_remaining_ms: int = Field(description="Milliseconds until track end")
+    next_track: Optional[str] = Field(default=None, description="Next track if already selected")
+
+class DJCrossfadePayload(BaseEventPayload):
+    """Payload for crossfade events."""
+    from_track: str = Field(description="Track being faded out")
+    to_track: str = Field(description="Track being faded in")
+    duration_ms: int = Field(description="Duration of crossfade in milliseconds")
+    
+class SpeechCacheRequestPayload(BaseEventPayload):
+    """Payload for requesting speech to be cached."""
+    text: str = Field(description="Text to be synthesized")
+    cache_key: str = Field(description="Unique key for caching")
+    priority: int = Field(default=1, description="Cache priority (higher = more important)")
+    ttl_seconds: Optional[int] = Field(default=None, description="Time to live in cache")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+class SpeechCacheReadyPayload(BaseEventPayload):
+    """Payload for cached speech ready notification."""
+    cache_key: str = Field(description="Cache key of the ready speech")
+    duration_ms: int = Field(description="Duration of the cached speech in milliseconds")
+    size_bytes: int = Field(description="Size of the cached audio in bytes")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+class SpeechCacheErrorPayload(BaseEventPayload):
+    """Payload for speech cache errors."""
+    cache_key: str = Field(description="Cache key that failed")
+    error: str = Field(description="Error message")
+    retry_count: int = Field(default=0, description="Number of retry attempts made")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    
+class SpeechCachePlaybackRequestPayload(BaseEventPayload):
+    """Payload for requesting playback of cached speech."""
+    cache_key: str = Field(description="Cache key of the speech to play")
+    volume: float = Field(default=1.0, description="Playback volume (0.0-1.0)")
+    playback_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique ID for this playback")
+    delay_ms: int = Field(default=0, description="Optional delay before playback in milliseconds")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    
+class SpeechCachePlaybackStartedPayload(BaseEventPayload):
+    """Payload for cached speech playback start notification."""
+    cache_key: str = Field(description="Cache key of the speech being played")
+    playback_id: str = Field(description="ID of this playback instance")
+    duration_ms: int = Field(description="Total duration of the audio in milliseconds")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    
+class SpeechCachePlaybackCompletedPayload(BaseEventPayload):
+    """Payload for cached speech playback completion notification."""
+    cache_key: str = Field(description="Cache key of the speech that was played")
+    playback_id: str = Field(description="ID of this playback instance")
+    completion_status: Literal["completed", "interrupted", "error"] = Field(default="completed")
+    error: Optional[str] = Field(default=None, description="Error message if completion_status is 'error'")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata") 

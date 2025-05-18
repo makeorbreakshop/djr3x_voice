@@ -198,20 +198,26 @@ class ElevenLabsService(BaseService):
             raise
     
     async def _setup_subscriptions(self) -> None:
-        """Set up event subscriptions following architecture standards."""
+        """Set up event subscriptions."""
         self.logger.info("Setting up ElevenLabsService event subscriptions")
         
-        # Subscribe to speech generation requests
-        speech_gen_task = asyncio.create_task(
-            self.subscribe(EventTopics.SPEECH_GENERATION_REQUEST, self._handle_speech_generation_request)
+        # Main subscription for speech generation requests
+        await self.subscribe(
+            EventTopics.SPEECH_GENERATION_REQUEST,
+            self._handle_speech_generation_request
         )
-        self._tasks.append(speech_gen_task)
         
-        # Subscribe to LLM responses to convert text to speech
-        llm_response_task = asyncio.create_task(
-            self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
+        # Handle all LLM responses for text-to-speech
+        await self.subscribe(
+            EventTopics.LLM_RESPONSE,
+            self._handle_llm_response
         )
-        self._tasks.append(llm_response_task)
+        
+        # Add subscription for TTS_REQUEST from CachedSpeechService
+        await self.subscribe(
+            EventTopics.TTS_REQUEST,
+            self._handle_tts_request
+        )
         
         self.logger.info("ElevenLabsService event subscriptions complete")
     
@@ -784,3 +790,142 @@ class ElevenLabsService(BaseService):
         except Exception as e:
             self.logger.error(f"Error executing system command: {e}")
             raise 
+
+    async def _handle_tts_request(self, payload: Dict[str, Any]) -> None:
+        """Handle TTS request events from CachedSpeechService.
+        
+        Unlike regular speech generation requests, these don't play the audio immediately
+        but return the raw audio data to the requester.
+        
+        Args:
+            payload: The request payload containing text and other parameters
+        """
+        try:
+            text = payload.get("text")
+            request_id = payload.get("request_id")
+            non_streaming = payload.get("non_streaming", False)
+            source = payload.get("source", "unknown")
+            
+            if not text or not request_id:
+                self.logger.error("Invalid TTS_REQUEST payload: missing text or request_id")
+                await self._emit_dict(
+                    EventTopics.TTS_AUDIO_DATA,
+                    {
+                        "request_id": request_id,
+                        "success": False,
+                        "error": "Missing required parameters: text or request_id"
+                    }
+                )
+                return
+                
+            self.logger.info(f"Received TTS request from {source}, text length: {len(text)}, request_id: {request_id}")
+            
+            # Use configured voice settings or defaults
+            voice_id = payload.get("voice_id", self._config.voice_id)
+            model_id = payload.get("model_id", self._config.model_id)
+            stability = payload.get("stability", self._config.stability)
+            similarity_boost = payload.get("similarity_boost", self._config.similarity_boost)
+            speed = payload.get("speed", self._config.speed)
+            
+            # Generate speech (non-streaming)
+            self.logger.info(f"Generating non-streaming audio for caching, request_id: {request_id}")
+            audio_data = await self._generate_speech(
+                text=text,
+                voice_id=voice_id,
+                model_id=model_id,
+                stability=stability,
+                similarity_boost=similarity_boost,
+                speed=speed
+            )
+            
+            if not audio_data:
+                error_msg = "Failed to generate TTS audio: No data returned"
+                self.logger.error(error_msg)
+                await self._emit_dict(
+                    EventTopics.TTS_AUDIO_DATA,
+                    {
+                        "request_id": request_id,
+                        "success": False,
+                        "error": error_msg
+                    }
+                )
+                return
+                
+            # This part is critical - convert MP3 to raw PCM for the CachedSpeechService
+            # We need to decode the MP3 to get sample rate and raw audio data
+            try:
+                import io
+                import soundfile as sf
+                import sounddevice as sd
+                import tempfile
+                import numpy as np
+                
+                # Create a temporary file to hold the MP3
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
+                    tmp_file.write(audio_data)
+                    tmp_file_path = tmp_file.name
+                
+                # Convert MP3 to numpy array using soundfile
+                try:
+                    # Use sf.read to get the data and sample rate
+                    data, sample_rate = sf.read(tmp_file_path)
+                    
+                    # Remove the temporary file
+                    import os
+                    os.unlink(tmp_file_path)
+                    
+                    # Calculate duration in milliseconds
+                    duration_ms = int((len(data) / sample_rate) * 1000)
+                    
+                    # Ensure the data is float32
+                    if data.dtype != np.float32:
+                        data = data.astype(np.float32)
+                    
+                    # Send back the audio data and metadata
+                    await self._emit_dict(
+                        EventTopics.TTS_AUDIO_DATA,
+                        {
+                            "request_id": request_id,
+                            "success": True,
+                            "audio_data": data.tobytes(),  # Raw PCM data as bytes
+                            "sample_rate": sample_rate,
+                            "duration_ms": duration_ms,
+                            "channels": data.shape[1] if len(data.shape) > 1 else 1,
+                            "dtype": str(data.dtype)
+                        }
+                    )
+                    
+                    self.logger.info(f"Successfully sent TTS audio data, request_id: {request_id}, duration: {duration_ms}ms")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error converting MP3 to numpy array: {e}")
+                    await self._emit_dict(
+                        EventTopics.TTS_AUDIO_DATA,
+                        {
+                            "request_id": request_id,
+                            "success": False,
+                            "error": f"Error converting audio format: {str(e)}"
+                        }
+                    )
+            
+            except ImportError as e:
+                self.logger.error(f"Required libraries not available for audio conversion: {e}")
+                await self._emit_dict(
+                    EventTopics.TTS_AUDIO_DATA,
+                    {
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Required libraries not available: {str(e)}"
+                    }
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error handling TTS request: {e}")
+            await self._emit_dict(
+                EventTopics.TTS_AUDIO_DATA,
+                {
+                    "request_id": payload.get("request_id", "unknown"),
+                    "success": False,
+                    "error": f"Error in TTS processing: {str(e)}"
+                }
+            ) 
