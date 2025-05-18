@@ -59,7 +59,7 @@ class CachedSpeechService(BaseService):
 
     def __init__(self, event_bus, config=None, name="cached_speech_service"):
         """Initialize the service with proper event bus and config."""
-        super().__init__(name, event_bus, logger=None)
+        super().__init__(service_name=name, event_bus=event_bus)
         
         # Convert config dict to Pydantic model
         self._config = CachedSpeechServiceConfig(**(config or {}))

@@ -742,3 +742,256 @@ With these changes, the system now provides a complete DJ Mode experience with i
 - Ensure proper inheritance and method signature compatibility
 - Standardize event emission patterns across all services
 
+## 🔧 Service Template Import Pattern Fix (#22)
+
+**Issue Summary**: Identified a recurring architectural pattern violation where services are importing from `service_template.py` instead of using it as a copy template.
+
+**Root Cause Analysis**:
+1. Developers (including AI) treating `service_template.py` as a base class to import from
+2. Common pattern in other frameworks leading to misconception
+3. Name "template" suggesting inheritance rather than copying
+4. Multiple services using absolute imports like:
+   ```python
+   from cantina_os.services.service_template import ServiceTemplate  # WRONG
+   ```
+
+**Architectural Requirements**:
+1. `service_template.py` is a COPY template, not an import source
+2. Each new service should:
+   - Copy service_template.py to new service directory
+   - Rename to <service_name>.py
+   - Rename class from ServiceTemplate to ServiceName
+   - Never import from service_template.py
+
+**Impact of Issue**:
+- Import errors in production
+- Service loader collisions from duplicate class names
+- Dependency issues during initialization
+- Confusion about architectural patterns
+
+**Fix Applied**:
+1. Updated services to stop importing from service_template.py
+2. Fixed relative import patterns across services
+3. Added explicit warning in SERVICE_TEMPLATE_GUIDELINES.md
+4. Documented pattern in dev log for future reference
+
+**Lesson Learned**:
+- Templates should be clearly marked as "DO NOT IMPORT"
+- Architecture docs should explain why patterns exist
+- Copy-template pattern needs to be emphasized in onboarding
+
+## 🔧 BaseService Implementation Fixes (#23)
+
+**Issue Summary**: Fixed multiple startup failures due to import path issues and constructor parameter mismatches.
+
+**Root Cause Analysis**:
+1. Services were using incorrect import patterns:
+   ```python
+   from cantina_os.services.service_template import ServiceTemplate  # WRONG
+   from ..base import StandardService  # WRONG
+   ```
+2. Services were passing parameters to BaseService incorrectly:
+   ```python
+   super().__init__(event_bus, config, name=name)  # WRONG for BaseService
+   ```
+3. The base.py module defined StandardService as an alias to ServiceTemplate, which doesn't exist.
+
+**Fix Applied**:
+1. Updated relative imports to use absolute paths to standard modules:
+   ```python
+   from cantina_os.base_service import BaseService  # CORRECT
+   ```
+2. Fixed BaseService initialization to match its constructor signature:
+   ```python
+   super().__init__(service_name=name, event_bus=event_bus)  # CORRECT for BaseService
+   ```
+3. Updated base.py to alias BaseService correctly:
+   ```python
+   from cantina_os.base_service import BaseService
+   StandardService = BaseService  # Define StandardService as an alias for BaseService
+   ```
+
+**Services Fixed**:
+- DeepgramDirectMicService
+- MemoryService
+- BrainService
+- TimelineExecutorService
+- CachedSpeechService (partially)
+
+**Remaining Issues**:
+- The CachedSpeechService still has an attribute error related to 'name'
+- Debug service reports "No service class found for debug"
+
+**Architecture Improvements**:
+- Consistent use of BaseService across all services
+- Proper initialization patterns
+- Clear path for future service development by using BaseService directly
+
+This fix complements the import pattern documentation in issue #22, providing practical implementation of the corrected architectural pattern.
+
+## 🎵 DJ Mode Implementation Complete (#24)
+
+**Major Achievement**: Completed implementation of DJ Mode core features across all services.
+
+### 🧠 BrainService Enhancements
+- Implemented intelligent track sequencing with genre/energy matching
+- Added DJ commentary generation with 7 distinct styles (energetic, chill, funny, informative, mysterious, dramatic, galactic)
+- Created genre groupings for smarter transitions:
+  - upbeat, electronic, chill, traditional, alien, misc
+- Implemented track rotation and history to avoid repetition
+- Added support for manual track queuing
+- Integrated with CachedSpeechService for transition commentary
+
+### 🎚️ Key Features Completed
+1. **Smart Track Selection**
+   - Genre-aware transitions
+   - Avoids recent track repetition
+   - Weighted selection for musical flow
+   - Support for manual track queuing
+
+2. **DJ Commentary System**
+   - Pre-cached transitions for responsiveness
+   - Style rotation for variety
+   - Special handling for skip commands
+   - Context-aware commentary generation
+
+3. **Event System Integration**
+   - Proper handling of TRACK_ENDING_SOON
+   - Support for DJ_NEXT_TRACK (skip)
+   - DJ_TRACK_QUEUED handling
+   - Memory service integration for state persistence
+
+### 🔧 Technical Improvements
+- Fixed unsubscribe method implementation
+- Enhanced error handling in track selection
+- Improved memory management for cached transitions
+- Added proper cleanup on service shutdown
+
+### 📝 Next Steps
+1. Complete automated test suite for DJ mode
+2. Add timing verification for speech/music sync
+3. Conduct long-running stability tests
+4. Enhance error recovery mechanisms
+
+### 🐛 Known Issues
+- Need more comprehensive testing for edge cases
+- Some timing verification still needed for speech/music sync
+- Long-running stability tests pending
+
+This completes the major implementation phase of DJ Mode, with only testing and refinement remaining.
+
+## 🔧 Multi-Word Command Handling Fix (#25)
+
+**Issue Summary**: DJ Mode commands ("dj start", "dj stop", etc.) appeared in the help menu but failed with "Unknown command: 'dj'" when executed.
+
+**Root Cause Analysis**:
+1. Only the compound commands (e.g., "dj start") were registered via `register_compound_command`
+2. The base command "dj" was not registered, so the dispatcher couldn't parse "dj" + arguments
+3. The CommandDispatcherService was receiving "dj" as the command and "start" as an argument
+4. BrainService didn't have handling for command/subcommand structure in its event handler
+
+**Fix Applied**:
+1. Updated main.py to register the base "dj" command in addition to compound commands:
+   ```python
+   # First register the base "dj" command
+   if "dj" not in dispatcher.get_registered_commands():
+       dispatcher.register_command_handler("dj", EventTopics.DJ_MODE_CHANGED)
+   ```
+
+2. Enhanced BrainService._handle_dj_mode_changed to handle CLI commands with args:
+   ```python
+   # Check if this is a CLI command or a mode change event
+   command = payload.get("command")
+   subcommand = payload.get("subcommand")
+   args = payload.get("args", [])
+   
+   # Handle CLI command (dj start, dj stop, etc.)
+   if command == "dj":
+       # Get action from subcommand or first arg
+       action = subcommand or (args[0] if args else "start")
+       # Execute appropriate action based on command
+   ```
+
+**Impact**:
+- DJ Mode commands now work correctly from CLI
+- Fixed inconsistencies between help documentation and actual command support
+- Improved command handling pattern for other multi-word commands
+
+**Lesson Learned**:
+- Multi-word commands must register both the base command and compound forms
+- Service handlers need to handle various command formats (command+subcommand, command+args)
+- Updated SERVICE_TEMPLATE_GUIDELINES.md with a dedicated section on command registration
+
+## 🔧 DJ Mode Command Processing & Playback Fix (#26)
+
+**Issue Summary**: DJ Mode would activate but not actually start playing music when triggered with "dj start" command. Additionally, there were duplicate arguments in command payloads causing errors in MemoryService.
+
+**Root Cause Analysis**:
+1. **Command Registration Overlap**: Both "dj" and "dj start" were registered as separate commands, causing conflicts in command processing
+2. **Argument Duplication**: This resulted in payloads with duplicated arguments: `'args': ['start', 'start']`
+3. **Inconsistent Payload Handling**: MemoryService expected only the `dj_mode_active` flag format but received command payloads
+4. **Missing Music Playback Logic**: BrainService's DJ Mode activation didn't automatically start playing music
+
+**Fix Applied**:
+1. **Simplified Command Registration**: Removed individual compound command registrations to prevent conflicts
+   ```python
+   # Register only the base "dj" command to avoid conflicts
+   if "dj" not in dispatcher.get_registered_commands():
+       dispatcher.register_command_handler("dj", EventTopics.DJ_MODE_CHANGED)
+   
+   # Don't register individual compound commands to prevent overlapping handlers
+   ```
+
+2. **Added Automatic Music Playback**: Enhanced BrainService to start music when DJ Mode is activated
+   ```python
+   # After DJ Mode activation
+   if self._music_library.tracks:
+       # Select random track that wasn't recently played
+       initial_track = random.choice(available_tracks).name
+       
+       # Play the selected track
+       await self._emit_dict(
+           EventTopics.MUSIC_COMMAND,
+           {
+               "action": "play",
+               "song_query": initial_track,
+               "source": "dj"
+           }
+       )
+   ```
+   
+3. **Improved MemoryService Payload Handling**: Updated to handle both direct mode change and CLI command formats
+   ```python
+   # Handle CLI command payload format (e.g., from "dj start" command)
+   elif "command" in payload and payload["command"] == "dj":
+       # Extract action from args or use default "start"
+       args = payload.get("args", [])
+       action = args[0] if args else "start"
+       
+       # Set state based on action
+       is_active = (action == "start")
+       await self.set("dj_mode_active", is_active)
+   ```
+
+**Impact**:
+- DJ Mode now starts playing music immediately when activated
+- Fixed duplicated argument errors in MemoryService
+- More consistent command handling for "dj start", "dj stop", etc.
+- Improved error handling and logging
+
+**Architectural Improvements**:
+- Simpler and more consistent command registration pattern
+- Better separation of concerns between command dispatch and execution
+- More robust payload handling with support for multiple formats
+- Complete DJ functionality flow from command to music playback
+
+**Testing Notes**:
+- Verified "dj start" command now correctly activates DJ Mode and starts playing music
+- No more "Invalid payload" errors in the logs
+- Subsequent commands like "dj next" and "dj stop" work as expected
+
+**Recommended Follow-up**:
+- Audit other multi-word commands for similar registration patterns
+- Consider adding formal command schema validation
+- Add more comprehensive error handling for CLI command parsing
+

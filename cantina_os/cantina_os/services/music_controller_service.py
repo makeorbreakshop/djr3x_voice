@@ -1259,11 +1259,10 @@ class MusicControllerService(BaseService):
             await self._send_error(f"Error skipping track: {str(e)}")
 
     async def _handle_dj_queue_command(self, track_query: str) -> None:
-        """
-        Handle the 'dj queue' CLI command to queue a specific track
+        """Handle the 'dj queue' CLI command to queue a specific track
         
         Args:
-            track_query: Query to identify the track to queue
+            track_query: Search query for the track to queue
         """
         try:
             # Check if DJ mode is active
@@ -1271,39 +1270,68 @@ class MusicControllerService(BaseService):
                 await self._send_error("DJ mode is not active")
                 return
                 
-            # Find the track
-            track_names = list(self.tracks.keys())
-            best_match = None
-            best_score = 0
-            
-            for name in track_names:
-                # Simple case-insensitive substring match
-                if track_query.lower() in name.lower():
-                    score = len(track_query) / len(name)
-                    if score > best_score:
-                        best_score = score
-                        best_match = name
-            
-            if not best_match:
-                await self._send_error(f"No track found matching '{track_query}'")
+            # Find the track by name
+            available_tracks = list(self.tracks.values())
+            if not available_tracks:
+                await self._send_error("No tracks available")
                 return
                 
-            track = self.tracks[best_match]
+            # Try to find a matching track
+            selected_track = None
             
-            # Set as next track
-            self.next_track = track
+            # First try exact match
+            for track in available_tracks:
+                if track.name.lower() == track_query.lower():
+                    selected_track = track
+                    break
+                
+            # If no exact match, try to find a track containing the query
+            if not selected_track:
+                for track in available_tracks:
+                    if track_query.lower() in track.name.lower():
+                        selected_track = track
+                        break
             
-            # Emit event to indicate track queued
-            await self.emit(
-                EventTopics.DJ_TRACK_QUEUED,
-                {
-                    "track_name": track.name,
-                    "source": "cli"
-                }
-            )
+            # If still no match, try matching by track number
+            if not selected_track:
+                try:
+                    track_num = int(track_query)
+                    if 1 <= track_num <= len(available_tracks):
+                        # Convert to 0-based index
+                        selected_track = available_tracks[track_num - 1]
+                except (ValueError, IndexError):
+                    pass
+                
+            # If we found a track, queue it
+            if selected_track:
+                # Emit DJ_TRACK_QUEUED event
+                await self.emit(
+                    EventTopics.DJ_TRACK_QUEUED,
+                    {
+                        "track_name": selected_track.name,
+                        "track_path": selected_track.path
+                    }
+                )
+                
+                # Also set in memory
+                await self.emit(
+                    EventTopics.MEMORY_SET,
+                    {
+                        "key": "dj_next_track",
+                        "value": selected_track.name
+                    }
+                )
+                
+                # Preload the track for faster transitions if supported
+                if hasattr(self, 'next_track') and self.current_track:
+                    self.next_track = selected_track
+                    self.logger.info(f"Preloaded next track: {selected_track.name}")
+                
+                # Confirm to user
+                await self._send_success(f"Queued '{selected_track.name}' as the next track")
+            else:
+                await self._send_error(f"Could not find a track matching '{track_query}'")
             
-            # Confirm to user
-            await self._send_success(f"Queued as next track: {track.name}")
         except Exception as e:
-            self.logger.error(f"Error queuing track: {e}")
-            await self._send_error(f"Error queuing track: {str(e)}")
+            self.logger.error(f"Error queueing track: {e}")
+            await self._send_error(f"Error queueing track: {str(e)}")

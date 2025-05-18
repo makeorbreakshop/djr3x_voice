@@ -69,6 +69,10 @@ class CommandDispatcherService(BaseService):
             's': 'stop music',
             'stop': 'stop music',
             'i': 'idle',  # Added shortcut for idle command
+            'dj': 'dj start',  # Added DJ mode shortcuts
+            'djs': 'dj stop',
+            'djn': 'dj next',
+            'djq': 'dj queue'
         }
         
         # Mode mappings for mode change commands
@@ -406,6 +410,7 @@ class CommandDispatcherService(BaseService):
                 "Mode Commands": ["engage", "disengage", "ambient"],
                 "Eye Commands": ["eye pattern", "eye test", "eye status"],
                 "Music Commands": ["play music", "stop music", "list music"],
+                "DJ Mode Commands": ["dj start", "dj stop", "dj next", "dj queue"],
                 "System Commands": ["help", "status", "reset"],
                 "Debug Commands": ["debug level", "debug trace"]
             }
@@ -432,6 +437,15 @@ class CommandDispatcherService(BaseService):
                             "    • angry     - Angled lines showing anger",
                             "    • surprised - Special pattern for surprise reactions",
                             "    • error     - X pattern indicating an error state"
+                        ])
+                    elif category == "DJ Mode Commands":
+                        help_lines.extend([f"  • {cmd}" for cmd in sorted(category_commands)])
+                        help_lines.append("\n  DJ Mode Commands:")
+                        help_lines.extend([
+                            "    • dj start        - Start DJ mode with automatic track transitions",
+                            "    • dj stop         - Stop DJ mode and return to normal playback",
+                            "    • dj next         - Skip to next track with DJ commentary",
+                            "    • dj queue <track> - Queue a specific track to play next"
                         ])
                     else:
                         help_lines.extend([f"  • {cmd}" for cmd in sorted(category_commands)])

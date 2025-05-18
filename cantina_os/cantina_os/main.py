@@ -232,6 +232,21 @@ class CantinaOS:
         if "eye" not in dispatcher.get_registered_commands():
             dispatcher.register_command_handler("eye", EventTopics.EYE_COMMAND)
         
+        # Register DJ mode commands
+        # dj_commands = {
+        #     "dj start": EventTopics.DJ_MODE_CHANGED,
+        #     "dj stop": EventTopics.DJ_MODE_CHANGED,
+        #     "dj next": EventTopics.DJ_NEXT_TRACK,
+        #     "dj queue": EventTopics.DJ_TRACK_QUEUED
+        # }
+        
+        # Register only the base "dj" command to avoid conflicts with compound command handling
+        if "dj" not in dispatcher.get_registered_commands():
+            dispatcher.register_command_handler("dj", EventTopics.DJ_MODE_CHANGED)
+        
+        # Don't register individual compound commands to prevent overlapping handlers
+        # This avoids the issue where "dj start" being processed as command="dj", args=["start", "start"]
+        
         # Compound commands
         # Music commands
         for cmd in ["play music", "stop music", "list music", "install music"]:

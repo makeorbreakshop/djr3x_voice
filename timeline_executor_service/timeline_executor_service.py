@@ -13,18 +13,17 @@ import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 
 from cantina_os.bus import EventTopics, LogLevel, ServiceStatus
-from cantina_os.base_service import BaseService
+from cantina_os.services.base import StandardService
 from cantina_os.event_payloads import (
     PlanPayload,
     PlanStartedPayload,
     StepReadyPayload,
     StepExecutedPayload,
     PlanEndedPayload,
-    MusicCommandPayload,
-    SpeechGenerationRequestPayload
+    PlanStep
 )
 
 # ---------------------------------------------------------------------------
@@ -32,112 +31,74 @@ from cantina_os.event_payloads import (
 # ---------------------------------------------------------------------------
 class _Config(BaseModel):
     """Pydantic‑validated configuration for the timeline executor service."""
-    default_ducking_level: float = 0.3  # Default ducking level (0.0-1.0)
-    ducking_fade_ms: int = 300  # Fade time in ms for ducking
-    speech_wait_timeout: float = 10.0  # Timeout for waiting for speech to complete (was 5.0)
-    layer_priorities: Dict[str, int] = {
-        "ambient": 0,     # Lowest priority
-        "foreground": 1,  # User-initiated content
-        "override": 2     # System messages, critical alerts
-    }
+    default_ducking_level: float = Field(default=0.3, description="Default ducking level (0.0-1.0)")
+    ducking_fade_ms: int = Field(default=500, description="Ducking fade time in milliseconds")
+    layer_priorities: Dict[str, int] = Field(
+        default={
+            "override": 3,
+            "foreground": 2,
+            "ambient": 1
+        },
+        description="Priority values for different timeline layers"
+    )
+    speech_wait_timeout: float = Field(default=10.0, description="Maximum seconds to wait for speech to complete")
 
 
 # ---------------------------------------------------------------------------
 # Service Implementation
 # ---------------------------------------------------------------------------
-class TimelineExecutorService(BaseService):
-    """Timeline Executor Service for DJ R3X.
+class TimelineExecutorService(StandardService):
+    """Timeline executor service for DJ R3X.
     
-    Handles layered execution of plans, audio coordination, and timing.
+    Handles layered execution of plans:
+    - override layer cancels lower layers
+    - foreground pauses ambient; ambient resumes on finish
+    - each layer can have its own plan running
+    
+    Sequence for speak steps: duck → TTS → wait → unduck
     """
 
-    def __init__(self, event_bus, config=None, name="timeline_executor_service"):
-        super().__init__(service_name=name, event_bus=event_bus)
-        
+    def __init__(
+        self,
+        event_bus,
+        config: Dict[str, Any] | None = None,
+        name: str = "timeline_executor_service",
+    ) -> None:
+        super().__init__(event_bus, config, name=name)
+
         # ----- validated configuration -----
         self._config = _Config(**(config or {}))
-        
+
         # ----- bookkeeping -----
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: List[asyncio.Task] = []
+        self._subs: List[tuple[str, Callable]] = []
         
         # ----- timeline state -----
-        self._ambient_timelines: Dict[str, asyncio.Task] = {}  # Background/ambient timelines
-        self._foreground_timelines: Dict[str, asyncio.Task] = {}  # User-driven timelines
-        self._override_timelines: Dict[str, asyncio.Task] = {}  # System/critical timelines
-        self._timeline_layers: Dict[str, str] = {}  # Maps timeline_id -> layer
-        self._paused_timelines: Dict[str, PlanPayload] = {}  # For resuming after interrupts
-        
-        # Also initialize the dictionaries used in the _run_plan and other methods
         self._layer_tasks: Dict[str, asyncio.Task] = {}  # Tasks running plans on each layer
         self._active_plans: Dict[str, PlanPayload] = {}  # Currently active plans by ID
         self._layer_events: Dict[str, asyncio.Event] = {}  # Events for pausing/resuming layers
         self._speech_end_events: Dict[str, asyncio.Event] = {}  # Events for speech completion
         
-        # Initialize layer events
-        for layer in self._config.layer_priorities:
-            self._layer_events[layer] = asyncio.Event()
-            self._layer_events[layer].set()  # Layers start unpaused
-        
-        # ----- audio state -----
-        self._audio_ducked: bool = False
-        self._current_music_playing: bool = False
-
-    # ------------------------------------------------------------------
-    # Helper methods
-    # ------------------------------------------------------------------
-    async def _emit_dict(self, topic: EventTopics, payload: BaseEventPayload) -> None:
-        """Emit a Pydantic model as a dictionary to the event bus.
-        
-        Args:
-            topic: Event topic
-            payload: Pydantic model to emit
-        """
-        try:
-            # Convert Pydantic model to dict using model_dump() method
-            if hasattr(payload, "model_dump"):
-                payload_dict = payload.model_dump()
-            else:
-                # Fallback for old pydantic versions or dict inputs
-                payload_dict = payload if isinstance(payload, dict) else payload.dict()
-                
-            await self.emit(topic, payload_dict)
-        except Exception as e:
-            self.logger.error(f"Error emitting event on topic {topic}: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error emitting event: {e}",
-                LogLevel.ERROR
-            )
-    
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
     async def _start(self) -> None:
-        """Initialize timeline service and set up subscriptions."""
-        try:
-            self._loop = asyncio.get_running_loop()
-            self._setup_subscriptions()  # Not async, don't await
-            await self._emit_status(ServiceStatus.RUNNING, "Timeline execution service started")
-            self.logger.info("TimelineExecutorService started successfully")
-        except Exception as e:
-            error_msg = f"Failed to start TimelineExecutorService: {e}"
-            self.logger.error(error_msg)
-            await self._emit_status(ServiceStatus.ERROR, error_msg)
-            raise
+        """Initialize timeline executor service and set up subscriptions."""
+        self._loop = asyncio.get_running_loop()
+        await self._setup_subscriptions()
+        
+        # Initialize layer events
+        for layer in self._config.layer_priorities:
+            self._layer_events[layer] = asyncio.Event()
+            self._layer_events[layer].set()  # Start in unpaused state
+            
+        await self._emit_status(ServiceStatus.OK, "Timeline executor service started")
 
     async def _stop(self) -> None:
         """Clean up tasks and subscriptions."""
-        # Cancel all running timelines
-        for timeline_id, task in self._ambient_timelines.items():
-            if not task.done():
-                task.cancel()
-                
-        for timeline_id, task in self._foreground_timelines.items():
-            if not task.done():
-                task.cancel()
-                
-        for timeline_id, task in self._override_timelines.items():
+        # Cancel all layer tasks
+        for layer, task in self._layer_tasks.items():
             if not task.done():
                 task.cancel()
         
@@ -147,78 +108,35 @@ class TimelineExecutorService(BaseService):
                 task.cancel()
                 
         # Wait for tasks to complete with timeout
-        all_tasks = self._tasks + list(self._ambient_timelines.values()) + \
-                   list(self._foreground_timelines.values()) + \
-                   list(self._override_timelines.values())
-        
+        all_tasks = list(self._layer_tasks.values()) + self._tasks
         if all_tasks:
             await asyncio.wait(all_tasks, timeout=5.0)
             
         self._tasks.clear()
-        self._ambient_timelines.clear()
-        self._foreground_timelines.clear()
-        self._override_timelines.clear()
-        self._timeline_layers.clear()
-        self._paused_timelines.clear()
+        self._layer_tasks.clear()
 
-        await self._emit_status(ServiceStatus.STOPPED, "Timeline execution service stopped")
+        for topic, handler in self._subs:
+            self.unsubscribe(topic, handler)
+        self._subs.clear()
+
+        await self._emit_status(ServiceStatus.OK, "Timeline executor service stopped")
 
     # ------------------------------------------------------------------
     # Subscription setup
     # ------------------------------------------------------------------
-    def _setup_subscriptions(self) -> None:
+    async def _setup_subscriptions(self) -> None:
         """Register event-handlers for timeline execution."""
-        # Subscribe to timeline management events
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.PLAN_READY, self._handle_plan_ready)
-        )
-        self._tasks.append(task)
+        await super()._setup_subscriptions()
         
-        # Listen for music state changes for coordination
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_started)
+        # Create task for main subscription
+        asyncio.create_task(
+            self._subscribe(EventTopics.PLAN_READY, self._handle_plan_ready)
         )
-        self._tasks.append(task)
         
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_stopped)
+        # Subscribe to events needed for step execution
+        asyncio.create_task(
+            self._subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_ended)
         )
-        self._tasks.append(task)
-        
-        # Subscribe to memory updates for state coordination
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated)
-        )
-        self._tasks.append(task)
-        
-        # Subscribe to speech synthesis completion for audio unduck
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_generation_complete)
-        )
-        self._tasks.append(task)
-        
-        # Subscribe to speech synthesis ended events for plan coordination
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_ended)
-        )
-        self._tasks.append(task)
-        
-        # Subscribe to direct LLM responses for automatic speech handling
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
-        )
-        self._tasks.append(task)
-        
-        # Subscribe to voice recording events to duck during microphone activity
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
-        )
-        self._tasks.append(task)
-        
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped)
-        )
-        self._tasks.append(task)
 
     # ------------------------------------------------------------------
     # Plan handling
@@ -239,7 +157,7 @@ class TimelineExecutorService(BaseService):
             # Check for existing plan on this layer and manage layer priorities
             if layer in self._layer_tasks and not self._layer_tasks[layer].done():
                 await self._emit_status(
-                    ServiceStatus.RUNNING, 
+                    ServiceStatus.OK, 
                     f"Cancelling existing plan on layer {layer}", 
                     LogLevel.INFO
                 )
@@ -435,74 +353,51 @@ class TimelineExecutorService(BaseService):
         self._speech_end_events[speech_id] = speech_event
         
         try:
-            # Start audio ducking if music is playing
-            if self._current_music_playing:
-                self.logger.info(f"Ducking audio for speech step '{step.id}'")
-                await self._emit_dict(
-                    EventTopics.AUDIO_DUCKING_START,
-                    {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
-                )
-                self._audio_ducked = True
-                
-                # Small delay to ensure ducking has started
-                await asyncio.sleep(0.15)
+            # Start audio ducking
+            await self._emit_dict(
+                EventTopics.AUDIO_DUCKING_START,
+                {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
+            )
+            
+            # Small delay to ensure ducking has started
+            await asyncio.sleep(0.1)
             
             # Request TTS generation
-            self.logger.info(f"Generating speech for step '{step.id}': '{step.text[:30]}...'")
             await self._emit_dict(
                 EventTopics.TTS_GENERATE_REQUEST,
-                SpeechGenerationRequestPayload(
-                    text=step.text,
-                    clip_id=speech_id,
-                    step_id=step.id,
-                    plan_id=plan_id,
-                    conversation_id=None  # Add conversation_id parameter
-                )
+                {
+                    "text": step.text,
+                    "clip_id": speech_id,
+                    "step_id": step.id,
+                    "plan_id": plan_id
+                }
             )
             
             # Wait for speech synthesis to complete with timeout
             try:
-                self.logger.info(f"Waiting for speech synthesis to complete (timeout: {self._config.speech_wait_timeout}s)")
                 await asyncio.wait_for(
                     speech_event.wait(),
                     timeout=self._config.speech_wait_timeout
                 )
                 speech_success = True
-                self.logger.info(f"Speech synthesis completed successfully for step '{step.id}'")
             except asyncio.TimeoutError:
                 speech_success = False
-                self.logger.error(f"Timeout waiting for speech synthesis to complete for step {step.id}")
                 await self._emit_status(
                     ServiceStatus.ERROR,
                     f"Timeout waiting for speech synthesis to complete for step {step.id}",
                     LogLevel.ERROR
                 )
-                # Force progress even on timeout
-                speech_success = True  # We'll continue with the plan despite the timeout
             
             # Add a small delay to ensure speech playback has finished
             await asyncio.sleep(0.25)
             
-            # Note: We don't unduck audio here - that's now handled by the _handle_speech_generation_complete method
-            # which responds to the SPEECH_GENERATION_COMPLETE event from ElevenLabsService
+            # Stop audio ducking
+            await self._emit_dict(
+                EventTopics.AUDIO_DUCKING_STOP,
+                {"fade_ms": self._config.ducking_fade_ms}
+            )
             
             return speech_success, {"text": step.text, "speech_id": speech_id}
-            
-        except Exception as e:
-            self.logger.error(f"Error in speech step execution: {e}")
-            
-            # Ensure we stop ducking even if there's an error
-            if self._current_music_playing and self._audio_ducked:
-                try:
-                    await self._emit_dict(
-                        EventTopics.AUDIO_DUCKING_STOP,
-                        {"fade_ms": self._config.ducking_fade_ms}
-                    )
-                    self._audio_ducked = False
-                except Exception as ducking_error:
-                    self.logger.error(f"Error stopping ducking after speech error: {ducking_error}")
-                    
-            return False, {"error": str(e)}
             
         finally:
             # Clean up the speech event
@@ -510,18 +405,30 @@ class TimelineExecutorService(BaseService):
                 del self._speech_end_events[speech_id]
 
     async def _execute_play_music_step(self, step: PlanStep) -> tuple[bool, Dict[str, Any]]:
-        """Execute a play_music step."""
-        # Emit music command
-        await self._emit_dict(
-            EventTopics.MUSIC_COMMAND,
-            {
-                "action": "play",
-                "song_query": step.genre or "",
-                "source": "voice",  # Indicate this is from voice command through timeline
-                "conversation_id": step.conversation_id if hasattr(step, "conversation_id") else None
-            }
-        )
-        return True, {"genre": step.genre}
+        """Execute a play_music step.
+        
+        Special handling for genre="stop" to stop music playback.
+        """
+        # Check for special "stop" genre value
+        if step.genre == "stop":
+            # Emit stop music command
+            await self._emit_dict(
+                EventTopics.MUSIC_COMMAND,
+                {
+                    "action": "stop"
+                }
+            )
+            return True, {"action": "stop"}
+        else:
+            # Normal play command
+            await self._emit_dict(
+                EventTopics.MUSIC_COMMAND,
+                {
+                    "action": "play",
+                    "song_query": step.genre or ""
+                }
+            )
+            return True, {"action": "play", "genre": step.genre}
 
     async def _execute_eye_pattern_step(self, step: PlanStep) -> tuple[bool, Dict[str, Any]]:
         """Execute an eye_pattern step."""
@@ -552,90 +459,20 @@ class TimelineExecutorService(BaseService):
         try:
             # Check if we have a clip_id or step_id to match
             clip_id = payload.get("clip_id", "")
-            step_id = payload.get("step_id", "")
             
-            self.logger.info(f"Received speech ended event for clip_id={clip_id}, step_id={step_id}")
-            
-            # First try to match by clip_id
-            if clip_id and clip_id in self._speech_end_events:
-                self.logger.info(f"Setting speech event for clip_id={clip_id}")
+            if clip_id in self._speech_end_events:
                 self._speech_end_events[clip_id].set()
-                return
-                
-            # Then try to match by step_id
-            if step_id and step_id in self._speech_end_events:
-                self.logger.info(f"Setting speech event for step_id={step_id}")
-                self._speech_end_events[step_id].set()
-                return
-                
-            # No exact match, try to find any waiting steps
-            if self._speech_end_events:
-                # This is a fallback for when the IDs don't match but we need to advance
-                # Consider enabling this only in development mode
-                waiting_id = next(iter(self._speech_end_events))
-                self.logger.warning(f"No exact match for speech end event; using fallback id={waiting_id}")
-                self._speech_end_events[waiting_id].set()
             else:
-                self.logger.warning(f"Received speech ended event but no waiting steps found")
-                
+                # Look for matching step_id in active plans
+                step_id = payload.get("step_id", "")
+                if step_id in self._speech_end_events:
+                    self._speech_end_events[step_id].set()
         except Exception as e:
             await self._emit_status(
                 ServiceStatus.ERROR,
                 f"Error handling speech ended: {e}",
                 LogLevel.ERROR
             )
-
-    async def _handle_music_started(self, payload: Dict[str, Any]) -> None:
-        """Handle MUSIC_PLAYBACK_STARTED events.
-        
-        Updates internal state to track when music is playing.
-        """
-        self._current_music_playing = True
-        await self._emit_status(
-            ServiceStatus.RUNNING,
-            "Music playback started - timeline coordinator informed",
-            LogLevel.INFO
-        )
-    
-    async def _handle_music_stopped(self, payload: Dict[str, Any]) -> None:
-        """Handle MUSIC_PLAYBACK_STOPPED events.
-        
-        Updates internal state to track when music is stopped.
-        """
-        self._current_music_playing = False
-        await self._emit_status(
-            ServiceStatus.RUNNING,
-            "Music playback stopped - timeline coordinator informed",
-            LogLevel.INFO
-        )
-    
-    async def _handle_memory_updated(self, payload: Dict[str, Any]) -> None:
-        """Handle MEMORY_UPDATED events.
-        
-        Updates internal state based on memory changes.
-        """
-        # Not implemented in the initial version
-        pass
-
-    # ------------------------------------------------------------------
-    # Add new handler for speech generation complete
-    # ------------------------------------------------------------------
-    async def _handle_speech_generation_complete(self, payload: Dict[str, Any]) -> None:
-        """Handle SPEECH_GENERATION_COMPLETE events from ElevenLabsService.
-        
-        This ensures audio is unducked after speech playback completes,
-        for both plan-based speech and direct LLM responses.
-        """
-        self.logger.info(f"Received speech generation complete event")
-        
-        # If we have music playing and it's currently ducked, restore it
-        if self._current_music_playing and self._audio_ducked:
-            self.logger.info("Unducking audio after speech playback complete")
-            await self._emit_dict(
-                EventTopics.AUDIO_DUCKING_STOP,
-                {"fade_ms": self._config.ducking_fade_ms}
-            )
-            self._audio_ducked = False
 
     # ------------------------------------------------------------------
     # Layer management
@@ -650,7 +487,7 @@ class TimelineExecutorService(BaseService):
                 if not task.done():
                     task.cancel()
                     await self._emit_status(
-                        ServiceStatus.RUNNING,
+                        ServiceStatus.OK,
                         f"Cancelling {other_layer} layer due to {layer} priority",
                         LogLevel.INFO
                     )
@@ -678,7 +515,7 @@ class TimelineExecutorService(BaseService):
                             )
                     
                     await self._emit_status(
-                        ServiceStatus.RUNNING,
+                        ServiceStatus.OK,
                         f"Pausing {other_layer} layer due to {layer} priority",
                         LogLevel.INFO
                     )
@@ -690,58 +527,7 @@ class TimelineExecutorService(BaseService):
             
             # Log resumption
             await self._emit_status(
-                ServiceStatus.RUNNING,
+                ServiceStatus.OK,
                 f"Resuming {layer} layer",
                 LogLevel.INFO
-            )
-
-    # ------------------------------------------------------------------
-    # Add new handler for LLM responses (direct speech)
-    # ------------------------------------------------------------------
-    async def _handle_llm_response(self, payload: Dict[str, Any]) -> None:
-        """Handle direct LLM_RESPONSE events.
-        
-        Treats direct speech responses as automatic foreground activities
-        with appropriate audio ducking.
-        """
-        # Only duck if this is a direct speech response (not a filler)
-        response_type = payload.get("response_type", "")
-        if response_type == "filler":
-            self.logger.info("Received filler response, not ducking audio")
-            return
-        
-        # Only duck if we have music playing and aren't already ducked
-        if self._current_music_playing and not self._audio_ducked:
-            self.logger.info("Ducking audio for direct LLM response")
-            await self._emit_dict(
-                EventTopics.AUDIO_DUCKING_START,
-                {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
-            )
-            self._audio_ducked = True
-
-    # ------------------------------------------------------------------
-    # Add handlers for voice activity
-    # ------------------------------------------------------------------
-    async def _handle_voice_listening_started(self, payload: Dict[str, Any]) -> None:
-        """Handle VOICE_LISTENING_STARTED events.
-        
-        Ducks audio while microphone is active.
-        """
-        if self._current_music_playing and not self._audio_ducked:
-            self.logger.info("Ducking audio for microphone activity")
-            await self._emit_dict(
-                EventTopics.AUDIO_DUCKING_START,
-                {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
-            )
-            self._audio_ducked = True
-
-    async def _handle_voice_listening_stopped(self, payload: Dict[str, Any]) -> None:
-        """Handle VOICE_LISTENING_STOPPED events.
-        
-        Note: We don't unduck here as speech response may follow.
-        The _handle_speech_generation_complete will handle unducking
-        after any response speech is complete.
-        """
-        # We intentionally don't unduck here since a speech response might follow
-        # The full conversation flow is: mic → LLM response → unduck
-        self.logger.info("Voice recording stopped, maintaining audio duck for potential response") 
+            ) 

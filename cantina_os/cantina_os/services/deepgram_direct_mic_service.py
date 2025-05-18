@@ -13,7 +13,7 @@ import os
 from dotenv import load_dotenv
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents, Microphone
 
-from cantina_os.services.service_template import ServiceTemplate
+from cantina_os.base_service import BaseService
 from cantina_os.core.event_bus import EventBus
 from cantina_os.event_topics import EventTopics
 from cantina_os.event_payloads import (
@@ -35,7 +35,7 @@ from cantina_os.event_payloads import (
 #     TRANSCRIPTION_METRICS
 # )
 
-class DeepgramDirectMicService(ServiceTemplate):
+class DeepgramDirectMicService(BaseService):
     """
     Service that directly captures and streams microphone audio to Deepgram.
     
@@ -53,7 +53,11 @@ class DeepgramDirectMicService(ServiceTemplate):
         config: Optional[Dict[str, Any]] = None,
         logger: Optional[logging.Logger] = None
     ):
-        super().__init__(event_bus, config or {}, logger, name="deepgram_direct_mic")
+        """Initialize the service following BaseService pattern."""
+        super().__init__(service_name="deepgram_direct_mic", event_bus=event_bus, logger=logger)
+        
+        # Store config
+        self._config = config or {}
         
         # Store event loop for thread-safe operations
         self._event_loop = asyncio.get_event_loop()

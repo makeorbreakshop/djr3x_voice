@@ -14,7 +14,7 @@ import time
 from pydantic import BaseModel, ValidationError, Field
 
 from cantina_os.bus import EventTopics, LogLevel, ServiceStatus
-from ..base import StandardService
+from cantina_os.base_service import BaseService
 from cantina_os.event_payloads import (
     IntentPayload, 
     PlanPayload,
@@ -51,14 +51,14 @@ class _Config(BaseModel):
 # ---------------------------------------------------------------------------
 # Service Implementation
 # ---------------------------------------------------------------------------
-class BrainService(StandardService):
+class BrainService(BaseService):
     """Brain service for DJ R3X.
     
     Handles intent processing, music commands, track intro generation, and DJ mode.
     """
 
     def __init__(self, event_bus, config=None, name="brain_service"):
-        super().__init__(event_bus, config, name=name)
+        super().__init__(service_name=name, event_bus=event_bus)
         
         # ----- validated configuration -----
         self._config = _Config(**(config or {}))
@@ -131,7 +131,25 @@ class BrainService(StandardService):
                 f"Error emitting event: {e}",
                 LogLevel.ERROR
             )
-    
+
+    async def unsubscribe(self, topic: EventTopics, handler) -> None:
+        """Unsubscribe a handler from an event topic.
+        
+        Args:
+            topic: Event topic to unsubscribe from
+            handler: Handler function to remove
+        """
+        try:
+            # Get the event bus instance
+            if hasattr(self, "_event_bus") and self._event_bus:
+                # Remove the listener from the event bus
+                self._event_bus.remove_listener(topic, handler)
+                self.logger.debug(f"Unsubscribed handler from topic: {topic}")
+            else:
+                self.logger.warning(f"Cannot unsubscribe from {topic}: No event bus")
+        except Exception as e:
+            self.logger.error(f"Error unsubscribing from {topic}: {e}")
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -182,26 +200,27 @@ class BrainService(StandardService):
         task = asyncio.create_task(self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_started))
         self._tasks.append(task)
         
-        # Keep INTENT_DETECTED for legacy/other intents
-        task = asyncio.create_task(self.subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected))
-        self._tasks.append(task)
-        
-        # Also subscribe to LLM responses for track intro handling
+        # Subscribe to LLM responses for monitoring
         task = asyncio.create_task(self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response))
         self._tasks.append(task)
         
-        # Subscribe to memory updates for reactive capabilities
+        # Subscribe to regular intent events (though mostly using direct paths now)
+        task = asyncio.create_task(self.subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected))
+        self._tasks.append(task)
+        
+        # Subscribe to memory updates
         task = asyncio.create_task(self.subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated))
         self._tasks.append(task)
         
+        # Subscribe to memory value responses
         task = asyncio.create_task(self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory_value))
         self._tasks.append(task)
         
-        # Subscribe to music library updates to keep track list in sync
+        # Subscribe to music library updates
         task = asyncio.create_task(self.subscribe(EventTopics.MUSIC_LIBRARY_UPDATED, self._handle_music_library_updated))
         self._tasks.append(task)
         
-        # DJ mode specific events
+        # Subscribe to DJ mode topics
         task = asyncio.create_task(self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed))
         self._tasks.append(task)
         
@@ -214,14 +233,14 @@ class BrainService(StandardService):
         task = asyncio.create_task(self.subscribe(EventTopics.DJ_TRACK_QUEUED, self._handle_dj_track_queued))
         self._tasks.append(task)
         
-        # Subscribe to cached speech events
+        # Listen for cached speech events
         task = asyncio.create_task(self.subscribe(EventTopics.SPEECH_CACHE_READY, self._handle_speech_cache_ready))
         self._tasks.append(task)
         
         task = asyncio.create_task(self.subscribe(EventTopics.SPEECH_CACHE_ERROR, self._handle_speech_cache_error))
         self._tasks.append(task)
         
-        # Fetch available tracks at startup
+        # Fetch available tracks on start
         await self._fetch_available_tracks()
 
     async def _handle_music_library_updated(self, payload: Dict[str, Any]) -> None:
@@ -888,12 +907,98 @@ class BrainService(StandardService):
     # DJ Mode handlers
     # ------------------------------------------------------------------
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ mode activation/deactivation.
+        """Handle DJ mode activation/deactivation and DJ commands.
         
         Args:
-            payload: Event payload with dj_mode_active flag
+            payload: Event payload with dj_mode_active flag or command info
         """
         try:
+            # Check if this is a CLI command or a mode change event
+            command = payload.get("command")
+            subcommand = payload.get("subcommand")
+            args = payload.get("args", [])
+            
+            # Handle CLI command (dj start, dj stop, etc.)
+            if command == "dj":
+                # Default to "start" if no subcommand provided
+                if not subcommand and not args:
+                    action = "start"
+                # Get the subcommand or first arg as the action
+                elif subcommand:
+                    action = subcommand
+                elif args:
+                    action = args[0]
+                else:
+                    action = "start"
+                
+                self.logger.info(f"Processing DJ command: {action}")
+                
+                if action == "start":
+                    # Start DJ mode
+                    await self._emit_dict(
+                        EventTopics.DJ_MODE_CHANGED,
+                        {"dj_mode_active": True}
+                    )
+                    
+                    # Select and play an initial track when DJ mode is activated
+                    import random
+                    if self._music_library.tracks:
+                        # Get available tracks that aren't in the recently played list
+                        available_tracks = [t for t in self._music_library.tracks 
+                                           if t.name not in self._recently_played_tracks]
+                        
+                        # If we've exhausted the library, just use all tracks
+                        if not available_tracks:
+                            available_tracks = self._music_library.tracks
+                            
+                        # Select a random track
+                        initial_track = random.choice(available_tracks).name
+                        
+                        self.logger.info(f"Starting DJ Mode with initial track: {initial_track}")
+                        
+                        # Play the selected track
+                        await self._emit_dict(
+                            EventTopics.MUSIC_COMMAND,
+                            {
+                                "action": "play",
+                                "song_query": initial_track,
+                                "source": "dj"
+                            }
+                        )
+                    else:
+                        self.logger.warning("DJ Mode activated but no tracks available in library")
+                    return
+                    
+                elif action == "stop":
+                    # Stop DJ mode
+                    await self._emit_dict(
+                        EventTopics.DJ_MODE_CHANGED,
+                        {"dj_mode_active": False}
+                    )
+                    return
+                    
+                elif action == "next":
+                    # Skip to next track
+                    await self._emit_dict(
+                        EventTopics.DJ_NEXT_TRACK,
+                        {"source": "cli"}
+                    )
+                    return
+                    
+                elif action == "queue":
+                    # Queue a specific track if provided
+                    track_name = " ".join(args[1:]) if len(args) > 1 else None
+                    if not track_name:
+                        self.logger.error("No track specified for dj queue command")
+                        return
+                        
+                    await self._emit_dict(
+                        EventTopics.DJ_TRACK_QUEUED,
+                        {"track_name": track_name, "source": "cli"}
+                    )
+                    return
+            
+            # Handle mode change event
             is_active = payload.get("dj_mode_active", False)
             
             # Update service state
@@ -1066,7 +1171,11 @@ class BrainService(StandardService):
                 self.logger.info("DJ next track requested, but DJ Mode is not active")
                 return
             
-            current_track = self._last_track_meta.get("track_name", "Unknown Track") if self._last_track_meta else "Unknown Track"
+            # Get current track from payload or use last known track
+            current_track = payload.get("current_track")
+            if not current_track and self._last_track_meta:
+                current_track = self._last_track_meta.get("title", "Unknown Track")
+            
             self.logger.info(f"DJ next track requested. Current track: {current_track}")
             
             # Select the next track to play
@@ -1108,10 +1217,13 @@ class BrainService(StandardService):
             
             # Update memory
             self._add_to_recently_played(next_track)
-            await self.emit(EventTopics.MEMORY_SET, {
-                "key": "dj_track_history",
-                "value": self._recently_played_tracks
-            })
+            await self._emit_dict(
+                EventTopics.MEMORY_SET, 
+                {
+                    "key": "dj_track_history",
+                    "value": self._recently_played_tracks
+                }
+            )
             
         except Exception as e:
             self.logger.error(f"Error handling DJ next track: {e}")
@@ -1125,23 +1237,54 @@ class BrainService(StandardService):
         """Handle DJ_TRACK_QUEUED events from MusicControllerService.
         
         Args:
-            payload: Event payload with track_name and source
+            payload: Event payload with track_name and optionally source
         """
         try:
-            track_name = payload.get("track_name", "Unknown Track")
-            source = payload.get("source", "unknown")
+            # Only proceed if DJ mode is active
+            if not self._dj_mode_active:
+                self.logger.info("Track queued, but DJ Mode is not active")
+                return
             
+            # Extract track name from payload
+            if not isinstance(payload, dict) or "track_name" not in payload:
+                self.logger.error(f"Invalid payload for DJ_TRACK_QUEUED: {payload}")
+                return
+            
+            track_name = payload["track_name"]
+            source = payload.get("source", "cli")  # Default source is CLI
+            
+            # Update our local state
+            self._dj_next_track = track_name
             self.logger.info(f"Track queued for DJ mode: {track_name} (source: {source})")
             
-            # Store the queued track for next transition
-            self._dj_next_track = track_name
+            # If we already have a transition plan, mark it as invalid
+            # so we'll generate a new one with the queued track
+            if self._dj_transition_plan_ready:
+                self._dj_transition_plan_ready = False
+                self.logger.info("Invalidated existing transition plan to use queued track")
             
-            # Mark that we don't have a transition plan ready yet
-            # This will be created when we get TRACK_ENDING_SOON
-            self._dj_transition_plan_ready = False
+            # Generate a basic track intro right away if appropriate
+            current_track = None
+            if self._last_track_meta:
+                current_track = self._last_track_meta.get("title", None)
+            
+            if current_track:
+                # For manual queued tracks, create a cache entry in advance
+                asyncio.create_task(
+                    self._request_cached_dj_commentary(current_track, track_name)
+                )
+            
+            # Add to history once it actually plays
+            # We don't add it now because it might never play if the user
+            # queues multiple tracks before the current one finishes
             
         except Exception as e:
             self.logger.error(f"Error handling DJ track queued: {e}")
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error handling queued track: {e}",
+                LogLevel.ERROR
+            )
     
     async def _select_next_dj_track(self, current_track: str) -> Optional[str]:
         """Select the next track for DJ mode based on intelligent sequencing.

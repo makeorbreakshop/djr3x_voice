@@ -32,7 +32,7 @@ from cantina_os.event_payloads import (
     StandardCommandPayload
 )
 from cantina_os.event_topics import EventTopics
-from cantina_os.services.simple_eye_adapter import SimpleEyeAdapter
+from .simple_eye_adapter import SimpleEyeAdapter
 
 
 class EyePattern(str, Enum):

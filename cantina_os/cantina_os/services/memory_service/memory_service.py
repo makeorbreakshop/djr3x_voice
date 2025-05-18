@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from pydantic import BaseModel, ValidationError
 
 from cantina_os.bus import EventTopics, LogLevel, ServiceStatus
-from ..base import StandardService
+from cantina_os.base_service import BaseService
 from cantina_os.event_payloads import BaseEventPayload, IntentPayload
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ class MemoryUpdatedPayload(BaseEventPayload):
 # ---------------------------------------------------------------------------
 # Service Implementation
 # ---------------------------------------------------------------------------
-class MemoryService(StandardService):
+class MemoryService(BaseService):
     """Working memory service for DJ R3X.
     
     Provides access to state variables, chat history, and emits change events.
@@ -52,7 +52,7 @@ class MemoryService(StandardService):
     """
 
     def __init__(self, event_bus, config=None, name="memory_service"):
-        super().__init__(event_bus, config, name=name)
+        super().__init__(service_name=name, event_bus=event_bus)
 
         # ----- validated configuration -----
         self._config = _Config(**(config or {}))
@@ -335,7 +335,8 @@ class MemoryService(StandardService):
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
         """Handle DJ_MODE_CHANGED event."""
         try:
-            if isinstance(payload, dict) and "dj_mode_active" in payload:
+            # Handle direct mode change payload with dj_mode_active flag
+            if "dj_mode_active" in payload:
                 # Update DJ mode state
                 is_active = payload["dj_mode_active"]
                 await self.set("dj_mode_active", is_active)
@@ -347,7 +348,23 @@ class MemoryService(StandardService):
                     await self.set("dj_next_track", None)
                     await self.set("dj_track_history", [])
                     await self.set("dj_transition_style", None)
-                    
+            
+            # Handle CLI command payload format (e.g., from "dj start" command)
+            elif "command" in payload and payload["command"] == "dj":
+                # Extract action from args or use default "start"
+                args = payload.get("args", [])
+                action = args[0] if args else "start"
+                
+                # Set state based on action
+                is_active = (action == "start")
+                await self.set("dj_mode_active", is_active)
+                self.logger.info(f"DJ Mode state updated via CLI: {is_active}")
+                
+                # Clear other DJ state if mode is deactivated
+                if not is_active:
+                    await self.set("dj_next_track", None)
+                    await self.set("dj_track_history", [])
+                    await self.set("dj_transition_style", None)
             else:
                 self.logger.error(f"Invalid payload for DJ_MODE_CHANGED: {payload}")
                 await self._emit_status(
