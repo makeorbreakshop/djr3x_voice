@@ -6,6 +6,7 @@ import threading
 import queue
 from enum import Enum
 from typing import Dict, Optional, Union, List, Any
+import uuid
 
 import httpx
 from pydantic import BaseModel, ValidationError, Field
@@ -791,141 +792,134 @@ class ElevenLabsService(BaseService):
             self.logger.error(f"Error executing system command: {e}")
             raise 
 
-    async def _handle_tts_request(self, payload: Dict[str, Any]) -> None:
-        """Handle TTS request events from CachedSpeechService.
-        
-        Unlike regular speech generation requests, these don't play the audio immediately
-        but return the raw audio data to the requester.
+    async def _process_audio_for_caching(self, audio_bytes, request_id, sample_rate=None):
+        """Process audio data for caching requests from CachedSpeechService.
         
         Args:
-            payload: The request payload containing text and other parameters
+            audio_bytes: Raw MP3 audio data
+            request_id: The request ID for tracking
+            sample_rate: Optional sample rate override
         """
         try:
-            text = payload.get("text")
-            request_id = payload.get("request_id")
-            non_streaming = payload.get("non_streaming", False)
-            source = payload.get("source", "unknown")
+            # Convert MP3 to numpy array
+            import io
+            from pydub import AudioSegment
+            import numpy as np
             
-            if not text or not request_id:
-                self.logger.error("Invalid TTS_REQUEST payload: missing text or request_id")
-                await self._emit_dict(
-                    EventTopics.TTS_AUDIO_DATA,
-                    {
-                        "request_id": request_id,
-                        "success": False,
-                        "error": "Missing required parameters: text or request_id"
-                    }
-                )
-                return
-                
-            self.logger.info(f"Received TTS request from {source}, text length: {len(text)}, request_id: {request_id}")
+            # Load MP3 data
+            audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
             
-            # Use configured voice settings or defaults
-            voice_id = payload.get("voice_id", self._config.voice_id)
-            model_id = payload.get("model_id", self._config.model_id)
-            stability = payload.get("stability", self._config.stability)
-            similarity_boost = payload.get("similarity_boost", self._config.similarity_boost)
-            speed = payload.get("speed", self._config.speed)
+            # Convert to numpy array
+            samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
+            samples = samples / (2**(audio.sample_width * 8 - 1))  # Normalize
             
-            # Generate speech (non-streaming)
-            self.logger.info(f"Generating non-streaming audio for caching, request_id: {request_id}")
-            audio_data = await self._generate_speech(
-                text=text,
-                voice_id=voice_id,
-                model_id=model_id,
-                stability=stability,
-                similarity_boost=similarity_boost,
-                speed=speed
+            # Get sample rate
+            final_sample_rate = sample_rate or audio.frame_rate
+            
+            # Return the processed audio data through the event system
+            await self.emit(
+                EventTopics.TTS_AUDIO_DATA,
+                {
+                    "request_id": request_id,
+                    "audio_data": samples.tobytes(),
+                    "sample_rate": final_sample_rate,
+                    "success": True
+                }
+            )
+        except Exception as e:
+            self.logger.error(f"Error converting MP3 to numpy array: {e}")
+            await self.emit(
+                EventTopics.TTS_AUDIO_DATA,
+                {
+                    "request_id": request_id,
+                    "success": False,
+                    "error": str(e)
+                }
             )
             
-            if not audio_data:
-                error_msg = "Failed to generate TTS audio: No data returned"
-                self.logger.error(error_msg)
-                await self._emit_dict(
-                    EventTopics.TTS_AUDIO_DATA,
-                    {
-                        "request_id": request_id,
-                        "success": False,
-                        "error": error_msg
-                    }
-                )
-                return
+    async def _handle_tts_request(self, payload: Dict[str, Any]) -> None:
+        """Handle TTS request events from other services."""
+        try:
+            text = payload.get("text")
+            request_id = payload.get("request_id", str(uuid.uuid4()))
+            source = payload.get("source", "unknown")
+            non_streaming = payload.get("non_streaming", False)  # Flag for cacheable requests
+            
+            self.logger.info(f"Received TTS request from {source}, text length: {len(text) if text else 0}, request_id: {request_id}")
+            
+            if non_streaming:
+                self.logger.info(f"Generating non-streaming audio for caching, request_id: {request_id}")
                 
-            # This part is critical - convert MP3 to raw PCM for the CachedSpeechService
-            # We need to decode the MP3 to get sample rate and raw audio data
-            try:
-                import io
-                import soundfile as sf
-                import sounddevice as sd
-                import tempfile
-                import numpy as np
+                # Get voice settings from config
+                voice_id = self._config.voice_id
+                model_id = self._config.model_id
+                speed = self._config.speed
                 
-                # Create a temporary file to hold the MP3
-                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_file:
-                    tmp_file.write(audio_data)
-                    tmp_file_path = tmp_file.name
+                self.logger.info(f"Sending TTS request to ElevenLabs for text length: {len(text)} with speed {speed}")
                 
-                # Convert MP3 to numpy array using soundfile
+                # Make request to ElevenLabs for complete audio file
                 try:
-                    # Use sf.read to get the data and sample rate
-                    data, sample_rate = sf.read(tmp_file_path)
-                    
-                    # Remove the temporary file
-                    import os
-                    os.unlink(tmp_file_path)
-                    
-                    # Calculate duration in milliseconds
-                    duration_ms = int((len(data) / sample_rate) * 1000)
-                    
-                    # Ensure the data is float32
-                    if data.dtype != np.float32:
-                        data = data.astype(np.float32)
-                    
-                    # Send back the audio data and metadata
-                    await self._emit_dict(
-                        EventTopics.TTS_AUDIO_DATA,
-                        {
-                            "request_id": request_id,
-                            "success": True,
-                            "audio_data": data.tobytes(),  # Raw PCM data as bytes
-                            "sample_rate": sample_rate,
-                            "duration_ms": duration_ms,
-                            "channels": data.shape[1] if len(data.shape) > 1 else 1,
-                            "dtype": str(data.dtype)
-                        }
+                    import elevenlabs
+                    audio_bytes = elevenlabs.generate(
+                        text=text,
+                        voice=voice_id,
+                        model=model_id
                     )
                     
-                    self.logger.info(f"Successfully sent TTS audio data, request_id: {request_id}, duration: {duration_ms}ms")
+                    self.logger.info(f"Successfully generated speech, received {len(audio_bytes)} bytes")
+                    
+                    # Process the audio for caching
+                    await self._process_audio_for_caching(audio_bytes, request_id)
                     
                 except Exception as e:
-                    self.logger.error(f"Error converting MP3 to numpy array: {e}")
-                    await self._emit_dict(
+                    self.logger.error(f"Error generating speech: {e}")
+                    await self.emit(
                         EventTopics.TTS_AUDIO_DATA,
                         {
                             "request_id": request_id,
                             "success": False,
-                            "error": f"Error converting audio format: {str(e)}"
+                            "error": f"Error generating speech: {str(e)}"
                         }
                     )
-            
-            except ImportError as e:
-                self.logger.error(f"Required libraries not available for audio conversion: {e}")
-                await self._emit_dict(
-                    EventTopics.TTS_AUDIO_DATA,
-                    {
-                        "request_id": request_id,
-                        "success": False,
-                        "error": f"Required libraries not available: {str(e)}"
-                    }
-                )
+            else:
+                # Standard streaming playback - existing code here
+                pass
                 
         except Exception as e:
             self.logger.error(f"Error handling TTS request: {e}")
-            await self._emit_dict(
-                EventTopics.TTS_AUDIO_DATA,
+            await self.emit(
+                EventTopics.TTS_ERROR,
                 {
+                    "error": str(e),
                     "request_id": payload.get("request_id", "unknown"),
-                    "success": False,
-                    "error": f"Error in TTS processing: {str(e)}"
+                    "source": payload.get("source", "unknown")
+                }
+            )
+            
+    async def _emit_dict(self, topic: EventTopics, payload: Any) -> None:
+        """Emit a Pydantic model or dict as a dictionary to the event bus.
+        
+        Args:
+            topic: The event topic
+            payload: The payload to emit (Pydantic model or dict)
+        """
+        try:
+            # Convert Pydantic model to dict using model_dump() method
+            if hasattr(payload, "model_dump"):
+                payload_dict = payload.model_dump()
+            else:
+                # Fallback for old pydantic versions or dict inputs
+                payload_dict = payload if isinstance(payload, dict) else payload.dict()
+                
+            await self.emit(topic, payload_dict)
+        except Exception as e:
+            self.logger.error(f"Error emitting event on topic {topic}: {e}")
+            await self.emit(
+                EventTopics.SERVICE_STATUS,
+                {
+                    "service_name": self.name,
+                    "status": ServiceStatus.ERROR,
+                    "message": f"Error emitting event: {e}",
+                    "log_level": LogLevel.ERROR
                 }
             ) 

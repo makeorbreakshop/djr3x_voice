@@ -9,6 +9,7 @@ interface and ensures proper event-driven communication.
 import logging
 from typing import Dict, Tuple, Optional, Any, List
 import asyncio
+import warnings
 
 from pyee.asyncio import AsyncIOEventEmitter
 
@@ -69,7 +70,7 @@ class CommandDispatcherService(BaseService):
             's': 'stop music',
             'stop': 'stop music',
             'i': 'idle',  # Added shortcut for idle command
-            'dj': 'dj start',  # Added DJ mode shortcuts
+            'dj': 'dj start',  # Updated DJ mode shortcuts to use full command strings
             'djs': 'dj stop',
             'djn': 'dj next',
             'djq': 'dj queue'
@@ -136,183 +137,236 @@ class CommandDispatcherService(BaseService):
         
     def register_command_handler(self, command: str, event_topic: str) -> None:
         """
-        Register a handler for a specific command
+        [DEPRECATED] Register a handler for a specific command
+        Use register_command() instead which includes service context.
         
         Args:
             command: The command name (e.g., "eye", "music")
             event_topic: The event topic to send the command to
         """
+        warnings.warn(
+            "register_command_handler is deprecated. Use register_command with service context instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.command_handlers[command.lower()] = event_topic
         self.logger.debug(f"Registered handler for command '{command}' to topic '{event_topic}'")
 
     def register_compound_command(self, command: str, event_topic: str) -> None:
         """
-        Register a handler for a compound command
+        [DEPRECATED] Register a handler for a compound command
+        Use register_command() instead which includes service context.
         
         Args:
             command: The compound command (e.g., "eye pattern", "play music")
             event_topic: The event topic to send the command to
         """
+        warnings.warn(
+            "register_compound_command is deprecated. Use register_command with service context instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.compound_commands[command.lower()] = event_topic
         self.logger.debug(f"Registered handler for compound command '{command}' to topic '{event_topic}'")
         
-    async def _handle_command(self, payload: Dict[str, Any]) -> None:
+    def register_command(self, command: str, service_name: str, event_topic: str) -> None:
         """
-        Handle an incoming CLI command
+        Register a command with service name and topic
         
-        This is the central entry point for all commands. It:
-        1. Parses the command and arguments
-        2. Expands shortcuts
-        3. Handles special cases (mode commands, etc.)
-        4. Routes to the appropriate handler via events
+        This is the preferred method for command registration as it tracks both
+        the event topic and the service that will handle the command, enabling
+        proper payload transformation.
         
         Args:
-            payload: The command payload from CLI service
+            command: The command string (e.g., "eye", "dj start")
+            service_name: Name of the service that will handle this command
+            event_topic: The event topic to send the command to
         """
-        try:
-            self.logger.debug(f"Handling command payload: {payload}")
+        command = command.lower()
+        
+        if " " in command:
+            # Compound command (e.g., "dj start")
+            self.compound_commands[command] = {
+                "service": service_name,
+                "topic": event_topic
+            }
+            self.logger.debug(f"Registered compound command '{command}' to service '{service_name}' with topic '{event_topic}'")
+        else:
+            # Basic command (e.g., "eye")
+            self.command_handlers[command] = {
+                "service": service_name,
+                "topic": event_topic
+            }
+            self.logger.debug(f"Registered command '{command}' to service '{service_name}' with topic '{event_topic}'")
             
-            # Extract command information
-            if not isinstance(payload, dict):
-                raise ValueError(f"Invalid command payload type: {type(payload)}")
-                
-            # First check if this is a CliCommandPayload
-            command = payload.get("command", "").lower()
-            args = payload.get("args", [])
-            raw_input = payload.get("raw_input", "")
-            conversation_id = payload.get("conversation_id")
+    def _transform_payload_for_service(self, service_name: str, command: str, args: list, raw_input: str) -> dict:
+        """
+        Transform command payload to match service expectations
+        
+        Args:
+            service_name: The target service
+            command: The command string
+            args: Command arguments
+            raw_input: Raw command input
             
-            if not command and not raw_input:
-                self.logger.warning("Empty command received")
-                return
+        Returns:
+            Transformed payload suitable for the target service
+        """
+        # DJ mode commands
+        if service_name == "brain_service" and command.startswith("dj"):
+            if command == "dj start":
+                return {"dj_mode_active": True}
+            elif command == "dj stop":
+                return {"dj_mode_active": False}
+            elif command == "dj next":
+                return {"command": command, "args": args, "raw_input": raw_input}
+            elif command == "dj queue":
+                track_name = " ".join(args) if args else ""
+                return {"command": command, "track_name": track_name, "raw_input": raw_input}
                 
-            # Convert to StandardCommandPayload for consistent processing
-            if raw_input:
-                # Create directly from raw input when available (preferred)
-                cmd_payload = StandardCommandPayload.from_raw_input(
-                    raw_input, 
-                    conversation_id
-                )
-            else:
-                # Fall back to legacy format if needed
-                cmd_payload = StandardCommandPayload.from_legacy_format(payload)
+        # Mode commands
+        elif service_name == "mode_manager":
+            mode_map = {
+                "engage": "INTERACTIVE",
+                "disengage": "IDLE",
+                "ambient": "AMBIENT",
+                "idle": "IDLE"
+            }
+            if command in mode_map:
+                return {"mode": mode_map[command]}
                 
-            self.logger.debug(f"Standardized command payload: {cmd_payload}")
-            
-            # Process shortcuts
-            base_command = cmd_payload.command
-            if base_command in self.shortcuts:
-                # Handle shortcut by updating the cmd_payload with expanded command
-                expanded = self.shortcuts[base_command]
-                self.logger.debug(f"Expanding shortcut '{base_command}' to '{expanded}'")
+        # Music commands
+        elif service_name == "music_controller":
+            if command == "play music":
+                track_query = " ".join(args) if args else ""
+                return {
+                    "action": "play",
+                    "song_query": track_query,
+                    "source": "command"
+                }
+            elif command == "stop music":
+                return {"action": "stop"}
+            elif command == "list music":
+                return {"action": "list"}
                 
-                # Re-parse with the expanded command
-                if " " in expanded:  # For compound command shortcuts (e.g., 'l' -> 'list music')
-                    cmd_payload = StandardCommandPayload.from_raw_input(
-                        expanded + (" " + " ".join(cmd_payload.args) if cmd_payload.args else ""),
-                        conversation_id
-                    )
-                else:  # For simple command shortcuts (e.g., 'h' -> 'help')
-                    cmd_payload = StandardCommandPayload(
-                        command=expanded,
-                        subcommand=cmd_payload.subcommand,
-                        args=cmd_payload.args,
-                        raw_input=raw_input,
-                        conversation_id=cmd_payload.conversation_id
-                    )
-                    
-                self.logger.debug(f"Expanded command payload: {cmd_payload}")
-            
-            # Handle mode commands specially (engage, disengage, ambient)
-            if cmd_payload.command in self.mode_commands:
-                mode = self.mode_commands[cmd_payload.command]
-                self.logger.info(f"Mode command: {cmd_payload.command} -> {mode}")
+        # Eye commands
+        elif service_name == "eye_controller":
+            if command == "eye pattern":
+                pattern = args[0] if args else "idle"
+                return {"pattern": pattern}
+            elif command == "eye test":
+                return {"action": "test"}
+            elif command == "eye status":
+                return {"action": "status"}
                 
-                await self.emit(
-                    EventTopics.SYSTEM_SET_MODE_REQUEST,
-                    {
-                        "mode": mode,
-                        "conversation_id": cmd_payload.conversation_id
-                    }
-                )
-                return
-            
-            # Handle compound commands first
-            full_command = cmd_payload.get_full_command()
-            if full_command in self.compound_commands:
-                topic = self.compound_commands[full_command]
-                self.logger.info(f"Routing compound command: '{full_command}' to topic: {topic}")
-                
-                # Split the compound command into parts
-                parts = full_command.split()
-                base_command = parts[0]
-                subcommand = parts[1] if len(parts) > 1 else None
-                
-                # Any remaining args from the original command
-                remaining_args = cmd_payload.args
-                
-                # Construct the proper payload
-                command_payload = {
-                    "command": base_command,
-                    "subcommand": subcommand,
+        # Debug commands
+        elif service_name == "debug_service":
+            if command.startswith("debug"):
+                subcommand = args[0] if args else ""
+                remaining_args = args[1:] if len(args) > 1 else []
+                return {
+                    "level": subcommand,
                     "args": remaining_args,
-                    "raw_input": cmd_payload.raw_input,
-                    "conversation_id": cmd_payload.conversation_id
+                    "raw_input": raw_input
                 }
                 
-                # Send the properly structured payload
-                await self.emit(topic, command_payload)
-                return
+        # Command dispatcher's own commands
+        elif service_name == "command_dispatcher":
+            if command in ["help", "status", "reset"]:
+                return {
+                    "command": command,
+                    "args": args,
+                    "raw_input": raw_input
+                }
                 
-            # Handle basic commands
-            if cmd_payload.command in self.command_handlers:
-                topic = self.command_handlers[cmd_payload.command]
-                self.logger.info(f"Routing command: '{cmd_payload.command}' to topic: {topic}")
-                
-                # Special handling for system commands
-                if (topic == EventTopics.SYSTEM_SET_MODE_REQUEST and 
-                    cmd_payload.command in self.mode_commands):
-                    # Already handled above
-                    return
-                
-                # Special handling for "eye" command without subcommand
-                if cmd_payload.command == "eye" and not cmd_payload.subcommand and not cmd_payload.args:
-                    await self._send_error("Eye command requires a subcommand: pattern, test, or status")
-                    return
+        # Default format for other services
+        return {
+            "command": command,
+            "args": args,
+            "raw_input": raw_input
+        }
+        
+    async def _handle_command(self, payload: Dict[str, Any]) -> None:
+        """Handle a CLI command.
+        
+        Args:
+            payload: Command payload with command string and args
+        """
+        try:
+            # Extract command and args
+            raw_input = payload.get("raw_input", "").strip().lower()
+            command = payload.get("command", "").lower()
+            args = payload.get("args", [])
+            
+            # First check for compound commands (e.g. "dj start", "play music")
+            compound_cmd = None
+            for cmd in self.compound_commands:
+                if raw_input.startswith(cmd):
+                    compound_cmd = cmd
+                    break
                     
-                # Send StandardCommandPayload
-                await self.emit(topic, cmd_payload.model_dump())
-                return
+            if compound_cmd:
+                # Found a matching compound command
+                service_info = self.compound_commands[compound_cmd]
                 
-            # Special case for "play music N" pattern
-            if raw_input and raw_input.strip().lower().startswith("play music "):
-                parts = raw_input.strip().split()
-                track_index = None
+                # Get service info and topic based on new or old registration format
+                if isinstance(service_info, dict):
+                    service_name = service_info["service"]
+                    topic = service_info["topic"]
+                else:
+                    # Legacy format without service name
+                    service_name = "unknown"
+                    topic = service_info
                 
-                # Extract track number
-                if len(parts) > 2 and parts[2].isdigit():
-                    track_index = parts[2]
-                    
-                self.logger.info(f"Special case: 'play music {track_index}'")
+                # Get any remaining args after the compound command
+                remaining_input = raw_input[len(compound_cmd):].strip()
+                remaining_args = remaining_input.split() if remaining_input else []
                 
-                # Construct and emit a music command payload
-                await self.emit(
-                    EventTopics.MUSIC_COMMAND,
-                    {
-                        "command": "play",
-                        "args": ["music", track_index] if track_index else ["music"],
-                        "raw_input": raw_input,
-                        "conversation_id": conversation_id
-                    }
+                # Transform the payload based on service expectations
+                cmd_payload = self._transform_payload_for_service(
+                    service_name,
+                    compound_cmd,
+                    remaining_args,
+                    raw_input
                 )
+                
+                # Emit the command event
+                self.logger.info(f"Routing command '{compound_cmd}' to service '{service_name}' on topic '{topic}'")
+                await self.emit(topic, cmd_payload)
+                return
+                
+            # Check for basic commands if no compound command matched
+            if command in self.command_handlers:
+                service_info = self.command_handlers[command]
+                
+                # Get service info and topic based on new or old registration format
+                if isinstance(service_info, dict):
+                    service_name = service_info["service"]
+                    topic = service_info["topic"]
+                else:
+                    # Legacy format without service name
+                    service_name = "unknown"
+                    topic = service_info
+                
+                # Transform the payload based on service expectations
+                cmd_payload = self._transform_payload_for_service(
+                    service_name,
+                    command,
+                    args,
+                    raw_input
+                )
+                
+                # Emit the command event
+                self.logger.info(f"Routing command '{command}' to service '{service_name}' on topic '{topic}'")
+                await self.emit(topic, cmd_payload)
                 return
                 
             # Unknown command
-            self.logger.warning(f"Unknown command: '{base_command}'")
+            self.logger.warning(f"Unknown command: '{raw_input}'")
             
             # Format help suggestion
             registered_commands = ", ".join(sorted(list(self.command_handlers.keys()) + list(self.compound_commands.keys())))
-            help_message = f"Unknown command: '{base_command}'. Try 'help' for a list of available commands."
+            help_message = f"Unknown command: '{raw_input}'. Try 'help' for a list of available commands."
             
             await self._send_error(help_message)
                 

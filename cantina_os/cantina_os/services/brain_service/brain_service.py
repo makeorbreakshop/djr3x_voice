@@ -907,56 +907,25 @@ class BrainService(BaseService):
     # DJ Mode handlers
     # ------------------------------------------------------------------
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ mode activation/deactivation and DJ commands.
+        """Handle DJ mode activation/deactivation.
         
         Args:
             payload: Event payload with dj_mode_active flag or command info
         """
         try:
-            # Check if this is a CLI command or a mode change event
-            command = payload.get("command")
-            subcommand = payload.get("subcommand")
-            args = payload.get("args", [])
-            
-            # Handle CLI command (dj start, dj stop, etc.)
-            if command == "dj":
-                # Default to "start" if no subcommand provided
-                if not subcommand and not args:
-                    action = "start"
-                # Get the subcommand or first arg as the action
-                elif subcommand:
-                    action = subcommand
-                elif args:
-                    action = args[0]
-                else:
-                    action = "start"
+            # Handle direct mode change payload with dj_mode_active flag
+            if "dj_mode_active" in payload:
+                is_active = payload["dj_mode_active"]
+                self._dj_mode_active = is_active
+                self.logger.info(f"DJ Mode {'activated' if is_active else 'deactivated'}")
                 
-                self.logger.info(f"Processing DJ command: {action}")
-                
-                if action == "start":
-                    # Start DJ mode
-                    await self._emit_dict(
-                        EventTopics.DJ_MODE_CHANGED,
-                        {"dj_mode_active": True}
-                    )
+                # If activating, start playing music if nothing is playing
+                if is_active and self._music_library and self._music_library.tracks:
+                    # Use _smart_track_selection to get a track name
+                    # This handles getting a random track not recently played
+                    initial_track = await self._smart_track_selection("")
                     
-                    # Select and play an initial track when DJ mode is activated
-                    import random
-                    if self._music_library.tracks:
-                        # Get available tracks that aren't in the recently played list
-                        available_tracks = [t for t in self._music_library.tracks 
-                                           if t.name not in self._recently_played_tracks]
-                        
-                        # If we've exhausted the library, just use all tracks
-                        if not available_tracks:
-                            available_tracks = self._music_library.tracks
-                            
-                        # Select a random track
-                        initial_track = random.choice(available_tracks).name
-                        
-                        self.logger.info(f"Starting DJ Mode with initial track: {initial_track}")
-                        
-                        # Play the selected track
+                    if initial_track:
                         await self._emit_dict(
                             EventTopics.MUSIC_COMMAND,
                             {
@@ -965,100 +934,122 @@ class BrainService(BaseService):
                                 "source": "dj"
                             }
                         )
-                    else:
-                        self.logger.warning("DJ Mode activated but no tracks available in library")
-                    return
-                    
-                elif action == "stop":
-                    # Stop DJ mode
-                    await self._emit_dict(
-                        EventTopics.DJ_MODE_CHANGED,
-                        {"dj_mode_active": False}
-                    )
-                    return
-                    
-                elif action == "next":
-                    # Skip to next track
-                    await self._emit_dict(
-                        EventTopics.DJ_NEXT_TRACK,
-                        {"source": "cli"}
-                    )
-                    return
-                    
-                elif action == "queue":
-                    # Queue a specific track if provided
-                    track_name = " ".join(args[1:]) if len(args) > 1 else None
-                    if not track_name:
-                        self.logger.error("No track specified for dj queue command")
-                        return
-                        
-                    await self._emit_dict(
-                        EventTopics.DJ_TRACK_QUEUED,
-                        {"track_name": track_name, "source": "cli"}
-                    )
-                    return
+                return
             
-            # Handle mode change event
-            is_active = payload.get("dj_mode_active", False)
+            # Handle CLI command format
+            command = payload.get("command", "").lower()
             
-            # Update service state
-            self._dj_mode_active = is_active
-            self.logger.info(f"DJ Mode {'activated' if is_active else 'deactivated'}")
-            
-            if is_active:
-                # When activating DJ mode, select a random transition style
-                import random
-                self._dj_transition_style = random.choice(self._config.dj_commentary_styles)
-                self.logger.info(f"Selected DJ transition style: {self._dj_transition_style}")
-                
-                # Reset track history for DJ rotation
-                self._dj_track_history = []
-                
-                # Store DJ mode state in memory service
+            # Handle the full command strings
+            if command == "dj start":
                 await self._emit_dict(
-                    EventTopics.MEMORY_SET, 
-                    {
-                        "key": "dj_mode_active",
-                        "value": True
-                    }
+                    EventTopics.DJ_MODE_CHANGED,
+                    {"dj_mode_active": True}
                 )
                 
+            elif command == "dj stop":
                 await self._emit_dict(
-                    EventTopics.MEMORY_SET, 
-                    {
-                        "key": "dj_transition_style",
-                        "value": self._dj_transition_style
-                    }
+                    EventTopics.DJ_MODE_CHANGED,
+                    {"dj_mode_active": False}
                 )
                 
             else:
-                # Clear any pending DJ transitions
-                self._dj_transition_plan_ready = False
-                self._dj_next_track = None
+                self.logger.error(f"Invalid payload for DJ_MODE_CHANGED: {payload}")
                 
-                # Update memory service
-                await self._emit_dict(
-                    EventTopics.MEMORY_SET, 
-                    {
-                        "key": "dj_mode_active",
-                        "value": False
-                    }
-                )
-                
-                await self._emit_dict(
-                    EventTopics.MEMORY_SET, 
-                    {
-                        "key": "dj_next_track",
-                        "value": None
-                    }
-                )
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}")
+            
+    async def _handle_dj_next_track(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ next track command."""
+        try:
+            if not self._dj_mode_active:
+                self.logger.warning("DJ next track command received but DJ mode is not active")
+                return
+                
+            # Get currently playing track or default to unknown
+            current_track = payload.get("current_track", "Unknown Track")
+            
+            # Clear any previous transition plan flag
+            self._dj_transition_plan_ready = False
+            
+            # Select the next track to play
+            next_track = await self._select_next_dj_track(current_track)
+            if not next_track:
+                self.logger.error("Failed to select next track for DJ skip")
+                await self._emit_status(
+                    ServiceStatus.ERROR,
+                    "DJ skip failed: could not select next track",
+                    LogLevel.ERROR
+                )
+                return
+                
+            self.logger.info(f"DJ next track: skipping from {current_track} to {next_track}")
+                
+            # Request cached commentary for the transition (with skip flag)
+            cache_key = await self._request_cached_dj_commentary(current_track, next_track, is_skip=True)
+            
+            # Create a skip transition plan with the commentary and next track
+            import uuid
+            skip_plan = PlanPayload(
+                plan_id=str(uuid.uuid4()),
+                layer="foreground",
+                steps=[
+                    PlanStep(
+                        id="dj_skip_commentary",
+                        type="speak",
+                        text=cache_key  # Use cache key instead of raw text
+                    ),
+                    PlanStep(
+                        id="next_track",
+                        type="play_music",
+                        genre=next_track
+                    )
+                ]
+            )
+            
+            # Emit the plan to timeline executor
+            await self._emit_dict(EventTopics.PLAN_READY, skip_plan)
+            self.logger.info(f"DJ skip plan emitted: {current_track} → {next_track}")
+            
+            # Update memory with the track history
+            self._add_to_recently_played(next_track)
+            await self._emit_dict(
+                EventTopics.MEMORY_SET, 
+                {
+                    "key": "dj_track_history",
+                    "value": self._recently_played_tracks
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling DJ next track: {e}")
             await self._emit_status(
                 ServiceStatus.ERROR,
-                f"Error handling DJ mode change: {e}",
+                f"DJ skip error: {e}",
                 LogLevel.ERROR
             )
+            
+    async def _handle_dj_track_queued(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ track queue command."""
+        try:
+            if not self._dj_mode_active:
+                self.logger.warning("DJ queue command received but DJ mode is not active")
+                return
+                
+            track_name = payload.get("track_name")
+            if not track_name:
+                self.logger.error("No track name provided for queue command")
+                return
+                
+            await self._emit_dict(
+                EventTopics.DJ_TRACK_QUEUED,
+                {
+                    "track_name": track_name,
+                    "source": payload.get("source", "command")
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling DJ track queue: {e}")
     
     async def _handle_track_ending_soon(self, payload: Dict[str, Any]) -> None:
         """Handle TRACK_ENDING_SOON events from MusicControllerService.
@@ -1156,133 +1147,6 @@ class BrainService(BaseService):
             await self._emit_status(
                 ServiceStatus.ERROR,
                 f"DJ transition error: {e}",
-                LogLevel.ERROR
-            )
-    
-    async def _handle_dj_next_track(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ_NEXT_TRACK events (skip to next track).
-        
-        Args:
-            payload: Event payload
-        """
-        try:
-            # Only proceed if DJ mode is active
-            if not self._dj_mode_active:
-                self.logger.info("DJ next track requested, but DJ Mode is not active")
-                return
-            
-            # Get current track from payload or use last known track
-            current_track = payload.get("current_track")
-            if not current_track and self._last_track_meta:
-                current_track = self._last_track_meta.get("title", "Unknown Track")
-            
-            self.logger.info(f"DJ next track requested. Current track: {current_track}")
-            
-            # Select the next track to play
-            next_track = await self._select_next_dj_track(current_track)
-            if not next_track:
-                self.logger.error("Failed to select next track for DJ skip")
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    "DJ skip failed: could not select next track",
-                    LogLevel.ERROR
-                )
-                return
-            
-            # Request cached commentary for the skip (with is_skip=True)
-            cache_key = await self._request_cached_dj_commentary(current_track, next_track, is_skip=True)
-            
-            # Create a transition plan with the commentary and next track
-            import uuid
-            skip_plan = PlanPayload(
-                plan_id=str(uuid.uuid4()),
-                layer="foreground",
-                steps=[
-                    PlanStep(
-                        id="dj_skip_commentary",
-                        type="speak",
-                        text=cache_key  # Use cache key instead of raw text
-                    ),
-                    PlanStep(
-                        id="next_track",
-                        type="play_music",
-                        genre=next_track
-                    )
-                ]
-            )
-            
-            # Emit the skip plan
-            await self._emit_dict(EventTopics.PLAN_READY, skip_plan)
-            self.logger.info(f"DJ skip plan ready: {current_track} → {next_track}")
-            
-            # Update memory
-            self._add_to_recently_played(next_track)
-            await self._emit_dict(
-                EventTopics.MEMORY_SET, 
-                {
-                    "key": "dj_track_history",
-                    "value": self._recently_played_tracks
-                }
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error handling DJ next track: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"DJ next track error: {e}",
-                LogLevel.ERROR
-            )
-    
-    async def _handle_dj_track_queued(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ_TRACK_QUEUED events from MusicControllerService.
-        
-        Args:
-            payload: Event payload with track_name and optionally source
-        """
-        try:
-            # Only proceed if DJ mode is active
-            if not self._dj_mode_active:
-                self.logger.info("Track queued, but DJ Mode is not active")
-                return
-            
-            # Extract track name from payload
-            if not isinstance(payload, dict) or "track_name" not in payload:
-                self.logger.error(f"Invalid payload for DJ_TRACK_QUEUED: {payload}")
-                return
-            
-            track_name = payload["track_name"]
-            source = payload.get("source", "cli")  # Default source is CLI
-            
-            # Update our local state
-            self._dj_next_track = track_name
-            self.logger.info(f"Track queued for DJ mode: {track_name} (source: {source})")
-            
-            # If we already have a transition plan, mark it as invalid
-            # so we'll generate a new one with the queued track
-            if self._dj_transition_plan_ready:
-                self._dj_transition_plan_ready = False
-                self.logger.info("Invalidated existing transition plan to use queued track")
-            
-            # Generate a basic track intro right away if appropriate
-            current_track = None
-            if self._last_track_meta:
-                current_track = self._last_track_meta.get("title", None)
-            
-            if current_track:
-                # For manual queued tracks, create a cache entry in advance
-                asyncio.create_task(
-                    self._request_cached_dj_commentary(current_track, track_name)
-                )
-            
-            # Add to history once it actually plays
-            # We don't add it now because it might never play if the user
-            # queues multiple tracks before the current one finishes
-            
-        except Exception as e:
-            self.logger.error(f"Error handling DJ track queued: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error handling queued track: {e}",
                 LogLevel.ERROR
             )
     

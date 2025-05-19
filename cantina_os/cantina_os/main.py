@@ -203,65 +203,64 @@ class CantinaOS:
         """
         self.logger.info("Registering commands with dispatcher")
         
-        # The current issue is that main.py believes the dispatcher handles all registrations,
-        # but it doesn't. We need to manually register the missing commands.
-        
         # Register basic commands that aren't being auto-registered by the dispatcher
         if "help" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("help", EventTopics.CLI_HELP_REQUEST)
+            dispatcher.register_command("help", "command_dispatcher", EventTopics.CLI_HELP_REQUEST)
             
         if "reset" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("reset", EventTopics.CLI_STATUS_REQUEST)
+            dispatcher.register_command("reset", "command_dispatcher", EventTopics.CLI_STATUS_REQUEST)
         
         # Additional commands that might need registration
         if "status" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("status", EventTopics.CLI_STATUS_REQUEST)
+            dispatcher.register_command("status", "command_dispatcher", EventTopics.CLI_STATUS_REQUEST)
         
         if "debug" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("debug", EventTopics.DEBUG_COMMAND)
+            dispatcher.register_command("debug", "debug_service", EventTopics.DEBUG_COMMAND)
         
         # Handle mode commands
         for mode_cmd in ["engage", "disengage", "ambient", "idle"]:
             if mode_cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_command_handler(mode_cmd, EventTopics.SYSTEM_SET_MODE_REQUEST)
+                dispatcher.register_command(mode_cmd, "mode_manager", EventTopics.SYSTEM_SET_MODE_REQUEST)
         
         # Basic music and eye commands
         if "music" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("music", EventTopics.MUSIC_COMMAND)
+            dispatcher.register_command("music", "music_controller", EventTopics.MUSIC_COMMAND)
             
         if "eye" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("eye", EventTopics.EYE_COMMAND)
+            dispatcher.register_command("eye", "eye_controller", EventTopics.EYE_COMMAND)
         
-        # Register DJ mode commands
-        # dj_commands = {
-        #     "dj start": EventTopics.DJ_MODE_CHANGED,
-        #     "dj stop": EventTopics.DJ_MODE_CHANGED,
-        #     "dj next": EventTopics.DJ_NEXT_TRACK,
-        #     "dj queue": EventTopics.DJ_TRACK_QUEUED
-        # }
+        # Register DJ mode commands properly as full command strings
+        dj_commands = {
+            "dj start": EventTopics.DJ_MODE_CHANGED,
+            "dj stop": EventTopics.DJ_MODE_CHANGED,
+            "dj next": EventTopics.DJ_NEXT_TRACK,
+            "dj queue": EventTopics.DJ_TRACK_QUEUED
+        }
         
-        # Register only the base "dj" command to avoid conflicts with compound command handling
-        if "dj" not in dispatcher.get_registered_commands():
-            dispatcher.register_command_handler("dj", EventTopics.DJ_MODE_CHANGED)
+        # Register each DJ command with the service name for proper payload transformation
+        for cmd, topic in dj_commands.items():
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command(cmd, "brain_service", topic)
         
-        # Don't register individual compound commands to prevent overlapping handlers
-        # This avoids the issue where "dj start" being processed as command="dj", args=["start", "start"]
+        # Remove the base "dj" command registration to prevent conflicts
+        if "dj" in dispatcher.command_handlers:
+            del dispatcher.command_handlers["dj"]
         
         # Compound commands
         # Music commands
         for cmd in ["play music", "stop music", "list music", "install music"]:
             if cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_compound_command(cmd, EventTopics.MUSIC_COMMAND)
+                dispatcher.register_command(cmd, "music_controller", EventTopics.MUSIC_COMMAND)
         
         # Eye commands
         for cmd in ["eye pattern", "eye test", "eye status"]:
             if cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_compound_command(cmd, EventTopics.EYE_COMMAND)
+                dispatcher.register_command(cmd, "eye_controller", EventTopics.EYE_COMMAND)
         
         # Debug commands
         for cmd in ["debug level", "debug trace", "debug music"]:
             if cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_compound_command(cmd, EventTopics.DEBUG_COMMAND)
+                dispatcher.register_command(cmd, "debug_service", EventTopics.DEBUG_COMMAND)
         
         # Log registered commands for debugging
         commands = dispatcher.get_registered_commands()

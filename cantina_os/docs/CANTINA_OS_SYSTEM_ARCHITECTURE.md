@@ -167,26 +167,53 @@ CantinaOS follows these key architectural principles:
    - Actively monitoring for voice input
    - All services at full functionality
 
-### 4.3 CLI Command Processing Flow
+### 4.3 Unified Command Processing Flow
 
 ```
-[User Input] → [CLIService] → [CLI_COMMAND] → [CommandDispatcherService] → [Service-specific Topic] → [Target Service] → [CLI_RESPONSE] → [CLIService]
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ CLI Command │────▶│   Command   │────▶│  Timeline   │────▶│    Music    │
+└─────────────┘     │ Dispatcher  │     │  Executor   │     │ Controller  │
+                    └─────────────┘     └─────────────┘     └─────────────┘
+┌─────────────┐     ┌─────────────┐            ▲            
+│    Voice    │────▶│    Brain    │────────────┘            
+└─────────────┘     └─────────────┘                         
+                           ▲                                
+┌─────────────┐           │                                 
+│   DJ Mode   │───────────┘                                 
+└─────────────┘                                             
 ```
 
-1. User enters command in terminal
-2. CLIService parses input into StandardCommandPayload and emits to CLI_COMMAND topic
-3. CommandDispatcherService receives the command and:
-   - Validates the command format and arguments
-   - Identifies the appropriate service topic for handling
-   - Routes to the target service via service-specific command topic
-4. Target service processes command using its domain-specific logic
-5. Target service emits CLI_RESPONSE with results
-6. CLIService displays response to user
+The system implements a consistent three-tier architecture for all music commands:
 
-This flow ensures consistent command handling with clear separation of responsibilities:
-- CLIService only handles user I/O
-- CommandDispatcherService owns all command routing logic
-- Service handlers focus on domain-specific business logic
+1. **Command Entry**: Commands can originate from three sources:
+   - CLI commands entered by the user
+   - Voice commands processed by the speech recognition system
+   - DJ Mode automatic music selection and transitions
+
+2. **Command Transformation & Routing**:
+   - CommandDispatcherService transforms commands into standardized payloads
+   - Uses service-specific payload transformation for consistent handling
+   - Maintains consistent data structures across different entry points
+
+3. **Plan-Based Execution**:
+   - ALL music commands flow through TimelineExecutorService
+   - Commands are converted to PlanPayload objects with explicit steps
+   - Ensures consistent audio ducking and cross-fading
+
+4. **Command Flow Process**:
+   - User or system initiates command (CLI, voice, or DJ mode)
+   - Command is routed to appropriate service with transformed payload
+   - Service creates a plan with specific steps
+   - Plan is executed by TimelineExecutor
+   - Music Controller handles final playback
+
+This unified architecture ensures:
+- Consistent command handling regardless of source
+- Proper audio coordination and ducking
+- Clear separation of responsibilities
+- Standardized data structures throughout the system
+
+Previous CLI-direct paths have been deprecated in favor of this unified approach.
 
 ### 4.4 Music and Audio Ducking Flow
 

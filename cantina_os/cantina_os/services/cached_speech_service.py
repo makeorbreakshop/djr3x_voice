@@ -55,30 +55,173 @@ class CachedSpeechServiceConfig(BaseModel):
     sample_rate: int = Field(default=44100, description="Audio sample rate")
 
 class CachedSpeechService(BaseService):
-    """Service for caching and managing pre-rendered speech audio."""
-
+    """Service for caching and managing speech audio data."""
+    
     def __init__(self, event_bus, config=None, name="cached_speech_service"):
-        """Initialize the service with proper event bus and config."""
+        """Initialize the service with proper event bus and config.
+        
+        Args:
+            event_bus: The event bus to use
+            config: Optional config dict
+            name: Service name, defaults to "cached_speech_service"
+        """
         super().__init__(service_name=name, event_bus=event_bus)
+        
+        # Store name as property for access from other methods
+        self.name = name
         
         # Convert config dict to Pydantic model
         self._config = CachedSpeechServiceConfig(**(config or {}))
         
-        # Initialize cache as OrderedDict for LRU functionality
-        self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
-        self._cache_lock = threading.Lock()
+        # Initialize cache
+        self._speech_cache = {}
+        self._cache_lock = asyncio.Lock()
         
-        # Audio thread management
-        self._audio_thread = None
-        self._audio_queue = asyncio.Queue(maxsize=100)
-        self._stop_flag = threading.Event()
+    async def _handle_tts_audio_data(self, payload: Dict[str, Any]) -> None:
+        """Handle TTS audio data from ElevenLabsService.
         
-        # Store event loop for thread-safe operations
-        self._event_loop = None
+        Args:
+            payload: Dict containing audio data and metadata
+        """
+        try:
+            request_id = payload.get("request_id")
+            if not request_id:
+                self.logger.warning("Received TTS audio data without request ID")
+                return
+                
+            success = payload.get("success", False)
+            if not success:
+                self.logger.warning(f"TTS request {request_id} failed")
+                return
+                
+            audio_data = payload.get("audio_data")
+            sample_rate = payload.get("sample_rate")
+            
+            if not audio_data or not sample_rate:
+                self.logger.warning(f"Missing audio data or sample rate for request {request_id}")
+                return
+                
+            # Cache the audio data
+            async with self._cache_lock:
+                self._speech_cache[request_id] = {
+                    "audio_data": audio_data,
+                    "sample_rate": sample_rate
+                }
+                
+            self.logger.debug(f"Cached audio data for request {request_id}")
+            
+            # Emit cache update event
+            await self.emit(
+                EventTopics.SPEECH_CACHE_UPDATED,
+                {
+                    "request_id": request_id,
+                    "success": True
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling TTS audio data: {e}", exc_info=True)
+            
+    async def _handle_speech_cache_request(self, payload: Dict[str, Any]) -> None:
+        """Handle request for cached speech data.
         
-        # Track active operations
-        self._active_requests: Dict[str, asyncio.Event] = {}
-        self._tasks = []
+        Args:
+            payload: Dict containing request ID
+        """
+        try:
+            request_id = payload.get("request_id")
+            if not request_id:
+                self.logger.warning("Received cache request without request ID")
+                return
+                
+            # Check if we have the requested audio in cache
+            async with self._cache_lock:
+                cached_data = self._speech_cache.get(request_id)
+                
+            if not cached_data:
+                self.logger.warning(f"No cached audio found for request {request_id}")
+                await self.emit(
+                    EventTopics.SPEECH_CACHE_MISS,
+                    {
+                        "request_id": request_id,
+                        "success": False,
+                        "message": "Audio not found in cache"
+                    }
+                )
+                return
+                
+            # Return the cached audio data
+            await self.emit(
+                EventTopics.SPEECH_CACHE_HIT,
+                {
+                    "request_id": request_id,
+                    "success": True,
+                    "audio_data": cached_data["audio_data"],
+                    "sample_rate": cached_data["sample_rate"]
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling speech cache request: {e}", exc_info=True)
+            
+    async def _handle_clear_cache_request(self, payload: Dict[str, Any]) -> None:
+        """Handle request to clear the speech cache.
+        
+        Args:
+            payload: Dict containing optional request ID to clear specific entry
+        """
+        try:
+            request_id = payload.get("request_id")
+            
+            async with self._cache_lock:
+                if request_id:
+                    # Clear specific cache entry
+                    if request_id in self._speech_cache:
+                        del self._speech_cache[request_id]
+                        self.logger.info(f"Cleared cache entry for request {request_id}")
+                else:
+                    # Clear entire cache
+                    self._speech_cache.clear()
+                    self.logger.info("Cleared entire speech cache")
+                    
+            # Emit cache cleared event
+            await self.emit(
+                EventTopics.SPEECH_CACHE_CLEARED,
+                {
+                    "request_id": request_id,
+                    "success": True
+                }
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error handling clear cache request: {e}", exc_info=True)
+            
+    async def start(self) -> None:
+        """Start the service and register event handlers."""
+        try:
+            # Register event handlers
+            self.register_handler(EventTopics.TTS_AUDIO_DATA, self._handle_tts_audio_data)
+            self.register_handler(EventTopics.SPEECH_CACHE_REQUEST, self._handle_speech_cache_request)
+            self.register_handler(EventTopics.CLEAR_SPEECH_CACHE, self._handle_clear_cache_request)
+            
+            self.logger.info(f"Started {self.name}")
+            
+        except Exception as e:
+            self.logger.error(f"Error starting {self.name}: {e}", exc_info=True)
+            raise
+            
+    async def stop(self) -> None:
+        """Stop the service and clean up resources."""
+        try:
+            # Clear the cache
+            async with self._cache_lock:
+                self._speech_cache.clear()
+                
+            self.logger.info(f"Stopped {self.name}")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping {self.name}: {e}", exc_info=True)
+            raise
 
     async def _start(self) -> None:
         """Start the service and initialize resources."""
@@ -98,36 +241,6 @@ class CachedSpeechService(BaseService):
             }
         )
         self.logger.info("CachedSpeechService started successfully")
-
-    async def stop(self) -> None:
-        """Stop the service and clean up resources."""
-        self.logger.info("Stopping CachedSpeechService")
-        
-        # Signal audio thread to stop
-        self._stop_flag.set()
-        
-        # Cancel all tasks
-        for task in self._tasks:
-            if not task.done():
-                task.cancel()
-                
-        # Wait for tasks to complete with timeout
-        if self._tasks:
-            await asyncio.wait(self._tasks, timeout=5.0)
-        
-        # Clear cache
-        with self._cache_lock:
-            self._cache.clear()
-        
-        await self.emit(
-            EventTopics.SERVICE_STATUS,
-            {
-                "service_name": self.name,
-                "status": ServiceStatus.STOPPED,
-                "message": "CachedSpeechService stopped successfully"
-            }
-        )
-        self.logger.info("CachedSpeechService stopped successfully")
 
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
@@ -212,20 +325,32 @@ class CachedSpeechService(BaseService):
         """Add an entry to the cache with thread safety."""
         with self._cache_lock:
             # Remove oldest entries if at capacity
-            while len(self._cache) >= self._config.max_cache_entries:
-                self._cache.popitem(last=False)
+            while len(self._speech_cache) >= self._config.max_cache_entries:
+                oldest_key = next(iter(self._speech_cache))
+                del self._speech_cache[oldest_key]
             
             # Add new entry
-            self._cache[key] = entry
+            self._speech_cache[key] = {
+                "audio_data": entry.audio_data,
+                "sample_rate": entry.sample_rate,
+                "duration_ms": entry.duration_ms,
+                "metadata": entry.metadata
+            }
 
     def _get_cached_entry(self, key: str) -> Optional[CacheEntry]:
         """Get a cached entry with thread safety."""
         with self._cache_lock:
-            if key in self._cache:
-                entry = self._cache[key]
+            if key in self._speech_cache:
+                entry_data = self._speech_cache[key]
+                entry = CacheEntry(
+                    audio_data=entry_data["audio_data"],
+                    sample_rate=entry_data["sample_rate"],
+                    duration_ms=entry_data["duration_ms"],
+                    metadata=entry_data["metadata"]
+                )
                 # Update access time and move to end (most recently used)
                 entry.last_access = time.time()
-                self._cache.move_to_end(key)
+                self._speech_cache[key] = entry
                 return entry
         return None
 
@@ -260,8 +385,8 @@ class CachedSpeechService(BaseService):
             if keys:
                 with self._cache_lock:
                     for key in keys:
-                        if key in self._cache:
-                            del self._cache[key]
+                        if key in self._speech_cache:
+                            del self._speech_cache[key]
                     self.logger.info(f"Cleaned up {len(keys)} specific cache entries")
                 return
             
@@ -273,8 +398,8 @@ class CachedSpeechService(BaseService):
             
             # If no specific cleanup parameters, clean up everything
             with self._cache_lock:
-                cache_size = len(self._cache)
-                self._cache.clear()
+                cache_size = len(self._speech_cache)
+                self._speech_cache.clear()
                 self.logger.info(f"Cleaned up all {cache_size} cache entries")
             
         except Exception as e:
@@ -292,13 +417,13 @@ class CachedSpeechService(BaseService):
         with self._cache_lock:
             # Create list of expired keys
             expired_keys = [
-                key for key, entry in self._cache.items()
+                key for key, entry in self._speech_cache.items()
                 if now - entry.creation_time > ttl
             ]
             
             # Remove expired entries
             for key in expired_keys:
-                del self._cache[key]
+                del self._speech_cache[key]
                 
             if expired_keys:
                 self.logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
@@ -475,34 +600,4 @@ class CachedSpeechService(BaseService):
                     "error": str(e),
                     "operation": "playback"
                 }
-            )
-
-    async def _handle_tts_audio_data(self, payload: Dict[str, Any]) -> None:
-        """Handle TTS audio data received from ElevenLabs service.
-        
-        This method processes audio data coming from the ElevenLabs service
-        in response to a TTS_REQUEST event.
-        
-        Args:
-            payload: The TTS audio data payload
-        """
-        try:
-            request_id = payload.get("request_id")
-            if not request_id:
-                self.logger.warning("Received TTS audio data without request_id")
-                return
-                
-            # Check if we have a pending request for this ID
-            if request_id in self._active_requests:
-                # Get the future and resolve it with the payload
-                future = self._active_requests[request_id]
-                if not future.done():
-                    self.logger.info(f"Resolving TTS request future for request_id: {request_id}")
-                    future.set_result(payload)
-                else:
-                    self.logger.warning(f"Future for request_id {request_id} already resolved")
-            else:
-                self.logger.warning(f"Received TTS audio data for unknown request_id: {request_id}")
-                
-        except Exception as e:
-            self.logger.error(f"Error handling TTS audio data: {e}") 
+            ) 

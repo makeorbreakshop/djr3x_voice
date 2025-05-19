@@ -464,16 +464,107 @@ When adding a new command:
 - [ ] Test all command variations
 - [ ] Document command in README.md
 
-### 9.5 Command Flow Architecture
+### 9.5 Unified Command Flow Architecture
 
-Commands must follow this flow:
+Commands must follow the unified three-tier architecture:
 
-1. CLIService receives user input
-2. CLIService emits to CLI_COMMAND topic
-3. CommandDispatcherService receives and routes command
-4. Service-specific handler processes command
-5. Handler emits response
-6. CLIService displays response to user
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ CLI Command │────▶│   Command   │────▶│  Timeline   │────▶│    Music    │
+└─────────────┘     │ Dispatcher  │     │  Executor   │     │ Controller  │
+                    └─────────────┘     └─────────────┘     └─────────────┘
+┌─────────────┐     ┌─────────────┐            ▲            
+│    Voice    │────▶│    Brain    │────────────┘            
+└─────────────┘     └─────────────┘                         
+                           ▲                                
+┌─────────────┐           │                                 
+│   DJ Mode   │───────────┘                                 
+└─────────────┘                                             
+```
+
+1. **Command Entry**:
+   - CLI command: CLIService emits to CLI_COMMAND topic
+   - Voice command: BrainService processes intent into command
+   - DJ Mode: Automatic transitions and command generation
+
+2. **Command Routing**:
+   - CommandDispatcherService routes command to appropriate service
+   - Apply service-specific payload transformation to match expected formats
+   - Use `register_command` with service name parameter:
+     ```python
+     # Register command with service context
+     dispatcher.register_command(
+         command="dj start", 
+         service_name="brain_service", 
+         event_topic=EventTopics.DJ_COMMAND
+     )
+     ```
+
+3. **Payload Transformation**:
+   - Commands must be transformed to match service expectations:
+     ```python
+     def _transform_payload_for_service(self, service_name: str, command: str, args: list, raw_input: str) -> dict:
+         """Transform command payload to match service expectations"""
+         # Special handling for brain_service DJ mode commands
+         if service_name == "brain_service" and command.startswith("dj"):
+             if command == "dj start":
+                 return {"dj_mode_active": True}
+             elif command == "dj stop":
+                 return {"dj_mode_active": False}
+         
+         # Create timeline plan payloads for music commands
+         if command == "play music":
+             track_query = " ".join(args) if args else ""
+             # Create a plan payload
+             return PlanPayload(
+                 plan_id=str(uuid.uuid4()),
+                 layer="foreground",
+                 steps=[
+                     PlanStep(
+                         id="music",
+                         type="play_music",
+                         genre=track_query
+                     )
+                 ]
+             )
+         
+         # Default generic payload format
+         return {"command": command, "args": args, "raw_input": raw_input}
+     ```
+
+4. **Plan-Based Execution**:
+   - All music commands must flow through TimelineExecutorService
+   - Consistent data structures must be used across all command sources
+   - Use Pydantic models for validation and serialization:
+     ```python
+     # Standard music track model
+     class MusicTrack(BaseModel):
+         name: str
+         path: str
+         duration: Optional[float] = None
+         artist: Optional[str] = None
+         genre: Optional[str] = None
+     
+     # Standard plan structure
+     class PlanStep(BaseModel):
+         id: str
+         type: str
+         genre: Optional[str] = None
+         text: Optional[str] = None
+         # Additional fields as needed
+     
+     class PlanPayload(BaseModel):
+         plan_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+         layer: str = "foreground"
+         steps: List[PlanStep]
+     ```
+
+5. **Service Response**:
+   - Services respond with standard response formats
+   - Include success/error indicators
+   - Provide helpful context in response
+
+This unified architecture ensures consistent handling of commands from all sources, proper audio coordination, and standardized data structures throughout the system. All new command implementations MUST follow this architecture.
 
 ### 9.6 Command Validation
 
