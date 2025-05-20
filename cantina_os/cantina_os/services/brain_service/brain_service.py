@@ -156,10 +156,51 @@ class BrainService(BaseService):
     async def _start(self) -> None:
         """Initialize brain service and set up subscriptions."""
         try:
+            self.logger.debug("BrainService: Starting initialization")
+            
+            # Initialize state with defaults
+            self._dj_mode_active = False
+            self._dj_next_track = None
+            self._dj_transition_plan_ready = False
+            self._dj_transition_style = "energetic"
+            self._dj_track_history = []
+            self._recently_played_tracks = []
+            
+            self.logger.debug("BrainService: State initialized with defaults")
             self._loop = asyncio.get_running_loop()
+            self.logger.debug("BrainService: Got running loop")
+            
+            # Set up subscriptions first
             await self._setup_subscriptions()
+            self.logger.debug("BrainService: Subscriptions set up")
+            
+            # Try to fetch initial state from memory service, but don't fail if not found
+            try:
+                await self._emit_dict(
+                    EventTopics.MEMORY_GET,
+                    {
+                        "key": "dj_mode_active",
+                        "callback_topic": EventTopics.MEMORY_VALUE
+                    }
+                )
+                await self._emit_dict(
+                    EventTopics.MEMORY_GET,
+                    {
+                        "key": "dj_track_history",
+                        "callback_topic": EventTopics.MEMORY_VALUE
+                    }
+                )
+                self.logger.debug("BrainService: Requested initial state from memory")
+                
+                # Short wait for memory responses
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch initial state from memory: {e}")
+                self.logger.info("Continuing with default state")
+            
             await self._emit_status(ServiceStatus.RUNNING, "Brain service started")
             self.logger.info("BrainService started successfully")
+            
         except Exception as e:
             error_msg = f"Failed to start BrainService: {e}"
             self.logger.error(error_msg)
@@ -190,14 +231,15 @@ class BrainService(BaseService):
     # ------------------------------------------------------------------
     async def _setup_subscriptions(self) -> None:
         """Register event-handlers for brain processing."""
-        # Subscribe to essential events for the new direct flow
-        task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_REQUEST, self._handle_music_request))
-        self._tasks.append(task)
+        self.logger.debug("BrainService: Starting _setup_subscriptions method.")
+        # Subscribe to essential events for the new direct flow # Removing subscriptions to non-existent topics
+        # task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_REQUEST, self._handle_music_request))
+        # self._tasks.append(task)
         
-        task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_STOP, self._handle_music_stop))
-        self._tasks.append(task)
+        # task = asyncio.create_task(self.subscribe(EventTopics.BRAIN_MUSIC_STOP, self._handle_music_stop))
+        # self._tasks.append(task)
         
-        task = asyncio.create_task(self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_started))
+        task = asyncio.create_task(self.subscribe(EventTopics.TRACK_PLAYING, self._handle_music_started))
         self._tasks.append(task)
         
         # Subscribe to LLM responses for monitoring
@@ -241,7 +283,10 @@ class BrainService(BaseService):
         self._tasks.append(task)
         
         # Fetch available tracks on start
+        self.logger.debug("BrainService: Calling _fetch_available_tracks.")
         await self._fetch_available_tracks()
+        self.logger.debug("BrainService: _fetch_available_tracks completed.")
+        self.logger.debug("BrainService: _setup_subscriptions method completed.")
 
     async def _handle_music_library_updated(self, payload: Dict[str, Any]) -> None:
         """Handle music library updates from MusicControllerService."""
@@ -1029,27 +1074,56 @@ class BrainService(BaseService):
             )
             
     async def _handle_dj_track_queued(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ track queue command."""
+        """Handle DJ_TRACK_QUEUED event.
+        
+        Expected payload: {"command": "dj queue", "args": ["<track_name>"]}
+        """
         try:
-            if not self._dj_mode_active:
-                self.logger.warning("DJ queue command received but DJ mode is not active")
-                return
-                
-            track_name = payload.get("track_name")
-            if not track_name:
-                self.logger.error("No track name provided for queue command")
-                return
-                
-            await self._emit_dict(
-                EventTopics.DJ_TRACK_QUEUED,
-                {
-                    "track_name": track_name,
-                    "source": payload.get("source", "command")
-                }
-            )
-            
+            if isinstance(payload, dict) and "command" in payload and payload["command"] == "dj queue" and "args" in payload and isinstance(payload["args"], list) and payload["args"]:
+                # Extract track name from args
+                track_name = " ".join(payload["args"])
+
+                # Validate if track exists in the music library (optional but good practice)
+                if not self._music_library.get_track_by_name(track_name):
+                    self.logger.warning(f"Attempted to queue unknown track: {track_name}")
+                    # Optionally, emit an error response here if needed
+                    # await self.emit_error_response(...)
+                    return # Stop processing if track is unknown
+
+                # Save queued track
+                await self._memory_service.set("dj_next_track", track_name) # Use MemoryService to set state
+
+                # Update track history (this logic can remain or be refined)
+                # The _handle_dj_track_queued in MemoryService already handles history update when dj_next_track is set,
+                # so we might not need this part here if we rely on MemoryService's handler.
+                # Let's remove the redundant history update here and rely on MemoryService.
+                # history = await self._memory_service.get("dj_track_history", [])
+                # ... history update logic ...
+                # await self._memory_service.set("dj_track_history", history)
+
+                self.logger.info(f"Queued track for DJ mode: {track_name}")
+                # Optionally, emit a success response here if needed
+                # await self._emit_dict(EventTopics.CLI_RESPONSE, {"success": True, "message": f"Track '{track_name}' queued."}) # Example response
+
+            else:
+                self.logger.error(f"Invalid payload for DJ_TRACK_QUEUED: {payload}")
+                # Emit error response for invalid payload
+                # await self._emit_dict(EventTopics.CLI_RESPONSE, {"success": False, "error": "Invalid queue command payload."}) # Example response
+                await self._emit_status(
+                    ServiceStatus.ERROR,
+                    f"Invalid payload for DJ_TRACK_QUEUED: {payload}",
+                    LogLevel.ERROR
+                )
+
         except Exception as e:
-            self.logger.error(f"Error handling DJ track queue: {e}")
+            self.logger.error(f"Error handling DJ track queued: {e}")
+            # Emit error response for exception
+            # await self._emit_dict(EventTopics.CLI_RESPONSE, {"success": False, "error": f"Error queuing track: {e}"}) # Example response
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error updating DJ track queue: {e}",
+                LogLevel.ERROR
+            )
     
     async def _handle_track_ending_soon(self, payload: Dict[str, Any]) -> None:
         """Handle TRACK_ENDING_SOON events from MusicControllerService.
@@ -1390,14 +1464,29 @@ class BrainService(BaseService):
     # Listen for memory values coming back - for async memory coordination
     async def _handle_memory_value(self, payload: Dict[str, Any]) -> None:
         """Handle MEMORY_VALUE events from MemoryService."""
-        if isinstance(payload, dict) and "key" in payload and "value" in payload:
-            key = payload.get("key")
-            value = payload.get("value")
-            
-            # Handle DJ next track from memory
-            if key == "dj_next_track" and value is not None:
-                self._dj_next_track = value
-                self.logger.debug(f"Retrieved dj_next_track from memory: {value}") 
+        try:
+            if isinstance(payload, dict) and "key" in payload:
+                key = payload.get("key")
+                value = payload.get("value")
+                
+                # Handle DJ next track from memory - allow None value
+                if key == "dj_next_track":
+                    self._dj_next_track = value  # Can be None
+                    self.logger.debug(f"Retrieved dj_next_track from memory: {value}")
+                
+                # Handle DJ mode state - default to False if not found
+                elif key == "dj_mode_active":
+                    self._dj_mode_active = bool(value) if value is not None else False
+                    self.logger.debug(f"Retrieved dj_mode_active from memory: {self._dj_mode_active}")
+                
+                # Handle track history - default to empty list if not found
+                elif key == "dj_track_history":
+                    self._recently_played_tracks = list(value) if value is not None else []
+                    self.logger.debug(f"Retrieved track history from memory: {len(self._recently_played_tracks)} tracks")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling memory value: {e}")
+            # Don't raise the exception - allow service to continue with defaults
 
     async def _handle_speech_cache_ready(self, payload: Dict[str, Any]) -> None:
         """Handle SPEECH_CACHE_READY events from CachedSpeechService.

@@ -7,16 +7,17 @@
 DJ_R3X_PATH="/Users/brandoncullum/DJ-R3X Voice"
 
 # Navigate to the installation directory
-cd "$DJ_R3X_PATH" || { echo "Error: Could not navigate to $DJ_R3X_PATH"; exit 1; }
+cd "$DJ_R3X_PATH/cantina_os" || { echo "Error: Could not navigate to $DJ_R3X_PATH/cantina_os"; exit 1; }
 
 # Activate virtual environment if it exists
-if [ -d "venv" ]; then
-    source venv/bin/activate
+# Note: The venv is at the project root, so we need to adjust the path
+if [ -d "../venv" ]; then
+    source ../venv/bin/activate
 fi
 
 # Launch the program - use the cantina_os module
 echo "Starting DJ R3X Voice..."
-python -m cantina_os.cantina_os.main $@
+python -m cantina_os.main "$@"
 
 # This line will only be reached when the program exits
 echo "DJ R3X Voice has been shut down."

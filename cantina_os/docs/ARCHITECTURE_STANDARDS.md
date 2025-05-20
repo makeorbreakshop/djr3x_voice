@@ -774,6 +774,71 @@ def _audio_callback(self, indata, frames, time, status):
     future3 = asyncio.run_coroutine_threadsafe(self._process3(indata), self._event_loop)
 ```
 
+## 11. I/O and Logging
+
+### 11.1 Asynchronous Logging to Console
+
+When logging in an asyncio application, using standard blocking logging handlers (like `StreamHandler` writing directly to `sys.stdout` or `sys.stderr`) from within the event loop can cause `BlockingIOError`.
+
+To prevent this, use a queued logging approach where log records are put into a queue from the event loop, and a separate thread processes the queue and writes to the console.
+
+Use `logging.handlers.QueueHandler` and `logging.handlers.QueueListener` for this pattern.
+
+**Implementation Pattern (typically in main application entry point):**
+
+1.  Create a `queue.Queue`.
+2.  Create a `logging.handlers.QueueHandler` pointing to the queue and add it to the root logger.
+3.  Remove any other blocking handlers from the root logger.
+4.  Create a standard blocking handler (e.g., `logging.StreamHandler`) to write to the console.
+5.  Create a `logging.handlers.QueueListener` with the queue and the console handler.
+6.  Start the `QueueListener` in a separate thread at application startup (`listener.start()`).
+7.  Stop the `QueueListener` gracefully at application shutdown (`listener.stop()`).
+
+```python
+import asyncio
+import logging
+import queue
+import logging.handlers
+import sys
+
+# ... (rest of imports and setup)
+
+# Create a queue for log records
+log_queue = queue.Queue()
+
+# Create a handler to put records in the queue
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+# Configure the root logger to use the queue handler
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+root_logger.addHandler(queue_handler)
+root_logger.setLevel(logging.DEBUG) # Capture all messages at root
+
+# Create a handler to write logs to the console (runs in listener thread)
+console_handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+console_handler.setLevel(logging.INFO) # Set desired output level
+
+# Create and start the QueueListener
+log_listener = logging.handlers.QueueListener(log_queue, console_handler)
+# Start the listener thread (call this in your application's startup)
+# log_listener.start()
+
+# ... (rest of application code)
+
+# Stop the listener thread gracefully (call this in your application's shutdown)
+# log_listener.stop()
+```
+
+**Why this is important:**
+
+- Prevents `BlockingIOError` in the asyncio event loop.
+- Ensures smooth application operation even with high logging volume.
+- Decouples log generation from log output I/O.
+
 ## Conclusion
 
 Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. These standards should be reviewed and updated as needed based on project evolution and team feedback. 

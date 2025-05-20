@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 import uuid
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from dataclasses import dataclass
 from collections import OrderedDict
 import sounddevice as sd
@@ -19,13 +19,16 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from ..event_payloads import (
     ServiceStatus,
     LogLevel,
     SpeechCacheRequestPayload,
     SpeechCacheReadyPayload,
-    SpeechCacheErrorPayload
+    SpeechCacheErrorPayload,
+    SpeechCacheUpdatedPayload,
+    SpeechCacheHitPayload,
+    SpeechCacheClearedPayload
 )
 
 class CacheEntry:
@@ -76,6 +79,7 @@ class CachedSpeechService(BaseService):
         # Initialize cache
         self._speech_cache = {}
         self._cache_lock = asyncio.Lock()
+        self._tasks: List[asyncio.Task] = [] # Initialize list to hold background tasks
         
     async def _handle_tts_audio_data(self, payload: Dict[str, Any]) -> None:
         """Handle TTS audio data from ElevenLabsService.
@@ -110,13 +114,13 @@ class CachedSpeechService(BaseService):
                 
             self.logger.debug(f"Cached audio data for request {request_id}")
             
-            # Emit cache update event
-            await self.emit(
+            # TODO: Define a proper Pydantic payload for SPEECH_CACHE_UPDATED event.
+            self._emit_dict(
                 EventTopics.SPEECH_CACHE_UPDATED,
-                {
-                    "request_id": request_id,
-                    "success": True
-                }
+                SpeechCacheUpdatedPayload(
+                    cache_key=request_id,
+                    success=True
+                ).model_dump()
             )
             
         except Exception as e:
@@ -140,25 +144,25 @@ class CachedSpeechService(BaseService):
                 
             if not cached_data:
                 self.logger.warning(f"No cached audio found for request {request_id}")
-                await self.emit(
+                # Using SpeechCacheErrorPayload for cache misses as they indicate an error state
+                self._emit_dict(
                     EventTopics.SPEECH_CACHE_MISS,
-                    {
-                        "request_id": request_id,
-                        "success": False,
-                        "message": "Audio not found in cache"
-                    }
+                    SpeechCacheErrorPayload(
+                        cache_key=request_id,
+                        error="Audio not found in cache"
+                    ).model_dump()
                 )
                 return
                 
-            # Return the cached audio data
-            await self.emit(
+            # TODO: Define a proper Pydantic payload (SpeechCacheHitPayload) for returning cached data.
+            self._emit_dict(
                 EventTopics.SPEECH_CACHE_HIT,
-                {
-                    "request_id": request_id,
-                    "success": True,
-                    "audio_data": cached_data["audio_data"],
-                    "sample_rate": cached_data["sample_rate"]
-                }
+                SpeechCacheHitPayload(
+                    cache_key=request_id,
+                    duration_ms=cached_data.get("duration_ms"),
+                    sample_rate=cached_data.get("sample_rate"),
+                    metadata=cached_data.get("metadata", {})
+                ).model_dump()
             )
             
         except Exception as e:
@@ -184,31 +188,17 @@ class CachedSpeechService(BaseService):
                     self._speech_cache.clear()
                     self.logger.info("Cleared entire speech cache")
                     
-            # Emit cache cleared event
-            await self.emit(
+            # TODO: Define a proper Pydantic payload for SPEECH_CACHE_CLEARED event.
+            self._emit_dict(
                 EventTopics.SPEECH_CACHE_CLEARED,
-                {
-                    "request_id": request_id,
-                    "success": True
-                }
+                SpeechCacheClearedPayload(
+                    cache_key=request_id,
+                    success=True
+                ).model_dump()
             )
             
         except Exception as e:
             self.logger.error(f"Error handling clear cache request: {e}", exc_info=True)
-            
-    async def start(self) -> None:
-        """Start the service and register event handlers."""
-        try:
-            # Register event handlers
-            self.register_handler(EventTopics.TTS_AUDIO_DATA, self._handle_tts_audio_data)
-            self.register_handler(EventTopics.SPEECH_CACHE_REQUEST, self._handle_speech_cache_request)
-            self.register_handler(EventTopics.CLEAR_SPEECH_CACHE, self._handle_clear_cache_request)
-            
-            self.logger.info(f"Started {self.name}")
-            
-        except Exception as e:
-            self.logger.error(f"Error starting {self.name}: {e}", exc_info=True)
-            raise
             
     async def stop(self) -> None:
         """Stop the service and clean up resources."""
@@ -231,38 +221,45 @@ class CachedSpeechService(BaseService):
         # Start cache cleanup task
         cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
         self._tasks.append(cleanup_task)
+        cleanup_task.add_done_callback(self._handle_task_exception) # Add exception handling
         
-        await self.emit(
-            EventTopics.SERVICE_STATUS,
-            {
-                "service_name": self.name,
-                "status": ServiceStatus.RUNNING,
-                "message": "CachedSpeechService started successfully"
-            }
+        await self._emit_status(
+            ServiceStatus.RUNNING,
+            "CachedSpeechService started successfully",
+            severity=LogLevel.INFO # Explicitly set severity for clarity
         )
         self.logger.info("CachedSpeechService started successfully")
 
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
-        await self.subscribe(
+        # Use asyncio.create_task for all subscriptions per architectural standards
+        
+        # Subscriptions already present
+        asyncio.create_task(self.subscribe(
             EventTopics.SPEECH_CACHE_REQUEST,
             self._handle_cache_request
-        )
+        ))
         
-        await self.subscribe(
+        asyncio.create_task(self.subscribe(
             EventTopics.SPEECH_CACHE_CLEANUP,
             self._handle_cache_cleanup
-        )
+        ))
         
-        await self.subscribe(
+        asyncio.create_task(self.subscribe(
             EventTopics.SPEECH_CACHE_PLAYBACK_REQUEST,
             self._handle_playback_request
-        )
+        ))
         
-        await self.subscribe(
+        asyncio.create_task(self.subscribe(
             EventTopics.TTS_AUDIO_DATA,
             self._handle_tts_audio_data
-        )
+        ))
+
+        # Add subscription from removed start method
+        asyncio.create_task(self.subscribe(
+            EventTopics.CLEAR_SPEECH_CACHE,
+            self._handle_clear_cache_request
+        ))
 
     async def _handle_cache_request(self, payload: Dict[str, Any]) -> None:
         """Handle a request to cache speech audio."""
@@ -397,7 +394,7 @@ class CachedSpeechService(BaseService):
                 return
             
             # If no specific cleanup parameters, clean up everything
-            with self._cache_lock:
+            async with self._cache_lock:
                 cache_size = len(self._speech_cache)
                 self._speech_cache.clear()
                 self.logger.info(f"Cleaned up all {cache_size} cache entries")
@@ -414,7 +411,7 @@ class CachedSpeechService(BaseService):
         now = time.time()
         ttl = max_age_seconds if max_age_seconds is not None else self._config.default_ttl_seconds
         
-        with self._cache_lock:
+        async with self._cache_lock:
             # Create list of expired keys
             expired_keys = [
                 key for key, entry in self._speech_cache.items()
@@ -470,7 +467,7 @@ class CachedSpeechService(BaseService):
                 if payload.get("request_id") == request_id:
                     response_future.set_result(payload)
                     # Unsubscribe after receiving the response
-                    await self.unsubscribe(EventTopics.TTS_AUDIO_DATA, handle_tts_response)
+                    self.unsubscribe(EventTopics.TTS_AUDIO_DATA, handle_tts_response)
             
             await self.subscribe(EventTopics.TTS_AUDIO_DATA, handle_tts_response)
             
@@ -558,12 +555,14 @@ class CachedSpeechService(BaseService):
     async def _play_audio(self, entry: CacheEntry, payload: Dict[str, Any]) -> None:
         """Play audio from a cache entry.
         
+        Plays audio in a separate thread to avoid blocking the asyncio event loop.
+        
         Args:
             entry: The cache entry containing audio data
             payload: Original playback request payload with parameters
         """
         try:
-            # Use sounddevice to play audio
+            # Use sounddevice to play audio in a separate thread
             request_id = str(uuid.uuid4())
             
             # Emit playback started event
@@ -577,11 +576,21 @@ class CachedSpeechService(BaseService):
                 }
             )
             
-            # Play the audio
-            sd.play(entry.audio_data, entry.sample_rate)
-            sd.wait()  # Wait for playback to complete
+            # Define the blocking playback function to run in the executor
+            def blocking_playback():
+                try:
+                    sd.play(entry.audio_data, entry.sample_rate)
+                    sd.wait()  # Wait for playback to complete
+                except Exception as e:
+                    # Log the error within the thread
+                    self.logger.error(f"Error during blocking audio playback: {e}")
+                    # Re-raise the exception so run_in_executor can propagate it
+                    raise
             
-            # Emit playback completed event
+            # Run the blocking playback function in the thread pool
+            await self._event_loop.run_in_executor(None, blocking_playback)
+            
+            # Emit playback completed event after successful playback in the thread
             await self.emit(
                 EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED,
                 {
@@ -592,7 +601,7 @@ class CachedSpeechService(BaseService):
             )
             
         except Exception as e:
-            self.logger.error(f"Error playing cached audio: {e}")
+            self.logger.error(f"Error handling playback task in _play_audio: {e}")
             await self.emit(
                 EventTopics.SPEECH_CACHE_ERROR,
                 {
@@ -600,4 +609,19 @@ class CachedSpeechService(BaseService):
                     "error": str(e),
                     "operation": "playback"
                 }
-            ) 
+            )
+
+    def _handle_task_exception(self, task: asyncio.Task) -> None:
+        """Handle exceptions raised by background tasks."""
+        try:
+            exception = task.exception()
+            if exception:
+                self.logger.error(f"Background task failed with exception: {exception}")
+                # Optionally emit a status update or error event
+                self._emit_status(
+                    ServiceStatus.ERROR,
+                    f"Background task error: {exception}",
+                    severity=LogLevel.ERROR
+                )
+        except asyncio.CancelledError:
+            pass # Task was cancelled, this is expected during shutdown 

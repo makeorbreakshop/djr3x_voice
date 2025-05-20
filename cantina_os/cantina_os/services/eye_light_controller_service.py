@@ -20,7 +20,7 @@ import serial
 import serial.tools.list_ports
 from pydantic import ValidationError, BaseModel, Field
 
-from cantina_os.base_service import BaseService
+from ..base_service import BaseService
 from cantina_os.event_payloads import (
     BaseEventPayload,
     EyeCommandPayload,

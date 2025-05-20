@@ -303,6 +303,107 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: Reliable Arduino communication with fallback modes
 - **Technical**: Multiple connection attempts, better buffer clearing
 
+```markdown
+### 2025-05-16: IntentRouter Feature Implementation Complete
+- **Issue**: Need to enable conversational responses while executing hardware actions
+- **Solution**: OpenAI function calling with IntentRouterService, comprehensive integration testing
+- **Impact**: Clean separation between spoken content and machine actions, full test coverage
+- **Technical**: End-to-end flow from voice transcript to hardware commands with robust error handling
+
+### 2025-05-16: BaseService Event Handling Fix
+- **Issue**: TypeError when awaiting boolean returns from event emissions and subscriptions
+- **Solution**: Removed incorrect await on pyee.AsyncIOEventEmitter's emit() and on() methods
+- **Impact**: Restored proper event handling functionality across all services
+- **Technical**: Aligned with pyee 11.0.1 implementation, these methods are not coroutines
+
+### 2025-05-16: Service Registration and Startup Fixes
+- **Issue**: CommandDispatcherService missing from service class map, YodaModeManagerService name mismatch
+- **Solution**: Added proper service mappings and corrected service names in main.py
+- **Impact**: Resolved system startup errors, restored CLI interface functionality
+- **Technical**: Fixed critical initialization issues preventing command processing
+
+### 2025-05-16: MusicController Service Standardization
+- **Issue**: Service not following architectural standards, incorrect directory paths
+- **Solution**: Implemented Pydantic config model, fixed path resolution to /audio/music
+- **Impact**: Proper music file discovery and aligned with architectural standards
+- **Technical**: Added multi-level path resolution with debug logging for music files
+
+### 2025-05-16: OpenAI Function Calling API Updates
+- **Issue**: Missing required parameter 'tools[0].type' error in function definitions
+- **Solution**: Updated command_functions.py format to nest properties under "function" key
+- **Impact**: Aligned with OpenAI's current API requirements for tool calling
+- **Technical**: Maintained backward compatibility while fixing function format specifications
+
+### 2025-05-16: Tool Call Streaming Enhancement
+- **Issue**: Tool calls in streaming chunks not properly accumulated for processing
+- **Solution**: Enhanced GPTService stream processing with proper accumulation and JSON validation
+- **Impact**: Voice commands now properly trigger both tool calls and intents
+- **Technical**: Added chunk accumulation, JSON validation, and immediate processing of complete tool calls
+
+### 2025-05-16: Voice Response Integration Simplification
+- **Issue**: GPT streaming complexity causing text responses to be lost during tool calls
+- **Solution**: Switched to non-streaming GPT architecture while keeping ElevenLabs streaming
+- **Impact**: More reliable text capture for speech synthesis with simplified code
+- **Technical**: Cleaner architecture ensuring both text and tool calls in single response
+
+### 2025-05-16: Two-Step Tool Call Implementation
+- **Issue**: OpenAI API returns either text OR tool calls, rarely both robustly
+- **Solution**: Implemented two-step process with INTENT_EXECUTION_RESULT event for verbal feedback
+- **Impact**: Ensures both command execution and natural verbal responses
+- **Technical**: First call executes with tool_choice="auto", second generates feedback with tool_choice="none"
+```
+
+### 2025-05-19: Comprehensive Command Registration System Overhaul
+- **Issue**: Recurring command registration and payload validation problems with multi-word commands
+- **Solution**: Enhanced registration with service-specific payload transformation
+- **Impact**: DJ commands now work with proper payload formats matching service expectations
+- **Technical**: New register_command method includes service name for proper routing
+
+### 2025-05-19: Backward Compatibility Layer for Command System
+- **Issue**: Need to support both old and new command registration patterns during transition
+- **Solution**: Added compatibility code to handle both dict and string service_info formats
+- **Impact**: Existing command registrations continue working during migration
+- **Technical**: Conditional logic preserves functionality with legacy format registrations
+
+### 2025-05-19: Track Model Standardization for DJ Mode
+- **Issue**: Data structure inconsistency in BrainService with "'str' object has no attribute 'name'"
+- **Solution**: Standardized track models using Pydantic with consistent interfaces
+- **Impact**: Consistent track handling across voice commands, CLI commands, and DJ mode
+- **Technical**: Unified data structures with proper type validation throughout system
+
+### 2025-05-19: Streamlined Command Flow Architecture
+- **Issue**: Multiple inconsistent command paths causing bugs and audio ducking issues
+- **Solution**: Implemented consistent three-tier architecture for all music commands
+- **Impact**: All commands now follow predictable flow through TimelineExecutorService
+- **Technical**: Plan-based execution ensures proper audio ducking for all command sources
+
+### 2025-05-19: DJ Mode GPT Commentary Integration
+- **Issue**: Missing GPT integration for DJ mode transitions and commentary
+- **Solution**: Added integration between BrainService and GPTService with custom prompts
+- **Impact**: DJ transitions now use GPT to generate authentic DJ R3X commentary
+- **Technical**: Commentary varies based on transition type (initial, normal, skip)
+
+### 2025-05-19: CLI Command Handling Improvements
+- **Issue**: CLI commands failing due to payload format mismatches
+- **Solution**: Fixed event subscriptions and enhanced payload processing
+- **Impact**: Restored full CLI functionality with consistent error handling
+- **Technical**: Added detailed payload logging for better troubleshooting
+
+### 2025-05-19: CachedSpeechService Audio Flow Fixes
+- **Issue**: Service failing to initialize and handle DJ mode transitions
+- **Solution**: Implemented proper event handler registration and subscription setup
+- **Impact**: Smoother DJ transitions with proper audio caching and playback
+- **Technical**: Enhanced audio flow coordination between services
+
+### 2025-05-19: Persona File Resolution Fix
+- **Issue**: DJ R3X persona files not being found during service initialization
+- **Solution**: Improved file path resolution and added enhanced logging
+- **Impact**: Proper personality for DJ mode and verbal responses
+- **Technical**: Better path configuration and file accessibility diagnostics
+
+
+
+
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation
 - Implement conversation persistence

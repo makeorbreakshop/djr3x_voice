@@ -9,6 +9,8 @@ import asyncio
 import logging
 import os
 import signal
+import queue # Import the queue module
+import logging.handlers # Import logging.handlers
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pyee.asyncio import AsyncIOEventEmitter
@@ -42,52 +44,54 @@ from .services.brain_service.brain_service import BrainService
 from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
 from .services.memory_service.memory_service import MemoryService
 
-# Configure logging
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-#     force=True  # Force reconfiguration of the root logger
-# )
-# logger = logging.getLogger("cantina_os.main")
-
-# Prevent duplicate logging by removing handlers from the root logger
-# for handler in logging.root.handlers[:]:
-# logging.root.removeHandler(handler)
-
-# Add a single handler to the root logger
-# handler = logging.StreamHandler()
-# formatter = logging.Formatter(\'%(asctime)s - %(name)s - %(levelname)s - %(message)s\')
-# handler.setFormatter(formatter)
-# logging.root.addHandler(handler)
-
-# Set specific logger levels for detailed debugging
-# logging.getLogger(\'cantina_os.mode_command_handler\').setLevel(logging.DEBUG)
-# logging.getLogger(\'cantina_os.command_dispatcher\').setLevel(logging.DEBUG)
-# logging.getLogger(\'cantina_os.base_service\').setLevel(logging.DEBUG)
-# logging.getLogger(\'cantina_os.cli\').setLevel(logging.DEBUG)
-# Keep these less verbose to avoid too much noise
-# logging.getLogger(\'cantina_os.deepgram_direct_mic\').setLevel(logging.INFO)  # Updated logger name
-
-def set_global_log_level(level: int) -> None:
-    """Sets the global logging level for the root logger and all handlers."""
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    for handler in root_logger.handlers:
-        handler.setLevel(level)
-    # Also update all existing loggers
-    for logger_name in logging.root.manager.loggerDict:
-        logger_instance = logging.getLogger(logger_name)
-        logger_instance.setLevel(level)
-        for h in logger_instance.handlers:
-            h.setLevel(level)
-    logging.info(f"Global log level set to: {logging.getLevelName(level)}")
+# Import the new debug service
+from .services.debug_service import DebugService
 
 # Initial logging setup
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    force=True # Force reconfiguration
-)
-set_global_log_level(logging.INFO) # Default to INFO
+# logging.basicConfig(
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+#     force=True # Force reconfiguration
+# )
+# set_global_log_level(logging.INFO) # Default to INFO
+
+# --- Queued Logging Setup ---
+# Create a queue for log records
+log_queue = queue.Queue()
+
+# Create a handler to put records in the queue
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+# Configure the root logger to use the queue handler
+root_logger = logging.getLogger()
+# Remove existing handlers to avoid duplicate logs
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+root_logger.addHandler(queue_handler)
+root_logger.setLevel(logging.DEBUG) # Set root logger level to DEBUG to capture all messages
+
+# Create a handler to write logs to the console (this will run in a separate thread)
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+console_handler.setLevel(logging.INFO) # Set console handler level (e.g., INFO)
+
+# Create a QueueListener to listen to the queue and pass records to the console handler
+log_listener = logging.handlers.QueueListener(log_queue, console_handler)
+
+# set_global_log_level will now only affect the console handler's level if called
+def set_global_log_level(level: int) -> None:
+    """Sets the global logging level for the root logger and all handlers."""
+    # root_logger = logging.getLogger()
+    # root_logger.setLevel(level)
+    # Correctly set the level of the single console handler
+    console_handler.setLevel(level)
+    # We can optionally set levels for other specific loggers here if needed
+    logging.getLogger("cantina_os").setLevel(level)
+    logging.info(f"Global log level set to: {logging.getLevelName(level)}")
+
+# Initial level setting using the new function
+set_global_log_level(logging.INFO)
+# ----------------------------
 
 logger = logging.getLogger("cantina_os.main")
 
@@ -285,8 +289,8 @@ class CantinaOS:
             "intent_router",  # Add IntentRouterService to route LLM intents to hardware commands
             "brain_service",  # Add brain service to handle intents and generate plans
             "timeline_executor_service",  # Add timeline executor to handle layered plans
-            "cached_speech_service",  # Add cached speech service for DJ Mode transitions
             "elevenlabs",  # Add ElevenLabs service to convert LLM responses to speech
+            "cached_speech_service",  # Add cached speech service for DJ Mode transitions
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
@@ -329,8 +333,9 @@ class CantinaOS:
             raise
             
     async def _cleanup_services(self) -> None:
-        """Clean up all started services in reverse order."""
-        # Stop services in reverse order
+        """Perform graceful shutdown and cleanup of all services."""
+        self.logger.info("Shutting down services...")
+        # Signal all services to stop
         for service_name in reversed(list(self._services.keys())):
             try:
                 self.logger.info(f"Stopping {service_name} service")
@@ -339,6 +344,12 @@ class CantinaOS:
             except Exception as e:
                 self.logger.error(f"Error stopping service {service_name}: {e}")
                 
+        # Stop the logging listener thread
+        log_listener.stop()
+        self.logger.info("Logging listener stopped.")
+        
+        self.logger.info("DJ R3X Voice has been shut down.")
+        
     def _setup_signal_handlers(self) -> None:
         """Set up handlers for system signals."""
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -360,7 +371,12 @@ class CantinaOS:
         self._shutdown_event.set()
         
     async def run(self) -> None:
-        """Run the CantinaOS system."""
+        """Run the main application asynchronously."""
+        self._logger.info("Starting DJ R3X Voice...")
+
+        # Start the logging listener thread
+        log_listener.start()
+
         try:
             # Set up signal handlers
             self._setup_signal_handlers()
@@ -452,7 +468,8 @@ class CantinaOS:
             "brain_service": BrainService,
             "timeline_executor_service": TimelineExecutorService,
             "memory_service": MemoryService,
-            "cached_speech_service": CachedSpeechService
+            "cached_speech_service": CachedSpeechService,
+            "debug": DebugService
         }
         
         # Early return if service doesn't exist in map
@@ -562,7 +579,7 @@ class CantinaOS:
             self.logger.error(f"Error handling DEBUG_SET_GLOBAL_LEVEL event: {e}")
 
 def main() -> None:
-    """Entry point for the application."""
+    """Main entry point for the application."""
     cantina_os = CantinaOS()
     
     try:

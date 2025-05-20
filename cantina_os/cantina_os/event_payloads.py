@@ -605,4 +605,41 @@ class SpeechCachePlaybackCompletedPayload(BaseEventPayload):
     playback_id: str = Field(description="ID of this playback instance")
     completion_status: Literal["completed", "interrupted", "error"] = Field(default="completed")
     error: Optional[str] = Field(default=None, description="Error message if completion_status is 'error'")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata") 
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+# New Payloads for CachedSpeechService Updates
+class SpeechCacheUpdatedPayload(BaseEventPayload):
+    """Payload for speech cache updated events."""
+    cache_key: str = Field(description="Cache key of the updated entry")
+    success: bool = Field(description="Whether the update was successful")
+    # Add other relevant fields if needed, e.g., size, duration summary
+
+class SpeechCacheHitPayload(BaseEventPayload):
+    """Payload for speech cache hit events."""
+    cache_key: str = Field(description="Cache key of the hit entry")
+    # Include relevant data from the cached entry, but maybe not the raw audio data itself
+    duration_ms: Optional[int] = Field(None, description="Duration of the cached speech in milliseconds")
+    sample_rate: Optional[int] = Field(None, description="Sample rate of the cached audio")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+class SpeechCacheClearedPayload(BaseEventPayload):
+    """Payload for speech cache cleared events."""
+    cache_key: Optional[str] = Field(None, description="Cache key of the cleared entry, or None if the entire cache was cleared")
+    success: bool = Field(description="Whether the clear operation was successful")
+
+# New payload for requesting DJ commentary from GPT
+class DJCommentaryRequestPayload(BaseEventPayload):
+    """Payload for requesting DJ commentary generation from GPTService."""
+    prompt: str = Field(description="The prompt text for GPT, including persona instructions.")
+    current_track_metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Metadata for the currently playing track."
+    )
+    next_track_metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Metadata for the next track."
+    )
+    commentary_type: Literal["intro", "transition", "outro"] = Field(
+        description="Type of commentary requested (intro, transition, outro)."
+    )
+    cache_key: str = Field(description="Unique key to use for caching the generated speech.") 

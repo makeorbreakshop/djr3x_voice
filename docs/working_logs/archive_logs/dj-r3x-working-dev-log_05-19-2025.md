@@ -394,3 +394,39 @@ This comprehensive approach will:
 1. Implement BrainService fix for the DJ mode track selection issue
 2. Modify timeline executor integration for CLI commands
 4. Update architecture documentation with the new command flow 
+
+### 🎧 DJ Mode Core Logic & Timeline Integration (#33)
+
+**Issue Summary**: Implementing the core DJ mode logic in `BrainService` and integrating its plan output with the `TimelineExecutorService` required defining new event schemas and updating both services to handle the new event types and plan structure.
+
+**Progress Made**: 
+1.  Defined Pydantic models for DJ mode events (`TrackDataPayload`, `TrackEndingSoonPayload`, `DjCommandPayload`, etc.) and plan structures (`DjTransitionPlanPayload`, `PlayCachedSpeechStep`, `MusicCrossfadeStep`) in `cantina_os/cantina_os/core/event_schemas.py`.
+2.  Implemented event handlers in `cantina_os/cantina_os/services/brain_service.py` for `GPT_COMMENTARY_RESPONSE` (triggering speech caching) and `TRACK_ENDING_SOON` (generating and emitting `PLAN_READY` with `DjTransitionPlanPayload`). Improved state management to link commentary requests to specific next tracks (`_commentary_request_next_track`).
+3.  Updated `cantina_os/cantina_os/services/timeline_executor_service/timeline_executor_service.py` to import and parse the new DJ mode Pydantic models. Modified `_handle_plan_ready` to process `DjTransitionPlanPayload` and updated `_execute_step` to recognize the new `"play_cached_speech"` and `"music_crossfade"` step types.
+4.  Implemented waiting mechanisms in `TimelineExecutorService` step execution methods (`_execute_play_cached_speech_step`, `_execute_music_crossfade_step`) using `asyncio.Event`s and added corresponding completion handlers (`_handle_cached_speech_playback_completed`, `_handle_crossfade_complete`) to signal step completion.
+
+**Architecture Conformance**: 
+- Adhered to the event-driven architecture using new `EventTopics` and Pydantic Payloads.
+- BrainService now generates structured plans for TimelineExecutorService.
+- TimelineExecutorService is updated to handle new step types required for synchronized DJ transitions.
+
+**Testing Notes**:
+- Verified that `BrainService` requests speech caching upon receiving GPT commentary.
+- Confirmed that `BrainService` emits a transition plan upon receiving `TRACK_ENDING_SOON` if commentary is cached.
+- Ensured `TimelineExecutorService` can parse the new plan structure and recognizes the new step types.
+- Implemented and verified the waiting logic for cached speech playback and crossfade completion in `TimelineExecutorService`.
+
+**Lesson Learned**: 
+- Precise event payload definitions and consistent Pydantic model usage across services are crucial for successful inter-service communication.
+- Implementing waiting mechanisms for asynchronous step execution within the timeline requires careful use of `asyncio.Event`s.
+
+## 📋 Next Steps
+
+2.  Modify `cantina_os/cantina_os/services/music_controller_service.py` to support:
+    -   Crossfading between tracks (`_crossfade_to_track`).
+    -   Emitting `TRACK_ENDING_SOON` events at the configured threshold before a track ends.
+    -   Pre-loading the next track (`preload_next_track`).
+    -   Providing track progress and remaining time information (`get_track_progress`).
+    -   Handling `CROSSFADE_COMPLETE` events (including sending a unique ID in the payload).
+    -   Integrating with `TimelineExecutorService`'s `music_crossfade` step execution.
+3.  Update architecture documentation with the new command flow and DJ mode specific interactions. 

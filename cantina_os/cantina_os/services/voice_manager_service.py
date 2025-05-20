@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-from cantina_os.base_service import BaseService
+from ..base_service import BaseService
 from cantina_os.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatusPayload, BaseEventPayload, ServiceStatus
 

@@ -16,7 +16,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 from elevenlabs import stream as elevenlabs_stream
 from elevenlabs.client import ElevenLabs
 
-from cantina_os.base_service import BaseService
+from ..base_service import BaseService
 from cantina_os.event_payloads import (
     BaseEventPayload,
     SpeechGenerationRequestPayload,

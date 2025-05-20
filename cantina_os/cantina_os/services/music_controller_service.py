@@ -29,6 +29,13 @@ from ..event_payloads import (
 )
 from ..models.music_models import MusicTrack, MusicLibrary
 
+# Import necessary Pydantic models from event_schemas
+from cantina_os.core.event_schemas import (
+    TrackDataPayload,
+    TrackEndingSoonPayload,
+    CrossfadeCompletePayload # Assuming this will be defined or updated
+)
+
 # Use MusicTrack class from shared models instead
 # class MusicTrack(BaseModel):
 #     """Model representing a music track."""
@@ -78,7 +85,7 @@ class MusicControllerService(BaseService):
         self.is_ducking = False
         self.is_crossfading = False
         self.dj_mode_active = False
-        self.track_end_timer = None
+        self.track_end_timer: Optional[asyncio.Task] = None # Use Optional[asyncio.Task]
         
         # Create VLC instance
         self.vlc_instance = vlc.Instance()
@@ -368,6 +375,29 @@ class MusicControllerService(BaseService):
                     elif payload["action"] == "stop":
                         await self._handle_stop_request(MusicCommandPayload(**payload))
                         return
+                    elif payload["action"] == "crossfade":
+                        # Handle crossfade action from TimelineExecutorService
+                        try:
+                            crossfade_payload = MusicCommandPayload(**payload)
+                            next_track_id = crossfade_payload.song_query # In crossfade, song_query is the next_track_id
+                            crossfade_duration_sec = crossfade_payload.fade_duration # Get fade duration from payload
+
+                            # Find the next track object by ID/name
+                            next_track = self.tracks.get(next_track_id) # Assuming track ID is the same as name key
+                            if not next_track:
+                                # Fallback to fuzzy matching if needed, but for timeline plans, direct ID/name is expected
+                                self.logger.error(f"Crossfade failed: Next track with ID/name '{next_track_id}' not found in music library.")
+                                await self._send_error(f"Crossfade failed: Track '{next_track_id}' not found.")
+                                # TODO: Emit CROSSFADE_COMPLETE with error status? Or rely on timeout in TimelineExecutor?
+                                return
+
+                            # Pass the duration from the payload to the crossfade method
+                            await self._crossfade_to_track(next_track, source="timeline", duration_sec=crossfade_duration_sec)
+                            return
+                        except Exception as e:
+                            self.logger.error(f"Error handling crossfade action: {e}", exc_info=True)
+                            await self._send_error(f"Error during crossfade: {str(e)}")
+                            return
                 
                 # Handle different commands
                 if command == "play":
@@ -981,202 +1011,217 @@ class MusicControllerService(BaseService):
             self.logger.error(f"Error handling DJ next track command: {e}")
 
     async def _setup_track_end_timer(self, track_duration_sec: float) -> None:
-        """
-        Set up a timer to emit TRACK_ENDING_SOON event before track ends
-        
-        Args:
-            track_duration_sec: Duration of the track in seconds
-        """
+        """Sets up a timer to emit TRACK_ENDING_SOON before the track ends."""
         # Cancel any existing timer
-        if self.track_end_timer:
+        if self.track_end_timer and not self.track_end_timer.done():
             self.track_end_timer.cancel()
-            
-        # Calculate when to emit the event (30 seconds before end)
+
         threshold_sec = self._config.track_ending_threshold_sec
-        if track_duration_sec <= threshold_sec:
-            # Track is shorter than our threshold, emit immediately
-            asyncio.create_task(self._emit_track_ending_soon())
+        # Ensure duration is valid and greater than the threshold
+        if track_duration_sec is None or track_duration_sec <= threshold_sec:
+            self.logger.debug(f"Track duration ({track_duration_sec}s) not long enough or invalid for TRACK_ENDING_SOON threshold ({threshold_sec}s). Not setting timer.")
+            self.track_end_timer = None
             return
-            
-        # Calculate delay before emitting event
+
+        # Calculate delay until the threshold is reached
+        # We want to trigger the event *at* the threshold time remaining
         delay_sec = track_duration_sec - threshold_sec
-        
-        # Set timer
-        self.logger.debug(f"Setting track end timer for {delay_sec:.1f} seconds")
-        self.track_end_timer = asyncio.create_task(self._delayed_track_ending_event(delay_sec))
+
+        if delay_sec > 0:
+            self.logger.info(f"Setting TRACK_ENDING_SOON timer for {delay_sec:.2f} seconds (track ending in {threshold_sec}s).")
+            # Create and store the timer task
+            self.track_end_timer = asyncio.create_task(
+                self._delayed_track_ending_event(delay_sec),
+                name=f"track_end_timer_{self.current_track.track_id if self.current_track else 'unknown'}"
+            )
+            # Add a done callback to handle potential exceptions (optional but good practice)
+            # self.track_end_timer.add_done_callback(self._handle_task_exception) # Needs _handle_task_exception in this service
+        else:
+             self.logger.warning(f"Calculated negative or zero delay for track end timer ({delay_sec:.2f}s). Not setting timer.")
+             self.track_end_timer = None
+
 
     async def _delayed_track_ending_event(self, delay_sec: float) -> None:
-        """
-        Wait for delay and then emit TRACK_ENDING_SOON event
-        
-        Args:
-            delay_sec: Seconds to wait before emitting event
-        """
+        """Waits for the specified delay and then emits the TRACK_ENDING_SOON event."""
         try:
+            self.logger.debug(f"Delayed track ending event waiting for {delay_sec:.2f} seconds.")
             await asyncio.sleep(delay_sec)
+
+            # Emit the TRACK_ENDING_SOON event
             await self._emit_track_ending_soon()
+
         except asyncio.CancelledError:
-            # Timer was cancelled, just exit
-            pass
+            self.logger.info("Track ending timer task cancelled.")
         except Exception as e:
-            self.logger.error(f"Error in track end timer: {e}")
+            self.logger.error(f"Error in track ending timer task: {e}", exc_info=True)
+            # TODO: Add error handling/status emission
+        finally:
+            self.track_end_timer = None # Clear the timer task reference
+
 
     async def _emit_track_ending_soon(self) -> None:
-        """Emit TRACK_ENDING_SOON event with current track info"""
-        if not self.current_track:
-            return
-            
-        await self.emit(
-            EventTopics.TRACK_ENDING_SOON,
-            {
-                "track_name": self.current_track.name,
-                "remaining_seconds": self._config.track_ending_threshold_sec
-            }
-        )
-        self.logger.info(f"Emitted TRACK_ENDING_SOON for {self.current_track.name}")
+        """Emits the TRACK_ENDING_SOON event with current track data."""
+        if self.current_track:
+            self.logger.info(f"Emitting TRACK_ENDING_SOON for track: {self.current_track.title}")
+            try:
+                # Create the payload using the Pydantic model
+                payload = TrackEndingSoonPayload(
+                    # timestamp is auto-generated by the model
+                    current_track=TrackDataPayload(**self.current_track.model_dump()), # Assuming MusicTrack is compatible or convertible
+                    time_remaining=self._config.track_ending_threshold_sec # Emit the threshold time remaining
+                )
 
-    async def _crossfade_to_track(self, next_track: MusicTrack, source: str = "dj") -> None:
-        """
-        Perform a smooth crossfade between current track and next track
-        
+                await self._emit_dict(EventTopics.TRACK_ENDING_SOON, payload)
+
+            except Exception as e:
+                self.logger.error(f"Error emitting TRACK_ENDING_SOON event: {e}", exc_info=True)
+        else:
+            self.logger.warning("Cannot emit TRACK_ENDING_SOON, no current track is set.")
+
+
+    async def _crossfade_to_track(self, next_track: MusicTrack, source: str = "dj", duration_sec: float = None) -> None:
+        """Performs a crossfade from the current track to the next track.
+
         Args:
-            next_track: The track to fade to
-            source: Source of the crossfade request
+            next_track: The MusicTrack to fade in.
+            source: The source of the crossfade request (e.g., 'dj', 'cli').
         """
         if self.is_crossfading:
-            self.logger.warning("Crossfade already in progress, ignoring request")
+            self.logger.warning("Already crossfading, ignoring new crossfade request.")
             return
-            
+
+        if not self.player or not self.current_track:
+            self.logger.warning("Cannot crossfade, no current track playing.")
+            # TODO: Handle case where no track is playing but we need to start the next one
+            await self._play_track_by_name(next_track.name, source=source) # Just start the next track
+            return
+
+        if not next_track:
+            self.logger.error("Cannot crossfade, next track is not provided.")
+            return
+
+        self.logger.info(f"Starting crossfade from '{self.current_track.title}' to '{next_track.title}'.")
         self.is_crossfading = True
-        self.logger.info(f"Starting crossfade to: {next_track.name}")
-        
+        self.next_track = next_track # Store next track for the crossfade
+
+        # Generate a unique ID for this crossfade operation
+        crossfade_id = str(uuid.uuid4())
+
         try:
-            # Create the secondary player if needed
+            # Create a secondary player for the next track
             if self.secondary_player:
-                await self._cleanup_player(self.secondary_player)
-                
+                self.secondary_player.stop()
+                self.secondary_player.release()
             self.secondary_player = self.vlc_instance.media_player_new()
-            
-            # Load the next track
+
             media = self.vlc_instance.media_new(next_track.path)
             self.secondary_player.set_media(media)
-            
-            # Set initial volume to 0
+
+            # Set initial volume for secondary player to 0 (faded out)
             self.secondary_player.audio_set_volume(0)
-            
-            # Start playback of next track
+
+            # Start the secondary player (faded out)
             self.secondary_player.play()
-            
-            # Emit crossfade started event
-            await self.emit(
-                EventTopics.CROSSFADE_STARTED,
-                {
-                    "from_track": self.current_track.name if self.current_track else "none",
-                    "to_track": next_track.name
-                }
-            )
-            
-            # Get crossfade parameters
-            duration_ms = self._config.crossfade_duration_ms
-            steps = self._config.crossfade_steps
-            step_time = duration_ms / steps
-            
-            # Execute the crossfade
-            start_volume = self.normal_volume if not self.is_ducking else self.ducking_volume
-            
-            for i in range(steps + 1):
-                # Calculate current volumes
-                progress = i / steps
-                vol_out = int(start_volume * (1 - progress))
-                vol_in = int(start_volume * progress)
-                
-                # Set volumes
-                if self.player and self.player.is_playing():
-                    self.player.audio_set_volume(vol_out)
-                    
-                if self.secondary_player and self.secondary_player.is_playing():
-                    self.secondary_player.audio_set_volume(vol_in)
-                    
-                # Wait for the next step
-                await asyncio.sleep(step_time / 1000)  # Convert ms to seconds
-                
-            # Stop the old track
-            if self.player:
-                self.player.stop()
-                await self._cleanup_player(self.player)
-                
-            # Swap players
+
+            # Perform the crossfade
+            crossfade_duration_ms = self._config.crossfade_duration_ms
+            crossfade_steps = self._config.crossfade_steps
+            step_delay_ms = crossfade_duration_ms // crossfade_steps
+            volume_step_main = self.player.audio_get_volume() // crossfade_steps
+            volume_step_secondary = self.normal_volume // crossfade_steps
+
+            for i in range(crossfade_steps + 1):
+                # Calculate new volumes
+                new_volume_main = max(0, self.player.audio_get_volume() - volume_step_main)
+                new_volume_secondary = min(self.normal_volume, self.secondary_player.audio_get_volume() + volume_step_secondary)
+
+                # Apply volumes
+                self.player.audio_set_volume(new_volume_main)
+                self.secondary_player.audio_set_volume(new_volume_secondary)
+
+                # Wait for the step duration
+                await asyncio.sleep(step_delay_ms / 1000.0)
+
+            # Ensure volumes are set to final values
+            self.player.audio_set_volume(0)
+            self.secondary_player.audio_set_volume(self.normal_volume)
+
+            # Stop and release the old player
+            self.player.stop()
+            self.player.release()
+            self.player = None
+
+            # Make the secondary player the main player
             self.player = self.secondary_player
             self.secondary_player = None
-            self.current_track = next_track
-            self.next_track = None
-            
-            # Set up next track end timer
-            if next_track.duration:
-                self._setup_track_end_timer(next_track.duration)
-                
-            # Emit track changed event
-            await self.emit(
-                EventTopics.MUSIC_PLAYBACK_STARTED,
-                {
-                    "track_name": next_track.name,
-                    "duration": next_track.duration,
-                    "source": source,
-                    "crossfaded": True
-                }
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error during crossfade: {e}")
-        finally:
+
+            # Update current track state
+            self.current_track = self.next_track
+            self.next_track = None # Clear next track after transition
+
+            self.logger.info(f"Crossfade complete. Now playing: '{self.current_track.title}'.")
             self.is_crossfading = False
 
-    async def preload_next_track(self, track: MusicTrack) -> None:
-        """
-        Preload the next track for faster crossfade transitions
-        
-        Args:
-            track: The track to preload
-        """
-        try:
-            self.next_track = track
-            self.logger.debug(f"Preloaded next track: {track.name}")
+            # Emit CROSSFADE_COMPLETE event with the unique ID
+            await self.emit(
+                EventTopics.CROSSFADE_COMPLETE,
+                CrossfadeCompletePayload(crossfade_id=crossfade_id, status="completed").model_dump()
+            )
+
+            # Start the track ending timer for the new current track
+            if self.current_track and self.current_track.duration:
+                await self._setup_track_end_timer(self.current_track.duration)
+
         except Exception as e:
-            self.logger.error(f"Error preloading track: {e}")
+            self.logger.error(f"Error during crossfade: {e}", exc_info=True)
+            self.is_crossfading = False # Ensure flag is reset
+            # TODO: Handle errors during crossfade - stop both players? Attempt to play next track directly?
+            # Emit CROSSFADE_COMPLETE with error status?
+            await self.emit(
+                 EventTopics.CROSSFADE_COMPLETE,
+                 CrossfadeCompletePayload(crossfade_id=crossfade_id, status="error", message=str(e)).model_dump()
+            )
+
+    async def preload_next_track(self, track: MusicTrack) -> None:
+        """Preloads the next track without starting playback."""
+        self.logger.info(f"Preloading next track: {track.title}")
+        self.next_track = track
+        # TODO: Potentially create a media instance for the next track here
+        # but don't assign it to a player until crossfade starts.
 
     async def get_track_progress(self) -> Dict[str, Any]:
+        """Gets the current playback progress of the current track.
+
+        Returns a dictionary with track information and progress.
         """
-        Get the current track progress information
-        
-        Returns:
-            Dict with position and remaining time info
-        """
-        if not self.player or not self.current_track:
-            return {"position_sec": 0, "position_ms": 0, "remaining_sec": 0, "percent": 0}
-            
-        try:
-            position_ms = self.player.get_time()
-            if position_ms < 0:
-                position_ms = 0
-                
-            position_sec = position_ms / 1000
-            
-            if self.current_track.duration:
-                remaining_sec = max(0, self.current_track.duration - position_sec)
-                percent = min(100, max(0, (position_sec / self.current_track.duration) * 100))
-            else:
-                remaining_sec = 0
-                percent = 0
-                
-            return {
-                "position_sec": position_sec,
-                "position_ms": position_ms,
-                "remaining_sec": remaining_sec,
-                "percent": percent
-            }
-        except Exception as e:
-            self.logger.error(f"Error getting track progress: {e}")
-            return {"position_sec": 0, "position_ms": 0, "remaining_sec": 0, "percent": 0}
+        progress_data = {
+            "is_playing": False,
+            "current_track": None,
+            "position_sec": 0.0,
+            "duration_sec": 0.0,
+            "time_remaining_sec": 0.0
+        }
+
+        if self.player and self.player.is_playing():
+            progress_data['is_playing'] = True
+            progress_data['current_track'] = self.current_track.model_dump() if self.current_track else None
+
+            # Get player state and position
+            # VLC player.get_time() returns milliseconds
+            # VLC player.get_length() returns milliseconds
+            current_time_ms = self.player.get_time()
+            total_length_ms = self.player.get_length()
+
+            if total_length_ms > 0:
+                progress_data['position_sec'] = current_time_ms / 1000.0
+                progress_data['duration_sec'] = total_length_ms / 1000.0
+                progress_data['time_remaining_sec'] = (total_length_ms - current_time_ms) / 1000.0
+
+        # Include information about the next track if preloaded
+        if self.next_track:
+             progress_data['next_track'] = self.next_track.model_dump()
+
+        return progress_data
 
     async def _handle_dj_start_command(self) -> None:
         """Handle the 'dj start' CLI command to activate DJ mode"""
