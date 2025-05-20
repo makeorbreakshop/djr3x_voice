@@ -10,7 +10,7 @@ cat > /tmp/dj-r3x << EOF
 # This script launches the DJ R3X Voice program from any directory
 
 # Store the actual path to the DJ-R3X Voice installation
-DJ_R3X_PATH="/Users/brandon/djr3x_voice"
+DJ_R3X_PATH="/Users/brandoncullum/DJ-R3X Voice"
 
 # Navigate to the installation directory
 cd "\$DJ_R3X_PATH" || { echo "Error: Could not navigate to \$DJ_R3X_PATH"; exit 1; }
@@ -31,7 +31,8 @@ EOF
 # Make the temporary script executable
 chmod +x /tmp/dj-r3x
 
-# Copy it to the user's bin directory (where it's already installed)
-cp /tmp/dj-r3x ~/bin/dj-r3x
+# Copy it to /usr/local/bin
+sudo cp /tmp/dj-r3x /usr/local/bin/dj-r3x
+sudo chmod +x /usr/local/bin/dj-r3x
 
 echo "DJ-R3X command fixed successfully! You can now run 'dj-r3x' from any terminal." 

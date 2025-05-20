@@ -4,7 +4,7 @@
 # This script launches the DJ R3X Voice program from any directory
 
 # Store the actual path to the DJ-R3X Voice installation
-DJ_R3X_PATH="/Users/brandon/djr3x_voice"
+DJ_R3X_PATH="/Users/brandoncullum/DJ-R3X Voice"
 
 # Navigate to the installation directory
 cd "$DJ_R3X_PATH" || { echo "Error: Could not navigate to $DJ_R3X_PATH"; exit 1; }
