@@ -15,7 +15,7 @@ from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents, Micro
 
 from cantina_os.base_service import BaseService
 from cantina_os.core.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     TranscriptionTextPayload,
     CliResponsePayload,

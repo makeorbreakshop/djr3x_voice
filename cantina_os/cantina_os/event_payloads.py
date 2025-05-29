@@ -543,12 +543,31 @@ class MemoryUpdatedPayload(BaseEventPayload):
     new_value: Any
     old_value: Optional[Any] = None
 
+class MemoryRequestPayload(BaseEventPayload):
+    """Payload for MEMORY_GET event."""
+    key: str = Field(..., description="Key to retrieve from memory")
+    callback_topic: str = Field(..., description="Topic to emit the response on")
+
+class MemorySetPayload(BaseEventPayload):
+    """Payload for MEMORY_SET event."""
+    key: str = Field(..., description="Key to set in memory")
+    value: Any = Field(..., description="Value to store in memory")
+
+class MemoryValuePayload(BaseEventPayload):
+    """Payload for MEMORY_VALUE event."""
+    key: str = Field(..., description="Key that was requested")
+    value: Any = Field(None, description="Value from memory, None if key not found")
+
 class DJModeStatePayload(BaseEventPayload):
     """Payload for DJ mode state changes."""
     is_active: bool = Field(description="Whether DJ mode is active")
     current_track: Optional[str] = Field(default=None, description="Currently playing track")
     next_track: Optional[str] = Field(default=None, description="Next track in queue")
     crossfade_active: bool = Field(default=False, description="Whether a crossfade is in progress")
+
+class DJModeChangedPayload(BaseEventPayload):
+    """Payload for DJ_MODE_CHANGED events."""
+    is_active: bool = Field(..., description="True if DJ mode is active, False if stopped")
 
 class DJTrackEndingSoonPayload(BaseEventPayload):
     """Payload for track ending soon notification."""

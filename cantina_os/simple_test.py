@@ -15,7 +15,7 @@ import pytest
 # sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from cantina_os.services.mic_input_service import MicInputService, AudioConfig
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatus
 from pyee.asyncio import AsyncIOEventEmitter
 

@@ -25,7 +25,7 @@ from cantina_os.event_payloads import (
     LogLevel,
     LLMResponsePayload
 )
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 
 
 class SpeechPlaybackMethod(str, Enum):

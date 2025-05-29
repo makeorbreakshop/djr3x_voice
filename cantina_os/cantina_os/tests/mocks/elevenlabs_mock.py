@@ -2,7 +2,7 @@
 import asyncio
 from typing import Optional, Dict, Any
 from cantina_os.base_service import BaseService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatus, BaseEventPayload
 
 class ElevenLabsMock(BaseService):

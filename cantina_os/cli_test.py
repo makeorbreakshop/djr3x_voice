@@ -17,7 +17,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 # Set up path to import from cantina_os package
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import CliCommandPayload
 from cantina_os.services.yoda_mode_manager_service import YodaModeManagerService, SystemMode
 from cantina_os.services.command_dispatcher_service import CommandDispatcherService

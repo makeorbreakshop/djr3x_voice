@@ -48,7 +48,7 @@ class TranscriptionTestRunner:
         self.event_bus.on(EventTopics.LLM_PROCESSING_STARTED, self._on_llm_processing_started)
         self.event_bus.on(EventTopics.LLM_PROCESSING_ENDED, self._on_llm_processing_ended)
         self.event_bus.on(EventTopics.LLM_RESPONSE_TEXT, self._on_llm_response)
-        self.event_bus.on(EventTopics.AUDIO_TRANSCRIPTION_FINAL, self._on_audio_final_transcript)
+        self.event_bus.on(EventTopics.TRANSCRIPTION_FINAL, self._on_audio_final_transcript)
         
     def _load_config(self):
         """Load configuration from environment variables."""

@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any, Optional
 
 from ..base_service import BaseService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatusPayload, BaseEventPayload, ServiceStatus
 
 logger = logging.getLogger(__name__)

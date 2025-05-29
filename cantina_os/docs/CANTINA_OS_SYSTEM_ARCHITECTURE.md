@@ -93,6 +93,21 @@ CantinaOS follows these key architectural principles:
 | AUDIO_DUCKING_START | ElevenLabsService | MusicControllerService | BaseEventPayload | Reduce music volume |
 | AUDIO_DUCKING_STOP | ElevenLabsService | MusicControllerService | BaseEventPayload | Restore music volume |
 
+### 3.3.1 Memory Events
+
+| Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
+|-------------|------------|-------------|-------------------|---------|
+| MEMORY_GET | BrainService, Other services | MemoryService | MemoryRequestPayload | Request memory value |
+| MEMORY_SET | BrainService, Other services | MemoryService | MemorySetPayload | Set memory value |
+| MEMORY_VALUE | MemoryService | BrainService, Other services | MemoryValuePayload | Response to memory request |
+| MEMORY_UPDATED | MemoryService | BrainService, Other services | MemoryUpdatePayload | Notify of memory changes |
+
+### 3.3.2 DJ Mode Events
+
+| Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
+|-------------|------------|-------------|-------------------|---------|
+| DJ_MODE_CHANGED | BrainService, CommandDispatcherService | BrainService, MusicControllerService, MemoryService | DJModeChangedPayload | Notify of DJ mode state changes |
+
 ### 3.4 Command and Control Events
 
 | Event Topic | Publishers | Subscribers | Payload Structure | Purpose |

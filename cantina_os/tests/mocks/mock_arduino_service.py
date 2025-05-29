@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Optional, Callable, Awaitable, Set
 from pyee.asyncio import AsyncIOEventEmitter
 
 from cantina_os.base_service import BaseService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatus
 
 logger = logging.getLogger(__name__)

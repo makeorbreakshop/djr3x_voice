@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any
 from pyee.asyncio import AsyncIOEventEmitter
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import SystemModeChangePayload, ServiceStatus
 from ..utils.audio_utils import play_audio_file
 

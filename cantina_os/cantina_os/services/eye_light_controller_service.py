@@ -31,7 +31,8 @@ from cantina_os.event_payloads import (
     SystemModeChangePayload,
     StandardCommandPayload
 )
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
+from cantina_os.utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 from .simple_eye_adapter import SimpleEyeAdapter
 
 
@@ -227,6 +228,9 @@ class EyeLightControllerService(BaseService):
         self.connected = False
         self.last_command_time = 0
         
+        # Set default command topic for auto-registration
+        self._default_command_topic = EventTopics.EYE_COMMAND
+        
     async def _start(self) -> None:
         """Start the service and connect to the Arduino."""
         self.logger.info("Starting EyeLightControllerService")
@@ -238,8 +242,8 @@ class EyeLightControllerService(BaseService):
         await self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_ended)
         await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_started)
         await self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_ended)
-        await self.subscribe(EventTopics.AUDIO_TRANSCRIPTION_FINAL, self._handle_listening_ended)
-        await self.subscribe(EventTopics.AUDIO_TRANSCRIPTION_INTERIM, self._handle_listening_active)
+        await self.subscribe(EventTopics.TRANSCRIPTION_FINAL, self._handle_listening_ended)
+        await self.subscribe(EventTopics.TRANSCRIPTION_INTERIM, self._handle_listening_active)
         
         # Add handlers for text-based recording mode
         await self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
@@ -258,23 +262,9 @@ class EyeLightControllerService(BaseService):
         # Add handler for CLI commands
         await self.subscribe(EventTopics.EYE_COMMAND, self._handle_cli_command)
 
-        # Register eye commands - use the REGISTER_COMMAND event topic
-        await self.emit(EventTopics.REGISTER_COMMAND, {
-            "command": "eye pattern",
-            "handler_service": "eye_light_controller",
-            "event_topic": EventTopics.EYE_COMMAND
-        })
-        await self.emit(EventTopics.REGISTER_COMMAND, {
-            "command": "eye test",
-            "handler_service": "eye_light_controller",
-            "event_topic": EventTopics.EYE_COMMAND
-        })
-        await self.emit(EventTopics.REGISTER_COMMAND, {
-            "command": "eye status",
-            "handler_service": "eye_light_controller",
-            "event_topic": EventTopics.EYE_COMMAND
-        })
-        self.logger.info("Emitted eye command registration events")
+        # Auto-register compound commands using decorators
+        register_service_commands(self, self._event_bus)
+        self.logger.info("Auto-registered eye commands using decorators")
         
         # Emit configuration info to debug service
         await self.emit(EventTopics.DEBUG_LOG, {
@@ -856,52 +846,62 @@ class EyeLightControllerService(BaseService):
             self.logger.info("Mouse recording stopped, immediately setting eye pattern to THINKING")
             await self.set_pattern(EyePattern.THINKING)
     
+    @compound_command("eye test")
+    @command_error_handler
+    async def handle_eye_test(self, payload: dict) -> None:
+        """Handle 'eye test' command - runs test sequence through all patterns."""
+        self.logger.info("Running eye test sequence")
+        await self._run_test_sequence()
+
+    @compound_command("eye status")
+    @command_error_handler
+    async def handle_eye_status(self, payload: dict) -> None:
+        """Handle 'eye status' command - returns current eye status."""
+        self.logger.info("Getting eye status")
+        await self._get_status()
+
+    @compound_command("eye pattern")
+    @validate_compound_command(min_args=1, max_args=1, required_args=["pattern_name"])
+    @command_error_handler
+    async def handle_eye_pattern(self, payload: dict) -> None:
+        """Handle 'eye pattern <pattern_name>' command - sets eye pattern."""
+        args = payload.get("args", [])
+        pattern_name = args[0].lower()
+        self.logger.info(f"Setting eye pattern to: {pattern_name}")
+        await self._set_pattern(pattern_name)
+
     async def _handle_cli_command(self, payload: dict) -> None:
         """
-        Handle eye commands from CLI
-        
-        Args:
-            payload: Command payload received from the dispatcher
+        Legacy CLI command handler - dispatches to appropriate methods.
         """
-        try:
-            self.logger.debug(f"Received eye command: {payload}")
+        self.logger.debug(f"Legacy CLI handler received: {payload}")
+        
+        # Handle CLI command payloads - dispatch to decorated methods
+        if isinstance(payload, dict) and "command" in payload:
+            command = payload.get("command", "")
+            subcommand = payload.get("subcommand", "")
             
-            # Extract command components directly from payload
-            command = payload.get("command", "").lower()
-            subcommand = payload.get("subcommand", "").lower()
-            args = payload.get("args", [])
-            
-            self.logger.debug(f"Processing command: {command}, subcommand: {subcommand}, args: {args}")
-            
-            # Validate base command
-            if command != "eye":
-                await self._send_error(f"Invalid command: {command}. Expected 'eye'")
-                return
-            
-            # Handle different subcommands
-            if subcommand == "pattern":
-                # Get pattern name from args
-                if not args:
-                    await self._send_error("Pattern name required. Usage: eye pattern <pattern_name>")
-                    return
-                pattern_name = args[0].lower()
-                await self._set_pattern(pattern_name)
-                
-            elif subcommand == "test":
-                # Run the full test sequence
-                await self._run_test_sequence()
-                
-            elif subcommand == "status":
-                # Get current status
-                await self._get_status()
-                
+            # Create command pattern for matching
+            if subcommand:
+                command_pattern = f"{command} {subcommand}"
             else:
-                # Unknown or missing subcommand
-                await self._send_error("Eye command requires a subcommand: pattern, test, or status")
-                
-        except Exception as e:
-            self.logger.error(f"Error handling eye command: {e}", exc_info=True)
-            await self._send_error(f"Error processing eye command: {str(e)}")
+                command_pattern = command
+            
+            self.logger.debug(f"Dispatching CLI command: {command_pattern}")
+            
+            # Dispatch to appropriate decorated method
+            if command_pattern == "eye test":
+                await self.handle_eye_test(payload)
+            elif command_pattern == "eye status":
+                await self.handle_eye_status(payload)
+            elif command_pattern == "eye pattern":
+                await self.handle_eye_pattern(payload)
+            else:
+                self.logger.warning(f"Unknown eye command pattern: {command_pattern}")
+                await self._send_error(f"Unknown eye command: {command_pattern}")
+            return
+        
+        self.logger.warning(f"Unhandled CLI command payload format: {payload}")
 
     async def _set_pattern(self, pattern_name: str) -> None:
         """Set the eye pattern via CLI command."""

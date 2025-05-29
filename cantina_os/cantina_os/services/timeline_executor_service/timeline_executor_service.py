@@ -492,26 +492,37 @@ class TimelineExecutorService(BaseService):
 
     async def _execute_play_music_step(self, step: PlanStep) -> tuple[bool, Dict[str, Any]]:
         """Execute a play_music step."""
-        # Emit music command
-        await self._emit_dict(
-            EventTopics.MUSIC_COMMAND,
+        # Route through CommandDispatcher instead of direct service emission
+        if step.genre == "stop":
+            command = "stop music"
+            args = []
+        else:
+            command = "play music"
+            args = [step.genre] if step.genre else []
+        
+        await self.emit(
+            EventTopics.CLI_COMMAND,
             {
-                "action": "play",
-                "song_query": step.genre or "",
-                "source": "voice",  # Indicate this is from voice command through timeline
-                "conversation_id": step.conversation_id if hasattr(step, "conversation_id") else None
+                "command": command.split()[0],
+                "args": command.split()[1:] + args,
+                "raw_input": f"{command} {' '.join(args)}".strip(),
+                "conversation_id": getattr(step, "conversation_id", None)
             }
         )
         return True, {"genre": step.genre}
 
     async def _execute_eye_pattern_step(self, step: PlanStep) -> tuple[bool, Dict[str, Any]]:
         """Execute an eye_pattern step."""
-        # Emit eye command
-        await self._emit_dict(
-            EventTopics.EYE_COMMAND,
+        # Route through CommandDispatcher instead of direct service emission
+        command = "eye pattern"
+        args = [step.pattern] if step.pattern else ["default"]
+        
+        await self.emit(
+            EventTopics.CLI_COMMAND,
             {
-                "pattern": step.pattern or "default",
-                "color": "#FFFFFF"  # Default color
+                "command": command.split()[0],
+                "args": command.split()[1:] + args,
+                "raw_input": f"{command} {' '.join(args)}".strip()
             }
         )
         return True, {"pattern": step.pattern}
@@ -772,24 +783,18 @@ class TimelineExecutorService(BaseService):
         self.logger.debug(f"Created crossfade completion event for {event_key}")
 
         try:
-            # Emit event to MusicControllerService to request crossfade
-            music_command_payload = MusicCommandPayload(
-                # timestamp is auto-generated
-                action="crossfade",
-                song_query=step.next_track_id, # Use next_track_id as song_query
-                fade_duration=step.crossfade_duration,
-                # TODO: Add volume parameters for fade out/in if needed by MusicController
-                # TODO: Add crossfade_id to MusicCommandPayload and CROSSFADE_COMPLETE payload
-                # For now, add to metadata if supported (check payload definition)
-                # MusicCommandPayload in event_payloads.py does NOT have metadata.
-                # This requires updating event_payloads.py or using a different event.
-                # Assuming for now CROSSFADE_COMPLETE will include crossfade_id directly.
-                # metadata={'crossfade_id': crossfade_id} # Not supported by current MusicCommandPayload
-            )
-
-            await self._emit_dict(
-                EventTopics.MUSIC_COMMAND, # Assuming MusicController listens to this topic
-                music_command_payload
+            # Route through CommandDispatcher instead of direct service emission
+            # Note: This assumes a "crossfade music" command exists or will be added
+            command = "crossfade music"
+            args = [step.next_track_id, str(step.crossfade_duration)]
+            
+            await self.emit(
+                EventTopics.CLI_COMMAND,
+                {
+                    "command": command.split()[0],
+                    "args": command.split()[1:] + args,
+                    "raw_input": f"{command} {' '.join(args)}".strip()
+                }
             )
 
             # Wait for crossfade completion
@@ -879,4 +884,31 @@ class TimelineExecutorService(BaseService):
                    # TODO: Consider how to handle this - maybe signal the most recent crossfade event?
 
          except Exception as e:
-              self.logger.error(f"Error handling CROSSFADE_COMPLETE: {e}", exc_info=True) 
+              self.logger.error(f"Error handling CROSSFADE_COMPLETE: {e}", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Audio ducking methods
+    # ------------------------------------------------------------------
+    async def _duck_music(self) -> None:
+        """Duck music volume during voice activity."""
+        if self._current_music_playing:
+            self.logger.info("Ducking music volume for voice activity")
+            await self._emit_dict(
+                EventTopics.AUDIO_DUCKING_START,
+                {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
+            )
+            self._audio_ducked = True
+            # Small delay to ensure ducking has started
+            await asyncio.sleep(0.15)
+
+    async def _unduck_music(self) -> None:
+        """Restore music volume after voice activity."""
+        if self._current_music_playing and self._audio_ducked:
+            self.logger.info("Restoring music volume after voice activity")
+            await self._emit_dict(
+                EventTopics.AUDIO_DUCKING_STOP,
+                {"fade_ms": self._config.ducking_fade_ms}
+            )
+            self._audio_ducked = False
+            # Small delay to ensure unducking has started
+            await asyncio.sleep(0.15) 

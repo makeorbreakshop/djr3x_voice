@@ -12,13 +12,14 @@ from pyee.asyncio import AsyncIOEventEmitter
 import sounddevice as sd
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     CliCommandPayload,
     CliResponsePayload,
     ServiceStatus,
     LogLevel
 )
+from ..utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 from .yoda_mode_manager_service import SystemMode
 
 class ModeCommandHandlerService(BaseService):
@@ -50,6 +51,9 @@ class ModeCommandHandlerService(BaseService):
         super().__init__("mode_command_handler", event_bus, logger)
         self._mode_manager = mode_manager_service
         
+        # Set default command topic for auto-registration
+        self._default_command_topic = EventTopics.MODE_COMMAND
+        
     async def _start(self) -> None:
         """Initialize the service."""
         self.logger.info("Starting mode command handler service")
@@ -63,6 +67,10 @@ class ModeCommandHandlerService(BaseService):
         # Subscribe to mode transition complete events to handle failures
         await self.subscribe(EventTopics.MODE_TRANSITION_COMPLETE, self._handle_mode_transition_complete)
         
+        # Auto-register compound commands using decorators
+        register_service_commands(self, self._event_bus)
+        self.logger.info("Auto-registered mode commands using decorators")
+        
         # Set service status to RUNNING
         self._status = ServiceStatus.RUNNING
         await self._emit_status(ServiceStatus.RUNNING, "Mode command handler ready")
@@ -73,55 +81,41 @@ class ModeCommandHandlerService(BaseService):
         
     async def _handle_mode_command(self, payload: Dict[str, Any]) -> None:
         """Handle mode-related commands.
-        
-        Args:
-            payload: The command payload
+        For decorated commands like 'engage', 'idle', 'ambient', 'disengage', this handler
+        now directly invokes the appropriate decorated method.
+        This method also handles other commands like 'status', 'help', 'reset' if they
+        are routed here without specific decorated handlers.
         """
+        self.logger.debug(f"_handle_mode_command received payload: {payload}")
+
+        # Extract the core command string to check if it's one handled by decorators
+        raw_input_command = payload.get("raw_input", "").strip().lower()
+        
+        # Check for decorated handler commands and invoke them directly
+        if raw_input_command == "engage":
+            await self.handle_engage(payload)
+            return
+        elif raw_input_command == "disengage":
+            await self.handle_disengage(payload)
+            return
+        elif raw_input_command == "ambient":
+            await self.handle_ambient(payload)
+            return
+        elif raw_input_command == "idle":
+            await self.handle_idle(payload)
+            return
+
+        # Handle other commands not managed by decorators
         try:
-            if not isinstance(payload, CliCommandPayload):
-                try:
-                    payload = CliCommandPayload(**payload)
-                except Exception as e:
-                    error_msg = f"Error handling mode command: {e}"
-                    self.logger.error(error_msg)
-                    await self._emit_status(
-                        ServiceStatus.ERROR,
-                        error_msg,
-                        severity=LogLevel.ERROR
-                    )
-                    
-                    # Fix: Convert the CliResponsePayload to dict before passing to emit_error_response
-                    response_payload = CliResponsePayload(
-                        message=error_msg,
-                        is_error=True,
-                        command=None
-                    ).model_dump()
-                    
-                    await self.emit_error_response(
-                        EventTopics.CLI_RESPONSE,
-                        response_payload
-                    )
-                    return
-                
-            command = payload.command.lower()
+            # Use .get() for safety as processed_payload is a dict here
+            command = payload.get("command", "").lower()
+            if not command and isinstance(payload, dict) and "raw_input" in payload:
+                 # Fallback for payloads that might just have raw_input
+                 command = payload["raw_input"].strip().lower().split()[0]
+
             response_msg = None
             
-            if command == "engage":
-                self.logger.info("Mode command: engage")
-                # No longer need to send a response here, as it will be handled by _handle_mode_change
-                await self._mode_manager.set_mode(SystemMode.INTERACTIVE)
-                
-            elif command == "ambient":
-                self.logger.info("Mode command: ambient")
-                await self._mode_manager.set_mode(SystemMode.AMBIENT)
-                # No longer need to send a response here, as it will be handled by _handle_mode_change
-                
-            elif command == "disengage":
-                self.logger.info("Mode command: disengage")
-                await self._mode_manager.set_mode(SystemMode.IDLE)
-                # No longer need to send a response here, as it will be handled by _handle_mode_change
-                
-            elif command == "status":
+            if command == "status":
                 current_mode = self._mode_manager.current_mode
                 response_msg = f"Current System Mode: {current_mode.name}"
                 
@@ -153,7 +147,6 @@ class ModeCommandHandlerService(BaseService):
                     EventTopics.CLI_RESPONSE,
                     cli_response_dict
                 )
-            # No need for the else case with default confirmation message
                 
         except Exception as e:
             error_msg = f"Error handling mode command: {e}"
@@ -241,6 +234,18 @@ class ModeCommandHandlerService(BaseService):
                 error_msg,
                 severity=LogLevel.ERROR
             )
+            # Ensure a CLI response is sent for unexpected errors in this handler
+            try:
+                await self.emit(
+                    EventTopics.CLI_RESPONSE,
+                    CliResponsePayload(
+                        message=f"Internal error handling mode change: {e}",
+                        is_error=True,
+                        command=f"mode_change_{payload.get('new_mode', 'unknown').lower()}_error"
+                    ).model_dump()
+                )
+            except Exception as cli_emit_error:
+                self.logger.error(f"Failed to emit CLI error response during mode change handling: {cli_emit_error}")
             
     async def _handle_mode_transition_complete(self, payload: Dict[str, Any]) -> None:
         """Handle mode transition complete events, especially failures.
@@ -334,3 +339,32 @@ Available Commands:
   Other:
     help         (h) - Show this help message
 """ 
+
+    # Add compound command methods using decorators
+    @compound_command("engage")
+    @command_error_handler
+    async def handle_engage(self, payload: dict) -> None:
+        """Handle the 'engage' command to enter interactive mode."""
+        self.logger.info("Mode command: engage")
+        await self._mode_manager.set_mode(SystemMode.INTERACTIVE)
+
+    @compound_command("disengage")
+    @command_error_handler
+    async def handle_disengage(self, payload: dict) -> None:
+        """Handle the 'disengage' command to return to idle mode."""
+        self.logger.info("Mode command: disengage")
+        await self._mode_manager.set_mode(SystemMode.IDLE)
+
+    @compound_command("ambient")
+    @command_error_handler
+    async def handle_ambient(self, payload: dict) -> None:
+        """Handle the 'ambient' command to enter ambient mode."""
+        self.logger.info("Mode command: ambient")
+        await self._mode_manager.set_mode(SystemMode.AMBIENT)
+
+    @compound_command("idle")
+    @command_error_handler
+    async def handle_idle(self, payload: dict) -> None:
+        """Handle the 'idle' command to enter idle mode."""
+        self.logger.info("Mode command: idle")
+        await self._mode_manager.set_mode(SystemMode.IDLE) 

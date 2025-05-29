@@ -17,7 +17,7 @@ import aiohttp
 from pydantic import BaseModel, ValidationError
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     BaseEventPayload,
     TranscriptionTextPayload,
@@ -259,7 +259,7 @@ class GPTService(BaseService):
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
         # Get the topic values directly from the enum for comparison
-        from ..event_topics import EventTopics
+        from ..core.event_topics import EventTopics
         transcription_final = EventTopics.TRANSCRIPTION_FINAL
         
         self.logger.info("GPTService attempting to set up subscriptions.") # Log entry for method call
@@ -295,6 +295,14 @@ class GPTService(BaseService):
             self._process_intent_execution_result
         ))
         self.logger.info("GPTService: Subscription task created for INTENT_EXECUTION_RESULT.")
+        
+        # Add subscription for DJ commentary requests
+        self.logger.info("GPTService subscribing to DJ_COMMENTARY_REQUEST")
+        asyncio.create_task(self.subscribe(
+            EventTopics.DJ_COMMENTARY_REQUEST,
+            self._handle_dj_commentary_request
+        ))
+        self.logger.info("GPTService: Subscription task created for DJ_COMMENTARY_REQUEST.")
 
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
@@ -1004,3 +1012,129 @@ class GPTService(BaseService):
             # Emit a fallback response
             fallback_msg = f"Action completed successfully."
             await self._emit_llm_response(fallback_msg) 
+
+    async def _handle_dj_commentary_request(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ commentary generation requests from BrainService."""
+        try:
+            self.logger.info("Handling DJ_COMMENTARY_REQUEST")
+            
+            # Import the request payload model
+            from cantina_os.core.event_schemas import DjCommentaryRequestPayload
+            
+            # Parse the request payload
+            request_payload = DjCommentaryRequestPayload(**payload)
+            context = request_payload.context
+            current_track = request_payload.current_track
+            next_track = request_payload.next_track
+            persona = request_payload.persona
+            request_id = request_payload.request_id
+            
+            self.logger.info(f"Generating commentary for request_id: {request_id}")
+            self.logger.info(f"Context: {context}, Next track: {next_track.title if next_track else 'None'}")
+            
+            # Create commentary prompt based on context and track information
+            if context == "transition" and current_track and next_track:
+                prompt = f"""
+{persona}
+
+You are transitioning from "{current_track.title}" to "{next_track.title}".
+
+Generate a brief, energetic DJ transition commentary (2-3 sentences max) that:
+- Acknowledges the current track ending
+- Introduces the next track with enthusiasm  
+- Maintains the Star Wars cantina atmosphere
+- Sounds natural and conversational like a real DJ
+
+Keep it concise and punchy - this will play over a crossfade.
+"""
+            elif context == "intro" and next_track:
+                prompt = f"""
+{persona}
+
+Generate a brief, enthusiastic introduction (2-3 sentences max) for the track "{next_track.title}".
+
+Make it sound like DJ R3X is introducing this track to the cantina crowd.
+Keep it energetic but concise.
+"""
+            else:
+                # Fallback prompt
+                prompt = f"""
+{persona}
+
+Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X.
+"""
+            
+            self.logger.info(f"Commentary prompt created for {context} context")
+            
+            # Generate commentary using GPT
+            api_url = "https://api.openai.com/v1/chat/completions"
+            
+            messages = [
+                {"role": "system", "content": persona},
+                {"role": "user", "content": prompt}
+            ]
+            
+            request_data = {
+                "model": self._config["MODEL"],
+                "messages": messages,
+                "temperature": 0.8,  # Higher temperature for more creative responses
+                "max_tokens": 150,   # Limit response length for brief commentary
+                "stream": False      # No streaming for commentary generation
+            }
+            
+            if not self._session:
+                raise RuntimeError("No active session for API request")
+    
+            headers = {
+                "Authorization": f"Bearer {self._config['OPENAI_API_KEY']}",
+                "Content-Type": "application/json"
+            }
+            
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                if response.status != 200:
+                    response_text = await response.text()
+                    error_msg = f"Commentary generation failed with status {response.status}: {response_text[:200]}"
+                    self.logger.error(error_msg)
+                    raise Exception(error_msg)
+    
+                response_data = await response.json()
+                commentary_text = response_data["choices"][0]["message"]["content"].strip()
+                
+                self.logger.info(f"Generated commentary: {commentary_text}")
+                
+                # Emit the commentary response
+                from cantina_os.core.event_schemas import GptCommentaryResponsePayload
+                
+                commentary_response = GptCommentaryResponsePayload(
+                    request_id=request_id,
+                    commentary_text=commentary_text,
+                    is_partial=False
+                )
+                
+                await self.emit(
+                    EventTopics.GPT_COMMENTARY_RESPONSE,
+                    commentary_response.model_dump()
+                )
+                
+                self.logger.info(f"Emitted GPT_COMMENTARY_RESPONSE for request_id: {request_id}")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling DJ commentary request: {e}", exc_info=True)
+            
+            # Emit error response if possible
+            try:
+                request_id = payload.get("request_id", "unknown")
+                from cantina_os.core.event_schemas import GptCommentaryResponsePayload
+                
+                error_response = GptCommentaryResponsePayload(
+                    request_id=request_id,
+                    commentary_text="",
+                    is_partial=True  # Mark as partial to indicate error
+                )
+                
+                await self.emit(
+                    EventTopics.GPT_COMMENTARY_RESPONSE,
+                    error_response.model_dump()
+                )
+            except Exception as emit_error:
+                self.logger.error(f"Failed to emit error response: {emit_error}") 

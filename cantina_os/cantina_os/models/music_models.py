@@ -11,9 +11,11 @@ from pydantic import BaseModel, Field
 
 class MusicTrack(BaseModel):
     """Model representing a music track."""
-    name: str = Field(description="Display name of the track")
-    path: str = Field(description="Full file path to the track")
+    name: str = Field(description="Name of the track (filename without extension)")
+    path: str = Field(description="Full path to the track file")
     duration: Optional[float] = Field(default=None, description="Duration of the track in seconds")
+    track_id: str = Field(default="", description="Unique identifier for the track (defaults to name)")
+    title: str = Field(default="", description="Display title for the track (defaults to name)")
     artist: Optional[str] = Field(default=None, description="Artist name if available")
     album: Optional[str] = Field(default=None, description="Album name if available")
     genre: Optional[str] = Field(default=None, description="Genre of the track if available")
@@ -24,13 +26,13 @@ class MusicTrack(BaseModel):
         
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MusicTrack":
-        """Create a MusicTrack from a dictionary, handling both full and partial data."""
-        if isinstance(data, dict):
-            # Only use fields that are defined in the model
-            valid_fields = {k: v for k, v in data.items() if k in cls.__annotations__}
-            return cls(**valid_fields)
-        else:
-            raise ValueError(f"Expected dictionary, got {type(data)}")
+        """Create a MusicTrack from a dictionary."""
+        # Set defaults for backward compatibility
+        if "track_id" not in data:
+            data["track_id"] = data.get("name", "")
+        if "title" not in data:
+            data["title"] = data.get("name", "")
+        return cls(**data)
 
 
 class MusicLibrary(BaseModel):

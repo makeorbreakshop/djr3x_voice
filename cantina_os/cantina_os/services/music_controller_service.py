@@ -17,7 +17,7 @@ import glob
 import math
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     MusicCommandPayload,
     BaseEventPayload,
@@ -25,9 +25,11 @@ from ..event_payloads import (
     ServiceStatus,
     SystemModePayload,
     LogLevel,
-    StandardCommandPayload
+    StandardCommandPayload,
+    DJModeChangedPayload
 )
 from ..models.music_models import MusicTrack, MusicLibrary
+from ..utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 
 # Import necessary Pydantic models from event_schemas
 from cantina_os.core.event_schemas import (
@@ -90,6 +92,9 @@ class MusicControllerService(BaseService):
         # Create VLC instance
         self.vlc_instance = vlc.Instance()
         
+        # Set default command topic for auto-registration
+        self._default_command_topic = EventTopics.MUSIC_COMMAND
+        
         # Subscriptions will be set up during start()
         self._subscriptions = []
         
@@ -141,6 +146,10 @@ class MusicControllerService(BaseService):
         # Load the music library
         self.logger.debug("Loading music library")
         await self._load_music_library()
+        
+        # Auto-register compound commands using decorators
+        register_service_commands(self, self._event_bus)
+        self.logger.info("Auto-registered music commands using decorators")
         
         # Set service status to running
         self.logger.info(f"Music controller started with {len(self.tracks)} tracks loaded")
@@ -263,7 +272,9 @@ class MusicControllerService(BaseService):
                         track = MusicTrack(
                             name=name, 
                             path=abs_path,
-                            duration=duration
+                            duration=duration,
+                            track_id=name,  # Use name as track_id for consistency
+                            title=name  # Add title field for BrainService
                         )
                         
                         # Use name as key for consistent lookup
@@ -280,12 +291,13 @@ class MusicControllerService(BaseService):
             if music_files_count == 0:
                 self.logger.warning("No music files found. Music playback will be unavailable.")
             
-            # Publish a music library updated event
+            # Publish a music library updated event with proper track data
+            track_data = await self.get_track_list()
             await self.emit(
                 EventTopics.MUSIC_LIBRARY_UPDATED,
                 {
                     "track_count": music_files_count,
-                    "tracks": await self.get_track_list()  # Send complete track list
+                    "tracks": track_data
                 }
             )
             
@@ -351,121 +363,68 @@ class MusicControllerService(BaseService):
 
     async def _handle_music_command(self, payload):
         """
-        Handle music command events.
-        
-        This method parses music command events and dispatches them to the
-        appropriate handlers.
+        Legacy music command handler - dispatches to appropriate methods.
         """
-        try:
-            # Extract command from payload
-            if isinstance(payload, dict):
-                command = payload.get("command", "").lower()
-                subcommand = payload.get("subcommand")
-                args = payload.get("args", [])
-                conversation_id = payload.get("conversation_id")
-                
-                self.logger.info(f"Handling music command: {command} {subcommand} {args}")
-                
-                # Convert to MusicCommandPayload if needed
-                if "action" in payload:
-                    # Already in correct format for play/stop
-                    if payload["action"] == "play":
-                        await self._handle_play_request(MusicCommandPayload(**payload))
-                        return
-                    elif payload["action"] == "stop":
-                        await self._handle_stop_request(MusicCommandPayload(**payload))
-                        return
-                    elif payload["action"] == "crossfade":
-                        # Handle crossfade action from TimelineExecutorService
-                        try:
-                            crossfade_payload = MusicCommandPayload(**payload)
-                            next_track_id = crossfade_payload.song_query # In crossfade, song_query is the next_track_id
-                            crossfade_duration_sec = crossfade_payload.fade_duration # Get fade duration from payload
+        self.logger.debug(f"Legacy music handler received: {payload}")
+        
+        # Handle action-based payloads (from other services)
+        if isinstance(payload, dict) and "action" in payload:
+            if payload["action"] == "play":
+                await self._handle_play_request(MusicCommandPayload(**payload))
+                return
+            elif payload["action"] == "stop":
+                await self._handle_stop_request(MusicCommandPayload(**payload))
+                return
+            elif payload["action"] == "crossfade":
+                # Handle crossfade action from TimelineExecutorService
+                try:
+                    crossfade_payload = MusicCommandPayload(**payload)
+                    next_track_id = crossfade_payload.song_query
+                    crossfade_duration_sec = crossfade_payload.fade_duration
 
-                            # Find the next track object by ID/name
-                            next_track = self.tracks.get(next_track_id) # Assuming track ID is the same as name key
-                            if not next_track:
-                                # Fallback to fuzzy matching if needed, but for timeline plans, direct ID/name is expected
-                                self.logger.error(f"Crossfade failed: Next track with ID/name '{next_track_id}' not found in music library.")
-                                await self._send_error(f"Crossfade failed: Track '{next_track_id}' not found.")
-                                # TODO: Emit CROSSFADE_COMPLETE with error status? Or rely on timeout in TimelineExecutor?
-                                return
-
-                            # Pass the duration from the payload to the crossfade method
-                            await self._crossfade_to_track(next_track, source="timeline", duration_sec=crossfade_duration_sec)
-                            return
-                        except Exception as e:
-                            self.logger.error(f"Error handling crossfade action: {e}", exc_info=True)
-                            await self._send_error(f"Error during crossfade: {str(e)}")
-                            return
-                
-                # Handle different commands
-                if command == "play":
-                    # Play specified track or a random one
-                    if args:
-                        track_query = " ".join(args)
-                        await self._smart_play_track(track_query)
-                    else:
-                        await self._send_error("Please specify a track name")
-                
-                elif command == "stop":
-                    # Stop music playback
-                    await self._stop_playback()
-                    
-                elif command == "list":
-                    # List available tracks
-                    await self._list_tracks()
-                    
-                elif command == "install":
-                    # Install music files from a directory
-                    if len(args) > 0:
-                        source_dir = args[0]
-                        await self._handle_install_music_command(args)
-                    else:
-                        await self._send_error("Please specify a source directory")
-                
-                elif command == "debug":
-                    # Debug music library issues
-                    await self._debug_music_library()
-                
-                # DJ Mode Commands
-                elif command == "dj":
-                    if len(args) == 0:
-                        await self._send_error("Please specify a DJ mode command: start, stop, next, queue")
+                    next_track = self.tracks.get(next_track_id)
+                    if not next_track:
+                        self.logger.error(f"Crossfade failed: Next track with ID/name '{next_track_id}' not found in music library.")
+                        await self._send_error(f"Crossfade failed: Track '{next_track_id}' not found.")
                         return
-                    
-                    # Handle DJ subcommands
-                    dj_command = args[0].lower()
-                    
-                    if dj_command == "start":
-                        await self._handle_dj_start_command()
-                    
-                    elif dj_command == "stop":
-                        await self._handle_dj_stop_command()
-                    
-                    elif dj_command == "next":
-                        await self._handle_dj_next_command()
-                    
-                    elif dj_command == "queue":
-                        if len(args) > 1:
-                            track_query = " ".join(args[1:])
-                            await self._handle_dj_queue_command(track_query)
-                        else:
-                            await self._send_error("Please specify a track to queue")
-                    
-                    else:
-                        await self._send_error(f"Unknown DJ command: {dj_command}")
 
-                else:
-                    # Unknown command
-                    await self._send_error(f"Unknown music command: {command}")
-                    
+                    await self._crossfade_to_track(next_track, source="timeline", duration_sec=crossfade_duration_sec)
+                    return
+                except Exception as e:
+                    self.logger.error(f"Error handling crossfade action: {e}", exc_info=True)
+                    await self._send_error(f"Error during crossfade: {str(e)}")
+                    return
+        
+        # Handle CLI command payloads - dispatch to decorated methods
+        if isinstance(payload, dict) and "command" in payload:
+            command = payload.get("command", "")
+            subcommand = payload.get("subcommand", "")
+            
+            # Create command pattern for matching
+            if subcommand:
+                command_pattern = f"{command} {subcommand}"
             else:
-                self.logger.error(f"Invalid music command payload format: {type(payload)}")
-                
-        except Exception as e:
-            self.logger.error(f"Error handling music command: {e}", exc_info=True)
-            await self._send_error(f"Error: {str(e)}")
+                command_pattern = command
+            
+            self.logger.debug(f"Dispatching CLI command: {command_pattern}")
+            
+            # Dispatch to appropriate decorated method
+            if command_pattern == "list music":
+                await self.handle_list_music(payload)
+            elif command_pattern == "play music":
+                await self.handle_play_music(payload)
+            elif command_pattern == "stop music":
+                await self.handle_stop_music(payload)
+            elif command_pattern == "install music":
+                await self.handle_install_music(payload)
+            elif command_pattern == "debug music":
+                await self.handle_debug_music(payload)
+            else:
+                self.logger.warning(f"Unknown music command pattern: {command_pattern}")
+                await self._send_error(f"Unknown music command: {command_pattern}")
+            return
+        
+        self.logger.warning(f"Unhandled music command payload format: {payload}")
 
     async def _handle_install_music_command(self, args):
         """
@@ -668,7 +627,7 @@ class MusicControllerService(BaseService):
             
             # Set up track end detection timer if in DJ mode
             if self.dj_mode_active and track.duration:
-                self._setup_track_end_timer(track.duration)
+                await self._setup_track_end_timer(track.duration)
             
             # Success message to CLI
             await self._send_success(f"Now playing: {track.name}")
@@ -719,22 +678,24 @@ class MusicControllerService(BaseService):
             await self._send_error(f"Error listing tracks: {str(e)}")
 
     async def _send_success(self, message: str) -> None:
-        """Send a success response"""
+        """Send a success response via CLI_RESPONSE event."""
         await self.emit(
             EventTopics.CLI_RESPONSE,
             {
                 "message": message,
-                "is_error": False
+                "is_error": False,
+                "service": self.service_name
             }
         )
 
     async def _send_error(self, message: str) -> None:
-        """Send an error response"""
+        """Send an error response via CLI_RESPONSE event."""
         await self.emit(
             EventTopics.CLI_RESPONSE,
             {
                 "message": message,
-                "is_error": True
+                "is_error": True,
+                "service": self.service_name
             }
         )
 
@@ -742,7 +703,46 @@ class MusicControllerService(BaseService):
         """Get list of available tracks"""
         # Use the actual loaded tracks instead of hardcoded list
         return [track.name for track in self.tracks.values()]
-        
+
+    @compound_command("list music")
+    @command_error_handler
+    async def handle_list_music(self, payload: dict) -> None:
+        """Handle 'list music' command - lists available tracks."""
+        self.logger.info("Listing available music tracks")
+        await self._list_tracks()
+
+    @compound_command("play music")
+    @validate_compound_command(min_args=1, required_args=["track_name"])
+    @command_error_handler
+    async def handle_play_music(self, payload: dict) -> None:
+        """Handle 'play music <track>' command - plays specified track."""
+        args = payload.get("args", [])
+        track_query = " ".join(args)
+        self.logger.info(f"Playing music track: {track_query}")
+        await self._smart_play_track(track_query)
+
+    @compound_command("stop music")
+    @command_error_handler
+    async def handle_stop_music(self, payload: dict) -> None:
+        """Handle 'stop music' command - stops music playback."""
+        self.logger.info("Stopping music playback")
+        await self._stop_playback()
+
+    @compound_command("install music")
+    @command_error_handler
+    async def handle_install_music(self, payload: dict) -> None:
+        """Handle 'install music [directory]' command - installs music from directory."""
+        args = payload.get("args", [])
+        self.logger.info(f"Installing music files from: {args}")
+        await self._handle_install_music_command(args)
+
+    @compound_command("debug music")
+    @command_error_handler
+    async def handle_debug_music(self, payload: dict) -> None:
+        """Handle 'debug music' command - shows music library debug info."""
+        self.logger.info("Running music library debug")
+        await self._debug_music_library()
+
     async def _handle_mode_change(self, payload: Dict[str, Any]):
         """Handle system mode changes."""
         # Use new_mode field from the payload (not SystemModePayload.mode)
@@ -791,17 +791,18 @@ class MusicControllerService(BaseService):
             self.is_ducking = False
             self.player.audio_set_volume(self.normal_volume)
             
-    async def get_track_list(self) -> List[Dict[str, any]]:
-        """Get a list of available music tracks."""
-        track_info = []
-        for track in self.tracks.values():
-            # Use model_dump() for Pydantic v2 compatibility
-            if hasattr(track, "model_dump"):
-                track_info.append(track.model_dump())
-            else:
-                # Fallback for Pydantic v1
-                track_info.append(track.dict())
-        return track_info
+    async def get_track_list(self) -> Dict[str, Dict]:
+        """Get a dictionary of all tracks with their metadata."""
+        track_dict = {}
+        for name, track in self.tracks.items():
+            track_dict[name] = {
+                "name": track.name,
+                "path": track.path,
+                "duration": track.duration,
+                "track_id": track.name,  # Use name as track_id for consistency
+                "title": track.name,  # Add title field for BrainService
+            }
+        return track_dict
         
     async def play_music(self, track_index=None, track_name=None):
         """
@@ -968,27 +969,31 @@ class MusicControllerService(BaseService):
             self.player.audio_set_volume(self.normal_volume)
             
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
-        """
-        Handle DJ mode activation/deactivation
-        
-        Args:
-            payload: Event payload with dj_mode_active flag
-        """
+        """Handle DJ mode activation/deactivation."""
         try:
-            is_active = payload.get("dj_mode_active", False)
-            self.dj_mode_active = is_active
-            
-            self.logger.info(f"DJ Mode {'activated' if is_active else 'deactivated'}")
-            
-            # If DJ mode is activated and we have a track playing, set up the end timer
-            if is_active and self.current_track and self.current_track.duration:
-                # Get current position to calculate remaining time
-                if self.player and self.player.is_playing():
-                    position_ms = self.player.get_time()
-                    if position_ms > 0:
-                        remaining_ms = (self.current_track.duration * 1000) - position_ms
-                        remaining_sec = remaining_ms / 1000
-                        self._setup_track_end_timer(remaining_sec)
+            # Use Pydantic model for incoming payload
+            mode_change_payload = DJModeChangedPayload(**payload)
+            is_active = mode_change_payload.is_active
+
+            if is_active:
+                self.logger.info("DJ Mode activated")
+                self.dj_mode_active = True
+                
+                # Try to start playing music if we have tracks
+                available_tracks = list(self.tracks.keys())
+                if available_tracks:
+                    # Select a random track to start with
+                    import random
+                    track_name = random.choice(available_tracks)
+                    await self._play_track_by_name(track_name, source="dj")
+                    self.logger.info(f"DJ mode started playing: {track_name}")
+                else:
+                    self.logger.warning("No tracks available to play in DJ mode")
+            else:
+                self.logger.info("DJ Mode deactivated")
+                self.dj_mode_active = False
+                # Stop current playback
+                await self._stop_playback()
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}")
 
@@ -1067,7 +1072,7 @@ class MusicControllerService(BaseService):
                 # Create the payload using the Pydantic model
                 payload = TrackEndingSoonPayload(
                     # timestamp is auto-generated by the model
-                    current_track=TrackDataPayload(**self.current_track.model_dump()), # Assuming MusicTrack is compatible or convertible
+                    current_track=TrackDataPayload(**self.current_track.dict()), # Assuming MusicTrack is compatible or convertible
                     time_remaining=self._config.track_ending_threshold_sec # Emit the threshold time remaining
                 )
 
@@ -1093,7 +1098,7 @@ class MusicControllerService(BaseService):
         if not self.player or not self.current_track:
             self.logger.warning("Cannot crossfade, no current track playing.")
             # TODO: Handle case where no track is playing but we need to start the next one
-            await self._play_track_by_name(next_track.name, source=source) # Just start the next track
+            await self.play_track_by_name(next_track.name, source=source) # Just start the next track
             return
 
         if not next_track:
@@ -1165,7 +1170,7 @@ class MusicControllerService(BaseService):
             # Emit CROSSFADE_COMPLETE event with the unique ID
             await self.emit(
                 EventTopics.CROSSFADE_COMPLETE,
-                CrossfadeCompletePayload(crossfade_id=crossfade_id, status="completed").model_dump()
+                CrossfadeCompletePayload(crossfade_id=crossfade_id, status="completed").dict()
             )
 
             # Start the track ending timer for the new current track
@@ -1179,7 +1184,7 @@ class MusicControllerService(BaseService):
             # Emit CROSSFADE_COMPLETE with error status?
             await self.emit(
                  EventTopics.CROSSFADE_COMPLETE,
-                 CrossfadeCompletePayload(crossfade_id=crossfade_id, status="error", message=str(e)).model_dump()
+                 CrossfadeCompletePayload(crossfade_id=crossfade_id, status="error", message=str(e)).dict()
             )
 
     async def preload_next_track(self, track: MusicTrack) -> None:
@@ -1204,7 +1209,7 @@ class MusicControllerService(BaseService):
 
         if self.player and self.player.is_playing():
             progress_data['is_playing'] = True
-            progress_data['current_track'] = self.current_track.model_dump() if self.current_track else None
+            progress_data['current_track'] = self.current_track.dict() if self.current_track else None
 
             # Get player state and position
             # VLC player.get_time() returns milliseconds
@@ -1219,7 +1224,7 @@ class MusicControllerService(BaseService):
 
         # Include information about the next track if preloaded
         if self.next_track:
-             progress_data['next_track'] = self.next_track.model_dump()
+             progress_data['next_track'] = self.next_track.dict()
 
         return progress_data
 
@@ -1231,12 +1236,10 @@ class MusicControllerService(BaseService):
                 await self._send_error("DJ mode is already active")
                 return
                 
-            # Emit event to activate DJ mode 
+            # Emit event to activate DJ mode
             await self.emit(
                 EventTopics.DJ_MODE_CHANGED,
-                {
-                    "dj_mode_active": True
-                }
+                DJModeChangedPayload(is_active=True).dict()
             )
             
             # Confirm to user
@@ -1266,9 +1269,7 @@ class MusicControllerService(BaseService):
             # Emit event to deactivate DJ mode
             await self.emit(
                 EventTopics.DJ_MODE_CHANGED,
-                {
-                    "dj_mode_active": False
-                }
+                DJModeChangedPayload(is_active=False).dict()
             )
             
             # Clean up DJ mode resources

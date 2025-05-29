@@ -14,7 +14,7 @@ import warnings
 from pyee.asyncio import AsyncIOEventEmitter
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     CliCommandPayload,
     CliResponsePayload,
@@ -23,6 +23,7 @@ from ..event_payloads import (
     StandardCommandPayload
 )
 from ..event_bus import EventBus
+from ..utils.command_decorators import standardize_command_payload, validate_command_payload
 
 class CommandDispatcherService(BaseService):
     """
@@ -199,92 +200,27 @@ class CommandDispatcherService(BaseService):
             }
             self.logger.debug(f"Registered command '{command}' to service '{service_name}' with topic '{event_topic}'")
             
-    def _transform_payload_for_service(self, service_name: str, command: str, args: list, raw_input: str) -> dict:
+    def _create_standardized_payload(self, command: str, args: list, raw_input: str) -> dict:
         """
-        Transform command payload to match service expectations
+        Create standardized payload for all services using consistent format.
+        
+        This replaces the complex service-specific transformation logic with
+        a simple, consistent format that all services can handle via decorators.
         
         Args:
-            service_name: The target service
             command: The command string
-            args: Command arguments
+            args: Command arguments  
             raw_input: Raw command input
             
         Returns:
-            Transformed payload suitable for the target service
+            Standardized payload that works with @compound_command decorators
         """
-        # DJ mode commands
-        if service_name == "brain_service" and command.startswith("dj"):
-            if command == "dj start":
-                return {"dj_mode_active": True}
-            elif command == "dj stop":
-                return {"dj_mode_active": False}
-            elif command == "dj next":
-                return {"command": command, "args": args, "raw_input": raw_input}
-            elif command == "dj queue":
-                track_name = " ".join(args) if args else ""
-                return {"command": command, "track_name": track_name, "raw_input": raw_input}
-                
-        # Mode commands
-        elif service_name == "mode_manager":
-            mode_map = {
-                "engage": "INTERACTIVE",
-                "disengage": "IDLE",
-                "ambient": "AMBIENT",
-                "idle": "IDLE"
-            }
-            if command in mode_map:
-                return {"mode": mode_map[command]}
-                
-        # Music commands
-        elif service_name == "music_controller":
-            if command == "play music":
-                track_query = " ".join(args) if args else ""
-                return {
-                    "action": "play",
-                    "song_query": track_query,
-                    "source": "command"
-                }
-            elif command == "stop music":
-                return {"action": "stop"}
-            elif command == "list music":
-                return {"action": "list"}
-                
-        # Eye commands
-        elif service_name == "eye_controller":
-            if command == "eye pattern":
-                pattern = args[0] if args else "idle"
-                return {"pattern": pattern}
-            elif command == "eye test":
-                return {"action": "test"}
-            elif command == "eye status":
-                return {"action": "status"}
-                
-        # Debug commands
-        elif service_name == "debug_service":
-            if command.startswith("debug"):
-                subcommand = args[0] if args else ""
-                remaining_args = args[1:] if len(args) > 1 else []
-                return {
-                    "level": subcommand,
-                    "args": remaining_args,
-                    "raw_input": raw_input
-                }
-                
-        # Command dispatcher's own commands
-        elif service_name == "command_dispatcher":
-            if command in ["help", "status", "reset"]:
-                return {
-                    "command": command,
-                    "args": args,
-                    "raw_input": raw_input
-                }
-                
-        # Default format for other services
-        return {
+        # Use our standardized payload format
+        return standardize_command_payload({
             "command": command,
             "args": args,
             "raw_input": raw_input
-        }
+        }, command)
         
     async def _handle_command(self, payload: Dict[str, Any]) -> None:
         """Handle a CLI command.
@@ -293,6 +229,13 @@ class CommandDispatcherService(BaseService):
             payload: Command payload with command string and args
         """
         try:
+            # Validate payload structure first
+            if not validate_command_payload(payload):
+                error_msg = f"Invalid command payload structure. Required fields: command, args, raw_input. Got: {list(payload.keys())}"
+                self.logger.error(error_msg)
+                await self._send_error(error_msg)
+                return
+            
             # Extract command and args
             raw_input = payload.get("raw_input", "").strip().lower()
             command = payload.get("command", "").lower()
@@ -323,8 +266,7 @@ class CommandDispatcherService(BaseService):
                 remaining_args = remaining_input.split() if remaining_input else []
                 
                 # Transform the payload based on service expectations
-                cmd_payload = self._transform_payload_for_service(
-                    service_name,
+                cmd_payload = self._create_standardized_payload(
                     compound_cmd,
                     remaining_args,
                     raw_input
@@ -349,8 +291,7 @@ class CommandDispatcherService(BaseService):
                     topic = service_info
                 
                 # Transform the payload based on service expectations
-                cmd_payload = self._transform_payload_for_service(
-                    service_name,
+                cmd_payload = self._create_standardized_payload(
                     command,
                     args,
                     raw_input
@@ -393,11 +334,8 @@ class CommandDispatcherService(BaseService):
                 self.logger.error(f"Invalid command registration payload: {payload}")
                 return
             
-            # Determine if this is a compound command (contains space)
-            if " " in command:
-                self.register_compound_command(command, event_topic)
-            else:
-                self.register_command_handler(command, event_topic)
+            # Use the new standardized registration method
+            self.register_command(command, handler_service, event_topic)
                 
             self.logger.info(
                 f"Registered command '{command}' to service '{handler_service}' "
@@ -581,10 +519,29 @@ class CommandDispatcherService(BaseService):
             
             # Add command topics
             topic_summary = {}
-            for topic in {v for v in self.command_handlers.values()}:
+            
+            # Extract topics from command handlers (which now store dicts with service and topic)
+            for handler_info in self.command_handlers.values():
+                if isinstance(handler_info, dict):
+                    topic = handler_info.get("topic", "unknown")
+                else:
+                    # Fallback for old string format
+                    topic = handler_info
+                    
                 topic_name = topic.split("/")[-1] if "/" in topic else topic
                 topic_summary[topic_name] = topic_summary.get(topic_name, 0) + 1
-                
+            
+            # Also extract topics from compound commands
+            for handler_info in self.compound_commands.values():
+                if isinstance(handler_info, dict):
+                    topic = handler_info.get("topic", "unknown")
+                else:
+                    # Fallback for old string format
+                    topic = handler_info
+                    
+                topic_name = topic.split("/")[-1] if "/" in topic else topic
+                topic_summary[topic_name] = topic_summary.get(topic_name, 0) + 1
+            
             for topic, count in sorted(topic_summary.items()):
                 status_lines.append(f"• {topic}: {count} commands")
             

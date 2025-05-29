@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 from pyee.asyncio import AsyncIOEventEmitter
 
 from .base_service import BaseService
-from .event_topics import EventTopics
-from .event_payloads import ServiceStatus, LogLevel
+from .core.event_topics import EventTopics
+from .core.event_payloads import ServiceStatus, LogLevel
 from .utils.audio_utils import play_audio_file
 from .services import (
     # MicInputService,  # Commented out as we're replacing with DeepgramDirectMicService
@@ -40,7 +40,7 @@ from .services.mode_command_handler_service import ModeCommandHandlerService
 from .services.cached_speech_service import CachedSpeechService
 
 # Import the new layered timeline services
-from .services.brain_service.brain_service import BrainService
+from .services.brain_service import BrainService  # Use the newer, complete BrainService
 from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
 from .services.memory_service.memory_service import MemoryService
 
@@ -224,7 +224,7 @@ class CantinaOS:
         # Handle mode commands
         for mode_cmd in ["engage", "disengage", "ambient", "idle"]:
             if mode_cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_command(mode_cmd, "mode_manager", EventTopics.SYSTEM_SET_MODE_REQUEST)
+                dispatcher.register_command(mode_cmd, "mode_command_handler", EventTopics.MODE_COMMAND)
         
         # Basic music and eye commands
         if "music" not in dispatcher.get_registered_commands():
@@ -234,17 +234,12 @@ class CantinaOS:
             dispatcher.register_command("eye", "eye_controller", EventTopics.EYE_COMMAND)
         
         # Register DJ mode commands properly as full command strings
-        dj_commands = {
-            "dj start": EventTopics.DJ_MODE_CHANGED,
-            "dj stop": EventTopics.DJ_MODE_CHANGED,
-            "dj next": EventTopics.DJ_NEXT_TRACK,
-            "dj queue": EventTopics.DJ_TRACK_QUEUED
-        }
+        dj_commands = ["dj start", "dj stop", "dj next", "dj queue"]
         
-        # Register each DJ command with the service name for proper payload transformation
-        for cmd, topic in dj_commands.items():
+        # Register each DJ command with the brain_service for proper payload transformation
+        for cmd in dj_commands:
             if cmd not in dispatcher.get_registered_commands():
-                dispatcher.register_command(cmd, "brain_service", topic)
+                dispatcher.register_command(cmd, "brain_service", EventTopics.DJ_COMMAND)
         
         # Remove the base "dj" command registration to prevent conflicts
         if "dj" in dispatcher.command_handlers:
@@ -281,6 +276,7 @@ class CantinaOS:
         # Define the service initialization order
         service_order = [
             "yoda_mode_manager",
+            "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
             "memory_service",  # Initialize memory service early as other services depend on it
             "mouse_input",  # Keep mouse input service for click control
@@ -459,6 +455,7 @@ class CantinaOS:
             "eye_light_controller": EyeLightControllerService,
             "cli": CLIService,
             "yoda_mode_manager": YodaModeManagerService,
+            "mode_command_handler": ModeCommandHandlerService,
             "mode_change_sound": ModeChangeSoundService,
             "music_controller": MusicControllerService,
             "mouse_input": MouseInputService,
@@ -555,9 +552,19 @@ class CantinaOS:
         
         # All services need the global event bus
         try:
-            # All services share the same initialization pattern: event_bus first, then config
-            service = service_class(self._event_bus, service_config)
-            return service
+            # Special handling for services that need other service references
+            if service_name == "mode_command_handler":
+                # ModeCommandHandlerService needs a reference to the mode manager
+                mode_manager = self._services.get("yoda_mode_manager")
+                if not mode_manager:
+                    self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
+                    return None
+                service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            else:
+                # All other services share the same initialization pattern: event_bus first, then config
+                service = service_class(self._event_bus, service_config)
+                return service
         except Exception as e:
             self.logger.error(f"Error creating service {service_name}: {str(e)}")
             return None

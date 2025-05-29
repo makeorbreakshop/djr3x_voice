@@ -9,7 +9,7 @@ class MockDeepgramService(BaseService):
     """Mock implementation of Deepgram's streaming transcription service for testing."""
     
     def __init__(self, event_bus: Any):
-        super().__init__(name="MockDeepgramService", event_bus=event_bus)
+        super().__init__(service_name="MockDeepgramService", event_bus=event_bus)
         self.is_connected: bool = False
         self.is_listening: bool = False
         self.current_conversation_id: Optional[str] = None

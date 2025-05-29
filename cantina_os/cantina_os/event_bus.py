@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Callable, Awaitable, List, Union, Set
 from pyee.asyncio import AsyncIOEventEmitter
 from pydantic import BaseModel
 
-from .event_topics import EventTopics
+from .core.event_topics import EventTopics
 
 logger = logging.getLogger(__name__)
 

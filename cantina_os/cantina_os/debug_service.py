@@ -14,8 +14,8 @@ from pyee.asyncio import AsyncIOEventEmitter
 from pydantic import BaseModel
 
 from .service_template import StandardService
-from .event_topics import EventTopics
-from .event_payloads import (
+from .core.event_topics import EventTopics
+from .core.event_payloads import (
     LogLevel, DebugLogPayload, CommandTracePayload,
     PerformanceMetricPayload, DebugConfigPayload
 )

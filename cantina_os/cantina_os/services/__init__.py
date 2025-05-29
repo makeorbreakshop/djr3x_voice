@@ -20,7 +20,7 @@ from .mouse_input_service import MouseInputService
 from .deepgram_direct_mic_service import DeepgramDirectMicService
 from .intent_router_service import IntentRouterService
 # Timeline services - now in the correct location
-from .brain_service.brain_service import BrainService
+from .brain_service import BrainService
 from .timeline_executor_service.timeline_executor_service import TimelineExecutorService
 from .memory_service.memory_service import MemoryService
 

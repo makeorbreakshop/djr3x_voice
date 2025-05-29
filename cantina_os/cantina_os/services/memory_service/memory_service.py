@@ -120,11 +120,34 @@ class MemoryService(BaseService):
     async def _start(self) -> None:
         """Initialize memory service and set up subscriptions."""
         try:
+            self.logger.debug("MemoryService: Starting initialization")
+            
             self._loop = asyncio.get_running_loop()
-            # State is loaded in __init__ now
-            self._setup_subscriptions()  # Not async, don't await
+            
+            # Set up subscriptions
+            await self._setup_subscriptions()
+            self.logger.debug("MemoryService: Subscriptions set up")
+            
+            # Initialize state with defaults for critical keys
+            if self._state.get("dj_mode_active") is None:
+                self._state["dj_mode_active"] = False
+            if self._state.get("dj_track_history") is None:
+                self._state["dj_track_history"] = []
+            if self._state.get("dj_next_track") is None:
+                self._state["dj_next_track"] = None
+            if self._state.get("chat_history") is None:
+                self._state["chat_history"] = []
+            if self._state.get("music_playing") is None:
+                self._state["music_playing"] = False
+                
+            self.logger.debug("MemoryService: State initialized with defaults")
+            
+            # Save initial state
+            self._save_state()
+            
             await self._emit_status(ServiceStatus.RUNNING, "Memory service started")
             self.logger.info("MemoryService started successfully")
+            
         except Exception as e:
             error_msg = f"Failed to start MemoryService: {e}"
             self.logger.error(error_msg)
@@ -151,120 +174,36 @@ class MemoryService(BaseService):
     # ------------------------------------------------------------------
     # Subscription setup
     # ------------------------------------------------------------------
-    def _setup_subscriptions(self) -> None:
+    async def _setup_subscriptions(self) -> None:
         """Register event-handlers for memory updates."""
-        self.logger.debug("MemoryService: Setting up subscriptions...") # Add debug log for start of subscriptions
+        self.logger.debug("MemoryService: Setting up subscriptions...")
+
+        # Create tasks for all subscriptions
+        subscription_tasks = []
 
         # Subscribe to essential music state events
+        subscription_tasks.extend([
+            asyncio.create_task(self.subscribe(EventTopics.TRACK_PLAYING, self._handle_music_started)),
+            asyncio.create_task(self.subscribe(EventTopics.TRACK_STOPPED, self._handle_music_stopped)),
+            asyncio.create_task(self.subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected)),
+            asyncio.create_task(self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_mode_change)),
+            # Add memory access subscriptions
+            asyncio.create_task(self.subscribe(EventTopics.MEMORY_GET, self._handle_memory_get)),
+            asyncio.create_task(self.subscribe(EventTopics.MEMORY_SET, self._handle_memory_set))
+        ])
+
+        # Add tasks to the service's task list for cleanup
+        self._tasks.extend(subscription_tasks)
+        
+        self.logger.debug("MemoryService: All subscription tasks created")
+
+        # Wait for all subscriptions to complete
         try:
-            music_playing_topic = getattr(EventTopics, 'TRACK_PLAYING', None)
-            if music_playing_topic:
-                task = asyncio.create_task(
-                    self.subscribe(music_playing_topic, self._handle_music_started)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to TRACK_PLAYING") # Add debug log for successful subscription
-            else:
-                self.logger.error("MemoryService: EventTopics.TRACK_PLAYING not found.")
+            await asyncio.gather(*subscription_tasks)
+            self.logger.debug("MemoryService: All subscriptions completed successfully")
         except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to TRACK_PLAYING: {e}")
-
-        try:
-            music_stopped_topic = getattr(EventTopics, 'TRACK_STOPPED', None)
-            if music_stopped_topic:
-                task = asyncio.create_task(
-                    self.subscribe(music_stopped_topic, self._handle_music_stopped)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to TRACK_STOPPED") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.TRACK_STOPPED not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to TRACK_STOPPED: {e}")
-
-        try:
-            # Add subscription for INTENT_DETECTED events
-            intent_detected_topic = getattr(EventTopics, 'INTENT_DETECTED', None)
-            if intent_detected_topic:
-                task = asyncio.create_task(
-                    self.subscribe(intent_detected_topic, self._handle_intent_detected)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to INTENT_DETECTED") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.INTENT_DETECTED not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to INTENT_DETECTED: {e}")
-
-        try:
-            # Add subscription for SYSTEM_MODE_CHANGE events
-            system_mode_change_topic = getattr(EventTopics, 'SYSTEM_MODE_CHANGE', None)
-            if system_mode_change_topic:
-                task = asyncio.create_task(
-                    self.subscribe(system_mode_change_topic, self._handle_mode_change)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to SYSTEM_MODE_CHANGE") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.SYSTEM_MODE_CHANGE not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to SYSTEM_MODE_CHANGE: {e}")
-
-        # # Add subscription for DJ mode events # Commenting out temporarily for debugging startup issue
-        # try:
-        #     dj_mode_changed_topic = getattr(EventTopics, 'DJ_MODE_CHANGED', None)
-        #     if dj_mode_changed_topic:
-        #         task = asyncio.create_task(
-        #             self.subscribe(dj_mode_changed_topic, self._handle_dj_mode_changed)
-        #         )
-        #         self._tasks.append(task)
-        #         self.logger.debug("MemoryService: Subscribed to DJ_MODE_CHANGED") # Add debug log for successful subscription
-        #     else:
-        #          self.logger.error("MemoryService: EventTopics.DJ_MODE_CHANGED not found.")
-        # except Exception as e:
-        #     self.logger.error(f"MemoryService: Error subscribing to DJ_MODE_CHANGED: {e}") # More specific error log
-
-        try:
-            dj_track_queued_topic = getattr(EventTopics, 'DJ_TRACK_QUEUED', None)
-            if dj_track_queued_topic:
-                task = asyncio.create_task(
-                    self.subscribe(dj_track_queued_topic, self._handle_dj_track_queued)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to DJ_TRACK_QUEUED") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.DJ_TRACK_QUEUED not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to DJ_TRACK_QUEUED: {e}")
-
-        try:
-            # Add subscriptions for direct memory access events
-            memory_get_topic = getattr(EventTopics, 'MEMORY_GET', None)
-            if memory_get_topic:
-                task = asyncio.create_task(
-                    self.subscribe(memory_get_topic, self._handle_memory_get)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to MEMORY_GET") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.MEMORY_GET not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to MEMORY_GET: {e}")
-
-        try:
-            memory_set_topic = getattr(EventTopics, 'MEMORY_SET', None)
-            if memory_set_topic:
-                task = asyncio.create_task(
-                    self.subscribe(memory_set_topic, self._handle_memory_set)
-                )
-                self._tasks.append(task)
-                self.logger.debug("MemoryService: Subscribed to MEMORY_SET") # Add debug log for successful subscription
-            else:
-                 self.logger.error("MemoryService: EventTopics.MEMORY_SET not found.")
-        except Exception as e:
-            self.logger.error(f"MemoryService: Error subscribing to MEMORY_SET: {e}")
-
-        self.logger.debug("MemoryService: Finished setting up subscriptions.") # Add debug log for end of subscriptions
+            self.logger.error(f"MemoryService: Error during subscription setup: {e}")
+            raise  # Re-raise to ensure service startup fails if subscriptions fail
 
     # ------------------------------------------------------------------
     # Memory API methods
@@ -595,107 +534,105 @@ class MemoryService(BaseService):
     # Direct memory access handlers
     # ------------------------------------------------------------------
     async def _handle_memory_get(self, payload: Dict[str, Any]) -> None:
-        """Handle a request to get a memory value.
-        
-        Args:
-            payload: Dict with "key" and optional "callback_topic"
-        """
+        """Handle memory get requests."""
         try:
-            if not isinstance(payload, dict) or "key" not in payload:
-                self.logger.error("Invalid memory get request: missing key")
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    "Invalid memory get request: missing key",
-                    LogLevel.ERROR
-                )
+            if not isinstance(payload, dict):
+                self.logger.warning(f"Invalid memory get payload type: {type(payload)}")
                 return
                 
             key = payload.get("key")
-            value = self.get(key)
+            callback_topic = payload.get("callback_topic")
             
-            # Determine where to send the response
-            callback_topic = payload.get("callback_topic", EventTopics.MEMORY_VALUE)
+            if key is None or callback_topic is None:
+                self.logger.warning("Memory get payload missing key or callback_topic")
+                return
+                
+            self.logger.debug(f"Handling memory get request for key: {key}")
             
-            # Emit the value
+            # Get value from state, defaulting to None if not found
+            value = self._state.get(key)
+            
+            # Emit value back on callback topic
             await self._emit_dict(
                 callback_topic,
                 {
                     "key": key,
-                    "value": value,
-                    "request_id": payload.get("request_id")  # Pass back any request ID
+                    "value": value
                 }
             )
-            
-            self.logger.debug(f"Memory get: {key} -> {value}")
+            self.logger.debug(f"Emitted memory value for key {key}: {value}")
             
         except Exception as e:
             self.logger.error(f"Error handling memory get request: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error handling memory get request: {e}",
-                LogLevel.ERROR
-            )
-            
+
     async def _handle_memory_set(self, payload: Dict[str, Any]) -> None:
-        """Handle a request to set a memory value.
-        
-        Args:
-            payload: Dict with "key" and "value"
-        """
+        """Handle memory set requests."""
         try:
-            if not isinstance(payload, dict) or "key" not in payload or "value" not in payload:
-                self.logger.error("Invalid memory set request: missing key or value")
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    "Invalid memory set request: missing key or value",
-                    LogLevel.ERROR
-                )
+            if not isinstance(payload, dict):
+                self.logger.warning(f"Invalid memory set payload type: {type(payload)}")
                 return
                 
             key = payload.get("key")
             value = payload.get("value")
             
-            # Use the regular set method to update the value
-            await self.set(key, value)
+            if key is None:
+                self.logger.warning("Memory set payload missing key")
+                return
+                
+            self.logger.debug(f"Setting memory key {key} to value: {value}")
             
-            self.logger.debug(f"Memory set: {key} = {value}")
+            # Store old value for event
+            old_value = self._state.get(key)
+            
+            # Update state
+            self._state[key] = value
+            
+            # Save state to disk
+            self._save_state()
+            
+            # Emit memory updated event
+            await self._emit_dict(
+                EventTopics.MEMORY_UPDATED,
+                {
+                    "key": key,
+                    "old_value": old_value,
+                    "new_value": value
+                }
+            )
+            self.logger.debug(f"Memory key {key} updated and saved")
             
         except Exception as e:
             self.logger.error(f"Error handling memory set request: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error handling memory set request: {e}",
-                LogLevel.ERROR
-            )
 
     def _load_state(self) -> Dict[str, Any]:
-        """Load state from the state file."""
-        if not os.path.exists(STATE_FILE_PATH):
-            self.logger.info(f"State file not found: {STATE_FILE_PATH}. Starting with default state.")
-            return {}
+        """Load state from disk, creating if not exists."""
         try:
-            with open(STATE_FILE_PATH, "r") as f:
-                state = json.load(f)
-                self.logger.info(f"State loaded from {STATE_FILE_PATH}")
+            # Ensure data directory exists
+            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
+            
+            # Try to load existing state
+            if os.path.exists(STATE_FILE_PATH):
+                with open(STATE_FILE_PATH, 'r') as f:
+                    state = json.load(f)
+                self.logger.debug(f"Loaded state from {STATE_FILE_PATH}")
                 return state
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding state file {STATE_FILE_PATH}: {e}. Starting with default state.")
-            return {}
+                
         except Exception as e:
-            self.logger.error(f"Error loading state from {STATE_FILE_PATH}: {e}. Starting with default state.")
-            return {}
+            self.logger.warning(f"Error loading state from {STATE_FILE_PATH}: {e}")
+            
+        # Return empty dict if file doesn't exist or load fails
+        return {}
 
     def _save_state(self) -> None:
-        """Save current state to the state file."""
+        """Save current state to disk."""
         try:
-            # Ensure the data directory exists
-            data_dir = os.path.dirname(STATE_FILE_PATH)
-            os.makedirs(data_dir, exist_ok=True)
-
-            with open(STATE_FILE_PATH, "w") as f:
-                # Filter state to only include keys defined in config before saving
-                state_to_save = {key: self._state.get(key) for key in self._config.state_keys}
-                json.dump(state_to_save, f, indent=4)
-            self.logger.debug(f"State saved to {STATE_FILE_PATH}")
+            # Ensure data directory exists
+            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
+            
+            # Write state to file
+            with open(STATE_FILE_PATH, 'w') as f:
+                json.dump(self._state, f, indent=2)
+            self.logger.debug(f"Saved state to {STATE_FILE_PATH}")
+            
         except Exception as e:
             self.logger.error(f"Error saving state to {STATE_FILE_PATH}: {e}") 

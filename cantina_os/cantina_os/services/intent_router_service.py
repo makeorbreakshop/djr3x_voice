@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Any, Optional, List
 
 from ..base_service import BaseService
-from ..event_topics import EventTopics
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     IntentPayload,
     IntentExecutionResultPayload,
@@ -209,15 +209,17 @@ class IntentRouterService(BaseService):
                 
             self.logger.info(f"Smart track selection: '{track}' → '{selected_track}'")
             
-            # Create and emit music command
-            music_payload = MusicCommandPayload(
-                action="play",
-                song_query=selected_track,
-                conversation_id=conversation_id
-            )
+            # Create and emit music command via CLI_COMMAND for unified processing
+            cli_payload = {
+                "command": "play",
+                "subcommand": "music", 
+                "args": [selected_track],
+                "raw_input": f"play music {selected_track}",
+                "conversation_id": conversation_id
+            }
             
-            await self.emit(EventTopics.MUSIC_COMMAND, music_payload)
-            self.logger.info(f"Emitted MUSIC_COMMAND event with action=play, song={selected_track}")
+            await self.emit(EventTopics.CLI_COMMAND, cli_payload)
+            self.logger.info(f"Emitted CLI_COMMAND event for play music: {selected_track}")
             
             # Return success result with information about what was played
             return {
@@ -249,9 +251,14 @@ class IntentRouterService(BaseService):
             A valid track number or name, or None if no match found
         """
         try:
-            # Get available tracks by sending a command to music_controller
-            tracks_payload = {"command": "list", "subcommand": None, "args": [], "raw_input": "list music"}
-            await self.emit(EventTopics.MUSIC_COMMAND, tracks_payload)
+            # Get available tracks by sending a command to music_controller via unified flow
+            tracks_payload = {
+                "command": "list", 
+                "subcommand": "music", 
+                "args": [], 
+                "raw_input": "list music"
+            }
+            await self.emit(EventTopics.CLI_COMMAND, tracks_payload)
             
             # TODO: Ideally we would get the track list directly, but for now we'll use some defaults
             # For testing we'll simulate some available tracks
@@ -305,14 +312,17 @@ class IntentRouterService(BaseService):
         try:
             self.logger.info("Stopping music")
             
-            # Create and emit music command
-            music_payload = MusicCommandPayload(
-                action="stop",
-                conversation_id=conversation_id
-            )
+            # Create and emit music command via CLI_COMMAND for unified processing
+            cli_payload = {
+                "command": "stop",
+                "subcommand": "music",
+                "args": [],
+                "raw_input": "stop music",
+                "conversation_id": conversation_id
+            }
             
-            await self.emit(EventTopics.MUSIC_COMMAND, music_payload)
-            self.logger.info("Emitted MUSIC_COMMAND event with action=stop")
+            await self.emit(EventTopics.CLI_COMMAND, cli_payload)
+            self.logger.info("Emitted CLI_COMMAND event for stop music")
             
             # Return success result
             return {
@@ -344,16 +354,17 @@ class IntentRouterService(BaseService):
             
             self.logger.info(f"Setting eye color to {color} with pattern {pattern}")
             
-            # Create and emit eye command
-            eye_payload = EyeCommandPayload(
-                pattern=pattern,
-                color=color,
-                intensity=intensity,
-                conversation_id=conversation_id
-            )
+            # Create and emit eye command via CLI_COMMAND for unified processing
+            cli_payload = {
+                "command": "eye",
+                "subcommand": "pattern",
+                "args": [pattern, color] if color else [pattern],
+                "raw_input": f"eye pattern {pattern} {color}" if color else f"eye pattern {pattern}",
+                "conversation_id": conversation_id
+            }
             
-            await self.emit(EventTopics.EYE_COMMAND, eye_payload)
-            self.logger.info(f"Emitted EYE_COMMAND event with color={color}, pattern={pattern}")
+            await self.emit(EventTopics.CLI_COMMAND, cli_payload)
+            self.logger.info(f"Emitted CLI_COMMAND event for eye pattern: {pattern} {color}")
             
             # Return success result
             return {

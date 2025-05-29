@@ -15,7 +15,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 from pydantic import BaseModel
 from enum import Enum
 
-from .event_topics import EventTopics
+from .core.event_topics import EventTopics
 from .event_payloads import (
     ServiceStatus,
     LogLevel,
@@ -23,20 +23,7 @@ from .event_payloads import (
     BaseEventPayload
 )
 
-class ServiceStatus(str, Enum):
-    """Service status enumeration."""
-    INITIALIZING = "INITIALIZING"
-    RUNNING = "RUNNING"
-    ERROR = "ERROR"
-    STOPPED = "STOPPED"
-    DEGRADED = "DEGRADED"
-
-class LogLevel(str, Enum):
-    """Log level enumeration."""
-    DEBUG = "DEBUG"
-    INFO = "INFO"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
+# ServiceStatus and LogLevel are imported from event_payloads.py
 
 class BaseService:
     """
