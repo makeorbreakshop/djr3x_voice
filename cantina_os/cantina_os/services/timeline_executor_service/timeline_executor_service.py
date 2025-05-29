@@ -22,6 +22,8 @@ from cantina_os.core.event_schemas import (
     DjTransitionPlanPayload,
     PlayCachedSpeechStep,
     MusicCrossfadeStep,
+    MusicDuckStep, # Add import for music duck step
+    MusicUnduckStep, # Add import for music unduck step
     SpeechCachePlaybackRequestPayload, # For playing cached speech
     BasePlanStep, # Base for new step types
     EventPayload, # Base for PlanReadyPayload
@@ -78,9 +80,9 @@ class TimelineExecutorService(BaseService):
         
         # ----- timeline state -----
         self._layer_tasks: Dict[str, asyncio.Task] = {}  # Tasks running plans on each layer
-        self._active_plans: Dict[str, Union[PlanPayload, DjTransitionPlanPayload]] = {}  # Currently active plans by ID
+        self._active_plans: Dict[str, DjTransitionPlanPayload] = {}  # Currently active plans by ID
         self._timeline_layers: Dict[str, str] = {}  # Maps plan_id -> layer (Legacy? Or needed for paused plans?)
-        self._paused_timelines: Dict[str, Union[PlanPayload, DjTransitionPlanPayload]] = {}  # For resuming after interrupts
+        self._paused_timelines: Dict[str, DjTransitionPlanPayload] = {}  # For resuming after interrupts
         
         self._layer_events: Dict[str, asyncio.Event] = {}  # Events for pausing/resuming layers
         self._speech_end_events: Dict[str, asyncio.Event] = {}  # Events for speech completion (Legacy?)
@@ -127,7 +129,7 @@ class TimelineExecutorService(BaseService):
         """Initialize timeline service and set up subscriptions."""
         try:
             self._loop = asyncio.get_running_loop()
-            self._setup_subscriptions()  # Not async, don't await
+            await self._setup_subscriptions()
             await self._emit_status(ServiceStatus.RUNNING, "Timeline execution service started")
             self.logger.info("TimelineExecutorService started successfully")
         except Exception as e:
@@ -165,72 +167,36 @@ class TimelineExecutorService(BaseService):
     # ------------------------------------------------------------------
     # Subscription setup
     # ------------------------------------------------------------------
-    def _setup_subscriptions(self) -> None:
+    async def _setup_subscriptions(self) -> None:
         """Register event-handlers for timeline execution."""
         # Subscribe to timeline management events
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.PLAN_READY, self._handle_plan_ready)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.PLAN_READY, self._handle_plan_ready)
         
         # Listen for music state changes for coordination
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.TRACK_PLAYING, self._handle_music_started)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.TRACK_PLAYING, self._handle_music_started)
         
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.TRACK_STOPPED, self._handle_music_stopped)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.TRACK_STOPPED, self._handle_music_stopped)
         
         # Subscribe to memory updates for state coordination
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.MEMORY_UPDATED, self._handle_memory_updated)
         
         # Subscribe to speech completion events for un-duck/plan progress
         # Keep old handler for legacy speak step if still used
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_generation_complete)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_generation_complete)
 
         # Add handler for new cached speech playback completion
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED, self._handle_cached_speech_playback_completed)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED, self._handle_cached_speech_playback_completed)
 
-        # Subscribe to speech ended events for plan coordination (Legacy?)
-        # task = asyncio.create_task(
-        #     self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_ended)
-        # )
-        # self._tasks.append(task)  # Comment out this line as well
-        
         # Subscribe to direct LLM responses (Legacy, likely not needed for DJ mode)
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
         
         # Subscribe to voice recording events to duck during microphone activity
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
         
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped)
 
         # Subscribe to MusicController crossfade complete event
-        task = asyncio.create_task(
-            self.subscribe(EventTopics.CROSSFADE_COMPLETE, self._handle_crossfade_complete)
-        )
-        self._tasks.append(task)
+        await self.subscribe(EventTopics.CROSSFADE_COMPLETE, self._handle_crossfade_complete)
 
     # ------------------------------------------------------------------
     # Plan handling
@@ -240,16 +206,58 @@ class TimelineExecutorService(BaseService):
         
         This is the entry point for executing plans on different layers.
         """
+        self.logger.info(f"Received PLAN_READY event with payload keys: {list(payload.keys())}")
+        
         try:
-            plan = PlanPayload(**payload)
-            layer = plan.layer
+            # Parse the PlanReadyPayload structure from BrainService
+            plan_ready = PlanReadyPayload(**payload)
+            
+            # Extract the nested plan data
+            plan_data = plan_ready.plan
+            plan_id = plan_ready.plan_id
+            
+            self.logger.info(f"Processing plan {plan_id} with {len(plan_data.get('steps', []))} steps")
+            
+            # The plan_data is a dict containing the DjTransitionPlanPayload structure
+            # We need to convert the steps back to proper Pydantic models
+            raw_steps = plan_data.get('steps', [])
+            converted_steps = []
+            
+            for step_dict in raw_steps:
+                step_type = step_dict.get('step_type')
+                self.logger.debug(f"Converting step of type: {step_type}")
+                
+                if step_type == 'play_cached_speech':
+                    step_obj = PlayCachedSpeechStep(**step_dict)
+                elif step_type == 'music_crossfade':
+                    step_obj = MusicCrossfadeStep(**step_dict)
+                elif step_type == 'music_duck':
+                    step_obj = MusicDuckStep(**step_dict)
+                elif step_type == 'music_unduck':
+                    step_obj = MusicUnduckStep(**step_dict)
+                else:
+                    # For unknown step types, use base step model
+                    step_obj = BasePlanStep(**step_dict)
+                converted_steps.append(step_obj)
+            
+            # Create DjTransitionPlanPayload with converted steps
+            dj_plan = DjTransitionPlanPayload(
+                plan_id=plan_data['plan_id'],
+                steps=converted_steps
+            )
+            
+            # Default to foreground layer for DJ plans
+            layer = "foreground"
             
             # Check if this layer is valid
             if layer not in self._config.layer_priorities:
                 raise ValueError(f"Unknown layer: {layer}")
             
+            self.logger.info(f"Starting plan {plan_id} on layer {layer}")
+            
             # Check for existing plan on this layer and manage layer priorities
             if layer in self._layer_tasks and not self._layer_tasks[layer].done():
+                self.logger.info(f"Cancelling existing plan on layer {layer}")
                 await self._emit_status(
                     ServiceStatus.RUNNING, 
                     f"Cancelling existing plan on layer {layer}", 
@@ -264,37 +272,42 @@ class TimelineExecutorService(BaseService):
                 await self._pause_lower_priority_layers(layer)
             
             # Start the new plan
-            self._active_plans[plan.plan_id] = plan
-            task = asyncio.create_task(self._run_plan(plan))
+            self._active_plans[dj_plan.plan_id] = dj_plan
+            task = asyncio.create_task(self._run_plan(dj_plan, layer))
             self._layer_tasks[layer] = task
             self._tasks.append(task)
+            
+            self.logger.info(f"Successfully started plan {plan_id} execution task")
             
             # Emit plan started event
             await self._emit_dict(
                 EventTopics.PLAN_STARTED,
                 PlanStartedPayload(
-                    plan_id=plan.plan_id,
+                    plan_id=dj_plan.plan_id,
                     layer=layer
                 )
             )
         except ValidationError as e:
+            self.logger.error(f"Validation error parsing PLAN_READY payload: {e}")
             await self._emit_status(
                 ServiceStatus.ERROR,
                 f"Invalid plan payload: {e}",
                 LogLevel.ERROR
             )
         except Exception as e:
+            self.logger.error(f"Error handling PLAN_READY event: {e}", exc_info=True)
             await self._emit_status(
                 ServiceStatus.ERROR,
                 f"Error handling plan: {e}",
                 LogLevel.ERROR
             )
 
-    async def _run_plan(self, plan: Union[PlanPayload, DjTransitionPlanPayload], layer: str) -> None:
+    async def _run_plan(self, plan: DjTransitionPlanPayload, layer: str) -> None:
         """Executes a given timeline plan.
 
         Args:
-            plan: The PlanPayload containing the steps to execute.
+            plan: The DjTransitionPlanPayload containing the steps to execute.
+            layer: The layer this plan is running on.
         """
         self.logger.info(f"Running plan {plan.plan_id} on layer {layer}")
         self._active_plans[plan.plan_id] = plan
@@ -307,10 +320,24 @@ class TimelineExecutorService(BaseService):
 
             # Execute steps sequentially
             for step in plan.steps:
-                self.logger.debug(f"Executing step {step.id} ({step.type}) for plan {plan.plan_id}")
+                # Get proper step ID and type
+                if hasattr(step, 'step_type'):
+                    step_type = step.step_type
+                    step_id = getattr(step, 'id', step_type)  # Use step ID if available, fallback to type
+                elif isinstance(step, PlayCachedSpeechStep):
+                    step_type = "play_cached_speech"
+                    step_id = getattr(step, 'cache_key', step_type)  # Use cache_key as unique ID
+                elif isinstance(step, MusicCrossfadeStep):
+                    step_type = "music_crossfade"
+                    step_id = getattr(step, 'next_track_id', step_type)  # Use track ID as unique ID
+                else:
+                    step_type = getattr(step, 'step_type', 'unknown')
+                    step_id = getattr(step, 'id', step_type)
+                
+                self.logger.debug(f"Executing step {step_id} ({step_type}) for plan {plan.plan_id}")
                 await self._emit_dict(
                     EventTopics.STEP_READY,
-                    StepReadyPayload(plan_id=plan.plan_id, step_id=getattr(step, 'id', 'N/A'))
+                    StepReadyPayload(plan_id=plan.plan_id, step_id=step_id)
                 )
 
                 # Execute the step based on its parsed type
@@ -321,14 +348,14 @@ class TimelineExecutorService(BaseService):
                     EventTopics.STEP_EXECUTED,
                     StepExecutedPayload(
                         plan_id=plan.plan_id,
-                        step_id=step.id,
+                        step_id=step_id,
                         status="success" if step_success else "failure",
                         details=step_details or {}
                     )
                 )
 
                 if not step_success:
-                    self.logger.error(f"Step {step.id} failed for plan {plan.plan_id}.")
+                    self.logger.error(f"Step {step_id} failed for plan {plan.plan_id}.")
                     # Decide how to handle step failure - continue, stop plan, etc.
                     # For now, let's stop the plan on step failure.
                     await self._emit_dict(
@@ -338,8 +365,9 @@ class TimelineExecutorService(BaseService):
                     return
 
                 # Handle delays within steps (if applicable) or explicit delay steps
-                if step.delay and step.delay > 0:
-                    await asyncio.sleep(step.delay)
+                delay = getattr(step, 'delay', None) or getattr(step, 'duration', None)
+                if delay and delay > 0:
+                    await asyncio.sleep(delay)
 
             # Plan completed successfully
             self.logger.info(f"Plan {plan.plan_id} completed successfully on layer {layer}")
@@ -358,7 +386,7 @@ class TimelineExecutorService(BaseService):
             self.logger.error(f"Error running plan {plan.plan_id} on layer {layer}: {e}", exc_info=True)
             await self._emit_dict(
                 EventTopics.PLAN_ENDED,
-                PlanEndedPayload(plan_id=plan.plan_id, layer=layer, status="error")
+                PlanEndedPayload(plan_id=plan.plan_id, layer=layer, status="failed")
             )
         finally:
             # Clean up active plan entry
@@ -367,42 +395,71 @@ class TimelineExecutorService(BaseService):
     # ------------------------------------------------------------------
     # Step execution
     # ------------------------------------------------------------------
-    async def _execute_step(self, step: PlanStep, plan_id: str) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _execute_step(self, step: BasePlanStep, plan_id: str) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a single step within a plan.
 
         Args:
-            step: The PlanStep to execute.
+            step: The BasePlanStep to execute.
             plan_id: The ID of the plan this step belongs to.
 
         Returns:
             A tuple of (success: bool, details: Optional[Dict[str, Any]]).
         """
         try:
-            if step.type == "play_music":
-                return await self._execute_play_music_step(step)
-            elif step.type == "speak":
-                return await self._execute_speak_step(step, plan_id)
-            elif step.type == "eye_pattern":
-                return await self._execute_eye_pattern_step(step)
-            elif step.type == "move":
-                return await self._execute_move_step(step)
-            elif step.type == "wait_for_event":
-                # TODO: Implement wait_for_event step logic
-                self.logger.warning(f"wait_for_event step type not yet implemented. Step: {step.id}")
-                return False, {"error": "Not implemented"}
-            elif step.type == "delay":
-                await asyncio.sleep(step.delay or 0) # delay is handled in _run_plan as well, keep here for explicit delay steps
-                return True, {}
-            # TODO: Add handling for new DJ mode step types: play_cached_speech, music_crossfade
-
+            # Properly determine step type from Pydantic model
+            if hasattr(step, 'step_type'):
+                step_type = step.step_type
+            elif isinstance(step, PlayCachedSpeechStep):
+                step_type = "play_cached_speech"
+            elif isinstance(step, MusicCrossfadeStep):
+                step_type = "music_crossfade"
+            elif isinstance(step, MusicDuckStep):
+                step_type = "music_duck"
+            elif isinstance(step, MusicUnduckStep):
+                step_type = "music_unduck"
             else:
-                self.logger.error(f"Unknown step type: {step.type} for step {step.id} in plan {plan_id}")
-                return False, {"error": f"Unknown step type: {step.type}"}
+                # Fallback: try to get from model fields
+                step_type = getattr(step, 'step_type', 'unknown')
+            
+            self.logger.debug(f"Executing step type: {step_type} for plan {plan_id}")
+            
+            if step_type == "play_music":
+                return await self._execute_play_music_step(step)
+            elif step_type == "speak":
+                return await self._execute_speak_step(step, plan_id)
+            elif step_type == "eye_pattern":
+                return await self._execute_eye_pattern_step(step)
+            elif step_type == "move":
+                return await self._execute_move_step(step)
+            elif step_type == "play_cached_speech":
+                # Handle DJ mode cached speech step
+                return await self._execute_play_cached_speech_step(step)
+            elif step_type == "music_crossfade":
+                # Handle DJ mode crossfade step
+                return await self._execute_music_crossfade_step(step)
+            elif step_type == "music_duck":
+                # Handle DJ mode music ducking step
+                return await self._execute_music_duck_step(step)
+            elif step_type == "music_unduck":
+                # Handle DJ mode music unducking step
+                return await self._execute_music_unduck_step(step)
+            elif step_type == "wait_for_event":
+                # TODO: Implement wait_for_event step logic
+                self.logger.warning(f"wait_for_event step type not yet implemented. Step: {step_type}")
+                return False, {"error": "Not implemented"}
+            elif step_type == "delay":
+                delay = getattr(step, 'duration', 0)
+                await asyncio.sleep(delay or 0)
+                return True, {}
+            else:
+                self.logger.error(f"Unknown step type: {step_type} for step in plan {plan_id}")
+                return False, {"error": f"Unknown step type: {step_type}"}
 
         except asyncio.CancelledError:
             raise # Propagate cancellation
         except Exception as e:
-            self.logger.error(f"Error executing step {step.id} ({step.type}) for plan {plan_id}: {e}", exc_info=True)
+            step_type = getattr(step, 'step_type', 'unknown')
+            self.logger.error(f"Error executing step {step_type} for plan {plan_id}: {e}", exc_info=True)
             return False, {"error": str(e)}
 
     async def _execute_speak_step(self, step: PlanStep, plan_id: str) -> tuple[bool, Dict[str, Any]]:
@@ -729,16 +786,15 @@ class TimelineExecutorService(BaseService):
         try:
             # Emit event to CachedSpeechService to request playback
             playback_request_payload = SpeechCachePlaybackRequestPayload(
-                # timestamp is auto-generated
+                timestamp=time.time(),
                 cache_key=step.cache_key,
-                volume=1.0, # TODO: Make volume configurable in step or plan
+                volume=1.0,  # TODO: Make volume configurable in step or plan
                 playback_id=playback_id,
-                # Pass step/plan ID in metadata for linking completion event
-                metadata={'plan_id': self._active_plans.get(self._layer_tasks.get(self._timeline_layers.get(getattr(self, '_current_plan_id', None)), None)
-                                                                            .plan_id if hasattr(self._layer_tasks.get(self._timeline_layers.get(getattr(self, '_current_plan_id', None)), None), 'plan_id') else None), # Attempt to get current plan_id
-                          'step_id': getattr(step, 'id', 'N/A'),
-                          'cache_key': step.cache_key, # Include cache key for easier lookup
-                         }
+                # Simple metadata - just include what we know
+                metadata={
+                    'cache_key': step.cache_key,
+                    'step_type': 'play_cached_speech'
+                }
             )
 
             await self._emit_dict(
@@ -749,8 +805,6 @@ class TimelineExecutorService(BaseService):
             # Wait for playback completion
             self.logger.debug(f"Waiting for cached speech playback completion event for {event_key}")
             try:
-                # TODO: Get actual duration from cached speech metadata to set a more accurate timeout
-                # For now, use a default timeout or a timeout from config
                 await asyncio.wait_for(self._cached_speech_playback_events[event_key].wait(), timeout=self._config.speech_wait_timeout)
                 self.logger.debug(f"Cached speech playback completion event received for {event_key}")
                 return True, {"cache_key": step.cache_key, "playback_id": playback_id, "status": "completed"}
@@ -783,17 +837,14 @@ class TimelineExecutorService(BaseService):
         self.logger.debug(f"Created crossfade completion event for {event_key}")
 
         try:
-            # Route through CommandDispatcher instead of direct service emission
-            # Note: This assumes a "crossfade music" command exists or will be added
-            command = "crossfade music"
-            args = [step.next_track_id, str(step.crossfade_duration)]
-            
+            # Emit MUSIC_COMMAND event with crossfade action
             await self.emit(
-                EventTopics.CLI_COMMAND,
+                EventTopics.MUSIC_COMMAND,
                 {
-                    "command": command.split()[0],
-                    "args": command.split()[1:] + args,
-                    "raw_input": f"{command} {' '.join(args)}".strip()
+                    "action": "crossfade",
+                    "song_query": step.next_track_id,
+                    "fade_duration": step.crossfade_duration,
+                    "crossfade_id": crossfade_id  # Include for completion tracking
                 }
             )
 
@@ -815,8 +866,74 @@ class TimelineExecutorService(BaseService):
             # Clean up the event
             self._crossfade_complete_events.pop(event_key, None)
 
-    # --- New DJ Mode Completion Handlers --- #
+    async def _execute_music_duck_step(self, step: MusicDuckStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+        """Executes a MusicDuckStep to lower music volume during speech.
+        
+        Args:
+            step: The MusicDuckStep containing duck level and fade duration
+            
+        Returns:
+            Tuple of (success, details)
+        """
+        self.logger.info(f"Executing MusicDuckStep: ducking music to {step.duck_level * 100}% volume")
+        
+        try:
+            # Emit audio ducking start event
+            await self.emit(
+                EventTopics.AUDIO_DUCKING_START,
+                {
+                    "level": step.duck_level,
+                    "fade_ms": step.fade_duration_ms
+                }
+            )
+            
+            # Mark that audio is ducked for tracking
+            self._audio_ducked = True
+            
+            # Small delay to ensure ducking has started
+            await asyncio.sleep(step.fade_duration_ms / 1000.0)
+            
+            return True, {"duck_level": step.duck_level, "fade_duration_ms": step.fade_duration_ms}
+            
+        except Exception as e:
+            self.logger.error(f"Error executing MusicDuckStep: {e}", exc_info=True)
+            return False, {"error": str(e)}
 
+    async def _execute_music_unduck_step(self, step: MusicUnduckStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+        """Executes a MusicUnduckStep to restore music volume after speech.
+        
+        Args:
+            step: The MusicUnduckStep containing fade duration
+            
+        Returns:
+            Tuple of (success, details)
+        """
+        self.logger.info(f"Executing MusicUnduckStep: restoring music volume")
+        
+        try:
+            # Emit audio ducking stop event
+            await self.emit(
+                EventTopics.AUDIO_DUCKING_STOP,
+                {
+                    "fade_ms": step.fade_duration_ms
+                }
+            )
+            
+            # Mark that audio is no longer ducked
+            self._audio_ducked = False
+            
+            # Small delay to ensure unducking has started
+            await asyncio.sleep(step.fade_duration_ms / 1000.0)
+            
+            return True, {"fade_duration_ms": step.fade_duration_ms}
+            
+        except Exception as e:
+            self.logger.error(f"Error executing MusicUnduckStep: {e}", exc_info=True)
+            return False, {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Add new handler for speech generation complete
+    # ------------------------------------------------------------------
     async def _handle_cached_speech_playback_completed(self, payload: Dict[str, Any]) -> None:
          """Handle SPEECH_CACHE_PLAYBACK_COMPLETED events.
 

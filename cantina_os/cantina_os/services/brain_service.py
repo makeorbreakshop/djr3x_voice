@@ -11,7 +11,7 @@ import logging
 import time
 import uuid
 from typing import Dict, Optional, Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..base_service import BaseService
 from cantina_os.core.event_topics import EventTopics
@@ -19,7 +19,6 @@ from cantina_os.event_payloads import (
     ServiceStatus,
     LogLevel,
     DJModeChangedPayload,
-    DJCommentaryRequestPayload,
     SpeechCacheRequestPayload,
     SpeechCacheReadyPayload,
     SpeechCacheErrorPayload,
@@ -30,11 +29,14 @@ from cantina_os.core.event_schemas import (
     TrackEndingSoonPayload, # Import TrackEndingSoonPayload
     DjCommandPayload,
     DjNextTrackSelectedPayload,
+    DjCommentaryRequestPayload, # Import from event_schemas instead of event_payloads
     GptCommentaryResponsePayload, # Import GptCommentaryResponsePayload
     PlanReadyPayload, # Import PlanReadyPayload
     DjTransitionPlanPayload, # Import DjTransitionPlanPayload
     PlayCachedSpeechStep, # Import PlayCachedSpeechStep
-    MusicCrossfadeStep # Import MusicCrossfadeStep
+    MusicCrossfadeStep, # Import MusicCrossfadeStep
+    MusicDuckStep, # Import MusicDuckStep for ducking music during speech
+    MusicUnduckStep # Import MusicUnduckStep for restoring music volume
 )
 from ..utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 
@@ -43,7 +45,7 @@ class BrainServiceConfig(BaseModel):
     """Configuration for BrainService."""
     max_recent_tracks: int = Field(default=10, description="Maximum number of recently played tracks to remember")
     commentary_cache_interval: int = Field(default=30, description="Interval in seconds for the commentary caching loop")
-    dj_persona_path: str = Field(default="dj_r3x-persona.txt", description="Path to the DJ R3X persona file, relative to execution dir or findable in common locations.")
+    dj_persona_path: str = Field(default="dj_r3x-transition-persona.txt", description="Path to the DJ R3X transition persona file for commentary generation.")
     verbal_feedback_persona_path: str = Field(default="dj_r3x-verbal-feedback-persona.txt", description="Path to the DJ R3X verbal feedback persona file, relative to execution dir or findable in common locations.")
     tts_voice_id: str = Field(default="YOUR_DEFAULT_VOICE_ID", description="Default voice ID for TTS caching") # Add default voice ID config
     crossfade_duration: float = Field(default=8.0, description="Default duration for music crossfades in seconds") # Add crossfade duration config
@@ -115,28 +117,21 @@ class BrainService(BaseService):
         self._commentary_request_next_track.clear()
 
     async def _stop(self) -> None:
-        """Stop the service and clean up resources."""
-        self.logger.info(f"Stopping {self.name}")
-        # Cancel all tracked tasks
-        for task in self._tasks:
-            if not task.done():
-                task.cancel()
-
-        # Wait for tasks to complete cancellation
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-
-        # Clear task list and state
-        self._tasks.clear()
-        self._dj_mode_active = False
-        self._recently_played_tracks.clear()
-        self._music_library.clear()
-        self._next_track_commentary_cached = False
-        self._current_track = None
-        self._next_track = None
-        self._commentary_cache_keys.clear()
-        self._cached_commentary_ready.clear()
-        self._commentary_request_next_track.clear()
+        """Stop the brain service and clean up resources."""
+        try:
+            # Cancel background tasks
+            for task in self._tasks:
+                if not task.done():
+                    task.cancel()
+            
+            # Wait for tasks to complete cancellation
+            if self._tasks:
+                await asyncio.gather(*self._tasks, return_exceptions=True)
+                
+            self.logger.info("BrainService stopped successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error stopping BrainService: {e}", exc_info=True)
 
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
@@ -204,8 +199,11 @@ class BrainService(BaseService):
         persona_loaded = False
         # Try loading DJ persona from a list of common paths
         dj_persona_paths_to_try = [
-            self._config.dj_persona_path, # Configured path first
-            "dj_r3x-persona.txt", # Current directory
+            self._config.dj_persona_path, # Configured path first (should be dj_r3x-transition-persona.txt)
+            "dj_r3x-transition-persona.txt", # Current directory
+            "cantina_os/dj_r3x-transition-persona.txt", # Inside cantina_os (if run from parent)
+            "../dj_r3x-transition-persona.txt", # Parent directory (if run from a subdir)
+            "dj_r3x-persona.txt", # Fallback to general persona
             "cantina_os/dj_r3x-persona.txt", # Inside cantina_os (if run from parent)
             "../dj_r3x-persona.txt" # Parent directory (if run from a subdir)
         ]
@@ -282,14 +280,14 @@ class BrainService(BaseService):
                 if not track_name:
                     self.logger.warning("No tracks available for DJ mode")
                     # Emit DJ mode stop if no tracks
-                    await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).dict())
+                    await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).model_dump())
                     return
 
                 # Get track metadata
                 self._current_track = self._music_library.get(track_name)
                 if not self._current_track:
                      self.logger.error(f"Metadata not found for initial track: {track_name}")
-                     await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).dict())
+                     await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).model_dump())
                      return
 
                 # Add to recently played
@@ -304,16 +302,53 @@ class BrainService(BaseService):
                         is_active=True,
                         # Note: current_track and next_track info will be managed internally
                         # and potentially included in other specific events or state updates
-                    ).dict()
+                    ).model_dump()
                 )
+
+                # REQUEST INITIAL COMMENTARY Timeline Plan for the just-started track (timeline-based approach)
+                # This provides an immediate DJ introduction when mode starts through timeline execution
+                self.logger.info(f"Creating initial commentary timeline plan for track: {self._current_track.title}")
+                
+                # Generate cache key for initial commentary 
+                initial_cache_key = f"commentary_{uuid.uuid4().hex[:8]}"
+                
+                # Request speech caching for initial commentary first
+                initial_request_id = str(uuid.uuid4())
+                initial_commentary_request = DjCommentaryRequestPayload(
+                    timestamp=time.time(),
+                    context="intro",  # Use "intro" context for initial DJ commentary
+                    current_track=None,  # No previous track for intro
+                    next_track=TrackDataPayload(**self._current_track.model_dump()),  # Introduce the track that just started
+                    persona=self._dj_persona,
+                    request_id=initial_request_id
+                )
+                
+                # Add to our tracking
+                self._commentary_cache_keys[initial_request_id] = initial_cache_key
+                self._commentary_request_next_track[initial_request_id] = None  # No next track for intro
+                
+                # Request commentary generation first (will get cached)
+                await self.emit(
+                    EventTopics.DJ_COMMENTARY_REQUEST,
+                    initial_commentary_request.model_dump()
+                )
+                
+                # Cache the generated commentary using SpeechCacheRequestPayload
+                # Note: We'll get the commentary text from GPT response and then cache it
+                # For now, create a basic cache request that will be updated when GPT responds
+                self.logger.info(f"Initial commentary requested with ID: {initial_request_id}, cache_key: {initial_cache_key}")
+                
+                # The commentary will be processed in _handle_gpt_commentary_response
+                # and then trigger a timeline plan for immediate playback
 
                 # The commentary caching loop starts and will select the NEXT track and cache its intro/transition commentary.
                 # The loop will update self._next_track and trigger the commentary request.
                 self._next_track = None # Ensure next track is selected by the loop
                 self._next_track_commentary_cached = False # Reset cache status
-                self._commentary_cache_keys.clear() # Clear previous cache key mapping
-                self._cached_commentary_ready.clear() # Clear previous cache readiness status
-                self._commentary_request_next_track.clear()
+                # DON'T clear the cache tracking - we need it for initial commentary
+                # self._commentary_cache_keys.clear() # Clear previous cache key mapping
+                # self._cached_commentary_ready.clear() # Clear previous cache readiness status
+                # self._commentary_request_next_track.clear()
 
             else:
                 self.logger.info("DJ mode deactivated")
@@ -331,7 +366,7 @@ class BrainService(BaseService):
                     EventTopics.DJ_MODE_STOP,
                      DJModeChangedPayload(
                         is_active=False,
-                    ).dict()
+                    ).model_dump()
                 )
 
         except Exception as e:
@@ -392,7 +427,7 @@ class BrainService(BaseService):
                      timestamp=time.time(),
                      current_track=TrackDataPayload(**self._current_track.model_dump()),
                      time_remaining=0.0 # Simulate end of track
-                 ).dict()
+                 ).model_dump()
                  await self._handle_track_ending_soon(dummy_payload)
              else:
                  self.logger.warning("Cannot force next track, current track is not set.")
@@ -536,7 +571,7 @@ class BrainService(BaseService):
                     # Request commentary from GPTService
                     # Use the DJ transition persona
                     # Pass current and next track metadata for contextual commentary
-                    commentary_request_payload = DJCommentaryRequestPayload(
+                    commentary_request_payload = DjCommentaryRequestPayload(
                         timestamp=time.time(),
                         context="transition",
                         current_track=TrackDataPayload(**self._current_track.model_dump()),
@@ -548,7 +583,7 @@ class BrainService(BaseService):
                     self.logger.info(f"Commentary caching loop: Emitting DJ_COMMENTARY_REQUEST with request_id: {request_id}")
                     await self.emit(
                         EventTopics.DJ_COMMENTARY_REQUEST,
-                        commentary_request_payload.dict()
+                        commentary_request_payload.model_dump()
                     )
 
                     # Mark that we have requested commentary for this next track
@@ -575,8 +610,13 @@ class BrainService(BaseService):
         """Handle the GPT_COMMENTARY_RESPONSE event and trigger speech caching."""
         self.logger.info("Handling GPT_COMMENTARY_RESPONSE")
         try:
-            # Use Pydantic model for incoming payload
-            response_payload = GptCommentaryResponsePayload(**payload)
+            # Use Pydantic model for incoming payload with error handling
+            try:
+                response_payload = GptCommentaryResponsePayload(**payload)
+            except ValidationError as e:
+                self.logger.error(f"Validation error in GPT_COMMENTARY_RESPONSE payload: {e}")
+                return
+                
             request_id = response_payload.request_id
             commentary_text = response_payload.commentary_text
             is_partial = response_payload.is_partial
@@ -589,30 +629,45 @@ class BrainService(BaseService):
                 # TODO: Handle empty commentary - maybe mark cache as failed for this request?
                 return
 
-            # Generate a cache key based on the request ID
-            # This assumes a 1:1 mapping between commentary request and speech cache request
-            cache_key = f"commentary_{request_id}"
-            self._commentary_cache_keys[request_id] = cache_key # Store mapping
-            self._cached_commentary_ready[cache_key] = False # Mark as not ready yet
+            # Generate a cache key based on the request ID or use existing mapping
+            cache_key = self._commentary_cache_keys.get(request_id)
+            if not cache_key:
+                cache_key = f"commentary_{request_id}"
+                self._commentary_cache_keys[request_id] = cache_key # Store mapping
+            
+            self._cached_commentary_ready[cache_key] = False
 
-            # Request speech caching from CachedSpeechService
-            cache_request_payload = SpeechCacheRequestPayload(
-                timestamp=time.time(),
-                text=commentary_text,
-                voice_id=self._config.tts_voice_id, # Use configured voice ID
-                cache_key=cache_key,
-                is_streaming=False, # Commentary is for caching, not streaming playback
-                metadata={
-                    "commentary_request_id": request_id,
-                    # Add any other relevant metadata like track info
-                }
-            )
+            # Request speech caching from CachedSpeechService with error handling
+            try:
+                cache_request_payload = SpeechCacheRequestPayload(
+                    timestamp=time.time(),
+                    text=commentary_text,
+                    voice_id=self._config.tts_voice_id, # Use configured voice ID
+                    cache_key=cache_key,
+                    is_streaming=False, # Commentary is for caching, not streaming playback
+                    metadata={
+                        "commentary_request_id": request_id,
+                        "context": getattr(response_payload, 'context', 'unknown'),  # Track context
+                    }
+                )
+            except ValidationError as e:
+                self.logger.error(f"Validation error creating SpeechCacheRequestPayload: {e}")
+                return
 
             self.logger.info(f"Emitting SPEECH_CACHE_REQUEST for cache_key: {cache_key}")
             await self.emit(
                 EventTopics.SPEECH_CACHE_REQUEST,
-                cache_request_payload.dict()
+                cache_request_payload.model_dump()
             )
+
+            # Check if this is an initial commentary (intro context)
+            # If so, create an immediate timeline plan for playback once cached
+            next_track_for_request = self._commentary_request_next_track.get(request_id)
+            if next_track_for_request is None:  # None means this is initial commentary
+                self.logger.info(f"Initial commentary caching requested for request_id: {request_id}")
+                # Mark that we have an initial commentary being cached
+                # We'll create the timeline plan in _handle_speech_cache_ready when caching completes
+                pass
 
             # Do NOT set _next_track_commentary_cached to True yet.
             # This flag should only be set when SPEECH_CACHE_READY is received for the corresponding cache key.
@@ -624,14 +679,18 @@ class BrainService(BaseService):
         """Handle the SPEECH_CACHE_READY event and update internal state."""
         self.logger.info("Handling SPEECH_CACHE_READY")
         try:
-            # Use Pydantic model for incoming payload
-            ready_payload = SpeechCacheReadyPayload(**payload)
+            # Use Pydantic model for incoming payload with error handling
+            try:
+                ready_payload = SpeechCacheReadyPayload(**payload)
+            except ValidationError as e:
+                self.logger.error(f"Validation error in SPEECH_CACHE_READY payload: {e}")
+                return
+                
             cache_key = ready_payload.cache_key
-            audio_filepath = ready_payload.audio_filepath
-            duration = ready_payload.duration
+            duration = ready_payload.duration_ms / 1000.0  # Convert to seconds
             metadata = ready_payload.metadata
 
-            self.logger.info(f"Speech cache ready for cache_key: {cache_key} at {audio_filepath} (Duration: {duration:.2f}s)")
+            self.logger.info(f"Speech cache ready for cache_key: {cache_key} (Duration: {duration:.2f}s)")
 
             # Mark the cache entry as ready
             if cache_key in self._cached_commentary_ready:
@@ -643,13 +702,59 @@ class BrainService(BaseService):
                  if commentary_request_id and commentary_request_id in self._commentary_request_next_track:
                      associated_next_track = self._commentary_request_next_track[commentary_request_id]
                      # Check if this cached commentary is for the CURRENTLY planned next track
-                     if self._next_track and associated_next_track.track_id == self._next_track.track_id:
-                         self._next_track_commentary_cached = True
+                     if self._next_track and associated_next_track and associated_next_track.track_id == self._next_track.track_id:
+                         self._next_track_commentary_cached = True # Mark as cached and ready
                          self.logger.info(f"Speech cache for next track '{self._next_track.title}' is ready (cache_key: {cache_key}).")
                      else:
-                         self.logger.warning(f"Speech cache ready for cache_key {cache_key} (request_id: {commentary_request_id}) but it does not match the current next track ('{self._next_track.title if self._next_track else 'None'}').")
+                         self.logger.debug(f"Speech cache ready, but not for the currently planned next track. Expected: {self._next_track.track_id if self._next_track else 'None'}, Got: {associated_next_track.track_id if associated_next_track else 'None'}")
+                     
+                     # Check if this is initial commentary (associated_next_track would be None for intro)
+                     if associated_next_track is None:  # This indicates initial commentary
+                         self.logger.info(f"Initial commentary cache ready (cache_key: {cache_key}). Creating immediate timeline plan.")
+                         
+                         # Create timeline plan for immediate initial commentary playback with ducking
+                         plan_id = str(uuid.uuid4())
+                         
+                         # Create steps with music ducking for professional intro
+                         duck_step = MusicDuckStep(
+                             step_type="music_duck",
+                             duck_level=0.3,  # Lower music to 30% for intro commentary
+                             fade_duration_ms=300
+                         )
+                         
+                         initial_speech_step = PlayCachedSpeechStep(
+                             step_type="play_cached_speech",
+                             cache_key=cache_key
+                         )
+                         
+                         unduck_step = MusicUnduckStep(
+                             step_type="music_unduck",
+                             fade_duration_ms=300
+                         )
+                         
+                         # Create the DJ transition plan payload (duck + speech + unduck for intro)
+                         initial_plan = DjTransitionPlanPayload(
+                             plan_id=plan_id,
+                             steps=[duck_step, initial_speech_step, unduck_step]
+                         )
+                         
+                         # Create the PlanReady payload
+                         plan_ready_payload = PlanReadyPayload(
+                             timestamp=time.time(),
+                             plan_id=plan_id,
+                             plan=initial_plan.model_dump()
+                         )
+                         
+                         self.logger.info(f"Emitting PLAN_READY for initial commentary with plan_id: {plan_id}")
+                         # Emit the PLAN_READY event for immediate execution
+                         await self.emit(
+                             EventTopics.PLAN_READY,
+                             plan_ready_payload.model_dump()
+                         )
+                 
+                 # If no commentary_request_id found in the main logic above, this might be legacy or unmapped cache
                  elif commentary_request_id:
-                     self.logger.warning(f"Speech cache ready for cache_key {cache_key} but request_id {commentary_request_id} not found in _commentary_request_next_track.")
+                     self.logger.warning(f"Speech cache ready for request_id {commentary_request_id} but no mapping found in _commentary_request_next_track")
             else:
                 self.logger.warning(f"Received SPEECH_CACHE_READY for unknown cache_key: {cache_key}")
 
@@ -660,14 +765,18 @@ class BrainService(BaseService):
         """Handle the SPEECH_CACHE_ERROR event and update internal state."""
         self.logger.error("Handling SPEECH_CACHE_ERROR")
         try:
-            # Use Pydantic model for incoming payload
-            error_payload = SpeechCacheErrorPayload(**payload)
+            # Use Pydantic model for incoming payload with error handling
+            try:
+                error_payload = SpeechCacheErrorPayload(**payload)
+            except ValidationError as e:
+                self.logger.error(f"Validation error in SPEECH_CACHE_ERROR payload: {e}")
+                return
+                
             cache_key = error_payload.cache_key
-            error_message = error_payload.error_message
-            error_type = error_payload.error_type
+            error_message = error_payload.error  # FIXED: Use correct field name 'error'
             metadata = error_payload.metadata # Get metadata to find request_id
 
-            self.logger.error(f"Speech cache error for cache_key {cache_key}: {error_type} - {error_message}")
+            self.logger.error(f"Speech cache error for cache_key {cache_key}: {error_message}")
 
             # Mark the cache entry as not ready (or failed)
             if cache_key in self._cached_commentary_ready:
@@ -680,7 +789,7 @@ class BrainService(BaseService):
                 if commentary_request_id and commentary_request_id in self._commentary_request_next_track:
                     associated_next_track = self._commentary_request_next_track[commentary_request_id]
                     # Check if this error is for the CURRENTLY planned next track
-                    if self._next_track and associated_next_track.track_id == self._next_track.track_id:
+                    if self._next_track and associated_next_track and associated_next_track.track_id == self._next_track.track_id:
                         self.logger.warning("Resetting _next_track_commentary_cached due to error for current next track.")
                         self._next_track_commentary_cached = False
                         # TODO: Consider triggering a new commentary request immediately for the same next track
@@ -729,7 +838,7 @@ class BrainService(BaseService):
                 target_request_id = None
                 # Find the request ID associated with the current _next_track
                 for req_id, next_track in self._commentary_request_next_track.items():
-                    if self._next_track and next_track.track_id == self._next_track.track_id:
+                    if self._next_track and next_track and next_track.track_id == self._next_track.track_id:
                         target_request_id = req_id
                         break
 
@@ -745,14 +854,28 @@ class BrainService(BaseService):
                     plan_steps: List[BasePlanStep] = []
                     self.logger.warning("Proceeding with transition plan without commentary due to missing cache key.")
                 else:
-                    # Create the plan steps:
-                    # 1. Play cached speech (commentary)
-                    # 2. Perform music crossfade
+                    # Create the plan steps with proper music ducking:
+                    # 1. Duck music volume
+                    # 2. Play cached speech (commentary)
+                    # 3. Unduck music volume
+                    # 4. Perform music crossfade
+                    
+                    duck_step = MusicDuckStep(
+                        step_type="music_duck",
+                        duck_level=0.3,  # Lower music to 30% volume during speech
+                        fade_duration_ms=300
+                    )
+                    
                     play_speech_step = PlayCachedSpeechStep(
                         step_type="play_cached_speech",
                         cache_key=commentary_cache_key,
                         # TODO: Add duration from cache metadata if needed by TimelineExecutor
                         # duration = ready_payload.duration # Need access to duration
+                    )
+                    
+                    unduck_step = MusicUnduckStep(
+                        step_type="music_unduck",
+                        fade_duration_ms=300
                     )
 
                     crossfade_step = MusicCrossfadeStep(
@@ -761,8 +884,8 @@ class BrainService(BaseService):
                         crossfade_duration=self._config.crossfade_duration # Use configured duration
                     )
 
-                    plan_steps = [play_speech_step, crossfade_step]
-                    self.logger.info(f"Created plan steps: {plan_steps}")
+                    plan_steps = [duck_step, play_speech_step, unduck_step, crossfade_step]
+                    self.logger.info(f"Created plan steps with music ducking: {plan_steps}")
 
                 # Generate a unique plan ID
                 plan_id = str(uuid.uuid4())
@@ -777,7 +900,7 @@ class BrainService(BaseService):
                 plan_ready_payload = PlanReadyPayload(
                     timestamp=time.time(),
                     plan_id=plan_id,
-                    plan=transition_plan.dict() # Emit the plan as a dictionary for now
+                    plan=transition_plan.model_dump() # Emit the plan as a dictionary for now
                     # TODO: Update TimelineExecutorService to accept DjTransitionPlanPayload directly
                 )
 
@@ -785,7 +908,7 @@ class BrainService(BaseService):
                 # Emit the PLAN_READY event
                 await self.emit(
                     EventTopics.PLAN_READY,
-                    plan_ready_payload.dict()
+                    plan_ready_payload.model_dump()
                 )
 
                 # Reset state after planning the transition
@@ -814,11 +937,11 @@ class BrainService(BaseService):
                     fallback_plan_ready = PlanReadyPayload(
                         timestamp=time.time(),
                         plan_id=fallback_plan.plan_id,
-                        plan=fallback_plan.dict()
+                        plan=fallback_plan.model_dump()
                     )
                     await self.emit(
                         EventTopics.PLAN_READY,
-                        fallback_plan_ready.dict()
+                        fallback_plan_ready.model_dump()
                     )
                     # Reset state similar to successful plan
                     self._next_track = None
@@ -873,7 +996,7 @@ class BrainService(BaseService):
               # Store the linkage between the request ID and the selected next track
               self._commentary_request_next_track[request_id] = self._next_track
 
-              commentary_request_payload = DJCommentaryRequestPayload(
+              commentary_request_payload = DjCommentaryRequestPayload(
                    timestamp=time.time(),
                    context="transition",
                    current_track=TrackDataPayload(**self._current_track.model_dump()) if self._current_track else None,
@@ -885,7 +1008,7 @@ class BrainService(BaseService):
               self.logger.info(f"Emitting DJ_COMMENTARY_REQUEST for immediately selected next track with request_id: {request_id}")
               await self.emit(
                    EventTopics.DJ_COMMENTARY_REQUEST,
-                   commentary_request_payload.dict()
+                   commentary_request_payload.model_dump()
               )
               # Cache readiness will be set by _handle_speech_cache_ready
               # Store linkage: _commentary_cache_keys will be updated in _handle_gpt_commentary_response
@@ -909,7 +1032,7 @@ class BrainService(BaseService):
                 return
 
             # Emit DJ mode activation event with correct payload format
-            await self.emit(EventTopics.DJ_MODE_CHANGED, DJModeChangedPayload(is_active=True).dict())
+            await self.emit(EventTopics.DJ_MODE_CHANGED, DJModeChangedPayload(is_active=True).model_dump())
             await self._send_success("DJ mode activated...")
         else:
             await self._send_success("DJ mode is already active")
@@ -926,7 +1049,7 @@ class BrainService(BaseService):
             })
             
             # Emit DJ mode deactivation event
-            await self.emit(EventTopics.DJ_MODE_CHANGED, DJModeChangedPayload(is_active=False).dict())
+            await self.emit(EventTopics.DJ_MODE_CHANGED, DJModeChangedPayload(is_active=False).model_dump())
             
             self._dj_mode_active = False
             self._current_track = None

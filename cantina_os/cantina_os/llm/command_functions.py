@@ -52,7 +52,7 @@ def create_play_music_function() -> Dict[str, Any]:
         "function": {
             "name": "play_music",
             "description": "Play a specific song or music genre",
-            "parameters": PlayMusicParams.model_json_schema()
+            "parameters": PlayMusicParams.schema()
         }
     }
 
@@ -63,7 +63,7 @@ def create_stop_music_function() -> Dict[str, Any]:
         "function": {
             "name": "stop_music",
             "description": "Stop the currently playing music",
-            "parameters": StopMusicParams.model_json_schema()
+            "parameters": StopMusicParams.schema()
         }
     }
 
@@ -74,7 +74,7 @@ def create_set_eye_color_function() -> Dict[str, Any]:
         "function": {
             "name": "set_eye_color",
             "description": "Change the color of DJ R3X's LED eyes",
-            "parameters": SetEyeColorParams.model_json_schema()
+            "parameters": SetEyeColorParams.schema()
         }
     }
 

@@ -857,14 +857,31 @@ class ElevenLabsService(BaseService):
                 
                 self.logger.info(f"Sending TTS request to ElevenLabs for text length: {len(text)} with speed {speed}")
                 
-                # Make request to ElevenLabs for complete audio file
+                # Make request to ElevenLabs for complete audio file using modern SDK
                 try:
-                    import elevenlabs
-                    audio_bytes = elevenlabs.generate(
+                    # Use the same client pattern as the streaming path
+                    eleven_client = ElevenLabs(api_key=self._config.api_key)
+                    
+                    # Voice settings for non-streaming (same as streaming for consistency)
+                    voice_settings = {
+                        "stability": self._config.stability,
+                        "similarity_boost": self._config.similarity_boost,
+                        "style": 0.25,
+                        "use_speaker_boost": True,
+                        "speed": speed
+                    }
+                    
+                    # Use modern convert method instead of old generate()
+                    audio_generator = eleven_client.text_to_speech.convert(
                         text=text,
-                        voice=voice_id,
-                        model=model_id
+                        voice_id=voice_id,
+                        model_id=model_id,
+                        voice_settings=voice_settings,
+                        output_format="mp3_44100_128"
                     )
+                    
+                    # Convert generator to bytes
+                    audio_bytes = b''.join(audio_generator)
                     
                     self.logger.info(f"Successfully generated speech, received {len(audio_bytes)} bytes")
                     

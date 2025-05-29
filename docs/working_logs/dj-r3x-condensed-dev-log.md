@@ -401,6 +401,67 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: Proper personality for DJ mode and verbal responses
 - **Technical**: Better path configuration and file accessibility diagnostics
 
+```markdown
+### 2025-05-20: GPTService Timeout Handling Improvements
+- **Issue**: GPTService stops responding after 15s with streaming responses causing truncated replies
+- **Solution**: Increased timeout to 60s and implemented partial response preservation on timeout
+- **Impact**: Longer DJ monologues complete properly with graceful degradation for very long responses
+- **Technical**: Modified _stream_gpt_response() to return partial content and added GPT_STREAMING_TIMEOUT config
+
+### 2025-05-20: DJ Mode Musical Pattern Recognition
+- **Issue**: Track selection was random rather than following cohesive musical patterns like a real DJ
+- **Solution**: Created MusicAnalysisService with track relationship algorithms and energy curve concept
+- **Impact**: More natural DJ-like transitions between songs with intelligent sequence generation
+- **Technical**: Added track metadata enrichment with tempo, energy, genre tags and smart transition algorithm
+
+### 2025-05-20: Service Startup and Architecture Standardization
+- **Issue**: Multiple service startup failures due to missing event topics and architectural deviations
+- **Solution**: Fixed missing EventTopics definitions, standardized CachedSpeechService architecture patterns
+- **Impact**: All services now start successfully with consistent event handling and error management
+- **Technical**: Added CROSSFADE_COMPLETE topic, implemented proper async/await patterns, fixed task exception handling
+
+### 2025-05-20: MemoryService State Persistence Implementation
+- **Issue**: DJ mode state and preferences were not persistent across system restarts
+- **Solution**: Implemented JSON file-based state persistence with load/save mechanisms
+- **Impact**: DJ mode state, track history, and preferences now persist across system restarts
+- **Technical**: Added _load_state/_save_state methods with proper error handling and directory creation
+
+### 2025-05-20: BrainService Memory Integration Fix
+- **Issue**: BrainService failing to start with MEMORY_VALUE error during initialization
+- **Solution**: Fixed race conditions in memory state initialization and improved error handling
+- **Impact**: BrainService now starts successfully with proper DJ mode state management
+- **Technical**: Enhanced memory response handling with increased wait times and robust defaults
+```
+
+### 2025-05-27: CLI Command Payload Format Inconsistency
+- **Issue**: Multi-word CLI commands like "list music" failing with "Unknown music command" error
+- **Solution**: Standardized CommandDispatcher payload transformation to use consistent command/args structure
+- **Impact**: Fixed recurring CLI command issues with consistent payload format
+- **Technical**: Updated _transform_payload_for_service() for backward compatibility
+
+### 2025-05-27: BrainService Startup Race Condition Fix
+- **Issue**: BrainService failing to start with MEMORY_VALUE error during initialization
+- **Solution**: Fixed async subscription setup by awaiting all subscription tasks before proceeding
+- **Impact**: Eliminated recurring service startup race conditions
+- **Technical**: Added await asyncio.gather(*subscription_tasks) to ensure subscriptions complete
+
+### 2025-05-27: System-wide Import Path Standardization
+- **Issue**: System failing to start due to EventTopics import errors in core framework
+- **Solution**: Comprehensive update of all import statements to use core.event_topics consistently
+- **Impact**: Fixed system startup failures and eliminated import inconsistencies
+- **Technical**: Updated 20+ files across core framework, services, and tests
+
+### 2025-05-27: CLI Command System Standardization Complete
+- **Issue**: Multiple services using inconsistent command handling patterns causing CLI failures
+- **Solution**: Implemented compound command decorator pattern across all services with auto-registration
+- **Impact**: All CLI commands now work reliably with consistent error handling and validation
+- **Technical**: Created @compound_command decorators, standardized payload handling, eliminated service-specific logic
+
+### 2025-05-27: DJ Mode Functionality Complete
+- **Issue**: DJ mode non-functional due to subscription race conditions and model import mismatches
+- **Solution**: Fixed BrainService event subscriptions, corrected MusicTrack imports, added missing GPT handlers
+- **Impact**: DJ mode now fully operational with end-to-end functionality working perfectly
+- **Technical**: Required proper async subscription synchronization and event schema alignment
 
 
 

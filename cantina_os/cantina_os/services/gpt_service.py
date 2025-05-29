@@ -1106,6 +1106,7 @@ Generate a brief DJ commentary for the music. Keep it energetic and in character
                 from cantina_os.core.event_schemas import GptCommentaryResponsePayload
                 
                 commentary_response = GptCommentaryResponsePayload(
+                    timestamp=time.time(),
                     request_id=request_id,
                     commentary_text=commentary_text,
                     is_partial=False
@@ -1127,6 +1128,7 @@ Generate a brief DJ commentary for the music. Keep it energetic and in character
                 from cantina_os.core.event_schemas import GptCommentaryResponsePayload
                 
                 error_response = GptCommentaryResponsePayload(
+                    timestamp=time.time(),
                     request_id=request_id,
                     commentary_text="",
                     is_partial=True  # Mark as partial to indicate error

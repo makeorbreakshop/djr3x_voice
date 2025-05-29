@@ -596,6 +596,9 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         raise
+    finally:
+        # Stop the logging listener thread
+        log_listener.stop()
         
 if __name__ == "__main__":
     main() 

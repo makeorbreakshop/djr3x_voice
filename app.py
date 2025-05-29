@@ -1,4 +1,4 @@
-from services.debug import DebugService
+from cantina_os.cantina_os.services.debug_service import DebugService
 
 class Application:
     def __init__(self):

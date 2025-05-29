@@ -535,7 +535,7 @@ class PlanEndedPayload(BaseEventPayload):
     """Payload for PLAN_ENDED event."""
     plan_id: str
     layer: str
-    status: Literal["completed", "cancelled", "paused"]
+    status: Literal["completed", "cancelled", "paused", "failed"]
 
 class MemoryUpdatedPayload(BaseEventPayload):
     """Payload for MEMORY_UPDATED event."""
@@ -603,14 +603,6 @@ class SpeechCacheErrorPayload(BaseEventPayload):
     retry_count: int = Field(default=0, description="Number of retry attempts made")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     
-class SpeechCachePlaybackRequestPayload(BaseEventPayload):
-    """Payload for requesting playback of cached speech."""
-    cache_key: str = Field(description="Cache key of the speech to play")
-    volume: float = Field(default=1.0, description="Playback volume (0.0-1.0)")
-    playback_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique ID for this playback")
-    delay_ms: int = Field(default=0, description="Optional delay before playback in milliseconds")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    
 class SpeechCachePlaybackStartedPayload(BaseEventPayload):
     """Payload for cached speech playback start notification."""
     cache_key: str = Field(description="Cache key of the speech being played")
@@ -646,19 +638,5 @@ class SpeechCacheClearedPayload(BaseEventPayload):
     cache_key: Optional[str] = Field(None, description="Cache key of the cleared entry, or None if the entire cache was cleared")
     success: bool = Field(description="Whether the clear operation was successful")
 
-# New payload for requesting DJ commentary from GPT
-class DJCommentaryRequestPayload(BaseEventPayload):
-    """Payload for requesting DJ commentary generation from GPTService."""
-    prompt: str = Field(description="The prompt text for GPT, including persona instructions.")
-    current_track_metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Metadata for the currently playing track."
-    )
-    next_track_metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Metadata for the next track."
-    )
-    commentary_type: Literal["intro", "transition", "outro"] = Field(
-        description="Type of commentary requested (intro, transition, outro)."
-    )
-    cache_key: str = Field(description="Unique key to use for caching the generated speech.") 
+# Note: DJCommentaryRequestPayload moved to core/event_schemas.py as DjCommentaryRequestPayload
+# for standardization as part of the event system migration 

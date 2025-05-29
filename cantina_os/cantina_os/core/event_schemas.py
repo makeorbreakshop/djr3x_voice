@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Any
+import uuid
 # Assuming MusicTrack and MusicLibrary models exist elsewhere or need defining
 # For now, using basic dict/Any types, but these should ideally be proper Pydantic models
 
@@ -63,7 +64,11 @@ class SpeechCacheRequestPayload(EventPayload):
 class SpeechCachePlaybackRequestPayload(EventPayload):
     """Payload for requesting playback of cached speech."""
     cache_key: str = Field(..., description="The key for the cached speech entry to play.")
-    # Add other relevant playback parameters if needed (e.g., volume, start_time)
+    volume: float = Field(default=1.0, description="Playback volume (0.0-1.0)")
+    playback_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique ID for this playback")
+    delay_ms: int = Field(default=0, description="Optional delay before playback in milliseconds")
+    metadata: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+    # Add other relevant playback parameters if needed (e.g., start_time)
 
 class SpeechCacheReadyPayload(EventPayload):
     """Payload indicating speech audio is ready in the cache."""
@@ -123,6 +128,17 @@ class MusicCrossfadeStep(BasePlanStep):
     next_track_id: str = Field(..., description="The ID of the track to fade in.")
     crossfade_duration: float = Field(..., description="The duration of the crossfade in seconds.")
     # Add other crossfade parameters
+
+class MusicDuckStep(BasePlanStep):
+    """Plan step to duck (lower) music volume during speech."""
+    step_type: str = "music_duck"
+    duck_level: float = Field(default=0.3, description="Volume level to duck to (0.0-1.0)")
+    fade_duration_ms: int = Field(default=300, description="Fade duration in milliseconds")
+
+class MusicUnduckStep(BasePlanStep):
+    """Plan step to restore (unduck) music volume after speech."""
+    step_type: str = "music_unduck"
+    fade_duration_ms: int = Field(default=300, description="Fade duration in milliseconds")
 
 class DjTransitionPlanPayload(BaseModel):
     """Represents a plan for a DJ transition (e.g., between tracks)."""
