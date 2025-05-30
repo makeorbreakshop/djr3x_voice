@@ -44,9 +44,9 @@ This document tracks the implementation progress of the CantinaOS system accordi
 - [x] Create unit tests for `MusicControllerService`
 - [x] Create unit tests for `ToolExecutorService`
 - [x] Create unit tests for `CLIService`
-- [ ] Create unit tests for `YodaModeManagerService`
+- [x] Create unit tests for `YodaModeManagerService`
 - [x] Create unit tests for `CommandDispatcherService`
-- [ ] Create unit tests for `ModeCommandHandlerService`
+- [x] Create unit tests for `ModeCommandHandlerService`
 
 #### Unit Tests Execution (Run after each service's tests are created)
 - [x] Run MicInputService Tests
@@ -117,7 +117,7 @@ Test Execution Order:
    - Command: `pytest tests/integration/test_cli_command_integration.py -v`
    - Validates: CLI functionality
 
-6. [ ] Run Resource Cleanup Tests
+6. [x] Run Resource Cleanup Tests
    - Command: `pytest tests/integration/test_resource_cleanup.py -v`
    - Validates: Resource management
 

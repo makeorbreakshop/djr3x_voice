@@ -1047,11 +1047,11 @@ Generate a brief, energetic DJ transition commentary (2-3 sentences max) that:
 
 Keep it concise and punchy - this will play over a crossfade.
 """
-            elif context == "intro" and next_track:
+            elif context == "intro" and current_track:
                 prompt = f"""
 {persona}
 
-Generate a brief, enthusiastic introduction (2-3 sentences max) for the track "{next_track.title}".
+Generate a brief, enthusiastic introduction (2-3 sentences max) for the track "{current_track.title}" by {current_track.artist}.
 
 Make it sound like DJ R3X is introducing this track to the cantina crowd.
 Keep it energetic but concise.
@@ -1109,7 +1109,8 @@ Generate a brief DJ commentary for the music. Keep it energetic and in character
                     timestamp=time.time(),
                     request_id=request_id,
                     commentary_text=commentary_text,
-                    is_partial=False
+                    is_partial=False,
+                    context=context
                 )
                 
                 await self.emit(
@@ -1131,7 +1132,8 @@ Generate a brief DJ commentary for the music. Keep it energetic and in character
                     timestamp=time.time(),
                     request_id=request_id,
                     commentary_text="",
-                    is_partial=True  # Mark as partial to indicate error
+                    is_partial=True,  # Mark as partial to indicate error
+                    context=payload.get("context", "unknown")
                 )
                 
                 await self.emit(

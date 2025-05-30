@@ -198,8 +198,6 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 ### 2025-05-09: Text-Based Recording Mode
 - **Issue**: Push-to-talk keyboard conflicts
 - **Solution**: Added 'rec' command for text input recording simulation
-- **Impact**: Reliable testing method and alternative input mode
-- **Technical**: Event emission for VOICE_LISTENING_STARTED/STOPPED
 
 ### 2025-05-09: Audio Capture Chain Fixed
 - **Issue**: MicInputService audio not reaching DeepgramTranscriptionService
@@ -303,7 +301,6 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: Reliable Arduino communication with fallback modes
 - **Technical**: Multiple connection attempts, better buffer clearing
 
-```markdown
 ### 2025-05-16: IntentRouter Feature Implementation Complete
 - **Issue**: Need to enable conversational responses while executing hardware actions
 - **Solution**: OpenAI function calling with IntentRouterService, comprehensive integration testing
@@ -351,7 +348,6 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Solution**: Implemented two-step process with INTENT_EXECUTION_RESULT event for verbal feedback
 - **Impact**: Ensures both command execution and natural verbal responses
 - **Technical**: First call executes with tool_choice="auto", second generates feedback with tool_choice="none"
-```
 
 ### 2025-05-19: Comprehensive Command Registration System Overhaul
 - **Issue**: Recurring command registration and payload validation problems with multi-word commands
@@ -401,37 +397,11 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: Proper personality for DJ mode and verbal responses
 - **Technical**: Better path configuration and file accessibility diagnostics
 
-```markdown
-### 2025-05-20: GPTService Timeout Handling Improvements
-- **Issue**: GPTService stops responding after 15s with streaming responses causing truncated replies
-- **Solution**: Increased timeout to 60s and implemented partial response preservation on timeout
-- **Impact**: Longer DJ monologues complete properly with graceful degradation for very long responses
-- **Technical**: Modified _stream_gpt_response() to return partial content and added GPT_STREAMING_TIMEOUT config
-
-### 2025-05-20: DJ Mode Musical Pattern Recognition
-- **Issue**: Track selection was random rather than following cohesive musical patterns like a real DJ
-- **Solution**: Created MusicAnalysisService with track relationship algorithms and energy curve concept
-- **Impact**: More natural DJ-like transitions between songs with intelligent sequence generation
-- **Technical**: Added track metadata enrichment with tempo, energy, genre tags and smart transition algorithm
-
-### 2025-05-20: Service Startup and Architecture Standardization
-- **Issue**: Multiple service startup failures due to missing event topics and architectural deviations
-- **Solution**: Fixed missing EventTopics definitions, standardized CachedSpeechService architecture patterns
-- **Impact**: All services now start successfully with consistent event handling and error management
-- **Technical**: Added CROSSFADE_COMPLETE topic, implemented proper async/await patterns, fixed task exception handling
-
-### 2025-05-20: MemoryService State Persistence Implementation
-- **Issue**: DJ mode state and preferences were not persistent across system restarts
-- **Solution**: Implemented JSON file-based state persistence with load/save mechanisms
-- **Impact**: DJ mode state, track history, and preferences now persist across system restarts
-- **Technical**: Added _load_state/_save_state methods with proper error handling and directory creation
-
-### 2025-05-20: BrainService Memory Integration Fix
-- **Issue**: BrainService failing to start with MEMORY_VALUE error during initialization
-- **Solution**: Fixed race conditions in memory state initialization and improved error handling
-- **Impact**: BrainService now starts successfully with proper DJ mode state management
-- **Technical**: Enhanced memory response handling with increased wait times and robust defaults
-```
+### 2025-05-20: VLC Core Audio Property Listener Error Fix
+- **Issue**: VLC repeatedly logging "AudioObjectAddPropertyListener failed" errors after music stops
+- **Solution**: Enhanced VLC initialization with proper args, improved cleanup timing, suppressed verbose logging
+- **Impact**: Eliminated console spam, cleaner application shutdown
+- **Technical**: Added VLC instance args (--quiet, --no-video, --verbose 0), async cleanup delays, environment variable suppression
 
 ### 2025-05-27: CLI Command Payload Format Inconsistency
 - **Issue**: Multi-word CLI commands like "list music" failing with "Unknown music command" error
@@ -463,7 +433,59 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: DJ mode now fully operational with end-to-end functionality working perfectly
 - **Technical**: Required proper async subscription synchronization and event schema alignment
 
+### 2025-05-29: DJ Mode Core Infrastructure Stabilization
+- **Issue**: DJ Mode activation broken after recent changes - BrainService and MusicController payload field mismatches
+- **Solution**: Standardized Pydantic model usage with DJModeChangedPayload and fixed commentary system imports
+- **Impact**: DJ mode activation and music playback restored to working state
+- **Technical**: Fixed payload field naming (is_active vs dj_mode_active) and Pydantic compatibility issues
 
+### 2025-05-29: DJ Mode Track Metadata Validation Complete
+- **Issue**: Commentary caching loop failing with Pydantic validation errors due to missing artist fields
+- **Solution**: Implemented smart filename parsing with "Artist - Title" format detection and fallback defaults
+- **Impact**: Track transitions with generated commentary now functional, robust handling of diverse file naming
+- **Technical**: Added _parse_track_metadata() method, standardized TrackDataPayload creation across all events
+
+### 2025-05-29: Comprehensive DJ Mode Pydantic Validation Fixes
+- **Issue**: Multiple validation failures throughout DJ mode event flow preventing operation
+- **Solution**: Fixed missing timestamp fields, resolved event schema conflicts, updated model serialization
+- **Impact**: Commentary generation, speech caching, and timeline execution now working end-to-end
+- **Technical**: Added timestamps to GPTService responses, standardized event model imports, fixed Pydantic v2 compatibility
+
+### 2025-05-29: ElevenLabs API Integration and Timeline Execution Fixes
+- **Issue**: Speech generation failing with outdated API calls, timeline plans not executing due to missing imports
+- **Solution**: Updated ElevenLabs non-streaming API to modern SDK, fixed TimelineExecutorService imports and plan parsing
+- **Impact**: Real audio generation for cached speech, timeline plans can now be parsed and executed
+- **Technical**: Replaced elevenlabs.generate() with eleven_client.text_to_speech.convert(), fixed PlanPayload structure handling
+
+### 2025-05-29: CantinaOS Architectural Migration Complete
+- **Issue**: Two competing memory services causing coordination chaos and architecture standard violations
+- **Solution**: Removed duplicate root-level services, migrated to comprehensive CantinaOS structure
+- **Impact**: Single source of truth for DJ mode state, eliminated service conflicts, architecture compliance achieved
+- **Technical**: Completed migration documented in condensed dev log (2025-05-07), proper service organization under /cantina_os/cantina_os/services/
+
+### 2025-05-29: DJ Mode Critical Coordination and ID Synchronization
+- **Issue**: Timeline execution timeouts due to event ID mismatches between CachedSpeechService and TimelineExecutor
+- **Solution**: Fixed playback ID synchronization, implemented proper event emission with consistent UUIDs
+- **Impact**: Timeline plans now execute successfully, smooth transitions between tracks working
+- **Technical**: Modified CachedSpeechService._play_audio() to use request payload IDs, fixed completion event tracking
+
+### 2025-05-29: DJ Mode Professional Audio Enhancements
+- **Issue**: Poor audio balance and timing in DJ transitions affecting user experience
+- **Solution**: Implemented parallel step execution with concurrent speech and crossfade, enhanced audio mixing
+- **Impact**: Professional-quality DJ transitions with uninterrupted music flow and balanced audio levels
+- **Technical**: Added ParallelSteps model, 60% music ducking, 1.8x commentary volume boost, 1500ms fade durations
+
+### 2025-05-29: BlockingIOError and MemoryService Coordination Fixes
+- **Issue**: httpx debug logging bypassing queued system causing BlockingIOError, track selection mismatches between services
+- **Solution**: Disabled httpx debug logging, implemented proper MemoryService coordination as designed in DJ_Mode_Plan.md
+- **Impact**: Eliminated async logging errors, fixed track commentary mismatches, architectural compliance
+- **Technical**: httpx logger controls, MemoryService-based track coordination, proper service boundaries
+
+### 2025-05-29: DJ Mode Automatic Transitions and Final Polish
+- **Issue**: Manual DJ control working but automatic transitions failing due to missing timestamp validation
+- **Solution**: Added timestamp fields to TRACK_ENDING_SOON events, implemented default_factory for future-proofing
+- **Impact**: Complete DJ mode functionality with both manual and automatic transitions working
+- **Technical**: Two-line elegant fix - immediate timestamp addition and EventPayload base class enhancement
 
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation

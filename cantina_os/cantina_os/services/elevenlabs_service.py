@@ -134,6 +134,12 @@ class ElevenLabsService(BaseService):
         self.logger.info(f"Starting ElevenLabsService with playback method: {self._config.playback_method}")
         
         try:
+            # Disable httpx debug logging to prevent BlockingIOError in asyncio event loop
+            httpx_logger = logging.getLogger("httpx")
+            httpx_logger.setLevel(logging.WARNING)  # Only show warnings and errors
+            httpcore_logger = logging.getLogger("httpcore")
+            httpcore_logger.setLevel(logging.WARNING)  # Only show warnings and errors
+            
             # Initialize HTTP client
             self._client = httpx.AsyncClient(
                 base_url="https://api.elevenlabs.io/v1",
@@ -220,6 +226,12 @@ class ElevenLabsService(BaseService):
             self._handle_tts_request
         )
         
+        # Add subscription for TTS_GENERATE_REQUEST from TimelineExecutorService
+        await self.subscribe(
+            EventTopics.TTS_GENERATE_REQUEST,
+            self._handle_tts_generate_request
+        )
+        
         self.logger.info("ElevenLabsService event subscriptions complete")
     
     async def _cleanup(self) -> None:
@@ -292,6 +304,9 @@ class ElevenLabsService(BaseService):
                     stability = request["stability"]
                     similarity_boost = request["similarity_boost"]
                     speed = request["speed"]
+                    clip_id = request.get("clip_id")
+                    step_id = request.get("step_id")
+                    plan_id = request.get("plan_id")
                     
                     # Clamp speed to valid range (0.7-1.2)
                     speed = min(max(speed, 0.7), 1.2)
@@ -309,7 +324,10 @@ class ElevenLabsService(BaseService):
                                 conversation_id=conversation_id,
                                 text=text,
                                 audio_length_seconds=0.0,
-                                success=True
+                                success=True,
+                                clip_id=clip_id,
+                                step_id=step_id,
+                                plan_id=plan_id
                             )
                             await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
                         asyncio.run_coroutine_threadsafe(emit_empty_complete(), self._event_loop)
@@ -365,7 +383,10 @@ class ElevenLabsService(BaseService):
                                 conversation_id=conversation_id,
                                 text=text,
                                 audio_length_seconds=0.0,  # Hard to calculate exact length
-                                success=True
+                                success=True,
+                                clip_id=clip_id,
+                                step_id=step_id,
+                                plan_id=plan_id
                             )
                             await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
                         asyncio.run_coroutine_threadsafe(emit_complete(), self._event_loop)
@@ -379,7 +400,10 @@ class ElevenLabsService(BaseService):
                                 text=text,
                                 audio_length_seconds=0.0,
                                 success=False,
-                                error=str(e)
+                                error=str(e),
+                                clip_id=clip_id,
+                                step_id=step_id,
+                                plan_id=plan_id
                             )
                             await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
                         asyncio.run_coroutine_threadsafe(emit_error(), self._event_loop)
@@ -451,7 +475,10 @@ class ElevenLabsService(BaseService):
                     "model_id": payload.model_id or self._config.model_id,
                     "stability": payload.stability or self._config.stability,
                     "similarity_boost": payload.similarity_boost or self._config.similarity_boost,
-                    "speed": speed
+                    "speed": speed,
+                    "clip_id": payload.clip_id,
+                    "step_id": payload.step_id,
+                    "plan_id": payload.plan_id
                 }
                 
                 # Send to audio thread for processing
@@ -529,7 +556,11 @@ class ElevenLabsService(BaseService):
             await self._emit_status(ServiceStatus.ERROR, error_msg, LogLevel.ERROR)
     
     async def _handle_llm_response(self, payload: Union[Dict[str, Any], LLMResponsePayload]) -> None:
-        """Handle LLM response events by converting text to speech."""
+        """Handle LLM response events by creating timeline plans for unified audio coordination.
+        
+        This routes all speech through TimelineExecutorService to ensure consistent 
+        music ducking behavior for both normal and DJ mode interactions.
+        """
         self.logger.info(f"Received LLM_RESPONSE event: {type(payload)}")
 
         try:
@@ -548,7 +579,7 @@ class ElevenLabsService(BaseService):
         conversation_id = event_data.conversation_id
         is_complete_chunk = event_data.is_complete
 
-        self.logger.info(f"Current playback method: {self._config.playback_method}, chunk: '{text_chunk[:50]}...', final: {is_complete_chunk}")
+        self.logger.info(f"Processing LLM response via timeline system, chunk: '{text_chunk[:50]}...', final: {is_complete_chunk}")
 
         if not conversation_id:
             self.logger.error("LLM_RESPONSE event has no conversation_id. Skipping.")
@@ -570,21 +601,24 @@ class ElevenLabsService(BaseService):
 
         # Only process when we have the complete response
         if is_complete_chunk and self._wait_for_complete_response:
-            self.logger.info(f"Complete response received ({len(self._llm_response_buffer)} chars). Generating speech.")
+            self.logger.info(f"Complete response received ({len(self._llm_response_buffer)} chars). Creating timeline plan.")
             
             # Perform a duplicate check to ensure this hasn't already been processed
             if conversation_id in self._processed_text_chunks and self._processed_text_chunks[conversation_id] and \
                self._llm_response_buffer in self._processed_text_chunks[conversation_id]:
-                self.logger.info("Exact duplicate of already processed text. Skipping TTS generation.")
+                self.logger.info("Exact duplicate of already processed text. Skipping timeline plan creation.")
                 return
                 
-            await self._flush_complete_response(conversation_id, self._llm_response_buffer)
+            await self._create_speech_timeline_plan(conversation_id, self._llm_response_buffer)
             
             # Clear buffer after processing
             self._llm_response_buffer = ""
-
-    async def _flush_complete_response(self, conversation_id: str, text: str) -> None:
-        """Process a complete response by sending to TTS."""
+    
+    async def _create_speech_timeline_plan(self, conversation_id: str, text: str) -> None:
+        """Create a timeline plan for normal speech interaction with ducking coordination.
+        
+        This ensures normal speech uses the same ducking infrastructure as DJ mode.
+        """
         if not text or not text.strip():
             self.logger.debug("Empty text, nothing to process")
             return
@@ -595,7 +629,47 @@ class ElevenLabsService(BaseService):
         self._processed_text_chunks[conversation_id].append(text)
         
         text_to_speak = text.strip()
-        self.logger.info(f"Sending complete response to TTS: {len(text_to_speak)} chars, text: '{text_to_speak[:50]}...'")
+        self.logger.info(f"Creating timeline plan for normal speech: {len(text_to_speak)} chars")
+        
+        try:
+            # Create speak step using BasePlanStep format (compatible with TimelineExecutorService)
+            speak_step = {
+                "step_type": "speak",
+                "text": text_to_speak,
+                "id": conversation_id,  # Use conversation_id as step ID for coordination
+                "duration": None
+            }
+            
+            # Create unique plan ID
+            plan_id = str(uuid.uuid4())
+            
+            # Import required models
+            from cantina_os.core.event_schemas import PlanReadyPayload
+            import time
+            
+            # Create timeline plan payload
+            plan_ready_payload = PlanReadyPayload(
+                timestamp=time.time(),
+                plan_id=plan_id,
+                plan={
+                    "plan_id": plan_id,
+                    "steps": [speak_step]
+                }
+            )
+            
+            self.logger.info(f"Emitting PLAN_READY for normal speech plan {plan_id}")
+            await self.emit(EventTopics.PLAN_READY, plan_ready_payload.model_dump())
+            
+        except Exception as e:
+            self.logger.error(f"Error creating speech timeline plan: {e}", exc_info=True)
+            # Fallback to direct TTS if timeline plan creation fails
+            self.logger.info("Falling back to direct TTS generation")
+            await self._flush_complete_response_direct(conversation_id, text_to_speak)
+    
+    async def _flush_complete_response_direct(self, conversation_id: str, text: str) -> None:
+        """Fallback method for direct TTS generation (legacy behavior)."""
+        text_to_speak = text.strip()
+        self.logger.info(f"Direct TTS fallback: {len(text_to_speak)} chars")
         
         speech_request_payload = SpeechGenerationRequestPayload(
             text=text_to_speak,
@@ -609,12 +683,11 @@ class ElevenLabsService(BaseService):
 
         if self._config.playback_method == SpeechPlaybackMethod.STREAMING:
             if self._audio_thread and self._audio_thread.is_alive():
-                # Convert to dict using model_dump() per architecture standards
                 request_data = speech_request_payload.model_dump()
                 self._speech_request_queue.put(request_data)
-                self.logger.info(f"Sent complete response ({len(text_to_speak)} chars) to streaming audio thread.")
+                self.logger.info(f"Sent fallback response to streaming audio thread.")
             else:
-                self.logger.error("Audio worker thread not running, cannot stream response. Falling back.")
+                self.logger.error("Audio worker thread not running, cannot stream response.")
                 await self._handle_speech_generation_request(speech_request_payload)
         else:
             await self._handle_speech_generation_request(speech_request_payload)
@@ -913,6 +986,70 @@ class ElevenLabsService(BaseService):
                 }
             )
             
+    async def _handle_tts_generate_request(self, payload: Dict[str, Any]) -> None:
+        """Handle TTS generate request events from TimelineExecutorService.
+        
+        This converts TTS_GENERATE_REQUEST format to SPEECH_GENERATION_REQUEST format
+        and delegates to the existing handler.
+        """
+        try:
+            # Extract TTS_GENERATE_REQUEST fields
+            text = payload.get("text")
+            clip_id = payload.get("clip_id")
+            step_id = payload.get("step_id") 
+            plan_id = payload.get("plan_id")
+            conversation_id = payload.get("conversation_id")
+            
+            self.logger.info(f"Received TTS_GENERATE_REQUEST for step {step_id}, text length: {len(text) if text else 0}")
+            
+            if not text:
+                self.logger.error("TTS_GENERATE_REQUEST missing text field")
+                # Emit failure event
+                complete_payload = SpeechGenerationCompletePayload(
+                    conversation_id=conversation_id or "unknown",
+                    text="",
+                    audio_length_seconds=0.0,
+                    success=False,
+                    error="Missing text field",
+                    clip_id=clip_id,
+                    step_id=step_id,
+                    plan_id=plan_id
+                )
+                await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, complete_payload.model_dump())
+                return
+            
+            # Convert to SPEECH_GENERATION_REQUEST format
+            speech_request = SpeechGenerationRequestPayload(
+                text=text,
+                conversation_id=conversation_id or clip_id or step_id,  # Use available ID
+                voice_id=self._config.voice_id,
+                model_id=self._config.model_id,
+                stability=self._config.stability,
+                similarity_boost=self._config.similarity_boost,
+                speed=self._config.speed,
+                clip_id=clip_id,
+                step_id=step_id,
+                plan_id=plan_id
+            )
+            
+            # Delegate to existing handler
+            await self._handle_speech_generation_request(speech_request)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling TTS_GENERATE_REQUEST: {e}")
+            # Emit failure event
+            complete_payload = SpeechGenerationCompletePayload(
+                conversation_id=payload.get("conversation_id", "unknown"),
+                text=payload.get("text", ""),
+                audio_length_seconds=0.0,
+                success=False,
+                error=str(e),
+                clip_id=payload.get("clip_id"),
+                step_id=payload.get("step_id"),
+                plan_id=payload.get("plan_id")
+            )
+            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, complete_payload.model_dump())
+    
     async def _emit_dict(self, topic: EventTopics, payload: Any) -> None:
         """Emit a Pydantic model or dict as a dictionary to the event bus.
         

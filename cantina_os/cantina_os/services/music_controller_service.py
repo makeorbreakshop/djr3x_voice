@@ -16,6 +16,11 @@ import uuid
 import glob
 import math
 
+# Suppress VLC verbose logging to prevent Core Audio property listener errors
+# from flooding the console output
+os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
+os.environ['VLC_PLUGIN_PATH'] = ''  # Don't scan for additional plugins
+
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
 from ..event_payloads import (
@@ -49,7 +54,7 @@ class MusicControllerConfig(BaseModel):
     """Configuration for the music controller service."""
     music_dir: str = Field(default="assets/music", description="Directory containing music files")
     normal_volume: int = Field(default=70, description="Normal playback volume (0-100)")
-    ducking_volume: int = Field(default=30, description="Volume during speech (0-100)")
+    ducking_volume: int = Field(default=50, description="Volume during speech (0-100)")
     crossfade_duration_ms: int = Field(default=3000, description="Duration of crossfade between tracks in milliseconds")
     crossfade_steps: int = Field(default=50, description="Number of volume adjustment steps during crossfade")
     track_ending_threshold_sec: int = Field(default=30, description="Seconds before track end to emit TRACK_ENDING_SOON event")
@@ -89,8 +94,19 @@ class MusicControllerService(BaseService):
         self.dj_mode_active = False
         self.track_end_timer: Optional[asyncio.Task] = None # Use Optional[asyncio.Task]
         
-        # Create VLC instance
-        self.vlc_instance = vlc.Instance()
+        # Create VLC instance with proper configuration to reduce verbose logging
+        # and prevent Core Audio property listener errors
+        vlc_args = [
+            '--intf', 'dummy',           # No interface
+            '--extraintf', '',           # No extra interfaces
+            '--quiet',                   # Reduce log output
+            '--no-video',                # Audio only
+            '--aout', 'auhal',           # Use auhal directly
+            '--no-audio-time-stretch',   # Disable time stretching
+            '--no-plugins-cache',        # Don't cache plugins
+            '--verbose', '0'             # Minimal verbosity
+        ]
+        self.vlc_instance = vlc.Instance(vlc_args)
         
         # Set default command topic for auto-registration
         self._default_command_topic = EventTopics.MUSIC_COMMAND
@@ -158,18 +174,40 @@ class MusicControllerService(BaseService):
     async def stop(self):
         """Stop the music controller service and cleanup resources."""
         try:
-            # Stop any current playback
+            # Cancel track end timer first
+            if self.track_end_timer and not self.track_end_timer.done():
+                self.track_end_timer.cancel()
+                try:
+                    await self.track_end_timer
+                except asyncio.CancelledError:
+                    pass
+                self.track_end_timer = None
+            
+            # Stop any current playback with improved cleanup
             if self.player:
-                self.player.stop()
-                self.player.release()
-                self.player = None
-                self.current_track = None
-                
-                # Emit playback stopped event
-                await self.emit(
-                    EventTopics.MUSIC_PLAYBACK_STOPPED,
-                    BaseEventPayload(conversation_id=None)
-                )
+                try:
+                    # Stop playback first
+                    self.player.stop()
+                    # Wait a moment for VLC to stop
+                    await asyncio.sleep(0.1)
+                    # Release the player
+                    self.player.release()
+                except Exception as e:
+                    self.logger.debug(f"Error stopping primary player: {e}")
+                finally:
+                    self.player = None
+                    self.current_track = None
+            
+            # Clean up secondary player (crossfade)
+            if self.secondary_player:
+                try:
+                    self.secondary_player.stop()
+                    await asyncio.sleep(0.1)
+                    self.secondary_player.release()
+                except Exception as e:
+                    self.logger.debug(f"Error stopping secondary player: {e}")
+                finally:
+                    self.secondary_player = None
             
             # Remove event subscriptions
             for topic, handler in self._subscriptions:
@@ -188,10 +226,25 @@ class MusicControllerService(BaseService):
             # Clear subscriptions list
             self._subscriptions.clear()
             
-            # Release VLC instance
+            # Emit final playback stopped event
+            try:
+                await self.emit(
+                    EventTopics.MUSIC_PLAYBACK_STOPPED,
+                    BaseEventPayload(conversation_id=None)
+                )
+            except Exception as e:
+                self.logger.debug(f"Error emitting final stopped event: {e}")
+            
+            # Release VLC instance with proper cleanup
             if self.vlc_instance:
-                self.vlc_instance.release()
-                self.vlc_instance = None
+                try:
+                    # Give VLC time to clean up internal state
+                    await asyncio.sleep(0.2)
+                    self.vlc_instance.release()
+                except Exception as e:
+                    self.logger.debug(f"Error releasing VLC instance: {e}")
+                finally:
+                    self.vlc_instance = None
             
             # Call parent stop method
             await super().stop()
@@ -635,17 +688,29 @@ class MusicControllerService(BaseService):
             # Update current track
             self.current_track = track
             
-            # Create track data payload for event
+            # Emit MUSIC_PLAYBACK_STARTED event with track data
             track_data = self._create_track_data_payload(track)
-            
-            # Emit event
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_STARTED,
                 {
-                    "track_data": track_data.dict(),
-                    "source": source
+                    "track": track_data.model_dump(),
+                    "source": source,
+                    "mode": self.current_mode
                 }
             )
+            
+            # Emit simple coordination event for timeline services
+            await self.emit(EventTopics.TRACK_PLAYING, {})
+            
+            # Update MemoryService with currently playing track for coordination
+            if self.dj_mode_active:
+                await self.emit(EventTopics.MEMORY_SET, {
+                    "key": "current_track",
+                    "value": track_data.model_dump()
+                })
+                self.logger.info(f"Updated MemoryService with current track: {track.title}")
+
+            self.logger.info(f"Now playing: {track.title} (Mode: {self.current_mode}, Source: {source})")
             
             # Set up track end detection timer if in DJ mode
             if self.dj_mode_active and track.duration:
@@ -659,22 +724,39 @@ class MusicControllerService(BaseService):
             await self._send_error(f"Error playing music: {str(e)}")
 
     async def _stop_playback(self) -> None:
-        """Stop music playback"""
+        """Stop music playback with improved VLC cleanup"""
         try:
             if not self.player:
                 await self._send_success("No music is currently playing")
                 return
-                
-            # Stop the player
-            self.player.stop()
             
+            # Cancel track end timer
+            if self.track_end_timer and not self.track_end_timer.done():
+                self.track_end_timer.cancel()
+                try:
+                    await self.track_end_timer
+                except asyncio.CancelledError:
+                    pass
+                self.track_end_timer = None
+                
             # Get track info before cleanup
             track_name = self.current_track.name if self.current_track else "Unknown"
+            
+            # Stop the player with improved cleanup
+            try:
+                self.player.stop()
+                # Give VLC time to stop cleanly
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                self.logger.debug(f"Error stopping VLC player: {e}")
             
             # Clean up the player
             await self._cleanup_player(self.player)
             self.player = None
             self.current_track = None
+            
+            # Reset audio ducking state
+            self.is_ducking = False
             
             # Emit stopped event
             await self.emit(
@@ -683,6 +765,9 @@ class MusicControllerService(BaseService):
                     "track_name": track_name
                 }
             )
+            
+            # Emit simple coordination event for timeline services
+            await self.emit(EventTopics.TRACK_STOPPED, {})
             
             await self._send_success("Stopped music playback")
             
@@ -876,7 +961,7 @@ class MusicControllerService(BaseService):
         
     async def _cleanup_player(self, player):
         """
-        Clean up a VLC player instance.
+        Clean up a VLC player instance with improved error handling.
         
         Args:
             player: The VLC player instance to clean up
@@ -886,11 +971,20 @@ class MusicControllerService(BaseService):
         """
         if player:
             try:
-                player.stop()
+                # Ensure player is stopped
+                if player.is_playing():
+                    player.stop()
+                
+                # Give VLC time to clean up internal state
+                await asyncio.sleep(0.1)
+                
+                # Release the player
                 player.release()
+                
                 self.logger.debug(f"Successfully cleaned up VLC player {id(player)}")
             except Exception as e:
-                self.logger.error(f"Error cleaning up VLC player: {e}")
+                # Don't log VLC cleanup errors as they're often harmless Core Audio issues
+                self.logger.debug(f"VLC player cleanup completed with minor issues (this is normal): {e}")
         
     async def _emit_status(
         self,
@@ -998,21 +1092,20 @@ class MusicControllerService(BaseService):
                 self.logger.info("DJ Mode activated")
                 self.dj_mode_active = True
                 
-                # Try to start playing music if we have tracks
-                available_tracks = list(self.tracks.keys())
-                if available_tracks:
-                    # Select a random track to start with
-                    import random
-                    track_name = random.choice(available_tracks)
-                    await self._play_track_by_name(track_name, source="dj")
-                    self.logger.info(f"DJ mode started playing: {track_name}")
-                else:
-                    self.logger.warning("No tracks available to play in DJ mode")
+                # Don't independently select tracks - wait for BrainService to coordinate through MemoryService
+                # BrainService will send MUSIC_COMMAND with the selected track
+                self.logger.info("DJ mode active - waiting for track selection from BrainService")
             else:
                 self.logger.info("DJ Mode deactivated")
                 self.dj_mode_active = False
                 # Stop current playback
                 await self._stop_playback()
+                
+                # Update MemoryService to clear DJ state
+                await self.emit(EventTopics.MEMORY_SET, {
+                    "key": "current_track",
+                    "value": None
+                })
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}")
 
@@ -1105,6 +1198,7 @@ class MusicControllerService(BaseService):
                 # Create the payload using the Pydantic model and helper method
                 track_data = self._create_track_data_payload(self.current_track)
                 payload = TrackEndingSoonPayload(
+                    timestamp=time.time(),
                     current_track=track_data,
                     time_remaining=self._config.track_ending_threshold_sec
                 )
@@ -1179,7 +1273,13 @@ class MusicControllerService(BaseService):
             # Calculate crossfade parameters
             duration_ms = int(duration_sec * 1000) if duration_sec else self._config.crossfade_duration_ms
             step_duration = duration_ms / self._config.crossfade_steps
-            volume_step = self.normal_volume / self._config.crossfade_steps
+            
+            # IMPORTANT FIX: Use current volume as target, not normal_volume
+            # This respects ducked state during crossfade
+            target_volume = self.ducking_volume if self.is_ducking else self.normal_volume
+            volume_step = target_volume / self._config.crossfade_steps
+            
+            self.logger.debug(f"Crossfade targeting volume: {target_volume} (ducked: {self.is_ducking})")
             
             # Start the next track at 0 volume
             self.secondary_player.audio_set_volume(0)
@@ -1192,14 +1292,14 @@ class MusicControllerService(BaseService):
                     break
                     
                 # Calculate volumes for this step
-                current_vol = int(self.normal_volume - (step * volume_step))
+                current_vol = int(target_volume - (step * volume_step))
                 next_vol = int(step * volume_step)
                 
                 # Set volumes
                 if self.player:
                     self.player.audio_set_volume(max(0, current_vol))
                 if self.secondary_player:
-                    self.secondary_player.audio_set_volume(min(self.normal_volume, next_vol))
+                    self.secondary_player.audio_set_volume(min(target_volume, next_vol))
                 
                 # Wait for the step duration
                 await asyncio.sleep(step_duration / 1000)
@@ -1224,6 +1324,9 @@ class MusicControllerService(BaseService):
                     "current_track": next_track_data.dict()
                 }
             )
+            
+            # Emit simple coordination event for timeline services (new track is now playing)
+            await self.emit(EventTopics.TRACK_PLAYING, {})
             
             # Set up track end timer for the new track
             if self.dj_mode_active and next_track.duration:

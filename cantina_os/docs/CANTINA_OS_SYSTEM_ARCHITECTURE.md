@@ -254,6 +254,21 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 3. EyeLightControllerService sends commands to Arduino
 4. LED pattern displays visual feedback for current system state
 
+### 4.6 Common Failure Points and Solutions
+
+**1. Service Initialization Race Conditions**
+- **Issue**: BrainService failing with "MEMORY_VALUE error" 
+- **Solution**: Always await event subscriptions before emitting requests
+
+**2. Multi-Word Command Parsing**
+- **Issue**: "list music" parsed incorrectly as command="list", args=["music"]
+- **Solution**: CommandDispatcher reconstructs multi-word commands
+
+**3. Import Path Errors**
+- **Issue**: "No module named 'event_topics'" errors
+- **Solution**: Always use full paths: `from core.event_topics import EventTopics`
+
+
 ## 5. Service Details
 
 ### 5.1 DeepgramDirectMicService

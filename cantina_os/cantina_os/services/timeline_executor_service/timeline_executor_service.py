@@ -24,6 +24,7 @@ from cantina_os.core.event_schemas import (
     MusicCrossfadeStep,
     MusicDuckStep, # Add import for music duck step
     MusicUnduckStep, # Add import for music unduck step
+    ParallelSteps, # Add import for parallel steps
     SpeechCachePlaybackRequestPayload, # For playing cached speech
     BasePlanStep, # Base for new step types
     EventPayload, # Base for PlanReadyPayload
@@ -49,9 +50,9 @@ from cantina_os.models.music_models import MusicTrack, MusicLibrary
 # ---------------------------------------------------------------------------
 class _Config(BaseModel):
     """Pydantic‑validated configuration for the timeline executor service."""
-    default_ducking_level: float = 0.3  # Default ducking level (0.0-1.0)
-    ducking_fade_ms: int = 300  # Fade time in ms for ducking
-    speech_wait_timeout: float = 10.0  # Timeout for waiting for speech to complete (was 5.0)
+    default_ducking_level: float = 0.5  # Default ducking level (0.0-1.0) - Updated to 50%
+    ducking_fade_ms: int = 500  # Fade time in ms for ducking - Updated for longer transitions
+    speech_wait_timeout: float = 25.0  # Timeout for waiting for speech to complete (increased from 10.0 to handle long commentary)
     layer_priorities: Dict[str, int] = {
         "ambient": 0,     # Lowest priority
         "foreground": 1,  # User-initiated content
@@ -227,7 +228,10 @@ class TimelineExecutorService(BaseService):
                 step_type = step_dict.get('step_type')
                 self.logger.debug(f"Converting step of type: {step_type}")
                 
-                if step_type == 'play_cached_speech':
+                if step_type == 'speak':
+                    # Leave speak steps as dictionaries - _execute_speak_step handles this format
+                    step_obj = step_dict
+                elif step_type == 'play_cached_speech':
                     step_obj = PlayCachedSpeechStep(**step_dict)
                 elif step_type == 'music_crossfade':
                     step_obj = MusicCrossfadeStep(**step_dict)
@@ -235,9 +239,27 @@ class TimelineExecutorService(BaseService):
                     step_obj = MusicDuckStep(**step_dict)
                 elif step_type == 'music_unduck':
                     step_obj = MusicUnduckStep(**step_dict)
+                elif step_type == 'parallel_steps':
+                    # Convert nested steps recursively
+                    nested_steps = []
+                    for nested_dict in step_dict.get('steps', []):
+                        nested_type = nested_dict.get('step_type')
+                        if nested_type == 'speak':
+                            nested_steps.append(nested_dict)  # Leave as dict
+                        elif nested_type == 'play_cached_speech':
+                            nested_steps.append(PlayCachedSpeechStep(**nested_dict))
+                        elif nested_type == 'music_crossfade':
+                            nested_steps.append(MusicCrossfadeStep(**nested_dict))
+                        elif nested_type == 'music_duck':
+                            nested_steps.append(MusicDuckStep(**nested_dict))
+                        elif nested_type == 'music_unduck':
+                            nested_steps.append(MusicUnduckStep(**nested_dict))
+                        else:
+                            nested_steps.append(nested_dict)  # Leave unknown as dict
+                    step_obj = ParallelSteps(step_type='parallel_steps', steps=nested_steps)
                 else:
-                    # For unknown step types, use base step model
-                    step_obj = BasePlanStep(**step_dict)
+                    # For unknown step types, leave as dictionary 
+                    step_obj = step_dict
                 converted_steps.append(step_obj)
             
             # Create DjTransitionPlanPayload with converted steps
@@ -330,6 +352,12 @@ class TimelineExecutorService(BaseService):
                 elif isinstance(step, MusicCrossfadeStep):
                     step_type = "music_crossfade"
                     step_id = getattr(step, 'next_track_id', step_type)  # Use track ID as unique ID
+                elif isinstance(step, MusicDuckStep):
+                    step_type = "music_duck"
+                elif isinstance(step, MusicUnduckStep):
+                    step_type = "music_unduck"
+                elif isinstance(step, ParallelSteps):
+                    step_type = "parallel_steps"
                 else:
                     step_type = getattr(step, 'step_type', 'unknown')
                     step_id = getattr(step, 'id', step_type)
@@ -399,29 +427,44 @@ class TimelineExecutorService(BaseService):
         """Executes a single step within a plan.
 
         Args:
-            step: The BasePlanStep to execute.
+            step: The BasePlanStep to execute (can be dict or Pydantic model).
             plan_id: The ID of the plan this step belongs to.
 
         Returns:
             A tuple of (success: bool, details: Optional[Dict[str, Any]]).
         """
         try:
-            # Properly determine step type from Pydantic model
-            if hasattr(step, 'step_type'):
-                step_type = step.step_type
-            elif isinstance(step, PlayCachedSpeechStep):
-                step_type = "play_cached_speech"
-            elif isinstance(step, MusicCrossfadeStep):
-                step_type = "music_crossfade"
-            elif isinstance(step, MusicDuckStep):
-                step_type = "music_duck"
-            elif isinstance(step, MusicUnduckStep):
-                step_type = "music_unduck"
+            # Handle both dictionary and Pydantic model formats
+            if isinstance(step, dict):
+                # Dictionary format (from new helper method)
+                step_type = step.get('step_type')
+                if not step_type:
+                    self.logger.error(f"Step dictionary missing step_type field: {list(step.keys())}")
+                    return False, {"error": "Missing step_type field"}
+                    
+                self.logger.debug(f"Executing dict step type: {step_type} with fields: {list(step.keys())}")
             else:
-                # Fallback: try to get from model fields
-                step_type = getattr(step, 'step_type', 'unknown')
-            
-            self.logger.debug(f"Executing step type: {step_type} for plan {plan_id}")
+                # Pydantic model format - determine step type
+                if hasattr(step, 'step_type'):
+                    step_type = step.step_type
+                elif hasattr(step, 'type'):
+                    # Handle PlanStep which uses 'type' field instead of 'step_type'
+                    step_type = step.type
+                elif isinstance(step, PlayCachedSpeechStep):
+                    step_type = "play_cached_speech"
+                elif isinstance(step, MusicCrossfadeStep):
+                    step_type = "music_crossfade"
+                elif isinstance(step, MusicDuckStep):
+                    step_type = "music_duck"
+                elif isinstance(step, MusicUnduckStep):
+                    step_type = "music_unduck"
+                elif isinstance(step, ParallelSteps):
+                    step_type = "parallel_steps"
+                else:
+                    # Fallback: try to get from model fields
+                    step_type = getattr(step, 'step_type', getattr(step, 'type', 'unknown'))
+                
+                self.logger.debug(f"Executing Pydantic step type: {step_type} for plan {plan_id}")
             
             if step_type == "play_music":
                 return await self._execute_play_music_step(step)
@@ -443,12 +486,15 @@ class TimelineExecutorService(BaseService):
             elif step_type == "music_unduck":
                 # Handle DJ mode music unducking step
                 return await self._execute_music_unduck_step(step)
+            elif step_type == "parallel_steps":
+                # Handle parallel execution of multiple steps
+                return await self._execute_parallel_steps(step, plan_id)
             elif step_type == "wait_for_event":
                 # TODO: Implement wait_for_event step logic
                 self.logger.warning(f"wait_for_event step type not yet implemented. Step: {step_type}")
                 return False, {"error": "Not implemented"}
             elif step_type == "delay":
-                delay = getattr(step, 'duration', 0)
+                delay = getattr(step, 'duration', 0) if not isinstance(step, dict) else step.get('duration', 0)
                 await asyncio.sleep(delay or 0)
                 return True, {}
             else:
@@ -458,25 +504,43 @@ class TimelineExecutorService(BaseService):
         except asyncio.CancelledError:
             raise # Propagate cancellation
         except Exception as e:
-            step_type = getattr(step, 'step_type', 'unknown')
+            if isinstance(step, dict):
+                step_type = step.get('step_type', 'unknown')
+            else:
+                step_type = getattr(step, 'step_type', getattr(step, 'type', 'unknown'))
             self.logger.error(f"Error executing step {step_type} for plan {plan_id}: {e}", exc_info=True)
             return False, {"error": str(e)}
 
-    async def _execute_speak_step(self, step: PlanStep, plan_id: str) -> tuple[bool, Dict[str, Any]]:
+    async def _execute_speak_step(self, step, plan_id: str) -> tuple[bool, Dict[str, Any]]:
         """Execute a speak step with audio ducking.
         
         Sequence: duck audio → generate TTS → wait for speech to end → unduck audio
+        
+        Args:
+            step: Either PlanStep model or dict with text and optional id
+            plan_id: The plan ID this step belongs to
         """
+        # Handle both dictionary and Pydantic model formats
+        if isinstance(step, dict):
+            text = step.get('text')
+            step_id = step.get('id', str(uuid.uuid4()))
+            if not text:
+                self.logger.error("Speak step dict missing text field")
+                return False, {"error": "Missing text field"}
+        else:
+            text = step.text
+            step_id = step.id if step.id else str(uuid.uuid4())
+            
         # Create an event for speech completion
         speech_event = asyncio.Event()
-        speech_id = step.id if step.id else str(uuid.uuid4())
+        speech_id = step_id
         self._speech_end_events[speech_id] = speech_event
         
         try:
             # Start audio ducking if music is playing
             if self._current_music_playing:
-                self.logger.info(f"Ducking audio for speech step '{step.id}'")
-                await self._emit_dict(
+                self.logger.info(f"Ducking audio for speech step '{step_id}'")
+                await self.emit(
                     EventTopics.AUDIO_DUCKING_START,
                     {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
                 )
@@ -486,16 +550,16 @@ class TimelineExecutorService(BaseService):
                 await asyncio.sleep(0.15)
             
             # Request TTS generation
-            self.logger.info(f"Generating speech for step '{step.id}': '{step.text[:30]}...'")
-            await self._emit_dict(
+            self.logger.info(f"Generating speech for step '{step_id}': '{text[:30]}...'")
+            await self.emit(
                 EventTopics.TTS_GENERATE_REQUEST,
                 SpeechGenerationRequestPayload(
-                    text=step.text,
+                    text=text,
                     clip_id=speech_id,
-                    step_id=step.id,
+                    step_id=step_id,
                     plan_id=plan_id,
                     conversation_id=None  # Add conversation_id parameter
-                )
+                ).model_dump()
             )
             
             # Wait for speech synthesis to complete with timeout
@@ -506,13 +570,13 @@ class TimelineExecutorService(BaseService):
                     timeout=self._config.speech_wait_timeout
                 )
                 speech_success = True
-                self.logger.info(f"Speech synthesis completed successfully for step '{step.id}'")
+                self.logger.info(f"Speech synthesis completed successfully for step '{step_id}'")
             except asyncio.TimeoutError:
                 speech_success = False
-                self.logger.error(f"Timeout waiting for speech synthesis to complete for step {step.id}")
+                self.logger.error(f"Timeout waiting for speech synthesis to complete for step {step_id}")
                 await self._emit_status(
                     ServiceStatus.ERROR,
-                    f"Timeout waiting for speech synthesis to complete for step {step.id}",
+                    f"Timeout waiting for speech synthesis to complete for step {step_id}",
                     LogLevel.ERROR
                 )
                 # Force progress even on timeout
@@ -524,7 +588,7 @@ class TimelineExecutorService(BaseService):
             # Note: We don't unduck audio here - that's now handled by the _handle_speech_generation_complete method
             # which responds to the SPEECH_GENERATION_COMPLETE event from ElevenLabsService
             
-            return speech_success, {"text": step.text, "speech_id": speech_id}
+            return speech_success, {"text": text, "speech_id": speech_id}
             
         except Exception as e:
             self.logger.error(f"Error in speech step execution: {e}")
@@ -532,7 +596,7 @@ class TimelineExecutorService(BaseService):
             # Ensure we stop ducking even if there's an error
             if self._current_music_playing and self._audio_ducked:
                 try:
-                    await self._emit_dict(
+                    await self.emit(
                         EventTopics.AUDIO_DUCKING_STOP,
                         {"fade_ms": self._config.ducking_fade_ms}
                     )
@@ -649,22 +713,52 @@ class TimelineExecutorService(BaseService):
     async def _handle_speech_generation_complete(self, payload: Dict[str, Any]) -> None:
         """Handle speech generation complete for un-ducking or plan progress.
 
-        This is primarily for the old speak step which requested generation directly.
-        New DJ mode should use cached speech.
+        This is primarily for the speak step which requested generation directly.
         """
-        self.logger.debug("Received SPEECH_GENERATION_COMPLETE")
+        self.logger.debug(f"Received SPEECH_GENERATION_COMPLETE: {payload}")
         try:
             # Use Pydantic model for validation
             complete_payload = SpeechGenerationCompletePayload(**payload)
 
             if complete_payload.success:
                 self.logger.info(f"Speech generation complete for text: {complete_payload.text[:50]}...")
-                # We might need to signal something here if a plan step was waiting for this.
-                # However, the new DJ mode uses cached speech, which has a separate completion event.
-                # This handler might become less relevant for DJ mode plans.
+                
+                # Signal the waiting speak step using clip_id, step_id, or conversation_id
+                speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
+                
+                if speech_id and speech_id in self._speech_end_events:
+                    self.logger.debug(f"Setting speech completion event for speech_id: {speech_id}")
+                    self._speech_end_events[speech_id].set()
+                else:
+                    self.logger.warning(f"No waiting event found for speech_id: {speech_id}")
+                
+                # Handle unducking if music is playing and ducked
+                if self._current_music_playing and self._audio_ducked:
+                    self.logger.info("Speech generation complete, restoring music volume")
+                    await self.emit(
+                        EventTopics.AUDIO_DUCKING_STOP,
+                        {"fade_ms": self._config.ducking_fade_ms}
+                    )
+                    self._audio_ducked = False
 
             else:
-                self.logger.error(f"Speech generation failed: {complete_payload.error}")
+                error_msg = complete_payload.error or "Unknown error"
+                self.logger.error(f"Speech generation failed: {error_msg}")
+                
+                # Still signal completion even on failure so the plan can continue
+                speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
+                if speech_id and speech_id in self._speech_end_events:
+                    self.logger.debug(f"Setting speech completion event (failed) for speech_id: {speech_id}")
+                    self._speech_end_events[speech_id].set()
+                
+                # Unduck music even on failure
+                if self._current_music_playing and self._audio_ducked:
+                    self.logger.info("Speech generation failed, restoring music volume")
+                    await self.emit(
+                        EventTopics.AUDIO_DUCKING_STOP,
+                        {"fade_ms": self._config.ducking_fade_ms}
+                    )
+                    self._audio_ducked = False
 
         except ValidationError as e:
             self.logger.error(f"Validation error for SPEECH_GENERATION_COMPLETE payload: {e}")
@@ -767,13 +861,25 @@ class TimelineExecutorService(BaseService):
 
     # --- New Handlers for DJ Mode --- #
 
-    async def _execute_play_cached_speech_step(self, step: PlayCachedSpeechStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _execute_play_cached_speech_step(self, step) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a PlayCachedSpeechStep.
 
         Requests CachedSpeechService to play a cached audio entry.
         Waits for playback completion.
+        
+        Args:
+            step: Either PlayCachedSpeechStep model or dict with cache_key
         """
-        self.logger.info(f"Executing PlayCachedSpeechStep for cache_key: {step.cache_key}")
+        # Handle both dictionary and Pydantic model formats
+        if isinstance(step, dict):
+            cache_key = step.get('cache_key')
+            if not cache_key:
+                self.logger.error("PlayCachedSpeechStep dict missing cache_key field")
+                return False, {"error": "Missing cache_key field"}
+        else:
+            cache_key = step.cache_key
+            
+        self.logger.info(f"Executing PlayCachedSpeechStep for cache_key: {cache_key}")
         # Generate a unique playback ID for this request
         playback_id = str(uuid.uuid4())
         event_key = f"cached_speech_complete_{playback_id}"
@@ -787,12 +893,12 @@ class TimelineExecutorService(BaseService):
             # Emit event to CachedSpeechService to request playback
             playback_request_payload = SpeechCachePlaybackRequestPayload(
                 timestamp=time.time(),
-                cache_key=step.cache_key,
+                cache_key=cache_key,
                 volume=1.0,  # TODO: Make volume configurable in step or plan
                 playback_id=playback_id,
                 # Simple metadata - just include what we know
                 metadata={
-                    'cache_key': step.cache_key,
+                    'cache_key': cache_key,
                     'step_type': 'play_cached_speech'
                 }
             )
@@ -807,13 +913,13 @@ class TimelineExecutorService(BaseService):
             try:
                 await asyncio.wait_for(self._cached_speech_playback_events[event_key].wait(), timeout=self._config.speech_wait_timeout)
                 self.logger.debug(f"Cached speech playback completion event received for {event_key}")
-                return True, {"cache_key": step.cache_key, "playback_id": playback_id, "status": "completed"}
+                return True, {"cache_key": cache_key, "playback_id": playback_id, "status": "completed"}
             except asyncio.TimeoutError:
                 self.logger.warning(f"Timeout waiting for cached speech playback completion event for {event_key}")
-                return False, {"cache_key": step.cache_key, "playback_id": playback_id, "error": "Timeout waiting for playback completion"}
+                return False, {"cache_key": cache_key, "playback_id": playback_id, "error": "Timeout waiting for playback completion"}
 
         except Exception as e:
-            self.logger.error(f"Error executing PlayCachedSpeechStep for cache_key {step.cache_key}: {e}", exc_info=True)
+            self.logger.error(f"Error executing PlayCachedSpeechStep for cache_key {cache_key}: {e}", exc_info=True)
             return False, {"error": str(e)}
         finally:
             # Clean up the event and active playback tracking
@@ -821,13 +927,27 @@ class TimelineExecutorService(BaseService):
             self._active_speech_playbacks.discard(playback_id)
 
 
-    async def _execute_music_crossfade_step(self, step: MusicCrossfadeStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _execute_music_crossfade_step(self, step) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a MusicCrossfadeStep.
 
         Requests MusicControllerService to perform a crossfade.
         Waits for crossfade completion.
+        
+        Args:
+            step: Either MusicCrossfadeStep model or dict with next_track_id and crossfade_duration
         """
-        self.logger.info(f"Executing MusicCrossfadeStep to track: {step.next_track_id} with duration {step.crossfade_duration}s")
+        # Handle both dictionary and Pydantic model formats
+        if isinstance(step, dict):
+            next_track_id = step.get('next_track_id')
+            crossfade_duration = step.get('crossfade_duration', 3.0)
+            if not next_track_id:
+                self.logger.error("MusicCrossfadeStep dict missing next_track_id field")
+                return False, {"error": "Missing next_track_id field"}
+        else:
+            next_track_id = step.next_track_id
+            crossfade_duration = step.crossfade_duration
+            
+        self.logger.info(f"Executing MusicCrossfadeStep to track: {next_track_id} with duration {crossfade_duration}s")
         # Generate a unique crossfade ID for this request
         crossfade_id = str(uuid.uuid4())
         event_key = f"crossfade_complete_{crossfade_id}"
@@ -842,8 +962,8 @@ class TimelineExecutorService(BaseService):
                 EventTopics.MUSIC_COMMAND,
                 {
                     "action": "crossfade",
-                    "song_query": step.next_track_id,
-                    "fade_duration": step.crossfade_duration,
+                    "song_query": next_track_id,
+                    "fade_duration": crossfade_duration,
                     "crossfade_id": crossfade_id  # Include for completion tracking
                 }
             )
@@ -852,38 +972,46 @@ class TimelineExecutorService(BaseService):
             self.logger.debug(f"Waiting for crossfade completion event for {event_key}")
             try:
                 # Timeout slightly longer than expected duration
-                await asyncio.wait_for(self._crossfade_complete_events[event_key].wait(), timeout=step.crossfade_duration + 5.0)
+                await asyncio.wait_for(self._crossfade_complete_events[event_key].wait(), timeout=crossfade_duration + 5.0)
                 self.logger.debug(f"Crossfade completion event received for {event_key}")
-                return True, {"next_track_id": step.next_track_id, "duration": step.crossfade_duration, "status": "completed"}
+                return True, {"next_track_id": next_track_id, "duration": crossfade_duration, "status": "completed"}
             except asyncio.TimeoutError:
                 self.logger.warning(f"Timeout waiting for crossfade completion event for {event_key}")
-                return False, {"next_track_id": step.next_track_id, "duration": step.crossfade_duration, "error": "Timeout waiting for crossfade completion"}
+                return False, {"next_track_id": next_track_id, "duration": crossfade_duration, "error": "Timeout waiting for crossfade completion"}
 
         except Exception as e:
-            self.logger.error(f"Error executing MusicCrossfadeStep to track {step.next_track_id}: {e}", exc_info=True)
+            self.logger.error(f"Error executing MusicCrossfadeStep to track {next_track_id}: {e}", exc_info=True)
             return False, {"error": str(e)}
         finally:
             # Clean up the event
             self._crossfade_complete_events.pop(event_key, None)
 
-    async def _execute_music_duck_step(self, step: MusicDuckStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _execute_music_duck_step(self, step) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a MusicDuckStep to lower music volume during speech.
         
         Args:
-            step: The MusicDuckStep containing duck level and fade duration
+            step: Either MusicDuckStep model or dict with duck_level and fade_duration_ms
             
         Returns:
             Tuple of (success, details)
         """
-        self.logger.info(f"Executing MusicDuckStep: ducking music to {step.duck_level * 100}% volume")
+        # Handle both dictionary and Pydantic model formats
+        if isinstance(step, dict):
+            duck_level = step.get('duck_level', 0.3)
+            fade_duration_ms = step.get('fade_duration_ms', 1500)
+        else:
+            duck_level = step.duck_level
+            fade_duration_ms = step.fade_duration_ms
+            
+        self.logger.info(f"Executing MusicDuckStep: ducking music to {duck_level * 100}% volume")
         
         try:
             # Emit audio ducking start event
             await self.emit(
                 EventTopics.AUDIO_DUCKING_START,
                 {
-                    "level": step.duck_level,
-                    "fade_ms": step.fade_duration_ms
+                    "level": duck_level,
+                    "fade_ms": fade_duration_ms
                 }
             )
             
@@ -891,23 +1019,29 @@ class TimelineExecutorService(BaseService):
             self._audio_ducked = True
             
             # Small delay to ensure ducking has started
-            await asyncio.sleep(step.fade_duration_ms / 1000.0)
+            await asyncio.sleep(fade_duration_ms / 1000.0)
             
-            return True, {"duck_level": step.duck_level, "fade_duration_ms": step.fade_duration_ms}
+            return True, {"duck_level": duck_level, "fade_duration_ms": fade_duration_ms}
             
         except Exception as e:
             self.logger.error(f"Error executing MusicDuckStep: {e}", exc_info=True)
             return False, {"error": str(e)}
 
-    async def _execute_music_unduck_step(self, step: MusicUnduckStep) -> tuple[bool, Optional[Dict[str, Any]]]:
+    async def _execute_music_unduck_step(self, step) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a MusicUnduckStep to restore music volume after speech.
         
         Args:
-            step: The MusicUnduckStep containing fade duration
+            step: Either MusicUnduckStep model or dict with fade_duration_ms
             
         Returns:
             Tuple of (success, details)
         """
+        # Handle both dictionary and Pydantic model formats
+        if isinstance(step, dict):
+            fade_duration_ms = step.get('fade_duration_ms', 1500)
+        else:
+            fade_duration_ms = step.fade_duration_ms
+            
         self.logger.info(f"Executing MusicUnduckStep: restoring music volume")
         
         try:
@@ -915,7 +1049,7 @@ class TimelineExecutorService(BaseService):
             await self.emit(
                 EventTopics.AUDIO_DUCKING_STOP,
                 {
-                    "fade_ms": step.fade_duration_ms
+                    "fade_ms": fade_duration_ms
                 }
             )
             
@@ -923,9 +1057,9 @@ class TimelineExecutorService(BaseService):
             self._audio_ducked = False
             
             # Small delay to ensure unducking has started
-            await asyncio.sleep(step.fade_duration_ms / 1000.0)
+            await asyncio.sleep(fade_duration_ms / 1000.0)
             
-            return True, {"fade_duration_ms": step.fade_duration_ms}
+            return True, {"fade_duration_ms": fade_duration_ms}
             
         except Exception as e:
             self.logger.error(f"Error executing MusicUnduckStep: {e}", exc_info=True)
@@ -938,7 +1072,6 @@ class TimelineExecutorService(BaseService):
          """Handle SPEECH_CACHE_PLAYBACK_COMPLETED events.
 
          Signals completion of cached speech playback to unblock waiting plan steps.
-         Also handles audio un-ducking if necessary.
          """
          self.logger.debug(f"Received SPEECH_CACHE_PLAYBACK_COMPLETED payload: {payload}")
          try:
@@ -958,17 +1091,11 @@ class TimelineExecutorService(BaseService):
               else:
                    self.logger.warning(f"Received SPEECH_CACHE_PLAYBACK_COMPLETED for unknown playback_id: {playback_id}")
 
-              # Handle audio un-ducking if this was the last active speech playback
-              # Remove from active playbacks set
+              # Remove from active playbacks set for tracking
               self._active_speech_playbacks.discard(playback_id)
-              # If no active speech playbacks remain and music is playing and ducked, unduck.
-              # TODO: Implement proper ducking/unducking logic based on active audio sources.
-              # For now, a simplified check:
-              if not self._active_speech_playbacks and self._current_music_playing and self._audio_ducked:
-                   self.logger.info("Last cached speech playback completed, attempting to unduck music.")
-                   # TODO: Emit unduck command to MusicController or a central AudioService
-                   self.logger.warning("Music unducking not yet implemented in TimelineExecutorService after cached speech completion.")
-                   # await self._unduck_music() # Placeholder
+              
+              # Note: Music unducking is handled by the timeline plan's MusicUnduckStep
+              # No automatic unduck needed here - the timeline orchestrates the audio coordination
 
          except ValidationError as e:
               self.logger.error(f"Validation error for SPEECH_CACHE_PLAYBACK_COMPLETED payload: {e}")
@@ -1003,6 +1130,54 @@ class TimelineExecutorService(BaseService):
          except Exception as e:
               self.logger.error(f"Error handling CROSSFADE_COMPLETE: {e}", exc_info=True)
 
+    async def _execute_parallel_steps(self, step: ParallelSteps, plan_id: str) -> tuple[bool, Optional[Dict[str, Any]]]:
+        """Execute multiple steps concurrently using asyncio.gather().
+        
+        Args:
+            step: The ParallelSteps containing sub-steps to execute concurrently
+            plan_id: The ID of the plan this step belongs to
+            
+        Returns:
+            Tuple of (success, details) - success is True only if ALL sub-steps succeed
+        """
+        self.logger.info(f"Executing ParallelSteps with {len(step.steps)} concurrent sub-steps for plan {plan_id}")
+        
+        try:
+            # Execute all sub-steps concurrently
+            tasks = [self._execute_step(sub_step, plan_id) for sub_step in step.steps]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Check results - success only if all steps succeeded
+            successes = []
+            details = {"sub_step_results": []}
+            
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"Sub-step {i} raised exception: {result}")
+                    successes.append(False)
+                    details["sub_step_results"].append({"success": False, "error": str(result)})
+                elif isinstance(result, tuple) and len(result) == 2:
+                    success, step_details = result
+                    successes.append(success)
+                    details["sub_step_results"].append({"success": success, "details": step_details})
+                else:
+                    self.logger.warning(f"Sub-step {i} returned unexpected result format: {result}")
+                    successes.append(False)
+                    details["sub_step_results"].append({"success": False, "error": "Unexpected result format"})
+            
+            overall_success = all(successes)
+            details["overall_success"] = overall_success
+            details["successful_steps"] = sum(successes)
+            details["total_steps"] = len(step.steps)
+            
+            self.logger.info(f"ParallelSteps completed: {details['successful_steps']}/{details['total_steps']} steps succeeded")
+            
+            return overall_success, details
+            
+        except Exception as e:
+            self.logger.error(f"Error executing ParallelSteps: {e}", exc_info=True)
+            return False, {"error": str(e)}
+
     # ------------------------------------------------------------------
     # Audio ducking methods
     # ------------------------------------------------------------------
@@ -1010,7 +1185,7 @@ class TimelineExecutorService(BaseService):
         """Duck music volume during voice activity."""
         if self._current_music_playing:
             self.logger.info("Ducking music volume for voice activity")
-            await self._emit_dict(
+            await self.emit(
                 EventTopics.AUDIO_DUCKING_START,
                 {"level": self._config.default_ducking_level, "fade_ms": self._config.ducking_fade_ms}
             )
@@ -1022,7 +1197,7 @@ class TimelineExecutorService(BaseService):
         """Restore music volume after voice activity."""
         if self._current_music_playing and self._audio_ducked:
             self.logger.info("Restoring music volume after voice activity")
-            await self._emit_dict(
+            await self.emit(
                 EventTopics.AUDIO_DUCKING_STOP,
                 {"fade_ms": self._config.ducking_fade_ms}
             )

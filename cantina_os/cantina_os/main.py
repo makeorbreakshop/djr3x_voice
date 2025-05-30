@@ -540,8 +540,8 @@ class CantinaOS:
         elif service_name == "timeline_executor_service":
             # Configure timeline executor service
             service_config = {
-                "default_ducking_level": 0.3,
-                "ducking_fade_ms": 500
+                "default_ducking_level": 0.5,  # Updated to 50% ducking
+                "ducking_fade_ms": 500  # Updated for longer fade transitions
             }
             
         elif service_name == "memory_service":

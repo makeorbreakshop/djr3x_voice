@@ -585,6 +585,82 @@ Implement these validation steps:
    - Include relevant context in errors
    - Provide helpful error messages
 
+### 9.7 Payload Transformation Standards
+
+Commands like "list music", "play music", "dj start" require special handling:
+
+```python
+# In CommandDispatcher._transform_payload_for_service()
+if command == "list" and args and args[0] == "music":
+    actual_command = "list music"
+    actual_args = args[1:]  # Remove "music" from args
+
+# Service-specific transformations
+if service_name == "brain_service" and command == "dj start":
+    return {"dj_mode_active": True}
+
+When implementing command handling, services MUST properly transform payloads to match expected formats:
+
+1. **Multi-word Command Handling**:
+   ```python
+   # CORRECT: Handle multi-word commands properly
+   def _transform_payload_for_service(self, service_name: str, command: str, args: list, raw_input: str) -> dict:
+       # For multi-word commands like "list music", "play music", etc.
+       if command == "list" and args and args[0] == "music":
+           actual_command = "list music"
+           actual_args = args[1:]  # Remove "music" from args
+       
+       # Transform to service-specific format
+       return self._get_service_payload(service_name, actual_command, actual_args)
+
+2. **Service-Specific Payload Formats:**
+    - Document expected payload format for each service
+    - Include examples of correct transformations
+    - Specify which fields are required vs optional
+    - Use Pydantic models for validation where appropriate
+
+    **Examples Transformations**
+
+    ```python
+    # For BrainService DJ commands
+    if service_name == "brain_service" and command.startswith("dj"):
+        if command == "dj start":
+            return {"dj_mode_active": True}
+        elif command == "dj stop":
+            return {"dj_mode_active": False}
+
+    # For MusicController commands
+    if command == "play music":
+        track_query = " ".join(args) if args else ""
+        return PlanPayload(
+            plan_id=str(uuid.uuid4()),
+            layer="foreground",
+            steps=[
+                PlanStep(
+                    id="music",
+                    type="play_music",
+                    genre=track_query
+                )
+            ]
+        ).model_dump()
+
+3. **Backward Compatibility:* 
+    - Maintain support for legacy payload formats during transitions
+    - Use compatibility layers when updating payload structures
+    - Document migration paths for payload format changes
+    
+    ```python
+    # Example compatibility layer
+    def _handle_command(self, payload: dict):
+        # Support both old and new payload formats
+        if isinstance(payload.get("service_info"), dict):
+            # New format
+            service_name = payload["service_info"]["service_name"]
+        else:
+            # Legacy format
+            service_name = self._infer_service_name(payload["command"])
+
+
 ## 10. Audio Processing Standards
 
 ### 10.1 Threading Model
@@ -839,6 +915,31 @@ log_listener = logging.handlers.QueueListener(log_queue, console_handler)
 - Ensures smooth application operation even with high logging volume.
 - Decouples log generation from log output I/O.
 
+## 12. Preventing Event Subscription Race Conditions
+
+### 12.1 Critical Pattern - Always Await Subscriptions
+
+Services that need responses from other services during startup MUST await their subscriptions:
+
+```python
+# CORRECT - Prevents race conditions
+async def _start(self) -> None:
+    # Wait for all subscriptions to complete
+    await asyncio.gather(
+        self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory_value),
+        self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
+    )
+    
+    # NOW safe to request data that requires responses
+    await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode"})
+
+# WRONG - Race condition, might miss response
+async def _start(self) -> None:
+    asyncio.create_task(self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory))
+    await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode"})  # Response might be missed!
+
+
 ## Conclusion
+
 
 Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. These standards should be reviewed and updated as needed based on project evolution and team feedback. 

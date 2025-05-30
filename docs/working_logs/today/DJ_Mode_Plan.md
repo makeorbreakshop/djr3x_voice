@@ -128,6 +128,7 @@ This section details the components involved in DJ Mode, emphasizing adherence t
 ## 🔄 Event Flow for DJ Mode
 
 This flow outlines the process triggered by `dj start` and subsequent automatic transitions.
+**ARCHITECTURAL PRINCIPLE: All audio/speech coordination flows through TimelineExecutorService for consistency.**
 
 ```
 [DJ Mode Active] (via 'dj start' command -> CommandDispatcher -> BrainService)
@@ -145,13 +146,16 @@ This flow outlines the process triggered by `dj start` and subsequent automatic 
 [GPTService generates intro text]
         |
         v
-[BrainService requests STREAMING audio from ElevenLabsService]
+[BrainService creates Timeline Plan for initial commentary with speak step]
         |
         v
-[Streamed intro audio plays (music ducked)]
+[TimelineExecutorService executes initial commentary plan]:
+    - Music ducked (Timeline Layer)
+    - Streaming TTS audio plays via speak step
+    - Music unduck after completion
         |
         v
-[Initial intro complete, music volume returns]
+[Initial intro complete, full music volume restored]
         |
         v
 [CONTINUOUS BACKGROUND PROCESS (in BrainService/DJ state manager)]
@@ -168,13 +172,13 @@ This flow outlines the process triggered by `dj start` and subsequent automatic 
         |   [GPTService generates transition text]
         |         |
         |         v
-        |   [BrainService requests NON-STREAMING audio from ElevenLabsService via CachedSpeechService]
+        |   [BrainService requests cached audio from ElevenLabsService via CachedSpeechService]
         |         |
         |         v
         |   [CachedSpeechService stores audio & metadata (Lookahead Cache is READY)]
         |         |
         |         v
-        |   [BrainService creates Timeline Plan for NEXT transition & submits]
+        |   [BrainService creates Timeline Plan for NEXT transition with PlayCachedSpeechStep & submits]
         |         |
         |         v
         |   [TimelineExecutorService holds Plan, ready for trigger]
@@ -235,16 +239,17 @@ This flow outlines the process triggered by `dj start` and subsequent automatic 
 8. **Sounddevice Threading**: Correctly implementing `sounddevice` audio playback within a dedicated thread in `CachedSpeechService` to avoid blocking the asyncio event loop.
 
 ## 🔧 Technical Requirements
-- ElevenLabs API direct integration (streaming for intro, non-streaming for cache)
+- ElevenLabs API integration via TimelineExecutorService (streaming via speak steps, cached via PlayCachedSpeechStep)
 - Audio buffer and track analysis capability
 - Thread-safe cache management - Strict adherence to `ARCHITECTURE_STANDARDS.md` Section 10 Threading Model.
 - Modification of `CachedSpeechService` audio playback to use a separate thread (`asyncio.run_in_executor`).
 - Event-driven architecture compatible with existing timeline services - Using `EventTopics` enum and Pydantic Payloads.
-- Precise audio timing for crossfades and voice synchronization.
+- Precise audio timing for crossfades and voice synchronization via TimelineExecutorService coordination.
 - Integration with `CommandDispatcherService` for CLI commands.
 - Implementation of new GPT Persona.
+- **Unified Timeline Architecture**: All audio/speech coordination flows through TimelineExecutorService for consistency.
 
-This implementation plan leverages our existing layered timeline architecture by using BrainService as the primary plan generator, MemoryService for state tracking, and TimelineExecutorService for coordinated execution. The lookahead caching approach balances responsiveness with resource efficiency. Strict adherence to the project's `ARCHITECTURE_STANDARDS.md` and `SERVICE_TEMPLATE_GUIDELINES.md` is critical for successful implementation. 
+This implementation plan leverages our existing layered timeline architecture by using BrainService as the primary plan generator, MemoryService for state tracking, and TimelineExecutorService for coordinated execution of BOTH initial and transition commentary. The lookahead caching approach balances responsiveness with resource efficiency. Strict adherence to the project's `ARCHITECTURE_STANDARDS.md` and `SERVICE_TEMPLATE_GUIDELINES.md` is critical for successful implementation.
 
 - [x] Track history tracking for repetition avoidance
 - [x] User preference storage

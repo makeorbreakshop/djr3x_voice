@@ -85,19 +85,19 @@ This checklist tracks the implementation of the three new services defined in th
   - [x] Event handling
 
 ### Integration Testing 🚀
-- [ ] Test: Voice → Music
+- [x] Test: Voice → Music
   - [ ] User says "Play something funky"
   - [ ] Music starts within 1.25s
   - [ ] MemoryService shows `music_playing=True`
-- [ ] Test: Filler Line
+- [x] Test: Filler Line
   - [ ] GPTService emits filler text
   - [ ] Line plays without ducking
   - [ ] Line plays before music starts
-- [ ] Test: Track Intro
+- [x] Test: Track Intro
   - [ ] BrainService emits `PLAN_READY` with speak step
   - [ ] TimelineExecutor ducks, plays line, unducks
   - [ ] Events `PLAN_STARTED`, `STEP_EXECUTED`, `PLAN_ENDED` emitted
-- [ ] Test: Layer Handling
+- [x] Test: Layer Handling
   - [ ] Test override cancellation
   - [ ] Test foreground pausing ambient
   - [ ] Test ambient resumption

@@ -31,7 +31,10 @@ class _Config(BaseModel):
         # DJ mode state keys
         "dj_mode_active", "dj_track_history", "dj_next_track",
         "dj_transition_style", "dj_user_preferences",
-        "dj_lookahead_cache"
+        "dj_lookahead_cache",
+        # DJ mode cache coordination keys
+        "dj_commentary_cache_mappings", "dj_commentary_cache_ready",
+        "dj_current_track"
     ]
 
 # ---------------------------------------------------------------------------
@@ -139,6 +142,13 @@ class MemoryService(BaseService):
                 self._state["chat_history"] = []
             if self._state.get("music_playing") is None:
                 self._state["music_playing"] = False
+            # Initialize DJ mode cache coordination keys
+            if self._state.get("dj_commentary_cache_mappings") is None:
+                self._state["dj_commentary_cache_mappings"] = {}
+            if self._state.get("dj_commentary_cache_ready") is None:
+                self._state["dj_commentary_cache_ready"] = {}
+            if self._state.get("dj_current_track") is None:
+                self._state["dj_current_track"] = None
                 
             self.logger.debug("MemoryService: State initialized with defaults")
             
@@ -324,6 +334,171 @@ class MemoryService(BaseService):
         """
         await self.set("dj_lookahead_cache", None)
         self.logger.debug("DJ lookahead cache state cleared.")
+
+    # =================== DJ MODE CACHE STATE TRACKING ===================
+    # Phase 1: Enhanced cache state management for DJ mode coordination
+    
+    async def set_commentary_cache_mapping(self, request_id: str, cache_key: str, next_track: Optional[Dict[str, Any]] = None) -> None:
+        """Store a mapping between commentary request_id and cache_key.
+        
+        Args:
+            request_id: The unique request ID for the commentary
+            cache_key: The cache key where the commentary audio is stored
+            next_track: Optional track data this commentary is for
+        """
+        cache_mappings = self.get("dj_commentary_cache_mappings", {})
+        cache_mappings[request_id] = {
+            "cache_key": cache_key,
+            "next_track": next_track,
+            "timestamp": time.time()
+        }
+        await self.set("dj_commentary_cache_mappings", cache_mappings)
+        self.logger.debug(f"Stored commentary cache mapping: {request_id} -> {cache_key}")
+
+    def get_commentary_cache_key(self, request_id: str) -> Optional[str]:
+        """Get the cache_key for a given commentary request_id.
+        
+        Args:
+            request_id: The commentary request ID
+            
+        Returns:
+            The cache_key if found, None otherwise
+        """
+        cache_mappings = self.get("dj_commentary_cache_mappings", {})
+        mapping = cache_mappings.get(request_id, {})
+        return mapping.get("cache_key")
+
+    def get_commentary_cache_mapping(self, request_id: str) -> Optional[Dict[str, Any]]:
+        """Get the full cache mapping for a given commentary request_id.
+        
+        Args:
+            request_id: The commentary request ID
+            
+        Returns:
+            The mapping dict if found, None otherwise
+        """
+        cache_mappings = self.get("dj_commentary_cache_mappings", {})
+        return cache_mappings.get(request_id)
+
+    async def set_commentary_cache_ready(self, cache_key: str, is_ready: bool = True, duration: Optional[float] = None) -> None:
+        """Mark a commentary cache as ready or not ready.
+        
+        Args:
+            cache_key: The cache key
+            is_ready: Whether the cache is ready
+            duration: Optional duration of the cached audio
+        """
+        cache_ready_states = self.get("dj_commentary_cache_ready", {})
+        cache_ready_states[cache_key] = {
+            "ready": is_ready,
+            "duration": duration,
+            "timestamp": time.time()
+        }
+        await self.set("dj_commentary_cache_ready", cache_ready_states)
+        self.logger.debug(f"Set commentary cache ready state: {cache_key} = {is_ready}")
+
+    def is_commentary_cache_ready(self, cache_key: str) -> bool:
+        """Check if a commentary cache is ready.
+        
+        Args:
+            cache_key: The cache key to check
+            
+        Returns:
+            True if ready, False otherwise
+        """
+        cache_ready_states = self.get("dj_commentary_cache_ready", {})
+        cache_state = cache_ready_states.get(cache_key, {})
+        return cache_state.get("ready", False)
+
+    def get_ready_commentary_for_track(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """Get ready commentary cache info for a specific track.
+        
+        Args:
+            track_id: The track ID to find commentary for
+            
+        Returns:
+            Dict with cache_key and metadata if found, None otherwise
+        """
+        cache_mappings = self.get("dj_commentary_cache_mappings", {})
+        cache_ready_states = self.get("dj_commentary_cache_ready", {})
+        
+        for request_id, mapping in cache_mappings.items():
+            next_track = mapping.get("next_track", {})
+            if next_track and next_track.get("track_id") == track_id:
+                cache_key = mapping.get("cache_key")
+                if cache_key and self.is_commentary_cache_ready(cache_key):
+                    return {
+                        "request_id": request_id,
+                        "cache_key": cache_key,
+                        "mapping": mapping,
+                        "cache_state": cache_ready_states.get(cache_key, {})
+                    }
+        return None
+
+    async def cleanup_commentary_cache_mapping(self, request_id: str) -> None:
+        """Remove a commentary cache mapping and its ready state.
+        
+        Args:
+            request_id: The request ID to clean up
+        """
+        cache_mappings = self.get("dj_commentary_cache_mappings", {})
+        cache_ready_states = self.get("dj_commentary_cache_ready", {})
+        
+        if request_id in cache_mappings:
+            mapping = cache_mappings[request_id]
+            cache_key = mapping.get("cache_key")
+            
+            # Remove mapping
+            del cache_mappings[request_id]
+            await self.set("dj_commentary_cache_mappings", cache_mappings)
+            
+            # Remove ready state
+            if cache_key and cache_key in cache_ready_states:
+                del cache_ready_states[cache_key]
+                await self.set("dj_commentary_cache_ready", cache_ready_states)
+                
+            self.logger.debug(f"Cleaned up commentary cache mapping for request_id: {request_id}")
+
+    async def set_dj_current_track(self, track: Optional[Dict[str, Any]]) -> None:
+        """Set the currently playing track in DJ mode.
+        
+        Args:
+            track: Track data dict or None
+        """
+        await self.set("dj_current_track", track)
+        if track:
+            self.logger.debug(f"Set DJ current track: {track.get('title', 'Unknown')}")
+
+    async def set_dj_next_track(self, track: Optional[Dict[str, Any]]) -> None:
+        """Set the next track to be played in DJ mode.
+        
+        Args:
+            track: Track data dict or None
+        """
+        await self.set("dj_next_track", track)
+        if track:
+            self.logger.debug(f"Set DJ next track: {track.get('title', 'Unknown')}")
+
+    async def add_to_dj_history(self, track: Dict[str, Any]) -> None:
+        """Add a track to the DJ mode play history.
+        
+        Args:
+            track: Track data dict
+        """
+        history = self.get("dj_track_history", [])
+        # Avoid duplicates in recent history
+        if not history or history[-1].get("track_id") != track.get("track_id"):
+            history.append({
+                "track_id": track.get("track_id"),
+                "title": track.get("title"),
+                "artist": track.get("artist"),
+                "played_at": time.time()
+            })
+            # Keep history reasonable size
+            if len(history) > 50:
+                history = history[-50:]
+            await self.set("dj_track_history", history)
+            self.logger.debug(f"Added to DJ history: {track.get('title', 'Unknown')}")
 
     async def wait_for(self, predicate: Callable[[Dict[str, Any]], bool], timeout: Optional[float] = None) -> bool:
         """Wait until a predicate function on state returns True.

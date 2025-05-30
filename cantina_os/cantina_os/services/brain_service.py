@@ -22,6 +22,8 @@ from cantina_os.event_payloads import (
     SpeechCacheRequestPayload,
     SpeechCacheReadyPayload,
     SpeechCacheErrorPayload,
+    PlanStep,  # Add import for timeline plan creation
+    PlanPayload,  # Add import for timeline plan creation
 )
 from cantina_os.models.music_models import MusicTrack  # Use correct MusicTrack model
 from cantina_os.core.event_schemas import (
@@ -36,7 +38,8 @@ from cantina_os.core.event_schemas import (
     PlayCachedSpeechStep, # Import PlayCachedSpeechStep
     MusicCrossfadeStep, # Import MusicCrossfadeStep
     MusicDuckStep, # Import MusicDuckStep for ducking music during speech
-    MusicUnduckStep # Import MusicUnduckStep for restoring music volume
+    MusicUnduckStep, # Import MusicUnduckStep for restoring music volume
+    ParallelSteps # Import ParallelSteps for concurrent step execution
 )
 from ..utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 
@@ -77,6 +80,13 @@ class BrainService(BaseService):
         self._next_track: Optional[MusicTrack] = None
         self._dj_persona: str = "" # Store DJ persona text
         self._verbal_feedback_persona: str = "" # Store verbal feedback persona text
+        
+        # Get reference to MemoryService for state coordination
+        # This will be set during startup once services are available
+        self._memory_service = None
+        
+        # Deprecated: These internal cache tracking dictionaries are being replaced by MemoryService
+        # TODO: Remove these completely once refactor is complete
         # Dictionary to map commentary request IDs to speech cache keys.
         # Used to track which cache key corresponds to which commentary request.
         # Expected format: {request_id: cache_key}
@@ -171,6 +181,12 @@ class BrainService(BaseService):
             self._handle_speech_cache_error
         )))
         
+        # Add subscription for timeline execution errors
+        subscription_tasks.append(asyncio.create_task(self.subscribe(
+            EventTopics.PLAN_ENDED,
+            self._handle_plan_ended
+        )))
+        
         # Wait for all subscriptions to complete before proceeding
         await asyncio.gather(*subscription_tasks)
         
@@ -192,6 +208,20 @@ class BrainService(BaseService):
                 )
         except asyncio.CancelledError:
             pass # Task was cancelled, this is expected during shutdown
+
+    def _create_track_data_payload(self, track: MusicTrack) -> TrackDataPayload:
+        """
+        Create a TrackDataPayload from a MusicTrack.
+        Ensures all required fields are properly populated.
+        """
+        return TrackDataPayload(
+            track_id=track.track_id,
+            title=track.title,
+            artist=track.artist or "Cantina Band",  # Use default if None
+            album=track.album,
+            genre=track.genre,
+            duration=track.duration
+        )
 
     async def _load_personas(self) -> None:
         """Load DJ personas from files."""
@@ -290,12 +320,24 @@ class BrainService(BaseService):
                      await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).model_dump())
                      return
 
+                # Store track in MemoryService as single source of truth
+                await self.emit(EventTopics.MEMORY_SET, {
+                    "key": "current_track", 
+                    "value": self._current_track.model_dump()
+                })
+                
                 # Add to recently played
                 self._recently_played_tracks.append(track_name)
                 if len(self._recently_played_tracks) > self._config.max_recent_tracks:
                     self._recently_played_tracks.pop(0)
 
-                # Emit DJ mode start event with initial track
+                # Update MemoryService with track history
+                await self.emit(EventTopics.MEMORY_SET, {
+                    "key": "dj_track_history",
+                    "value": self._recently_played_tracks.copy()
+                })
+
+                # Emit DJ mode start event with initial track - tell MusicController which track to play
                 await self.emit(
                     EventTopics.DJ_MODE_START,
                     DJModeChangedPayload(
@@ -305,41 +347,40 @@ class BrainService(BaseService):
                     ).model_dump()
                 )
 
-                # REQUEST INITIAL COMMENTARY Timeline Plan for the just-started track (timeline-based approach)
-                # This provides an immediate DJ introduction when mode starts through timeline execution
-                self.logger.info(f"Creating initial commentary timeline plan for track: {self._current_track.title}")
-                
-                # Generate cache key for initial commentary 
-                initial_cache_key = f"commentary_{uuid.uuid4().hex[:8]}"
-                
-                # Request speech caching for initial commentary first
-                initial_request_id = str(uuid.uuid4())
-                initial_commentary_request = DjCommentaryRequestPayload(
-                    timestamp=time.time(),
-                    context="intro",  # Use "intro" context for initial DJ commentary
-                    current_track=None,  # No previous track for intro
-                    next_track=TrackDataPayload(**self._current_track.model_dump()),  # Introduce the track that just started
-                    persona=self._dj_persona,
-                    request_id=initial_request_id
-                )
-                
-                # Add to our tracking
-                self._commentary_cache_keys[initial_request_id] = initial_cache_key
-                self._commentary_request_next_track[initial_request_id] = None  # No next track for intro
-                
-                # Request commentary generation first (will get cached)
+                # NEW: Emit specific play command to MusicController with the selected track
                 await self.emit(
-                    EventTopics.DJ_COMMENTARY_REQUEST,
-                    initial_commentary_request.model_dump()
+                    EventTopics.MUSIC_COMMAND,
+                    {
+                        "action": "play",
+                        "song_query": track_name,
+                        "conversation_id": None
+                    }
+                )
+
+                self.logger.info(f"DJ mode: Instructed MusicController to play '{track_name}'")
+
+                # Generate initial commentary for the selected track
+                self.logger.info(f"Requesting initial commentary generation for track: {self._current_track.title}")
+                
+                # Generate a unique request ID for this commentary request
+                request_id = str(uuid.uuid4())
+                cache_key = f"commentary_{request_id[:8]}"  # Short cache key
+                
+                # Store the linkage between the request ID and the cache key
+                self._commentary_cache_keys[request_id] = cache_key
+                
+                # Create commentary request for the CURRENT track as an "intro"
+                intro_request = DjCommentaryRequestPayload(
+                    timestamp=time.time(),
+                    context="intro",
+                    current_track=self._create_track_data_payload(self._current_track),
+                    next_track=None,  # No next track for intro
+                    persona=self._dj_persona,
+                    request_id=request_id
                 )
                 
-                # Cache the generated commentary using SpeechCacheRequestPayload
-                # Note: We'll get the commentary text from GPT response and then cache it
-                # For now, create a basic cache request that will be updated when GPT responds
-                self.logger.info(f"Initial commentary requested with ID: {initial_request_id}, cache_key: {initial_cache_key}")
-                
-                # The commentary will be processed in _handle_gpt_commentary_response
-                # and then trigger a timeline plan for immediate playback
+                self.logger.info(f"Initial commentary requested with ID: {request_id}, cache_key: {cache_key}")
+                await self.emit(EventTopics.DJ_COMMENTARY_REQUEST, intro_request.model_dump())
 
                 # The commentary caching loop starts and will select the NEXT track and cache its intro/transition commentary.
                 # The loop will update self._next_track and trigger the commentary request.
@@ -620,57 +661,72 @@ class BrainService(BaseService):
             request_id = response_payload.request_id
             commentary_text = response_payload.commentary_text
             is_partial = response_payload.is_partial
+            context = response_payload.context  # Now available in the payload
 
-            self.logger.info(f"Received commentary response for request_id: {request_id}. Partial: {is_partial}")
+            self.logger.info(f"Received commentary response for request_id: {request_id}. Context: {context}, Partial: {is_partial}")
             self.logger.debug(f"Commentary text: {commentary_text[:100]}...") # Log snippet
 
             if not commentary_text:
                 self.logger.warning(f"Received empty commentary text for request_id: {request_id}")
-                # TODO: Handle empty commentary - maybe mark cache as failed for this request?
                 return
 
-            # Generate a cache key based on the request ID or use existing mapping
-            cache_key = self._commentary_cache_keys.get(request_id)
-            if not cache_key:
-                cache_key = f"commentary_{request_id}"
-                self._commentary_cache_keys[request_id] = cache_key # Store mapping
-            
-            self._cached_commentary_ready[cache_key] = False
+            # Route based on context: intro uses timeline plan with speak step, transitions use caching
+            if context == "intro":
+                self.logger.info(f"Processing INTRO commentary via timeline plan for request_id: {request_id}")
+                
+                # Create timeline plan with speak step for proper ducking coordination
+                await self._create_initial_commentary_timeline_plan(commentary_text, request_id)
+                    
+            elif context == "transition":
+                self.logger.info(f"Processing TRANSITION commentary as cached speech for request_id: {request_id}")
+                
+                # Generate a cache key based on the request ID or use existing mapping
+                cache_key = await self._get_commentary_cache_key(request_id)
+                if not cache_key:
+                    cache_key = f"commentary_{request_id}"
+                    # Store the mapping using MemoryService
+                    next_track_for_mapping = self._commentary_request_next_track.get(request_id)
+                    await self._store_commentary_cache_mapping(request_id, cache_key, next_track_for_mapping)
+                    
+                    # Also store in legacy dict during transition
+                    self._commentary_cache_keys[request_id] = cache_key # Store mapping
+                
+                # Mark cache as not ready initially using MemoryService
+                await self._set_commentary_cache_ready(cache_key, False)
+                self._cached_commentary_ready[cache_key] = False  # Legacy fallback
 
-            # Request speech caching from CachedSpeechService with error handling
-            try:
-                cache_request_payload = SpeechCacheRequestPayload(
-                    timestamp=time.time(),
-                    text=commentary_text,
-                    voice_id=self._config.tts_voice_id, # Use configured voice ID
-                    cache_key=cache_key,
-                    is_streaming=False, # Commentary is for caching, not streaming playback
-                    metadata={
-                        "commentary_request_id": request_id,
-                        "context": getattr(response_payload, 'context', 'unknown'),  # Track context
-                    }
+                # Request speech caching from CachedSpeechService with error handling
+                try:
+                    cache_request_payload = SpeechCacheRequestPayload(
+                        timestamp=time.time(),
+                        text=commentary_text,
+                        voice_id=self._config.tts_voice_id, # Use configured voice ID
+                        cache_key=cache_key,
+                        is_streaming=False, # Commentary is for caching, not streaming playback
+                        metadata={
+                            "commentary_request_id": request_id,
+                            "context": context,
+                        }
+                    )
+                except ValidationError as e:
+                    self.logger.error(f"Validation error creating SpeechCacheRequestPayload: {e}")
+                    return
+
+                self.logger.info(f"Emitting SPEECH_CACHE_REQUEST for cache_key: {cache_key}")
+                await self.emit(
+                    EventTopics.SPEECH_CACHE_REQUEST,
+                    cache_request_payload.model_dump()
                 )
-            except ValidationError as e:
-                self.logger.error(f"Validation error creating SpeechCacheRequestPayload: {e}")
-                return
 
-            self.logger.info(f"Emitting SPEECH_CACHE_REQUEST for cache_key: {cache_key}")
-            await self.emit(
-                EventTopics.SPEECH_CACHE_REQUEST,
-                cache_request_payload.model_dump()
-            )
-
-            # Check if this is an initial commentary (intro context)
-            # If so, create an immediate timeline plan for playback once cached
-            next_track_for_request = self._commentary_request_next_track.get(request_id)
-            if next_track_for_request is None:  # None means this is initial commentary
-                self.logger.info(f"Initial commentary caching requested for request_id: {request_id}")
-                # Mark that we have an initial commentary being cached
-                # We'll create the timeline plan in _handle_speech_cache_ready when caching completes
+                # Check if this is a transition commentary
+                next_track_for_request = self._commentary_request_next_track.get(request_id)
+                if next_track_for_request is not None:
+                    self.logger.info(f"Transition commentary caching requested for request_id: {request_id}")
+                    
+            else:
+                self.logger.warning(f"Unknown context '{context}' for commentary request_id: {request_id}, falling back to caching")
+                # Fallback to caching for unknown contexts - implement if needed
                 pass
-
-            # Do NOT set _next_track_commentary_cached to True yet.
-            # This flag should only be set when SPEECH_CACHE_READY is received for the corresponding cache key.
 
         except Exception as e:
             self.logger.error(f"Error handling GPT commentary response: {e}", exc_info=True)
@@ -692,69 +748,29 @@ class BrainService(BaseService):
 
             self.logger.info(f"Speech cache ready for cache_key: {cache_key} (Duration: {duration:.2f}s)")
 
-            # Mark the cache entry as ready
+            # Mark the cache entry as ready using MemoryService
+            await self._set_commentary_cache_ready(cache_key, True, duration)
+            
+            # Legacy fallback during transition
             if cache_key in self._cached_commentary_ready:
                  self._cached_commentary_ready[cache_key] = True
                  self.logger.info(f"Marked cache_key {cache_key} as ready.")
 
-                 # Check if this ready cache entry corresponds to the currently planned next track commentary
+                 # Get commentary request ID from metadata
                  commentary_request_id = metadata.get("commentary_request_id")
-                 if commentary_request_id and commentary_request_id in self._commentary_request_next_track:
-                     associated_next_track = self._commentary_request_next_track[commentary_request_id]
-                     # Check if this cached commentary is for the CURRENTLY planned next track
-                     if self._next_track and associated_next_track and associated_next_track.track_id == self._next_track.track_id:
-                         self._next_track_commentary_cached = True # Mark as cached and ready
-                         self.logger.info(f"Speech cache for next track '{self._next_track.title}' is ready (cache_key: {cache_key}).")
-                     else:
-                         self.logger.debug(f"Speech cache ready, but not for the currently planned next track. Expected: {self._next_track.track_id if self._next_track else 'None'}, Got: {associated_next_track.track_id if associated_next_track else 'None'}")
-                     
-                     # Check if this is initial commentary (associated_next_track would be None for intro)
-                     if associated_next_track is None:  # This indicates initial commentary
-                         self.logger.info(f"Initial commentary cache ready (cache_key: {cache_key}). Creating immediate timeline plan.")
-                         
-                         # Create timeline plan for immediate initial commentary playback with ducking
-                         plan_id = str(uuid.uuid4())
-                         
-                         # Create steps with music ducking for professional intro
-                         duck_step = MusicDuckStep(
-                             step_type="music_duck",
-                             duck_level=0.3,  # Lower music to 30% for intro commentary
-                             fade_duration_ms=300
-                         )
-                         
-                         initial_speech_step = PlayCachedSpeechStep(
-                             step_type="play_cached_speech",
-                             cache_key=cache_key
-                         )
-                         
-                         unduck_step = MusicUnduckStep(
-                             step_type="music_unduck",
-                             fade_duration_ms=300
-                         )
-                         
-                         # Create the DJ transition plan payload (duck + speech + unduck for intro)
-                         initial_plan = DjTransitionPlanPayload(
-                             plan_id=plan_id,
-                             steps=[duck_step, initial_speech_step, unduck_step]
-                         )
-                         
-                         # Create the PlanReady payload
-                         plan_ready_payload = PlanReadyPayload(
-                             timestamp=time.time(),
-                             plan_id=plan_id,
-                             plan=initial_plan.model_dump()
-                         )
-                         
-                         self.logger.info(f"Emitting PLAN_READY for initial commentary with plan_id: {plan_id}")
-                         # Emit the PLAN_READY event for immediate execution
-                         await self.emit(
-                             EventTopics.PLAN_READY,
-                             plan_ready_payload.model_dump()
-                         )
                  
-                 # If no commentary_request_id found in the main logic above, this might be legacy or unmapped cache
-                 elif commentary_request_id:
-                     self.logger.warning(f"Speech cache ready for request_id {commentary_request_id} but no mapping found in _commentary_request_next_track")
+                 if commentary_request_id:
+                     # Handle transition commentary caching readiness
+                     if commentary_request_id in self._commentary_request_next_track:
+                         associated_next_track = self._commentary_request_next_track[commentary_request_id]
+                         # Check if this cached commentary is for the CURRENTLY planned next track
+                         if self._next_track and associated_next_track and associated_next_track.track_id == self._next_track.track_id:
+                             self._next_track_commentary_cached = True # Mark as cached and ready
+                             self.logger.info(f"Speech cache for next track '{self._next_track.title}' is ready (cache_key: {cache_key}).")
+                         else:
+                             self.logger.debug(f"Speech cache ready, but not for the currently planned next track. Expected: {self._next_track.track_id if self._next_track else 'None'}, Got: {associated_next_track.track_id if associated_next_track else 'None'}")
+                 else:
+                     self.logger.debug(f"Speech cache ready for cache_key {cache_key} but no commentary_request_id in metadata")
             else:
                 self.logger.warning(f"Received SPEECH_CACHE_READY for unknown cache_key: {cache_key}")
 
@@ -805,11 +821,16 @@ class BrainService(BaseService):
             self.logger.error(f"Error handling SPEECH_CACHE_ERROR: {e}", exc_info=True)
 
     async def _handle_track_ending_soon(self, payload: Dict[str, Any]) -> None:
-        """Handle the TRACK_ENDING_SOON event and trigger the transition plan."""
+        """Handle the TRACK_ENDING_SOON event and create transition plans."""
         self.logger.info("Handling TRACK_ENDING_SOON")
         try:
             # Use Pydantic model for incoming payload
-            ending_soon_payload = TrackEndingSoonPayload(**payload)
+            try:
+                ending_soon_payload = TrackEndingSoonPayload(**payload)
+            except ValidationError as e:
+                self.logger.error(f"Validation error in TRACK_ENDING_SOON payload: {e}")
+                return
+                
             current_track_data = ending_soon_payload.current_track
             time_remaining = ending_soon_payload.time_remaining
 
@@ -821,147 +842,119 @@ class BrainService(BaseService):
                 return
 
             # Ensure current track state is updated based on event payload
-            # (In case the internal state somehow got out of sync)
             if self._current_track is None or self._current_track.track_id != current_track_data.track_id:
                 self.logger.warning("BrainService current track state out of sync with TRACK_ENDING_SOON event.")
                 self._current_track = self._music_library.get(current_track_data.track_id)
                 if not self._current_track:
                     self.logger.error(f"Current track from event not found in music library: {current_track_data.title}")
-                    return # Cannot proceed without current track metadata
+                    return
 
-            # Check if we have a next track selected and commentary cached
-            if self._next_track and self._next_track_commentary_cached:
-                self.logger.info(f"Next track '{self._next_track.title}' selected and commentary cached. Preparing transition plan.")
-
-                # Use the stored linkage to find the correct cache key for the current _next_track
-                commentary_cache_key = None
-                target_request_id = None
-                # Find the request ID associated with the current _next_track
-                for req_id, next_track in self._commentary_request_next_track.items():
-                    if self._next_track and next_track and next_track.track_id == self._next_track.track_id:
-                        target_request_id = req_id
-                        break
-
-                if target_request_id and target_request_id in self._commentary_cache_keys:
-                    potential_cache_key = self._commentary_cache_keys[target_request_id]
-                    if self._cached_commentary_ready.get(potential_cache_key, False):
-                        commentary_cache_key = potential_cache_key
-                        self.logger.debug(f"Found ready commentary cache key {commentary_cache_key} for next track {self._next_track.title}.")
-
-                if not commentary_cache_key:
-                    self.logger.error("TRACK_ENDING_SOON: _next_track_commentary_cached is True but no ready cache key found!")
-                    # Fallback: proceed with a simpler transition without commentary
-                    plan_steps: List[BasePlanStep] = []
-                    self.logger.warning("Proceeding with transition plan without commentary due to missing cache key.")
-                else:
-                    # Create the plan steps with proper music ducking:
-                    # 1. Duck music volume
-                    # 2. Play cached speech (commentary)
-                    # 3. Unduck music volume
-                    # 4. Perform music crossfade
-                    
-                    duck_step = MusicDuckStep(
-                        step_type="music_duck",
-                        duck_level=0.3,  # Lower music to 30% volume during speech
-                        fade_duration_ms=300
-                    )
-                    
-                    play_speech_step = PlayCachedSpeechStep(
-                        step_type="play_cached_speech",
-                        cache_key=commentary_cache_key,
-                        # TODO: Add duration from cache metadata if needed by TimelineExecutor
-                        # duration = ready_payload.duration # Need access to duration
-                    )
-                    
-                    unduck_step = MusicUnduckStep(
-                        step_type="music_unduck",
-                        fade_duration_ms=300
-                    )
-
-                    crossfade_step = MusicCrossfadeStep(
-                        step_type="music_crossfade",
-                        next_track_id=self._next_track.track_id,
-                        crossfade_duration=self._config.crossfade_duration # Use configured duration
-                    )
-
-                    plan_steps = [duck_step, play_speech_step, unduck_step, crossfade_step]
-                    self.logger.info(f"Created plan steps with music ducking: {plan_steps}")
-
-                # Generate a unique plan ID
-                plan_id = str(uuid.uuid4())
-
-                # Create the DJ transition plan payload
-                transition_plan = DjTransitionPlanPayload(
-                    plan_id=plan_id,
-                    steps=plan_steps
-                )
-
-                # Create the PlanReady payload
-                plan_ready_payload = PlanReadyPayload(
-                    timestamp=time.time(),
-                    plan_id=plan_id,
-                    plan=transition_plan.model_dump() # Emit the plan as a dictionary for now
-                    # TODO: Update TimelineExecutorService to accept DjTransitionPlanPayload directly
-                )
-
-                self.logger.info(f"Emitting PLAN_READY with plan_id: {plan_id}")
-                # Emit the PLAN_READY event
-                await self.emit(
-                    EventTopics.PLAN_READY,
-                    plan_ready_payload.model_dump()
-                )
-
-                # Reset state after planning the transition
-                self._next_track = None # Next track is now the current track after transition
-                self._next_track_commentary_cached = False # Need to cache for the *next* next track
-                # Keep _commentary_cache_keys and _cached_commentary_ready until cleanup logic is added
-
-            elif self._dj_mode_active and self._next_track and not self._next_track_commentary_cached:
-                self.logger.warning(f"Track '{current_track_data.title}' ending soon, but next track commentary for '{self._next_track.title}' is not cached.")
-                # TODO: Implement fallback: Trigger on-demand generation/caching and create a plan
-                # This might involve a simpler transition initially, then potentially adding commentary if caching finishes in time.
-                # For now, log the warning and potentially just trigger a crossfade plan without commentary.
-                # Let's emit a basic crossfade plan as a fallback.
-
-                self.logger.warning("Emitting basic crossfade plan without commentary as fallback.")
-                if self._next_track:
-                    fallback_crossfade_step = MusicCrossfadeStep(
-                        step_type="music_crossfade",
-                        next_track_id=self._next_track.track_id,
-                        crossfade_duration=self._config.crossfade_duration
-                    )
-                    fallback_plan = DjTransitionPlanPayload(
-                        plan_id=str(uuid.uuid4()),
-                        steps=[fallback_crossfade_step]
-                    )
-                    fallback_plan_ready = PlanReadyPayload(
-                        timestamp=time.time(),
-                        plan_id=fallback_plan.plan_id,
-                        plan=fallback_plan.model_dump()
-                    )
-                    await self.emit(
-                        EventTopics.PLAN_READY,
-                        fallback_plan_ready.model_dump()
-                    )
-                    # Reset state similar to successful plan
-                    self._next_track = None
-                    self._next_track_commentary_cached = False
-                    # Keep cache keys/readiness for potential future cleanup
-                else:
-                    self.logger.error("TRACK_ENDING_SOON: _next_track is not set when commentary is not cached. This shouldn't happen.")
-
-            elif self._dj_mode_active and not self._next_track:
-                self.logger.warning(f"Track '{current_track_data.title}' ending soon, but next track is not selected.")
-                # This indicates an issue in the caching loop or initial selection.
-                # Trigger track selection immediately.
-                self.logger.info("Attempting to select next track immediately.")
-                # Running this directly might block, ideally trigger the caching loop logic.
-                # await self._select_and_cache_next_track_commentary() # Needs refactoring
-                # For now, just log and the caching loop should pick it up eventually.
-                pass # The caching loop should handle selecting the next track if _next_track is None
+            # Check if we have a next track selected and attempt to create transition plan
+            if self._next_track:
+                self.logger.info(f"Next track '{self._next_track.title}' selected. Creating transition plan.")
+                await self._create_and_emit_transition_plan()
+            else:
+                # No next track selected - attempt immediate selection and create simple crossfade
+                self.logger.warning("No next track selected for ending track. Attempting immediate selection.")
+                await self._handle_emergency_track_selection()
 
         except Exception as e:
             self.logger.error(f"Error handling TRACK_ENDING_SOON: {e}", exc_info=True)
+            # Emergency fallback - try to continue playing current track or stop gracefully
+            await self._handle_transition_failure()
+
+    async def _handle_emergency_track_selection(self) -> None:
+        """Handle emergency track selection when no next track is prepared."""
+        try:
+            next_track_name = await self._smart_track_selection()
+            if not next_track_name:
+                self.logger.error("Emergency track selection failed - no tracks available")
+                await self._handle_transition_failure()
+                return
+
+            self._next_track = self._music_library.get(next_track_name)
+            if not self._next_track:
+                self.logger.error(f"Emergency selected track not found in library: {next_track_name}")
+                await self._handle_transition_failure()
+                return
+
+            self.logger.info(f"Emergency selected next track: {self._next_track.title}")
+            
+            # Create simple crossfade plan without commentary (no time for caching)
+            await self._create_fallback_transition_plan()
+            
+        except Exception as e:
+            self.logger.error(f"Error in emergency track selection: {e}", exc_info=True)
+            await self._handle_transition_failure()
+
+    async def _handle_transition_failure(self) -> None:
+        """Handle complete transition failure with graceful degradation."""
+        self.logger.error("Transition failure - implementing emergency fallback")
+        try:
+            # Option 1: Repeat current track if available
+            if self._current_track:
+                self.logger.info("Emergency: Repeating current track")
+                fallback_plan = self._create_simple_repeat_plan()
+                await self._emit_validated_plan(fallback_plan)
+                return
+            
+            # Option 2: Stop music gracefully
+            self.logger.warning("Emergency: No fallback available, stopping music")
+            await self.emit(EventTopics.MUSIC_COMMAND, {
+                "action": "stop",
+                "conversation_id": None
+            })
+            
+            # Reset DJ mode state
+            self._current_track = None
+            self._next_track = None
+            self._next_track_commentary_cached = False
+            
+        except Exception as e:
+            self.logger.critical(f"Critical failure in transition fallback: {e}", exc_info=True)
+
+    def _create_simple_repeat_plan(self) -> DjTransitionPlanPayload:
+        """Create a simple plan to repeat the current track."""
+        if not self._current_track:
+            raise ValueError("Cannot create repeat plan - no current track")
+            
+        # Simple crossfade back to beginning of same track
+        crossfade_step = MusicCrossfadeStep(
+            step_type="music_crossfade",
+            next_track_id=self._current_track.track_id,
+            crossfade_duration=2.0  # Shorter crossfade for repeat
+        )
+        
+        plan_id = str(uuid.uuid4())
+        return DjTransitionPlanPayload(
+            plan_id=plan_id,
+            steps=[crossfade_step]
+        )
+
+    async def _create_fallback_transition_plan(self) -> None:
+        """Create a basic transition plan without commentary."""
+        if not self._next_track:
+            self.logger.error("Cannot create fallback transition - no next track")
+            return
+            
+        crossfade_step = MusicCrossfadeStep(
+            step_type="music_crossfade",
+            next_track_id=self._next_track.track_id,
+            crossfade_duration=self._config.crossfade_duration
+        )
+        
+        plan_id = str(uuid.uuid4())
+        transition_plan = DjTransitionPlanPayload(
+            plan_id=plan_id,
+            steps=[crossfade_step]
+        )
+        
+        await self._emit_validated_plan(transition_plan)
+        
+        # Update state
+        self._current_track = self._next_track
+        self._next_track = None
+        self._next_track_commentary_cached = False
 
     # Helper method to trigger next track selection and commentary caching
     # This is called from _music_library_updated and potentially needed elsewhere
@@ -1064,11 +1057,261 @@ class BrainService(BaseService):
     async def handle_dj_next(self, payload: dict) -> None:
         """Handle the 'dj next' command to skip to next track."""
         self.logger.info("DJ command: next")
-        if self._dj_mode_active:
-            await self.emit(EventTopics.DJ_NEXT_TRACK, {})
-            await self._send_success("Skipping to next track")
-        else:
+        if not self._dj_mode_active:
             await self._send_error("Cannot skip track, DJ mode is not active")
+            return
+            
+        # Check if next track and commentary are ready
+        if self._next_track and self._next_track_commentary_cached:
+            self.logger.info(f"Manual skip with cached commentary for '{self._next_track.title}'")
+            # Create immediate transition plan with cached commentary
+            await self._create_and_emit_transition_plan()
+        else:
+            # Fallback: Create transition plan without commentary (direct crossfade)
+            self.logger.warning("Manual skip without cached commentary - using direct crossfade")
+            
+            # Select next track if not already selected
+            if not self._next_track:
+                next_track_name = await self._smart_track_selection()
+                if next_track_name:
+                    self._next_track = self._music_library.get(next_track_name)
+            
+            if self._next_track:
+                # Create simple crossfade plan without commentary
+                fallback_crossfade_step = MusicCrossfadeStep(
+                    step_type="music_crossfade",
+                    next_track_id=self._next_track.track_id,
+                    crossfade_duration=self._config.crossfade_duration
+                )
+                
+                fallback_plan = DjTransitionPlanPayload(
+                    plan_id=str(uuid.uuid4()),
+                    steps=[fallback_crossfade_step]
+                )
+                
+                fallback_plan_ready = PlanReadyPayload(
+                    timestamp=time.time(),
+                    plan_id=fallback_plan.plan_id,
+                    plan={
+                        "plan_id": fallback_plan.plan_id,
+                        "steps": [fallback_crossfade_step.model_dump()]
+                    }
+                )
+                
+                await self.emit(
+                    EventTopics.PLAN_READY,
+                    fallback_plan_ready.model_dump()
+                )
+                
+                # Update state for next cycle
+                self._current_track = self._next_track
+                self._next_track = None
+                self._next_track_commentary_cached = False
+                
+                await self._send_success("Skipping to next track...")
+            else:
+                await self._send_error("Cannot skip - no next track available")
+                
+    async def _create_and_emit_transition_plan(self):
+        """Create and emit transition plan with cached commentary and comprehensive error recovery."""
+        if not self._next_track:
+            self.logger.error("Cannot create transition plan - no next track selected")
+            await self._handle_transition_failure()
+            return
+            
+        plan_steps = []
+        commentary_cache_key = None
+        commentary_info = None
+        
+        try:
+            # Find ready commentary cache key using MemoryService first
+            commentary_info = await self._get_ready_commentary_for_track(self._next_track.track_id)
+            commentary_cache_key = commentary_info.get("cache_key") if commentary_info else None
+            
+            # Fallback to legacy method during transition period
+            if not commentary_cache_key:
+                self.logger.debug("MemoryService lookup failed, trying legacy method")
+                for cache_key, is_ready in self._cached_commentary_ready.items():
+                    if is_ready:
+                        # Check if this cache key is for our next track
+                        for request_id, track in self._commentary_request_next_track.items():
+                            if (track and track.track_id == self._next_track.track_id and 
+                                self._commentary_cache_keys.get(request_id) == cache_key):
+                                commentary_cache_key = cache_key
+                                commentary_info = {
+                                    "request_id": request_id,
+                                    "cache_key": cache_key,
+                                    "next_track": track
+                                }
+                                break
+                        if commentary_cache_key:
+                            break
+            
+            # Create transition plan based on available commentary
+            if commentary_cache_key:
+                self.logger.info(f"Creating transition plan with commentary (cache_key: {commentary_cache_key})")
+                plan_steps = await self._create_commentary_transition_steps(commentary_cache_key)
+            else:
+                self.logger.warning("No ready commentary found - creating crossfade-only plan")
+                plan_steps = await self._create_simple_crossfade_steps()
+            
+            # Validate plan steps
+            if not plan_steps or len(plan_steps) == 0:
+                self.logger.error("Generated plan has no steps - cannot proceed")
+                await self._create_fallback_transition_plan()
+                return
+            
+            # Create and validate the complete plan
+            plan_id = str(uuid.uuid4())
+            transition_plan = DjTransitionPlanPayload(
+                plan_id=plan_id,
+                steps=plan_steps
+            )
+            
+            # Validate plan structure
+            try:
+                # Test serialization to catch any validation issues
+                plan_dict = transition_plan.model_dump()
+                if not plan_dict.get("steps"):
+                    raise ValueError("Plan serialization resulted in empty steps")
+                    
+                self.logger.info(f"Plan validation successful with {len(plan_steps)} steps")
+                
+            except Exception as validation_error:
+                self.logger.error(f"Plan validation failed: {validation_error}")
+                await self._create_fallback_transition_plan()
+                return
+            
+            # Emit the validated plan
+            await self._emit_validated_plan(transition_plan)
+            
+            # Clean up used cache data using MemoryService
+            await self._cleanup_used_commentary_cache(commentary_info)
+            
+        except Exception as e:
+            self.logger.error(f"Error creating transition plan: {e}", exc_info=True)
+            await self._create_fallback_transition_plan()
+
+    async def _create_commentary_transition_steps(self, commentary_cache_key: str) -> List:
+        """Create transition steps with commentary, ducking, and crossfade."""
+        try:
+            duck_step = self._create_dj_plan_step("music_duck", {
+                "duck_level": 0.5,  # Lower music to 50% for commentary - consistent with other ducking
+                "fade_duration_ms": 2000,  # Longer, professional ducking speed
+            })
+            
+            play_speech_step = self._create_dj_plan_step("play_cached_speech", {
+                "cache_key": commentary_cache_key,
+            })
+            
+            crossfade_step = self._create_dj_plan_step("music_crossfade", {
+                "next_track_id": self._next_track.track_id,
+                "crossfade_duration": self._config.crossfade_duration,
+            })
+            
+            # Create parallel step for concurrent speech and crossfade
+            parallel_step = self._create_dj_plan_step("parallel_steps", {
+                "steps": [play_speech_step, crossfade_step],
+            })
+            
+            unduck_step = self._create_dj_plan_step("music_unduck", {
+                "fade_duration_ms": 2000,  # Longer, professional unducking speed
+            })
+
+            steps = [duck_step, parallel_step, unduck_step]
+            self.logger.debug(f"Created {len(steps)} commentary transition steps")
+            return steps
+            
+        except Exception as e:
+            self.logger.error(f"Error creating commentary transition steps: {e}", exc_info=True)
+            # Fallback to simple crossfade
+            return await self._create_simple_crossfade_steps()
+
+    def _create_dj_plan_step(self, step_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a DJ plan step with consistent format and validation.
+        
+        This ensures all DJ mode steps use the correct BasePlanStep format
+        with step_type field and proper serialization.
+        
+        Args:
+            step_type: The type of step (e.g., "play_cached_speech", "music_duck")
+            params: Additional parameters for the step
+            
+        Returns:
+            Dictionary representation of the step ready for timeline execution
+        """
+        step = {
+            "step_type": step_type,
+            "duration": None,  # Default duration
+            **params  # Merge in the specific parameters
+        }
+        
+        # Validate required fields based on step type
+        if step_type == "play_cached_speech" and "cache_key" not in params:
+            raise ValueError(f"cache_key is required for {step_type} step")
+        elif step_type == "music_crossfade" and "next_track_id" not in params:
+            raise ValueError(f"next_track_id is required for {step_type} step")
+        elif step_type == "parallel_steps" and "steps" not in params:
+            raise ValueError(f"steps is required for {step_type} step")
+            
+        self.logger.debug(f"Created DJ plan step: {step_type} with params: {list(params.keys())}")
+        return step
+
+    async def _create_simple_crossfade_steps(self) -> List:
+        """Create simple crossfade steps without commentary."""
+        try:
+            crossfade_step = self._create_dj_plan_step("music_crossfade", {
+                "next_track_id": self._next_track.track_id,
+                "crossfade_duration": self._config.crossfade_duration,
+            })
+            
+            steps = [crossfade_step]
+            self.logger.debug("Created simple crossfade step")
+            return steps
+            
+        except Exception as e:
+            self.logger.error(f"Error creating simple crossfade steps: {e}", exc_info=True)
+            return []
+
+    async def _cleanup_used_commentary_cache(self, commentary_info: Optional[Dict[str, Any]]) -> None:
+        """Clean up used commentary cache data from both MemoryService and legacy storage."""
+        if not commentary_info:
+            return
+            
+        try:
+            cache_key = commentary_info.get("cache_key")
+            request_id = commentary_info.get("request_id")
+            
+            if request_id:
+                # Clean up via MemoryService
+                try:
+                    # Use the MemoryService cleanup method
+                    memory_service = None
+                    for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
+                        if service_name == "memory_service":
+                            memory_service = service
+                            break
+                    
+                    if memory_service:
+                        await memory_service.cleanup_commentary_cache_mapping(request_id)
+                        self.logger.debug(f"Cleaned up commentary cache via MemoryService for request_id: {request_id}")
+                    
+                except Exception as cleanup_error:
+                    self.logger.warning(f"MemoryService cleanup failed: {cleanup_error}")
+                
+                # Also clean up legacy dicts during transition period
+                if request_id in self._commentary_cache_keys:
+                    del self._commentary_cache_keys[request_id]
+                if request_id in self._commentary_request_next_track:
+                    del self._commentary_request_next_track[request_id]
+                    
+            if cache_key:
+                self._cached_commentary_ready.pop(cache_key, None)
+                
+            self.logger.debug(f"Cache cleanup completed for commentary")
+            
+        except Exception as e:
+            self.logger.warning(f"Error during cache cleanup: {e}", exc_info=True)
 
     @compound_command("dj queue")
     @validate_compound_command(min_args=1, required_args=["track_name"])
@@ -1102,6 +1345,253 @@ class BrainService(BaseService):
                 "service": "brain_service"
             }
         )
+
+    # =================== MEMORY SERVICE INTEGRATION ===================
+    # Phase 2: Replace internal cache tracking with MemoryService coordination
+    
+    async def _store_commentary_cache_mapping(self, request_id: str, cache_key: str, next_track: Optional[MusicTrack] = None) -> None:
+        """Store commentary cache mapping in MemoryService."""
+        track_data = None
+        if next_track:
+            track_data = {
+                "track_id": next_track.track_id,
+                "title": next_track.title,
+                "artist": next_track.artist,
+                "album": next_track.album,
+                "genre": next_track.genre
+            }
+        
+        # Store using event-based memory access
+        await self.emit(EventTopics.MEMORY_SET, {
+            "key": f"commentary_cache_mapping_{request_id}",
+            "value": {
+                "cache_key": cache_key,
+                "next_track": track_data,
+                "timestamp": time.time()
+            }
+        })
+        self.logger.debug(f"Stored commentary cache mapping via MemoryService: {request_id} -> {cache_key}")
+
+    async def _get_commentary_cache_key(self, request_id: str) -> Optional[str]:
+        """Get commentary cache key from MemoryService."""
+        # For simplicity, we'll use the current state direct access
+        # In a more event-driven approach, this would be async with callbacks
+        memory_service = None
+        for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
+            if service_name == "memory_service":
+                memory_service = service
+                break
+        
+        if memory_service:
+            mapping = memory_service.get(f"commentary_cache_mapping_{request_id}")
+            return mapping.get("cache_key") if mapping else None
+        
+        # Fallback to internal dict during transition
+        return self._commentary_cache_keys.get(request_id)
+
+    async def _set_commentary_cache_ready(self, cache_key: str, is_ready: bool = True, duration: Optional[float] = None) -> None:
+        """Mark commentary cache as ready in MemoryService."""
+        await self.emit(EventTopics.MEMORY_SET, {
+            "key": f"commentary_cache_ready_{cache_key}",
+            "value": {
+                "ready": is_ready,
+                "duration": duration,
+                "timestamp": time.time()
+            }
+        })
+        self.logger.debug(f"Set commentary cache ready via MemoryService: {cache_key} = {is_ready}")
+
+    async def _is_commentary_cache_ready(self, cache_key: str) -> bool:
+        """Check if commentary cache is ready via MemoryService."""
+        # Get from MemoryService if available
+        memory_service = None
+        for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
+            if service_name == "memory_service":
+                memory_service = service
+                break
+        
+        if memory_service:
+            cache_state = memory_service.get(f"commentary_cache_ready_{cache_key}")
+            return cache_state.get("ready", False) if cache_state else False
+        
+        # Fallback to internal dict during transition
+        return self._cached_commentary_ready.get(cache_key, False)
+
+    async def _get_ready_commentary_for_track(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """Get ready commentary cache info for a specific track via MemoryService."""
+        # Access MemoryService if available
+        memory_service = None
+        for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
+            if service_name == "memory_service":
+                memory_service = service
+                break
+        
+        if memory_service:
+            return memory_service.get_ready_commentary_for_track(track_id)
+        
+        # Fallback to internal logic during transition
+        for request_id, next_track in self._commentary_request_next_track.items():
+            if next_track and next_track.track_id == track_id:
+                cache_key = self._commentary_cache_keys.get(request_id)
+                if cache_key and self._cached_commentary_ready.get(cache_key, False):
+                    return {
+                        "request_id": request_id,
+                        "cache_key": cache_key,
+                        "next_track": next_track
+                    }
+        return None
+
+    async def _emit_validated_plan(self, plan: DjTransitionPlanPayload) -> None:
+        """Emit a validated plan with proper state management and error handling."""
+        try:
+            # Validate plan structure before emission
+            if not plan.steps or len(plan.steps) == 0:
+                self.logger.error("Cannot emit plan with no steps")
+                await self._handle_transition_failure()
+                return
+            
+            # Test serialization to catch validation issues
+            try:
+                plan_dict = plan.model_dump()
+                if not plan_dict.get("steps"):
+                    raise ValueError("Plan serialization resulted in empty steps")
+            except Exception as validation_error:
+                self.logger.error(f"Plan validation failed during emission: {validation_error}")
+                await self._handle_transition_failure()
+                return
+            
+            # Serialize steps - handle both dict and Pydantic model formats
+            serialized_steps = []
+            for step in plan.steps:
+                if isinstance(step, dict):
+                    # Already serialized (from helper method)
+                    serialized_steps.append(step)
+                else:
+                    # Pydantic model - needs serialization
+                    serialized_steps.append(step.model_dump())
+            
+            # Create PlanReady payload with properly serialized steps
+            plan_ready_payload = PlanReadyPayload(
+                timestamp=time.time(),
+                plan_id=plan.plan_id,
+                plan={
+                    "plan_id": plan.plan_id,
+                    "steps": serialized_steps
+                }
+            )
+            
+            self.logger.info(f"Emitting validated plan with ID: {plan.plan_id}")
+            await self.emit(EventTopics.PLAN_READY, plan_ready_payload.model_dump())
+            
+            # Update state after successful emission
+            if self._next_track:
+                self._current_track = self._next_track
+                self._next_track = None
+                self._next_track_commentary_cached = False
+                self.logger.debug("Updated track state after plan emission")
+             
+        except Exception as e:
+            self.logger.error(f"Error emitting validated plan: {e}", exc_info=True)
+            await self._handle_transition_failure()
+
+    async def _handle_plan_ended(self, payload: Dict[str, Any]) -> None:
+        """Handle timeline plan completion and failure events for recovery strategies."""
+        try:
+            plan_id = payload.get("plan_id")
+            status = payload.get("status", "unknown")
+            layer = payload.get("layer", "unknown")
+            
+            self.logger.info(f"Plan {plan_id} ended with status: {status} on layer: {layer}")
+            
+            # Only handle failures and implement recovery for DJ transition plans
+            if status == "failed":
+                self.logger.error(f"Plan execution failed for plan_id: {plan_id}")
+                
+                # Implement recovery strategy for failed DJ transitions
+                self.logger.warning("Implementing emergency recovery for failed DJ transition")
+                
+                # Try emergency track selection if we don't have a next track ready
+                if not self._next_track:
+                    await self._handle_emergency_track_selection()
+                
+                # If we still don't have a track after emergency selection, try basic crossfade
+                if not self._next_track:
+                    self.logger.error("No next track available even after emergency selection")
+                    await self._handle_transition_failure()
+                    return
+                
+                # Try a simplified transition without commentary
+                try:
+                    self.logger.info("Attempting simplified crossfade without commentary")
+                    await self.emit(EventTopics.MUSIC_COMMAND, {
+                        "action": "crossfade",
+                        "song_query": self._next_track.title,
+                        "fade_duration": 3.0,
+                        "conversation_id": None
+                    })
+                    
+                    # Update current track if crossfade succeeds
+                    self._current_track = self._next_track
+                    self._next_track = None
+                    
+                except Exception as recovery_error:
+                    self.logger.error(f"Recovery crossfade also failed: {recovery_error}")
+                    await self._handle_transition_failure()
+            
+            elif status == "completed":
+                self.logger.debug(f"Plan {plan_id} completed successfully")
+                # No action needed for successful completions
+            
+            elif status == "cancelled":
+                self.logger.debug(f"Plan {plan_id} was cancelled")
+                # No action needed for cancellations
+                
+        except Exception as e:
+            self.logger.critical(f"Error handling plan ended event: {e}", exc_info=True)
+            # Last resort - try to stop music gracefully
+            try:
+                await self.emit(EventTopics.MUSIC_COMMAND, {
+                    "action": "stop",
+                    "conversation_id": None
+                })
+            except:
+                pass  # Even this failed, but we've done our best
+
+    async def _create_initial_commentary_timeline_plan(self, commentary_text: str, request_id: str) -> None:
+        """Create timeline plan for initial commentary with proper ducking coordination.
+        
+        This uses BasePlanStep format (with step_type field) to be compatible with 
+        TimelineExecutorService validation, ensuring initial commentary uses the 
+        same ducking coordination as transitions.
+        """
+        try:
+            self.logger.info(f"Creating timeline plan for initial commentary (request_id: {request_id})")
+            
+            # Create speak step using BasePlanStep format (step_type field, not type)
+            speak_step = {
+                "step_type": "speak",
+                "text": commentary_text,
+                "duration": None
+            }
+            
+            # Create timeline plan ID
+            plan_id = str(uuid.uuid4())
+            
+            # Create PlanReadyPayload with proper structure (same as _emit_validated_plan)
+            plan_ready_payload = PlanReadyPayload(
+                timestamp=time.time(),
+                plan_id=plan_id,
+                plan={
+                    "plan_id": plan_id,
+                    "steps": [speak_step]  # Already a dict, no need for model_dump()
+                }
+            )
+            
+            self.logger.info(f"Emitting PLAN_READY for initial commentary plan {plan_id}")
+            await self.emit(EventTopics.PLAN_READY, plan_ready_payload.model_dump())
+            
+        except Exception as e:
+            self.logger.error(f"Error creating initial commentary timeline plan: {e}", exc_info=True)
 
 
 

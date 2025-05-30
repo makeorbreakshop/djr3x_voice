@@ -612,7 +612,14 @@ class CachedSpeechService(BaseService):
             # Define the blocking playback function to run in the executor
             def blocking_playback():
                 try:
-                    sd.play(entry.audio_data, entry.sample_rate)
+                    # Apply volume boost for better mixing with ducked music
+                    # Boost DJ R3X commentary by 1.8x for better presence
+                    audio_data = entry.audio_data * 1.8
+                    
+                    # Ensure we don't clip the audio (prevent values > 1.0 or < -1.0)
+                    audio_data = np.clip(audio_data, -1.0, 1.0)
+                    
+                    sd.play(audio_data, entry.sample_rate)
                     sd.wait()  # Wait for playback to complete
                 except Exception as e:
                     # Log the error within the thread
@@ -637,7 +644,7 @@ class CachedSpeechService(BaseService):
             )
             
         except Exception as e:
-            self.logger.error(f"Error handling playback task in _play_audio: {e}")
+            self.logger.error(f"Error handling playbook task in _play_audio: {e}")
             # Emit error event with the same playback_id for consistency
             playback_id = payload.get("playback_id", "unknown")
             await self.emit(

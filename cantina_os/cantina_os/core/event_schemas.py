@@ -1,12 +1,13 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 import uuid
+import time
 # Assuming MusicTrack and MusicLibrary models exist elsewhere or need defining
 # For now, using basic dict/Any types, but these should ideally be proper Pydantic models
 
 class EventPayload(BaseModel):
     """Base class for all event payloads."""
-    timestamp: float = Field(..., description="Timestamp when the event was created.")
+    timestamp: float = Field(default_factory=time.time, description="Timestamp when the event was created.")
     # Add other common fields if necessary
 
 class TrackDataPayload(BaseModel):
@@ -52,6 +53,7 @@ class GptCommentaryResponsePayload(EventPayload):
     request_id: str = Field(..., description="Identifier linking to the original commentary request.")
     commentary_text: str = Field(..., description="The generated commentary text.")
     is_partial: bool = Field(default=False, description="True if the response is partial (e.g., due to timeout).")
+    context: str = Field(..., description="Context for the commentary (e.g., 'intro', 'transition').")
 
 class SpeechCacheRequestPayload(EventPayload):
     """Payload for requesting speech audio to be cached."""
@@ -133,12 +135,17 @@ class MusicDuckStep(BasePlanStep):
     """Plan step to duck (lower) music volume during speech."""
     step_type: str = "music_duck"
     duck_level: float = Field(default=0.3, description="Volume level to duck to (0.0-1.0)")
-    fade_duration_ms: int = Field(default=300, description="Fade duration in milliseconds")
+    fade_duration_ms: int = Field(default=1500, description="Fade duration in milliseconds")
 
 class MusicUnduckStep(BasePlanStep):
     """Plan step to restore (unduck) music volume after speech."""
     step_type: str = "music_unduck"
-    fade_duration_ms: int = Field(default=300, description="Fade duration in milliseconds")
+    fade_duration_ms: int = Field(default=1500, description="Fade duration in milliseconds")
+
+class ParallelSteps(BasePlanStep):
+    """Plan step to execute multiple steps concurrently."""
+    step_type: str = "parallel_steps"
+    steps: list[BasePlanStep] = Field(..., description="List of steps to execute concurrently")
 
 class DjTransitionPlanPayload(BaseModel):
     """Represents a plan for a DJ transition (e.g., between tracks)."""

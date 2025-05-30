@@ -141,6 +141,9 @@ class SpeechGenerationRequestPayload(BaseEventPayload):
     stability: Optional[float] = Field(None, description="Voice stability setting (0.0-1.0)")
     similarity_boost: Optional[float] = Field(None, description="Voice similarity boost setting (0.0-1.0)")
     speed: Optional[float] = Field(None, description="Speech speed multiplier (0.5-2.0)")
+    clip_id: Optional[str] = Field(None, description="Clip ID for TimelineExecutorService coordination")
+    step_id: Optional[str] = Field(None, description="Step ID for TimelineExecutorService coordination")
+    plan_id: Optional[str] = Field(None, description="Plan ID for TimelineExecutorService coordination")
     
 class SpeechGenerationCompletePayload(BaseEventPayload):
     """Payload for speech generation completion events."""
@@ -148,6 +151,9 @@ class SpeechGenerationCompletePayload(BaseEventPayload):
     audio_length_seconds: float = Field(..., description="Length of generated audio in seconds")
     success: bool = Field(..., description="Whether generation was successful")
     error: Optional[str] = Field(None, description="Error message if generation failed")
+    clip_id: Optional[str] = Field(None, description="Clip ID for TimelineExecutorService coordination")
+    step_id: Optional[str] = Field(None, description="Step ID for TimelineExecutorService coordination")
+    plan_id: Optional[str] = Field(None, description="Plan ID for TimelineExecutorService coordination")
 
 class SpeechAmplitudePayload(BaseEventPayload):
     """Payload for speech amplitude events during synthesis."""
