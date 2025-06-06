@@ -358,7 +358,7 @@ class ElevenLabsService(BaseService):
                         self.logger.info(f"Starting streaming TTS with elevenlabs SDK for text: {text[:50]}...")
                         self.logger.info(f"Request details - Model: {model_id}, Voice: {voice_id}, Speed: {speed}")
                         
-                        audio_stream = eleven_client.text_to_speech.convert_as_stream(
+                        audio_stream = eleven_client.text_to_speech.stream(
                             text=text,
                             voice_id=voice_id,
                             model_id=model_id,
@@ -1071,7 +1071,7 @@ class ElevenLabsService(BaseService):
             await self.emit(
                 EventTopics.SERVICE_STATUS,
                 {
-                    "service_name": self.name,
+                    "service_name": self.service_name,
                     "status": ServiceStatus.ERROR,
                     "message": f"Error emitting event: {e}",
                     "log_level": LogLevel.ERROR

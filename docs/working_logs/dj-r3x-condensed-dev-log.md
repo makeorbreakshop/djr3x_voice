@@ -487,6 +487,49 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Impact**: Complete DJ mode functionality with both manual and automatic transitions working
 - **Technical**: Two-line elegant fix - immediate timestamp addition and EventPayload base class enhancement
 
+### 2025-05-30: DJ Mode Commentary Coordination System Overhaul
+
+Issue: DJ commentary system had disconnected caching and timeline execution, causing missing intro commentary and failed transitions
+Solution: Implemented three-phase architectural fix using MemoryService as central coordination hub
+Impact: Complete DJ mode commentary system working with proper intro playback and smooth transitions
+Technical: Enhanced MemoryService with cache state tracking, refactored BrainService to use centralized coordination, added comprehensive error recovery
+
+### 2025-05-30: Unified Timeline Architecture for All Commentary Types
+
+Issue: Initial commentary bypassed timeline system (no ducking), violating DJ_Mode_Plan.md specification
+Solution: Implemented unified timeline coordination for both streaming (intro) and cached (transition) commentary
+Impact: All DJ commentary now uses professional audio ducking and volume coordination
+Technical: Enhanced ElevenLabsService with TTS_GENERATE_REQUEST coordination, unified BrainService plan creation, fixed timeline executor routing
+
+### 2025-05-30: Audio Ducking System Fixes and Crossfade Bug Resolution
+
+Issue: Music not ducking during initial commentary, crossfade overriding ducked state causing volume jumps
+Solution: Fixed event topic mismatches and crossfade volume calculations to respect ducking state
+Impact: Professional DJ audio experience with consistent 50% ducking and smooth transitions
+Technical: Added TRACK_PLAYING events to MusicController, fixed crossfade to respect current ducking volume
+
+### 2025-05-30: Unified Timeline Routing for All Speech Interactions
+
+Issue: Normal engage mode conversations bypassed ducking system, causing speech over full-volume music
+Solution: Routed all speech interactions through timeline coordination system for consistent ducking
+Impact: Professional audio coordination for both DJ mode and normal conversations
+Technical: Modified ElevenLabsService to create timeline plans for all speech, unified architecture across interaction modes
+
+### 2025-05-30: VLC Core Audio Error Suppression
+
+Issue: VLC flooding console with "AudioObjectAddPropertyListener failed" errors on macOS after music stops
+Solution: Multi-layered VLC configuration with system-level logging suppression and enhanced cleanup
+Impact: Clean application shutdown without console spam while maintaining full audio functionality
+Technical: Enhanced VLC initialization args, environment variable suppression, improved async cleanup timing
+
+Key Architectural Achievements:
+
+Centralized State Management: MemoryService now serves as single source of truth for DJ mode coordination
+Unified Audio Coordination: All speech (DJ and normal) uses timeline system for consistent ducking
+Professional Audio Experience: 50% ducking, smooth crossfades, no volume jumps during transitions
+Robust Error Recovery: Comprehensive fallback mechanisms for failed commentary and transitions
+Clean System Operation: Eliminated VLC error spam while preserving functionality
+
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation
 - Implement conversation persistence

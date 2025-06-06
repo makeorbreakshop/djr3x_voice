@@ -196,6 +196,7 @@ In test mode:
 - Speech synthesis generates simple audio patterns instead of using ElevenLabs
 - LED control gracefully handles missing Arduino connections
 - Music playback works if VLC is installed, but is optional
+- On macOS, VLC must be installed via `brew install --cask vlc` for proper integration
 
 To run in test mode:
 ```bash

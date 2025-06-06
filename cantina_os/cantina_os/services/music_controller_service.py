@@ -19,7 +19,7 @@ import math
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
 os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
-os.environ['VLC_PLUGIN_PATH'] = ''  # Don't scan for additional plugins
+# Note: VLC_PLUGIN_PATH is set in startup scripts to point to VLC.app bundle
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
@@ -94,9 +94,25 @@ class MusicControllerService(BaseService):
         self.dj_mode_active = False
         self.track_end_timer: Optional[asyncio.Task] = None # Use Optional[asyncio.Task]
         
-        # Create VLC instance with proper configuration to reduce verbose logging
+        # Create VLC instance with proper configuration and fallback options
+        self.vlc_instance = self._create_vlc_instance()
+        
+        # Set default command topic for auto-registration
+        self._default_command_topic = EventTopics.MUSIC_COMMAND
+        
+        # Subscriptions will be set up during start()
+        self._subscriptions = []
+    
+    def _create_vlc_instance(self):
+        """
+        Create VLC instance with proper configuration and fallback options.
+        
+        Returns:
+            vlc.Instance or None: VLC instance if successful, None otherwise
+        """
+        # First attempt: Full configuration to reduce verbose logging
         # and prevent Core Audio property listener errors
-        vlc_args = [
+        vlc_args_primary = [
             '--intf', 'dummy',           # No interface
             '--extraintf', '',           # No extra interfaces
             '--quiet',                   # Reduce log output
@@ -106,13 +122,49 @@ class MusicControllerService(BaseService):
             '--no-plugins-cache',        # Don't cache plugins
             '--verbose', '0'             # Minimal verbosity
         ]
-        self.vlc_instance = vlc.Instance(vlc_args)
         
-        # Set default command topic for auto-registration
-        self._default_command_topic = EventTopics.MUSIC_COMMAND
+        try:
+            print(f"DEBUG: Attempting to create VLC instance with primary configuration: {vlc_args_primary}")
+            instance = vlc.Instance(vlc_args_primary)
+            if instance:
+                print("DEBUG: VLC instance created successfully with primary configuration")
+                if hasattr(self, 'logger'):
+                    self.logger.info("VLC instance created successfully with primary configuration")
+                return instance
+        except Exception as e:
+            print(f"DEBUG: Primary VLC instance creation failed: {e}")
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"Primary VLC instance creation failed: {e}")
         
-        # Subscriptions will be set up during start()
-        self._subscriptions = []
+        # Second attempt: Minimal configuration
+        vlc_args_fallback = [
+            '--intf', 'dummy',
+            '--quiet',
+            '--no-video'
+        ]
+        
+        try:
+            self.logger.debug("Attempting to create VLC instance with fallback configuration")
+            instance = vlc.Instance(vlc_args_fallback)
+            if instance:
+                self.logger.info("VLC instance created successfully with fallback configuration")
+                return instance
+        except Exception as e:
+            self.logger.warning(f"Fallback VLC instance creation failed: {e}")
+        
+        # Third attempt: Default VLC instance
+        try:
+            self.logger.debug("Attempting to create default VLC instance")
+            instance = vlc.Instance()
+            if instance:
+                self.logger.info("VLC instance created successfully with default configuration")
+                return instance
+        except Exception as e:
+            self.logger.error(f"Default VLC instance creation failed: {e}")
+        
+        # All attempts failed
+        self.logger.error("All VLC instance creation attempts failed. Music playback will be disabled.")
+        return None
         
     async def subscribe_to_events(self):
         """Subscribe to relevant system events."""
@@ -328,12 +380,20 @@ class MusicControllerService(BaseService):
                         
                         # Create media to get duration, safely handled
                         try:
-                            media = self.vlc_instance.media_new(filepath)
-                            media.parse()
-                            duration_ms = media.get_duration()
-                            duration = duration_ms / 1000.0 if duration_ms > 0 else None
+                            if self.vlc_instance is None:
+                                self.logger.debug(f"VLC instance is None, skipping duration detection for {filepath}")
+                                duration = None
+                            else:
+                                media = self.vlc_instance.media_new(filepath)
+                                if media is None:
+                                    self.logger.debug(f"VLC media creation failed for {filepath}")
+                                    duration = None
+                                else:
+                                    media.parse()
+                                    duration_ms = media.get_duration()
+                                    duration = duration_ms / 1000.0 if duration_ms > 0 else None
                         except Exception as e:
-                            self.logger.warning(f"Could not get duration for {filepath}: {e}")
+                            self.logger.debug(f"Could not get duration for {filepath}: {e}")
                             duration = None
                         
                         # Create MusicTrack with unique path for consistent identification
@@ -669,6 +729,12 @@ class MusicControllerService(BaseService):
             if self.player:
                 self.player.stop()
                 await self._cleanup_player(self.player)
+            
+            # Check if VLC instance is available
+            if not self.vlc_instance:
+                self.logger.error("VLC instance not available. Cannot play music.")
+                await self._send_error("Music playback unavailable - VLC initialization failed")
+                return
             
             # Create a new media player
             self.player = self.vlc_instance.media_player_new()
@@ -1260,6 +1326,12 @@ class MusicControllerService(BaseService):
                 }
             )
 
+            # Check if VLC instance is available
+            if not self.vlc_instance:
+                self.logger.error("VLC instance not available. Cannot perform crossfade.")
+                self.is_crossfading = False
+                return
+            
             # Create a secondary player for the next track
             if self.secondary_player:
                 self.secondary_player.stop()

@@ -568,7 +568,7 @@ class DeepgramDirectMicService(BaseService):
             await self.emit(
                 EventTopics.SERVICE_STATUS_UPDATE,
                 ServiceStatusPayload(
-                    service_name=self.name,
+                    service_name=self.service_name,
                     status=ServiceStatus.ERROR,
                     message=error_msg,
                     severity=LogLevel.ERROR
