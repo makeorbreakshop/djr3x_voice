@@ -77,7 +77,6 @@ class DeepgramDirectMicService(BaseService):
         # State tracking
         self._is_listening = False
         self._current_transcription = ""
-        self._start_time = None
         
         # Thread-safe queue for audio data
         self._audio_queue = asyncio.Queue(maxsize=100)
@@ -149,7 +148,8 @@ class DeepgramDirectMicService(BaseService):
             await self._setup_subscriptions()
             
             # Start metrics collection
-            self._start_time = time.time()
+            # Note: BaseService expects _start_time to be datetime, but we need time.time() for metrics
+            self._metrics_start_time = time.time()
             self._metrics_task = asyncio.create_task(self._collect_metrics())
             
             if self._logger:
@@ -200,7 +200,7 @@ class DeepgramDirectMicService(BaseService):
                 await asyncio.sleep(self._metrics_interval)
                 
                 # Calculate metrics
-                uptime = time.time() - self._start_time
+                uptime = time.time() - self._metrics_start_time
                 average_latency = (
                     self._metrics["total_latency"] / self._metrics["transcripts_for_latency"]
                     if self._metrics["transcripts_for_latency"] > 0

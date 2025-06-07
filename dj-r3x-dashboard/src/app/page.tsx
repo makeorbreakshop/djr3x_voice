@@ -1,0 +1,48 @@
+'use client'
+
+import { useState } from 'react'
+import { SocketProvider } from '@/contexts/SocketContext'
+import Header from '@/components/Header'
+import TabNavigation from '@/components/TabNavigation'
+import MonitorTab from '@/components/tabs/MonitorTab'
+import VoiceTab from '@/components/tabs/VoiceTab'
+import MusicTab from '@/components/tabs/MusicTab'
+import DJTab from '@/components/tabs/DJTab'
+import SystemTab from '@/components/tabs/SystemTab'
+
+export type TabType = 'monitor' | 'voice' | 'music' | 'dj' | 'system'
+
+export default function Home() {
+  const [activeTab, setActiveTab] = useState<TabType>('monitor')
+
+  const renderActiveTab = () => {
+    switch (activeTab) {
+      case 'monitor':
+        return <MonitorTab />
+      case 'voice':
+        return <VoiceTab />
+      case 'music':
+        return <MusicTab />
+      case 'dj':
+        return <DJTab />
+      case 'system':
+        return <SystemTab />
+      default:
+        return <MonitorTab />
+    }
+  }
+
+  return (
+    <SocketProvider>
+      <div className="min-h-screen bg-sw-dark-900">
+        <Header />
+        <div className="container mx-auto px-4 py-6">
+          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+          <div className="mt-6">
+            {renderActiveTab()}
+          </div>
+        </div>
+      </div>
+    </SocketProvider>
+  )
+}

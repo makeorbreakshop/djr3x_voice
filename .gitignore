@@ -78,4 +78,35 @@ data/
 path/
 
 # Scripts directory (if these are temporary/test scripts)
-scripts/ 
+scripts/ # Ignore node_modules and build files
+dj-r3x-dashboard/node_modules/
+dj-r3x-dashboard/.next/
+dj-r3x-bridge/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

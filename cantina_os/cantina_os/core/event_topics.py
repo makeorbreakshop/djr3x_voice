@@ -8,6 +8,7 @@ class EventTopics(str, Enum):
     # System events
     SERVICE_STATUS = "service.status"
     SERVICE_STATUS_UPDATE = "service.status.update"  # Added back - needed by MusicController
+    SERVICE_STATUS_REQUEST = "service.status.request"  # Request for all services to emit their current status
     SERVICE_ERROR = "service.error"  # Added back
     SYSTEM_STARTUP = "system.startup"  # Added back - needed by main.py
     SYSTEM_SHUTDOWN = "system.shutdown"  # Added back

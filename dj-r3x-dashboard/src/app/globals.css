@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;
+  }
+  
+  body {
+    @apply bg-sw-dark-900 text-sw-blue-100 font-sw-mono;
+    background: 
+      radial-gradient(circle at 25% 25%, rgba(0, 135, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(circle at 75% 75%, rgba(0, 135, 255, 0.03) 0%, transparent 50%),
+      linear-gradient(135deg, #0a0e16 0%, #020306 100%);
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .sw-terminal-border {
+    @apply border border-sw-blue-600/50 rounded-lg bg-sw-dark-800/50 backdrop-blur-sm;
+    box-shadow: 
+      0 0 20px rgba(0, 135, 255, 0.1),
+      inset 0 1px 0 rgba(0, 135, 255, 0.2);
+  }
+  
+  .sw-button {
+    @apply px-4 py-2 bg-sw-blue-600 hover:bg-sw-blue-500 text-white font-medium rounded-md;
+    @apply transition-all duration-200 transform hover:scale-105;
+    @apply border border-sw-blue-400/30 shadow-lg;
+    box-shadow: 
+      0 4px 14px 0 rgba(0, 135, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+  
+  .sw-button:hover {
+    box-shadow: 
+      0 6px 20px 0 rgba(0, 135, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+  
+  .sw-button:active {
+    @apply transform scale-95;
+  }
+  
+  .sw-tab {
+    @apply px-6 py-3 font-medium text-sm tracking-wide uppercase;
+    @apply border-b-2 border-transparent text-sw-blue-300/70;
+    @apply transition-all duration-200 hover:text-sw-blue-100 hover:border-sw-blue-600/50;
+  }
+  
+  .sw-tab.active {
+    @apply text-sw-blue-100 border-sw-blue-500;
+    text-shadow: 0 0 10px rgba(0, 135, 255, 0.5);
+  }
+  
+  .sw-panel {
+    @apply p-6 sw-terminal-border;
+  }
+  
+  .sw-status-indicator {
+    @apply w-3 h-3 rounded-full animate-pulse;
+  }
+  
+  .sw-status-online {
+    @apply bg-sw-green shadow-lg;
+    box-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+  }
+  
+  .sw-status-offline {
+    @apply bg-sw-red shadow-lg;
+    box-shadow: 0 0 10px rgba(255, 7, 58, 0.5);
+  }
+  
+  .sw-status-warning {
+    @apply bg-sw-yellow shadow-lg;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  }
+  
+  .sw-text-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+  
+  .sw-border-glow {
+    box-shadow: 
+      0 0 5px rgba(0, 135, 255, 0.3),
+      0 0 10px rgba(0, 135, 255, 0.2),
+      0 0 15px rgba(0, 135, 255, 0.1);
+  }
+  
+  /* Enhanced Star Wars animations */
+  @keyframes subtle-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.9; }
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% { text-shadow: 0 0 5px theme('colors.sw-blue.400'), 0 0 10px theme('colors.sw-blue.400'); }
+    50% { text-shadow: 0 0 10px theme('colors.sw-blue.400'), 0 0 20px theme('colors.sw-blue.400'), 0 0 30px theme('colors.sw-blue.400'); }
+  }
+
+  @keyframes data-stream {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .animate-pulse-subtle {
+    animation: subtle-pulse 4s ease-in-out infinite;
+  }
+
+  .animate-glow {
+    animation: glow-pulse 3s ease-in-out infinite;
+  }
+
+  .animate-data-stream {
+    animation: data-stream 2s linear infinite;
+  }
+}

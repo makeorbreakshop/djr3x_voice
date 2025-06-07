@@ -52,6 +52,8 @@ class BaseService:
         self._status = ServiceStatus.INITIALIZING
         self._event_handlers: Dict[str, List[Callable]] = {}  # topic -> [handlers]
         self._started = False
+        self._start_time = None  # Track service start time for uptime calculation
+        self._status_task = None  # Task for periodic status emission
     
     @property
     def service_name(self):
@@ -85,17 +87,35 @@ class BaseService:
         
         if not self._event_bus:
             raise RuntimeError("Event bus not set. Call set_event_bus() before starting the service.")
+        
+        # Record start time for uptime calculation    
+        self._start_time = datetime.now()
             
         await self._start()
         self._is_running = True
         self._started = True
         self._status = ServiceStatus.RUNNING
         await self._emit_status(ServiceStatus.RUNNING, f"{self.__class__.__name__} started successfully")
+        
+        # Start periodic status emission task
+        self._status_task = asyncio.create_task(self._periodic_status_emission())
+        
+        # Subscribe to status requests
+        await self.subscribe(EventTopics.SERVICE_STATUS_REQUEST, self._handle_status_request)
 
     async def stop(self) -> None:
         """Stop the service."""
         if not self._is_running:
             return
+        
+        # Stop periodic status task first
+        if self._status_task:
+            self._status_task.cancel()
+            try:
+                await self._status_task
+            except asyncio.CancelledError:
+                pass
+            self._status_task = None
             
         await self._stop()
         await self._remove_subscriptions()
@@ -149,16 +169,60 @@ class BaseService:
         log_method = getattr(self.logger, severity.lower())
         log_method(message)
         
-        # Emit the status event
+        # Calculate uptime for running services
+        uptime = "0:00:00"
+        if hasattr(self, '_start_time') and self._start_time:
+            uptime_seconds = (datetime.now() - self._start_time).total_seconds()
+            hours = int(uptime_seconds // 3600)
+            minutes = int((uptime_seconds % 3600) // 60)
+            seconds = int(uptime_seconds % 60)
+            uptime = f"{hours}:{minutes:02d}:{seconds:02d}"
+        
+        # Emit the status event using proper EventTopic and WebBridge-compatible format
         await self.emit(
-            "service_status",
+            EventTopics.SERVICE_STATUS_UPDATE,
             {
-                "service": self.__class__.__name__,
-                "status": status,
+                "service_name": self._service_name,
+                "status": status.value if hasattr(status, 'value') else str(status),
+                "uptime": uptime,
+                "last_update": datetime.now().isoformat(),
                 "message": message,
-                "severity": severity
+                "severity": severity.value if hasattr(severity, 'value') else str(severity)
             }
         )
+
+    async def _periodic_status_emission(self) -> None:
+        """Periodically emit status updates for services that started before WebBridge."""
+        while self._is_running:
+            try:
+                # Wait 30 seconds between status emissions
+                await asyncio.sleep(30)
+                
+                # Only emit if we're actually running
+                if self._is_running and self._status == ServiceStatus.RUNNING:
+                    await self._emit_status(
+                        ServiceStatus.RUNNING, 
+                        f"{self.__class__.__name__} periodic status update"
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                # Log error but don't stop the task
+                if self.logger:
+                    self.logger.error(f"Error in periodic status emission: {e}")
+                await asyncio.sleep(30)  # Wait before retrying
+
+    async def _handle_status_request(self, payload: Any) -> None:
+        """Handle requests for current service status."""
+        try:
+            if self._is_running and self._status == ServiceStatus.RUNNING:
+                await self._emit_status(
+                    ServiceStatus.RUNNING, 
+                    f"{self.__class__.__name__} status response"
+                )
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error handling status request: {e}")
 
     def debug_payload(self, payload: Any, prefix: str = "") -> None:
         """Debug helper for event payloads.

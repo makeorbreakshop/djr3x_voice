@@ -12,9 +12,26 @@ DJ-R3X Voice Assistant is a Python application that creates an interactive Star 
 - **LED Animation**: Synchronizes eye/mouth animations with speech via Arduino
 - **Music Management**: Plays background music that automatically ducks during speech
 
-The project features two implementations:
-1. A legacy monolithic design (`run_rex.py`)
-2. A modern event-driven MVP architecture (`run_r3x_mvp.py`)
+The project uses a modern event-driven CantinaOS architecture for reliable, scalable voice assistant functionality.
+
+## 🎛️ Web Dashboard
+
+**Quick Start Dashboard:**
+```bash
+./start-dashboard.sh    # Start everything
+./stop-dashboard.sh     # Stop everything
+```
+
+**Dashboard URL:** http://localhost:3000
+
+The dashboard provides real-time monitoring and control with:
+- **MONITOR**: Service status, audio spectrum, transcription feed
+- **VOICE**: Recording controls, processing pipeline status
+- **MUSIC**: Library browser, playback controls, queue management  
+- **DJ MODE**: Auto-transitions, commentary monitoring, crossfade control
+- **SYSTEM**: Service health, event logs, performance metrics
+
+See [DASHBOARD_SETUP.md](DASHBOARD_SETUP.md) for detailed setup instructions.
 
 ## Hardware Configuration
 

@@ -47,6 +47,9 @@ from .services.memory_service.memory_service import MemoryService
 # Import the new debug service
 from .services.debug_service import DebugService
 
+# Import the web bridge service
+from .services.web_bridge_service import WebBridgeService
+
 # Initial logging setup
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -290,6 +293,7 @@ class CantinaOS:
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
+            "web_bridge",  # Add web bridge service for dashboard connectivity
             "debug",  # Add debug service for LLM response logging
             "cli"
         ]
@@ -466,6 +470,7 @@ class CantinaOS:
             "timeline_executor_service": TimelineExecutorService,
             "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
+            "web_bridge": WebBridgeService,
             "debug": DebugService
         }
         
