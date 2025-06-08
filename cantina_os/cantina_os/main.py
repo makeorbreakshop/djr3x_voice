@@ -479,6 +479,9 @@ class CantinaOS:
             
     def _create_service(self, service_name: str):
         """Create and configure a service instance for the given name."""
+        # CRITICAL DEBUG: Track service creation
+        self.logger.critical(f"CRITICAL DEBUG: _create_service called for '{service_name}'")
+        
         service_class_map = {
             "deepgram_direct_mic": DeepgramDirectMicService,
             "gpt": GPTService,
@@ -508,6 +511,12 @@ class CantinaOS:
             return None
             
         service_class = service_class_map[service_name]
+        self.logger.critical(f"CRITICAL DEBUG: Found service class for '{service_name}': {service_class}")
+        
+        # Special debug for WebBridge
+        if service_name == "web_bridge":
+            self.logger.critical(f"CRITICAL DEBUG: About to instantiate WebBridgeService class: {service_class}")
+            self.logger.critical(f"CRITICAL DEBUG: WebBridge import location: {service_class.__module__}")
         
         # Get service config by name or empty dict if not found
         service_config = self._config.get(service_name, {})
@@ -592,14 +601,19 @@ class CantinaOS:
                 if not mode_manager:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
+                self.logger.critical(f"CRITICAL DEBUG: Creating {service_name} with special handling")
                 service = service_class(self._event_bus, mode_manager, service_config)
                 return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config
+                self.logger.critical(f"CRITICAL DEBUG: Creating {service_name} with standard pattern: {service_class}(event_bus, config)")
                 service = service_class(self._event_bus, service_config)
+                self.logger.critical(f"CRITICAL DEBUG: Successfully created {service_name} instance: {service}")
                 return service
         except Exception as e:
             self.logger.error(f"Error creating service {service_name}: {str(e)}")
+            import traceback
+            self.logger.error(f"Full traceback: {traceback.format_exc()}")
             return None
 
     async def _handle_set_global_log_level(self, payload: Dict[str, Any]) -> None:

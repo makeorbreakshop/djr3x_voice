@@ -43,24 +43,35 @@ export default function MusicTab() {
     if (!socket) return
 
     const handleMusicStatus = (data: MusicStatus) => {
-      console.log('Music status update:', data)
+      console.log('🎵 [MusicTab] Music status update received:', data)
+      console.log('🎵 [MusicTab] Track data received:', data.track)
+      console.log('🎵 [MusicTab] Current isPlaying state:', isPlaying)
+      console.log('🎵 [MusicTab] Current currentTrack state:', currentTrack)
       
       if (data.action === 'started') {
         setIsPlaying(true)
         if (data.track) {
+          // Extract filename from filepath for display
+          const filename = data.track.filepath ? data.track.filepath.split('/').pop() || data.track.title : data.track.title;
+          
           const track: Track = {
             id: data.track.track_id || data.track.title || '',
-            title: data.track.title || data.track.name || '',
+            title: data.track.title || '',
             artist: data.track.artist || 'Unknown Artist',
             duration: data.track.duration ? `${Math.floor(data.track.duration / 60)}:${String(Math.floor(data.track.duration % 60)).padStart(2, '0')}` : '0:00',
-            file: data.track.file || '',
-            path: data.track.path
+            file: filename,
+            path: data.track.filepath || ''
           }
+          console.log('🎵 [MusicTab] Created track object:', track)
           setCurrentTrack(track)
+          console.log('🎵 [MusicTab] Updated currentTrack state')
         }
       } else if (data.action === 'stopped') {
+        console.log('🎵 [MusicTab] Music stopped event received')
         setIsPlaying(false)
         setProgress(0)
+      } else {
+        console.log('🎵 [MusicTab] Unknown action received:', data.action)
       }
       
       if (data.volume !== undefined) {
@@ -381,8 +392,8 @@ export default function MusicTab() {
               AUDIO STATUS
             </h3>
             <div className="space-y-3">
-              <StatusIndicator label="Music Service" status={musicServiceStatus} />
-              <StatusIndicator label="VLC Backend" status={vlcBackendStatus} />
+              <StatusIndicator label="Music Service" status={musicServiceStatus as "online" | "offline" | "warning"} />
+              <StatusIndicator label="VLC Backend" status={vlcBackendStatus as "online" | "offline" | "warning"} />
               <StatusIndicator label="Audio Ducking" status={isPlaying ? 'online' : 'offline'} />
               <StatusIndicator label="Crossfade" status="offline" />
             </div>

@@ -43,6 +43,10 @@ class WebBridgeService(BaseService):
             event_bus=event_bus,
             logger=logging.getLogger("cantina_os.services.web_bridge"),
         )
+        
+        # CRITICAL DEBUG: Use proper logging instead of print
+        self._logger.critical("CRITICAL DEBUG: WebBridge.__init__() called and completed super().__init__()")
+        logging.getLogger("cantina_os.main").critical("CRITICAL DEBUG: WebBridge constructor completed")
 
         self._config = config or {}
         self._host = self._config.get("host", "127.0.0.1")
@@ -84,34 +88,48 @@ class WebBridgeService(BaseService):
 
     async def _start(self) -> None:
         """Start the web bridge service."""
-        self._logger.info("Starting DJ R3X Web Bridge Service")
+        # CRITICAL DEBUG: Use proper logging to trace execution
+        self._logger.critical("CRITICAL DEBUG: WebBridge._start() method called!")
+        logging.getLogger("cantina_os.main").critical("CRITICAL DEBUG: WebBridge._start() method called!")
+        
+        try:
+            self._logger.info("[WebBridge] Starting DJ R3X Web Bridge Service")
 
-        # Create FastAPI application
-        self._create_fastapi_app()
+            # Create FastAPI application
+            self._logger.info("[WebBridge] Creating FastAPI application")
+            self._create_fastapi_app()
 
-        # Create Socket.IO server
-        self._create_socketio_server()
+            # Create Socket.IO server
+            self._logger.info("[WebBridge] Creating Socket.IO server")
+            self._create_socketio_server()
 
-        # Subscribe to CantinaOS events
-        self._subscribe_to_events()
+            # Subscribe to CantinaOS events
+            self._logger.info("[WebBridge] About to subscribe to events")
+            self._subscribe_to_events()
+            self._logger.info("[WebBridge] Finished subscribing to events")
 
-        # Start the web server
-        await self._start_web_server()
+            # Start the web server
+            self._logger.info("[WebBridge] Starting web server")
+            await self._start_web_server()
+            self._logger.info("[WebBridge] Web server started")
 
-        # Start background tasks
-        asyncio.create_task(self._periodic_status_broadcast())
+            # Start background tasks
+            asyncio.create_task(self._periodic_status_broadcast())
 
-        # Request status from all services that may have started before us
-        self._event_bus.emit(
-            EventTopics.SERVICE_STATUS_REQUEST,
-            {"source": "web_bridge", "timestamp": datetime.now().isoformat()},
-        )
+            # Request status from all services that may have started before us
+            self._event_bus.emit(
+                EventTopics.SERVICE_STATUS_REQUEST,
+                {"source": "web_bridge", "timestamp": datetime.now().isoformat()},
+            )
 
-        self._status = ServiceStatus.RUNNING
-        await self._emit_status(
-            ServiceStatus.RUNNING, "Web Bridge Service started successfully"
-        )
-        self._logger.info("Web Bridge Service started successfully")
+            self._logger.info("[WebBridge] All initialization complete")
+            
+        except Exception as e:
+            self._logger.error(f"[WebBridge] CRITICAL ERROR in _start(): {e}")
+            import traceback
+            self._logger.error(f"[WebBridge] Traceback: {traceback.format_exc()}")
+            # Re-raise to ensure BaseService knows the start failed
+            raise
 
     async def _stop(self) -> None:
         """Stop the web bridge service."""
@@ -123,7 +141,7 @@ class WebBridgeService(BaseService):
 
         self._status = ServiceStatus.STOPPED
         await self._emit_status(
-            ServiceStatus.RUNNING, "Web Bridge Service started successfully"
+            ServiceStatus.STOPPED, "Web Bridge Service stopped"
         )
         self._logger.info("Web Bridge Service stopped")
 
@@ -403,6 +421,7 @@ class WebBridgeService(BaseService):
 
     def _subscribe_to_events(self) -> None:
         """Subscribe to CantinaOS events for dashboard monitoring."""
+        logger.info("[WebBridge] Subscribing to CantinaOS events...")
         self._event_bus.on(
             EventTopics.SERVICE_STATUS_UPDATE, self._handle_service_status_update
         )
@@ -418,12 +437,31 @@ class WebBridgeService(BaseService):
         self._event_bus.on(
             EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped
         )
+        
+        # Voice completion events - critical for resetting voice status to idle
+        self._event_bus.on(
+            EventTopics.VOICE_PROCESSING_COMPLETE, self._handle_voice_processing_complete
+        )
+        self._event_bus.on(
+            EventTopics.SPEECH_SYNTHESIS_COMPLETED, self._handle_speech_synthesis_completed
+        )
+        self._event_bus.on(
+            EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_synthesis_ended
+        )
+        self._event_bus.on(
+            EventTopics.LLM_PROCESSING_ENDED, self._handle_llm_processing_ended
+        )
+        self._event_bus.on(
+            EventTopics.VOICE_ERROR, self._handle_voice_error
+        )
         self._event_bus.on(
             EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_playback_started
         )
+        logger.info(f"[WebBridge] Subscribed to {EventTopics.MUSIC_PLAYBACK_STARTED}")
         self._event_bus.on(
             EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_playback_stopped
         )
+        logger.info(f"[WebBridge] Subscribed to {EventTopics.MUSIC_PLAYBACK_STOPPED}")
         self._event_bus.on(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
         self._event_bus.on(EventTopics.LLM_RESPONSE, self._handle_llm_response)
         self._event_bus.on(EventTopics.SYSTEM_ERROR, self._handle_system_error)
@@ -602,16 +640,62 @@ class WebBridgeService(BaseService):
             "voice_status",
         )
 
+    async def _handle_voice_processing_complete(self, data):
+        """Handle voice processing completion - reset to idle"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.VOICE_PROCESSING_COMPLETE,
+            {"status": "idle"},
+            "voice_status",
+        )
+
+    async def _handle_speech_synthesis_completed(self, data):
+        """Handle speech synthesis completion - reset to idle"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.SPEECH_SYNTHESIS_COMPLETED,
+            {"status": "idle"},
+            "voice_status",
+        )
+
+    async def _handle_speech_synthesis_ended(self, data):
+        """Handle speech synthesis ended - reset to idle"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.SPEECH_SYNTHESIS_ENDED,
+            {"status": "idle"},
+            "voice_status",
+        )
+
+    async def _handle_llm_processing_ended(self, data):
+        """Handle LLM processing completion - reset to idle"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.LLM_PROCESSING_ENDED,
+            {"status": "idle"},
+            "voice_status",
+        )
+
+    async def _handle_voice_error(self, data):
+        """Handle voice processing error - reset to idle"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.VOICE_ERROR,
+            {"status": "idle", "error": data.get("error", "Voice processing error")},
+            "voice_status",
+        )
+
     async def _handle_music_playback_started(self, data):
         """Handle music playback started event"""
+        track_data = data.get("track", {})
+        logger.info(f"[WebBridge] Music playback started - track data: {track_data}")
+        
+        payload = {
+            "action": "started",
+            "track": track_data,
+            "source": data.get("source", "unknown"),
+            "mode": data.get("mode", "INTERACTIVE"),
+        }
+        logger.info(f"[WebBridge] Broadcasting music_status event: {payload}")
+        
         await self._broadcast_event_to_dashboard(
             EventTopics.MUSIC_PLAYBACK_STARTED,
-            {
-                "action": "started",
-                "track": data.get("track", {}),
-                "source": data.get("source", "unknown"),
-                "mode": data.get("mode", "INTERACTIVE"),
-            },
+            payload,
             "music_status",
         )
 

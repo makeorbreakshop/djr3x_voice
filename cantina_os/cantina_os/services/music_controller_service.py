@@ -756,14 +756,14 @@ class MusicControllerService(BaseService):
             
             # Emit MUSIC_PLAYBACK_STARTED event with track data
             track_data = self._create_track_data_payload(track)
-            await self.emit(
-                EventTopics.MUSIC_PLAYBACK_STARTED,
-                {
-                    "track": track_data.model_dump(),
-                    "source": source,
-                    "mode": self.current_mode
-                }
-            )
+            payload = {
+                "track": track_data.model_dump(),
+                "source": source,
+                "mode": self.current_mode
+            }
+            self.logger.info(f"[MusicController] Emitting MUSIC_PLAYBACK_STARTED with payload: {payload}")
+            await self.emit(EventTopics.MUSIC_PLAYBACK_STARTED, payload)
+            self.logger.info("[MusicController] Used await self.emit() for MUSIC_PLAYBACK_STARTED")
             
             # Emit simple coordination event for timeline services
             await self.emit(EventTopics.TRACK_PLAYING, {})
@@ -1254,7 +1254,8 @@ class MusicControllerService(BaseService):
             artist=track.artist or "Cantina Band",  # Use default if None
             album=track.album,
             genre=track.genre,
-            duration=track.duration
+            duration=track.duration,
+            filepath=track.path
         )
 
     async def _emit_track_ending_soon(self) -> None:

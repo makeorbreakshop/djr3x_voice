@@ -497,4 +497,44 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 
 ---
 
+### WebBridge Service Music Status Bug - SERVICE INSTANTIATION FAILURE
+**Time**: Evening debugging session  
+**Goal**: Fix dashboard music status not showing when songs are played despite MusicController emitting events correctly  
+**Problem**: When clicking to play music in dashboard, song plays but track info doesn't appear in web interface  
+
+**Investigation Process**:
+1. **Frontend Analysis**: Confirmed MusicTab.tsx listens for 'music_status' events via Socket.IO
+2. **Backend Event Flow**: Verified MusicController emits MUSIC_PLAYBACK_STARTED events with proper track data
+3. **Data Structure Issues**: Fixed TrackDataPayload mismatch - added `filepath` field, updated frontend mapping
+4. **WebBridge Integration**: Added extensive debug logging to trace event subscription and handling
+
+**CRITICAL DISCOVERY - WebBridge Service Not Actually Starting**:
+- **Service Creation**: `main.py` successfully creates WebBridge service instance and logs show "Started service: web_bridge"
+- **Missing Constructor**: Added CRITICAL debug logging to `__init__()` method - **NEVER APPEARS IN LOGS**
+- **Missing _start() Call**: Added CRITICAL debug logging to `_start()` method - **NEVER APPEARS IN LOGS**  
+- **Architecture Violation**: Service shows as "started" but neither constructor nor lifecycle methods are ever called
+- **Root Cause**: Fundamental CantinaOS service lifecycle failure - BaseService.start() never calls WebBridge._start()
+
+**Debug Evidence from `cantina-session-20250608-170234.log`**:
+```
+[17:02:36] CRITICAL DEBUG: _create_service called for 'web_bridge'
+[17:02:36] CRITICAL DEBUG: Found service class for 'web_bridge': <class ...WebBridgeService'>
+[17:02:36] CRITICAL DEBUG: Successfully created web_bridge instance: <cantina_os...WebBridgeService object at 0x11e252c90>
+[17:02:37] INFO Started service: web_bridge
+```
+**Missing**: No WebBridge constructor or _start() debug logs despite CRITICAL level logging
+
+**Core Issue**: WebBridge service instance exists but is never properly initialized through CantinaOS BaseService lifecycle, violating fundamental architecture standards. This explains why music events aren't being forwarded to dashboard - the WebBridge never subscribes to any events because `_start()` is never called.
+
+**Next Steps**: 
+1. Investigate why BaseService.start() isn't calling WebBridge._start() method
+2. Check service registration and startup flow in main.py service initialization
+3. Verify BaseService inheritance and method override patterns in WebBridge
+
+**Impact**: Dashboard completely disconnected from CantinaOS events due to WebBridge service never actually starting despite appearing "started"  
+**Learning**: Service logging and lifecycle tracking is essential - "started" status doesn't guarantee proper initialization  
+**Result**: WebBridge Service Instantiation - **CRITICAL FAILURE IDENTIFIED** 🚨❌
+
+---
+
 **Note**: This log tracks daily development progress. For comprehensive project history, see `docs/working_logs/dj-r3x-condensed-dev-log.md`.
