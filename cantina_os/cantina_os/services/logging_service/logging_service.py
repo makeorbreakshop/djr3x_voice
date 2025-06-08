@@ -204,7 +204,8 @@ class LoggingService(BaseService):
                     # Add to file write queue synchronously (thread-safe)
                     self._file_write_queue.put_nowait(log_entry)
                     
-                    # Add to memory buffer synchronously
+                    # Memory buffer is only for dashboard/in-memory access
+                    # File writing is handled entirely by the async queue processor
                     if hasattr(self._log_buffer, '_buffer'):
                         self._log_buffer._buffer.append(log_entry)
                     
@@ -386,26 +387,30 @@ class LoggingService(BaseService):
             print(f"LoggingService: Error writing logs sync: {e}")
 
     async def _flush_session_file(self) -> None:
-        """Flush pending logs to session file."""
+        """Memory buffer maintenance - file writing is handled by async queue processor."""
         if not self._session_manager.current_session_file:
             return
 
         try:
-            # Get all logs from buffer
-            logs_to_write = []
+            # This method now only maintains the memory buffer
+            # All file writing is handled by _process_file_queue() to prevent duplicates
+            # Clean up old entries from memory buffer if needed
             async with self._log_buffer._lock:
-                logs_to_write = list(self._log_buffer._buffer)
-
-            if logs_to_write:
-                await self._write_logs_async(logs_to_write)
+                buffer_size = len(self._log_buffer._buffer)
+                if buffer_size > self._config.max_memory_logs:
+                    # Remove old entries beyond the max limit
+                    excess = buffer_size - self._config.max_memory_logs
+                    for _ in range(excess):
+                        self._log_buffer._buffer.popleft()
 
         except Exception as e:
-            print(f"LoggingService: Error writing session file: {e}")
+            print(f"LoggingService: Error maintaining memory buffer: {e}")
 
     async def _flush_remaining_logs(self) -> None:
         """Flush any remaining logs during shutdown."""
         try:
-            # Process any remaining items in the queue
+            # Process any remaining items in the async queue only
+            # This prevents duplicate writing since memory buffer was already processed
             remaining_logs = []
             while not self._file_write_queue.empty():
                 try:
@@ -417,8 +422,7 @@ class LoggingService(BaseService):
             if remaining_logs:
                 await self._write_logs_async(remaining_logs)
 
-            # Final flush of buffer
-            await self._flush_session_file()
+            # Note: No longer calling _flush_session_file() to prevent duplicate writing
 
         except Exception as e:
             print(f"LoggingService: Error flushing remaining logs: {e}")

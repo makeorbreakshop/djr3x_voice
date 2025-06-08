@@ -437,4 +437,64 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 
 ---
 
+### LoggingService Periodic Status Message Fix - INITIAL MISDIAGNOSIS
+**Time**: Late session debugging  
+**Goal**: Fix LoggingService still showing repeated startup messages despite multiple previous fixes  
+**Problem**: User reported LoggingService continues to display repeated "Service X started successfully" messages when left running  
+
+**Initial Root Cause Analysis (INCORRECT)**:
+- **BaseService Periodic Health Check**: Assumed periodic status updates were causing repeated messages
+- **Fix Applied**: Changed periodic status messages from "started successfully" to "is online" for clarity
+- **Default Behavior Changed**: Changed `periodic_emission_enabled` default from `True` to `False` in HealthCheckConfig
+
+**User Feedback**: "nope I restarted it" - indicating the fix didn't work
+
+**ACTUAL Root Cause Discovery**:
+- **Log File Analysis**: User's log file shows each service's startup message appears exactly **19 times** with **identical timestamps**
+- **Real Issue**: LoggingService has **dual file writing mechanisms** causing duplicate log entries to be written to the same file
+- **Duplicate Writing Sources**: 
+  1. `_process_file_queue()` - Background task processing async queue
+  2. `_flush_session_file()` - Periodic flusher writing from memory buffer
+- **Result**: Same log entries written multiple times, not periodic emissions
+
+**Technical Details of Initial (Wrong) Fix**:
+- `base_service.py:271`: Changed periodic emission message to "is online"
+- `base_service.py:289`: Changed status request response message to "is online"  
+- `event_payloads.py:62`: Changed `periodic_emission_enabled` default to `False`
+
+**Learning**: The issue was completely misdiagnosed - it's not periodic health checks but actual LoggingService file writing duplication  
+**Result**: Initial Fix - **MISDIAGNOSED, REAL ISSUE DISCOVERED** ❌🔍
+
+---
+
+### LoggingService Duplicate File Writing Fix - ACTUAL ROOT CAUSE
+**Time**: Root cause discovery and fix session  
+**Goal**: Fix the actual LoggingService issue - duplicate log entries being written to the same file  
+**Problem**: LoggingService has two parallel file writing mechanisms both writing the same log entries, causing each startup message to appear 19 times with identical timestamps  
+
+**Actual Root Cause Analysis**:
+- **Dual File Writing**: Two background tasks both writing to the same session file
+  1. `_process_file_queue()` - Processes async queue and writes logs to file
+  2. `_flush_session_file()` - Reads memory buffer and writes same logs to file again
+- **Queue + Buffer Duplication**: Log entries added to both async queue AND memory buffer, then both get written to file
+- **19x Duplication**: Each log entry processed multiple times through both writing mechanisms
+
+**Complete Fix Implemented**:
+1. **Single File Writing Path**: Made `_process_file_queue()` the only file writing mechanism
+2. **Memory Buffer Separation**: `_flush_session_file()` now only maintains memory buffer, doesn't write to file
+3. **Queue-Only File Writing**: All file writing happens through the async queue processor only
+4. **Shutdown Fix**: `_flush_remaining_logs()` only processes remaining queue items, no duplicate buffer flush
+
+**Technical Details**:
+- **logging_service.py:207-210**: Added comment clarifying memory buffer is for dashboard/in-memory access only
+- **logging_service.py:389-407**: Converted `_flush_session_file()` to memory buffer maintenance only
+- **logging_service.py:409-428**: Updated `_flush_remaining_logs()` to prevent duplicate writing during shutdown
+- **Architecture**: Clear separation between file writing (async queue) and memory access (ring buffer)
+
+**Impact**: Eliminates all duplicate log entries - each log entry now written exactly once to the session file  
+**Learning**: Complex async systems need clear ownership of responsibilities - file writing should have a single authoritative source  
+**Result**: LoggingService Duplicate Writing Fix - **ACTUAL ROOT CAUSE FIXED** ✅🎯
+
+---
+
 **Note**: This log tracks daily development progress. For comprehensive project history, see `docs/working_logs/dj-r3x-condensed-dev-log.md`.
