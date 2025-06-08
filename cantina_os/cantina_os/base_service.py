@@ -268,7 +268,7 @@ class BaseService:
                 if self._is_running and self._status == ServiceStatus.RUNNING:
                     await self._emit_status(
                         ServiceStatus.RUNNING,
-                        f"{self.__class__.__name__} periodic status update",
+                        f"{self.__class__.__name__} is online",
                         severity=self._health_config.periodic_emission_log_level,  # Use configured log level
                         force_emit=True,  # Force emission for periodic updates
                     )
@@ -286,7 +286,7 @@ class BaseService:
             if self._is_running and self._status == ServiceStatus.RUNNING:
                 await self._emit_status(
                     ServiceStatus.RUNNING,
-                    f"{self.__class__.__name__} status response",
+                    f"{self.__class__.__name__} is online",
                     severity=self._health_config.status_request_log_level,  # Use configured log level
                     force_emit=True,  # Force emission for status requests
                 )

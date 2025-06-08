@@ -59,7 +59,7 @@ class HealthCheckConfig(BaseModel):
     """Configuration for health check behavior."""
 
     periodic_emission_enabled: bool = Field(
-        default=True, description="Whether to enable periodic status emission"
+        default=False, description="Whether to enable periodic status emission"
     )
     periodic_emission_interval_seconds: int = Field(
         default=300,  # 5 minutes
