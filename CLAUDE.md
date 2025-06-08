@@ -57,10 +57,7 @@ When adding new features:
 ### Before You Start Checklist
 - [ ] Have I explored the codebase for similar patterns?
 - [ ] Do I understand the existing architecture?
-- [ ] **For CantinaOS services**: Have I read the required architecture documents?
-  - [ ] `cantina_os/docs/CANTINA_OS_SYSTEM_ARCHITECTURE.md`
-  - [ ] `cantina_os/docs/ARCHITECTURE_STANDARDS.md` 
-  - [ ] `cantina_os/docs/SERVICE_CREATION_GUIDELINES.md`
+- [ ] For CantinaOS services and functions ask for supporting documentation before making edits.
 - [ ] Have I created a clear plan?
 - [ ] Are there existing tests I should follow?
 - [ ] What commands will I use to verify my work?
@@ -251,51 +248,7 @@ class MyService(BaseService):
 - **Output**: System speakers via VLC/sounddevice
 - **Music**: VLC required for background playback with ducking
 
-## Environment Configuration
 
-**File**: `.env` (create from `env.example`)
-```bash
-# Required APIs
-OPENAI_API_KEY=your_key
-ELEVENLABS_API_KEY=your_key
-ELEVENLABS_VOICE_ID=voice_id
-
-# Hardware
-LED_SERIAL_PORT=/dev/ttyACM0    # Arduino port
-LED_BAUD_RATE=115200
-
-# Optional
-TEXT_ONLY_MODE=false
-DISABLE_AUDIO_PROCESSING=false
-```
-
-## Testing Strategy
-
-### CantinaOS Testing (Preferred)
-- **Comprehensive**: Unit, integration, performance tests
-- **Mocking**: Complete mock services for external APIs
-- **Async Support**: pytest-asyncio for async service testing
-- **Coverage**: Target >80% with detailed reporting
-
-### Dashboard Testing (Required)
-- **Startup Integration**: ALWAYS test `./start-dashboard.sh` works before claiming completion
-- **Cross-platform**: Test on target Python versions (3.11, 3.12, 3.13)
-- **Dependency Verification**: Verify all pip/npm installs succeed
-- **End-to-end**: Test full startup → dashboard access → functionality
-
-### Mock Usage
-```python
-# Tests use mocks in tests/mocks/
-from tests.mocks.elevenlabs_mock import MockElevenLabsService
-from tests.mocks.deepgram_mock import MockDeepgramService
-```
-
-### Critical Testing Requirements
-**BEFORE claiming any dashboard feature complete:**
-1. Run `./start-dashboard.sh` and verify it starts without errors
-2. Confirm dashboard accessible at localhost:3000
-3. Test basic functionality works in browser
-4. Run `./stop-dashboard.sh` and verify clean shutdown
 
 ## Development Priorities
 
@@ -306,14 +259,6 @@ from tests.mocks.deepgram_mock import MockDeepgramService
 
 ## Common Patterns
 
-### Event Publishing
-```python
-# Publish event with payload
-await self.event_bus.publish('/voice/response_ready', {
-    'text': response_text,
-    'audio_data': audio_bytes
-})
-```
 
 ### Service Dependencies
 Services are loosely coupled via events. No direct service-to-service calls.
@@ -322,22 +267,6 @@ Services are loosely coupled via events. No direct service-to-service calls.
 Services have isolated error handling with graceful degradation when dependencies fail.
 
 ## Troubleshooting
-
-### VLC Issues (macOS)
-```bash
-brew install --cask vlc
-# Set VLC_PLUGIN_PATH if needed
-```
-
-### Arduino Connection
-- Check serial port in Device Manager/System Report
-- Verify `LED_SERIAL_PORT` in `.env`
-- Arduino outputs "READY" when initialized
-
-### API Issues
-- Use test mode: `python -m cantina_os.main --test-mode`
-- Check API key format and permissions
-- Review service logs for detailed error info
 
 ## Context Management and Task Tracking
 
@@ -353,17 +282,6 @@ brew install --cask vlc
 - Focus on one feature area at a time
 - Complete current work before starting new tasks
 - Reference specific files rather than asking to "update the feature"
-
-### Checklists for Complex Tasks
-When implementing complex features, create explicit checklists:
-```
-- [ ] Write unit tests for new service
-- [ ] Implement service logic
-- [ ] Add integration tests
-- [ ] Update documentation
-- [ ] Run full test suite
-- [ ] Test with dashboard
-```
 
 ## Work Logging Requirements
 

@@ -25,4 +25,14 @@ class TranscriptionEventPayload(BaseModel):
     conversation_id: str
     is_final: bool
     transcript: str
-    confidence: float 
+    confidence: float
+
+
+class DashboardLogPayload(BaseModel):
+    """Payload for dashboard log events."""
+    timestamp: str
+    level: str
+    service: str
+    message: str
+    session_id: str
+    entry_id: str

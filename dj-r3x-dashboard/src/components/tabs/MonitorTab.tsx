@@ -39,7 +39,7 @@ export default function MonitorTab() {
     'deepgram_direct_mic': { name: 'Voice Processing', details: 'Deepgram Direct Mic' },
     'gpt_service': { name: 'AI Response', details: 'OpenAI GPT Service' },
     'elevenlabs_service': { name: 'Speech Synthesis', details: 'ElevenLabs TTS' },
-    'music_controller': { name: 'Music Controller', details: 'VLC Player Backend' },
+    'MusicController': { name: 'Music Controller', details: 'VLC Player Backend' },
     'eye_light_controller': { name: 'LED Controller', details: 'Arduino Connection' },
     'brain_service': { name: 'Brain Service', details: 'Main Logic Controller' }
   }

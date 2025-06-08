@@ -50,6 +50,9 @@ from .services.debug_service import DebugService
 # Import the web bridge service
 from .services.web_bridge_service import WebBridgeService
 
+# Import the logging service
+from .services.logging_service import LoggingService
+
 # Initial logging setup
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -278,6 +281,7 @@ class CantinaOS:
         
         # Define the service initialization order
         service_order = [
+            "logging_service",  # Start early to capture all startup logs
             "yoda_mode_manager",
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
@@ -299,15 +303,20 @@ class CantinaOS:
         ]
         
         try:
-            # Initialize mode manager first - it's required by most services
+            # Initialize logging service first to capture all startup logs
+            self.logger.info("Starting logging_service")
+            self._services["logging_service"] = self._create_service("logging_service")
+            await self._services["logging_service"].start()
+            
+            # Initialize mode manager next - it's required by most services
             self.logger.info("Starting yoda_mode_manager service")
             self._services["yoda_mode_manager"] = self._create_service("yoda_mode_manager")
             await self._services["yoda_mode_manager"].start()
             
             # Initialize the rest of the services in order
             for service_name in service_order:
-                # Skip mode_manager as it's already started
-                if service_name == "yoda_mode_manager":
+                # Skip services that are already started
+                if service_name in ["logging_service", "yoda_mode_manager"]:
                     continue
                     
                 self.logger.info(f"Starting {service_name} service")
@@ -471,7 +480,8 @@ class CantinaOS:
             "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
             "web_bridge": WebBridgeService,
-            "debug": DebugService
+            "debug": DebugService,
+            "logging_service": LoggingService
         }
         
         # Early return if service doesn't exist in map

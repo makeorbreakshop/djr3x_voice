@@ -55,6 +55,7 @@ CantinaOS follows these key architectural principles:
 | YodaModeManagerService | System mode orchestration | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND | SYSTEM_MODE_CHANGE, MODE_TRANSITION_STARTED, MODE_TRANSITION_COMPLETE | None | None |
 | MouseInputService | Handles mouse input | Mouse events | MIC_RECORDING_START, MIC_RECORDING_STOP | None | Mouse |
 | CLIService | Command-line interface | CLI_RESPONSE | CLI_COMMAND | None | Terminal |
+| WebBridgeService | Web dashboard integration | SYSTEM_MODE_CHANGE, SERVICE_STATUS_UPDATE, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, DJ_MODE_CHANGED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND, DJ_COMMAND | web_port, cors_origins | None |
 | DebugService | Logging and diagnostics | DEBUG_LOG, Various events | None | log_level | None |
 
 ## 3. Event Bus Topology
@@ -65,7 +66,8 @@ CantinaOS follows these key architectural principles:
 |-------------|------------|-------------|-------------------|---------|
 | SYSTEM_STARTUP | CantinaOS | All services | BaseEventPayload | System initialization |
 | SYSTEM_SHUTDOWN | CantinaOS, CLIService | All services | BaseEventPayload | Graceful shutdown |
-| SYSTEM_MODE_CHANGE | YodaModeManagerService | All services | SystemModePayload | Mode transitions |
+| SYSTEM_SET_MODE_REQUEST | WebBridgeService, CLIService | YodaModeManagerService | SystemModeRequestPayload | Request mode change |
+| SYSTEM_MODE_CHANGE | YodaModeManagerService | All services, WebBridgeService | SystemModePayload | Mode transitions |
 | SYSTEM_ERROR | Any service | DebugService | BaseEventPayload | System-level errors |
 
 ### 3.2 Voice Processing Events
@@ -112,9 +114,9 @@ CantinaOS follows these key architectural principles:
 
 | Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
 |-------------|------------|-------------|-------------------|---------|
-| CLI_COMMAND | CLIService | CommandDispatcherService | StandardCommandPayload | User command input |
+| CLI_COMMAND | CLIService, WebBridgeService | CommandDispatcherService | StandardCommandPayload | User command input |
 | CLI_RESPONSE | Various services | CLIService | CliResponsePayload | Command response |
-| SERVICE_STATUS | All services | DebugService | ServiceStatusPayload | Service health status |
+| SERVICE_STATUS_UPDATE | All services | DebugService, WebBridgeService | ServiceStatusPayload | Service health status |
 | DEBUG_LOG | All services | DebugService | DebugLogPayload | System logging |
 | SYSTEM_SHUTDOWN_REQUESTED | CommandDispatcherService | CantinaOS | BaseEventPayload | Request system shutdown/restart |
 
@@ -267,6 +269,10 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 **3. Import Path Errors**
 - **Issue**: "No module named 'event_topics'" errors
 - **Solution**: Always use full paths: `from core.event_topics import EventTopics`
+
+**4. Web Dashboard Integration Failures**
+- **Issue**: Dashboard bypassing CantinaOS event system or using wrong event topics
+- **Solution**: Follow WEB_DASHBOARD_STANDARDS.md for proper event topic translation and service compliance
 
 
 ## 5. Service Details
@@ -459,6 +465,13 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 - Click detection for recording activation
 - Managed by MouseInputService
 - Translates clicks to voice recording events
+
+**Web Dashboard Interface**:
+- Real-time web-based monitoring and control
+- Socket.io/WebSocket communication
+- Managed by WebBridgeService
+- Must follow WEB_DASHBOARD_STANDARDS.md for proper integration
+- Requires proper event topic translation and service compliance
 
 ## 7. Architecture Patterns
 

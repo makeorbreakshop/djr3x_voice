@@ -4,6 +4,7 @@ pyee>=11.0.1    # Event emitter for Python
 python-dotenv>=1.0.0  # Environment variable management
 aiohttp>=3.9.1  # Async HTTP client for API requests
 httpx>=0.25.0   # Modern async HTTP client for API requests
+aiofiles>=23.2.1  # Async file I/O for logging service
 
 # Audio Processing
 sounddevice>=0.4.6  # Audio capture and playback

@@ -255,12 +255,17 @@ class WebBridgeService(BaseService):
             
             try:
                 if data.get('action') == 'start':
-                    self._event_bus.emit(EventTopics.MIC_RECORDING_START, {
+                    # Follow proper CantinaOS engagement flow: 
+                    # Dashboard → SYSTEM_SET_MODE_REQUEST (INTERACTIVE) → YodaModeManagerService → VOICE_LISTENING_STARTED
+                    self._event_bus.emit(EventTopics.SYSTEM_SET_MODE_REQUEST, {
+                        'mode': 'INTERACTIVE',
                         'source': 'web_dashboard',
                         'sid': sid
                     })
                 elif data.get('action') == 'stop':
-                    self._event_bus.emit(EventTopics.MIC_RECORDING_STOP, {
+                    # Return to AMBIENT mode when stopping voice recording
+                    self._event_bus.emit(EventTopics.SYSTEM_SET_MODE_REQUEST, {
+                        'mode': 'AMBIENT',
                         'source': 'web_dashboard',
                         'sid': sid
                     })
@@ -304,12 +309,14 @@ class WebBridgeService(BaseService):
             try:
                 action = data.get('action')
                 if action == 'start':
-                    self._event_bus.emit(EventTopics.DJ_MODE_START, {
+                    self._event_bus.emit(EventTopics.DJ_COMMAND, {
+                        'command': 'dj start',
                         'auto_transition': data.get('auto_transition', True),
                         'source': 'web_dashboard'
                     })
                 elif action == 'stop':
-                    self._event_bus.emit(EventTopics.DJ_MODE_STOP, {
+                    self._event_bus.emit(EventTopics.DJ_COMMAND, {
+                        'command': 'dj stop',
                         'source': 'web_dashboard'
                     })
                 elif action == 'next':
@@ -319,6 +326,38 @@ class WebBridgeService(BaseService):
             except Exception as e:
                 logger.error(f"Error forwarding DJ command: {e}")
                 await self._sio.emit('error', {'message': f'Failed to execute DJ command: {e}'}, room=sid)
+        
+        @self._sio.event
+        async def system_command(sid, data):
+            """Handle system commands from dashboard"""
+            logger.info(f"System command from {sid}: {data}")
+            
+            try:
+                action = data.get('action')
+                if action == 'set_mode':
+                    # Translate web dashboard mode requests to proper CantinaOS events
+                    mode = data.get('mode', '').upper()
+                    if mode in ['IDLE', 'AMBIENT', 'INTERACTIVE']:
+                        self._event_bus.emit(EventTopics.SYSTEM_SET_MODE_REQUEST, {
+                            'mode': mode,
+                            'source': 'web_dashboard',
+                            'sid': sid
+                        })
+                    else:
+                        raise ValueError(f"Invalid mode: {mode}")
+                elif action == 'restart':
+                    self._event_bus.emit(EventTopics.SYSTEM_SHUTDOWN_REQUESTED, {
+                        'restart': True,
+                        'source': 'web_dashboard'
+                    })
+                elif action == 'refresh_config':
+                    # Emit config refresh request
+                    self._event_bus.emit('CONFIG_REFRESH_REQUEST', {
+                        'source': 'web_dashboard'
+                    })
+            except Exception as e:
+                logger.error(f"Error forwarding system command: {e}")
+                await self._sio.emit('error', {'message': f'Failed to execute system command: {e}'}, room=sid)
     
     def _subscribe_to_events(self) -> None:
         """Subscribe to CantinaOS events for dashboard monitoring."""
@@ -332,6 +371,12 @@ class WebBridgeService(BaseService):
         self._event_bus.on(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
         self._event_bus.on(EventTopics.LLM_RESPONSE, self._handle_llm_response)
         self._event_bus.on(EventTopics.SYSTEM_ERROR, self._handle_system_error)
+        self._event_bus.on(EventTopics.DASHBOARD_LOG, self._handle_dashboard_log)
+        
+        # System mode events - critical for dashboard state synchronization
+        self._event_bus.on(EventTopics.SYSTEM_MODE_CHANGE, self._handle_system_mode_change)
+        self._event_bus.on('MODE_TRANSITION_STARTED', self._handle_mode_transition)
+        self._event_bus.on('MODE_TRANSITION_COMPLETE', self._handle_mode_transition)
     
     async def _start_web_server(self) -> None:
         """Start the uvicorn web server."""
@@ -351,9 +396,11 @@ class WebBridgeService(BaseService):
     
     def _get_service_status(self) -> Dict[str, Any]:
         """Get current service status."""
-        return self._service_status or {
+        # Default service definitions for services that may not have reported yet
+        default_services = {
             "web_bridge": {"status": "offline", "uptime": "0:00:00"},
             "debug": {"status": "offline", "uptime": "0:00:00"},
+            "logging_service": {"status": "offline", "uptime": "0:00:00"},
             "yoda_mode_manager": {"status": "offline", "uptime": "0:00:00"},
             "mode_command_handler": {"status": "offline", "uptime": "0:00:00"},
             "memory_service": {"status": "offline", "uptime": "0:00:00"},
@@ -371,6 +418,13 @@ class WebBridgeService(BaseService):
             "cli": {"status": "offline", "uptime": "0:00:00"},
             "command_dispatcher": {"status": "offline", "uptime": "0:00:00"},
         }
+        
+        # Merge real service status data with defaults
+        # Real status data takes precedence over defaults
+        merged_status = default_services.copy()
+        merged_status.update(self._service_status)
+        
+        return merged_status
     
     async def _periodic_status_broadcast(self) -> None:
         """Periodically broadcast status to all connected clients."""
@@ -500,10 +554,12 @@ class WebBridgeService(BaseService):
     
     async def _handle_dj_mode_changed(self, data):
         """Handle DJ mode status changes"""
+        is_active = data.get('is_active', False)
         await self._broadcast_event_to_dashboard(
             EventTopics.DJ_MODE_CHANGED,
             {
-                'mode': data.get('mode', 'inactive'),
+                'mode': 'active' if is_active else 'inactive',
+                'is_active': is_active,
                 'auto_transition': data.get('auto_transition', False)
             },
             'dj_status'
@@ -531,3 +587,53 @@ class WebBridgeService(BaseService):
             },
             'system_error'
         )
+    
+    async def _handle_system_mode_change(self, data):
+        """Handle system mode changes from YodaModeManagerService"""
+        logger.info(f"System mode changed: {data}")
+        await self._broadcast_event_to_dashboard(
+            EventTopics.SYSTEM_MODE_CHANGE,
+            {
+                'current_mode': data.get('mode', 'IDLE'),
+                'previous_mode': data.get('previous_mode'),
+                'timestamp': data.get('timestamp', datetime.now().isoformat())
+            },
+            'system_mode_change'
+        )
+    
+    async def _handle_mode_transition(self, data):
+        """Handle mode transition events"""
+        logger.info(f"Mode transition: {data}")
+        await self._broadcast_event_to_dashboard(
+            data.get('topic', 'MODE_TRANSITION'),
+            {
+                'status': data.get('status'),
+                'from_mode': data.get('from_mode'),
+                'to_mode': data.get('to_mode'),
+                'timestamp': data.get('timestamp', datetime.now().isoformat())
+            },
+            'mode_transition'
+        )
+    
+    async def _handle_dashboard_log(self, data):
+        """Handle dashboard log events from LoggingService."""
+        try:
+            # Validate the log payload
+            log_data = {
+                'timestamp': data.get('timestamp', datetime.now().isoformat()),
+                'level': data.get('level', 'INFO'),
+                'service': data.get('service', 'Unknown'),
+                'message': data.get('message', ''),
+                'session_id': data.get('session_id', ''),
+                'entry_id': data.get('entry_id', '')
+            }
+            
+            # Broadcast to all connected dashboard clients
+            await self._broadcast_event_to_dashboard(
+                EventTopics.DASHBOARD_LOG,
+                log_data,
+                'system_log'
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling dashboard log: {e}")

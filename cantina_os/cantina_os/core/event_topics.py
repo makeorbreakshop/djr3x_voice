@@ -186,3 +186,6 @@ class EventTopics(str, Enum):
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
+
+    # Dashboard events
+    DASHBOARD_LOG = "/dashboard/log"

@@ -566,6 +566,22 @@ Commands must follow the unified three-tier architecture:
 
 This unified architecture ensures consistent handling of commands from all sources, proper audio coordination, and standardized data structures throughout the system. All new command implementations MUST follow this architecture.
 
+### 9.8 Web Dashboard Integration Requirements
+
+When implementing web dashboard functionality, developers MUST follow the standards outlined in `WEB_DASHBOARD_STANDARDS.md`. Key requirements include:
+
+1. **Event Topic Compliance**: Web events must be properly translated to CantinaOS event topics
+2. **Service Architecture Respect**: Web integration must not bypass core services like YodaModeManagerService
+3. **Proper Event Flow**: Follow established Event Bus Topology for all web interactions
+4. **State Synchronization**: Maintain real-time sync between web dashboard and CantinaOS state
+
+**Critical Event Flows for Web Integration**:
+- System mode changes: `Web → SYSTEM_SET_MODE_REQUEST → YodaModeManagerService → SYSTEM_MODE_CHANGE`
+- Voice commands: `Web → SYSTEM_SET_MODE_REQUEST (INTERACTIVE) → VOICE_LISTENING_STARTED`
+- Music commands: `Web → CLI_COMMAND → CommandDispatcherService → MusicControllerService`
+
+Failure to follow web dashboard standards will result in integration failures and broken functionality.
+
 ### 9.6 Command Validation
 
 Implement these validation steps:

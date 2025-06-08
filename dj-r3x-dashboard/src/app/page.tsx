@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { SocketProvider } from '@/contexts/SocketContext'
 import Header from '@/components/Header'
 import TabNavigation from '@/components/TabNavigation'
+import GlobalActivityBar from '@/components/GlobalActivityBar'
 import MonitorTab from '@/components/tabs/MonitorTab'
 import VoiceTab from '@/components/tabs/VoiceTab'
 import MusicTab from '@/components/tabs/MusicTab'
@@ -34,7 +35,7 @@ export default function Home() {
 
   return (
     <SocketProvider>
-      <div className="min-h-screen bg-sw-dark-900">
+      <div className="min-h-screen bg-sw-dark-900 pb-16">
         <Header />
         <div className="container mx-auto px-4 py-6">
           <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -43,6 +44,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      <GlobalActivityBar />
     </SocketProvider>
   )
 }

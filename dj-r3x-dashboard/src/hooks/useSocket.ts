@@ -34,11 +34,33 @@ export interface DJStatus {
   timestamp: string
 }
 
+export interface SystemModeStatus {
+  current_mode: 'IDLE' | 'AMBIENT' | 'INTERACTIVE'
+  previous_mode?: string
+  timestamp: string
+}
+
+export interface ModeTransitionStatus {
+  old_mode: string
+  new_mode: string
+  status: 'started' | 'completed' | 'failed'
+  error?: string
+  timestamp: string
+}
+
 export interface PerformanceMetrics {
   events_per_minute: number
   cpu_usage: number
   memory_usage: number
   uptime: string
+}
+
+export interface LogEntry {
+  id: string
+  timestamp: string
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR'
+  service: string
+  message: string
 }
 
 interface SocketEvents {
@@ -47,9 +69,12 @@ interface SocketEvents {
   transcription_update: (data: TranscriptionUpdate) => void
   music_status: (data: MusicStatus) => void
   dj_status: (data: DJStatus) => void
+  system_mode_change: (data: SystemModeStatus) => void
+  mode_transition: (data: ModeTransitionStatus) => void
   performance_metrics: (data: PerformanceMetrics) => void
   service_status_update: (data: any) => void
   cantina_event: (data: any) => void
+  system_log: (data: any) => void
   error: (data: any) => void
   event_replay: (data: any) => void
 }
@@ -65,10 +90,17 @@ export const useSocket = () => {
   const [lastTranscription, setLastTranscription] = useState<TranscriptionUpdate | null>(null)
   const [musicStatus, setMusicStatus] = useState<MusicStatus | null>(null)
   const [djStatus, setDJStatus] = useState<DJStatus | null>(null)
+  const [systemMode, setSystemMode] = useState<SystemModeStatus>({ 
+    current_mode: 'IDLE', 
+    timestamp: new Date().toISOString() 
+  })
+  const [modeTransition, setModeTransition] = useState<ModeTransitionStatus | null>(null)
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
   const [eventCount, setEventCount] = useState(0)
+  const [logs, setLogs] = useState<LogEntry[]>([])
   
   const socketRef = useRef<Socket | null>(null)
+  const maxLogs = 100
 
   useEffect(() => {
     const newSocket = io('http://localhost:8000', {
@@ -124,10 +156,44 @@ export const useSocket = () => {
       setDJStatus(data)
     })
 
+    // System mode events
+    newSocket.on('system_mode_change', (data: SystemModeStatus) => {
+      console.log('System mode changed:', data)
+      setSystemMode(data)
+    })
+
+    newSocket.on('mode_transition', (data: ModeTransitionStatus) => {
+      console.log('Mode transition:', data)
+      setModeTransition(data)
+    })
+
     // Performance metrics
     newSocket.on('performance_metrics', (data: PerformanceMetrics) => {
       setPerformanceMetrics(data)
     })
+
+    // Function to handle system events as log entries (moved from SystemTab)
+    const handleSystemEvent = (data: any) => {
+      // Handle system_log events with nested data structure
+      const logData = data.data || data
+      const message = logData.message || data.message || JSON.stringify(data)
+      const service = logData.service || data.service || data.topic || 'System'
+      const level = logData.level || data.level || 'INFO'
+      const timestamp = logData.timestamp || data.timestamp || new Date().toISOString()
+      
+      const logEntry: LogEntry = {
+        id: Date.now() + Math.random().toString(),
+        timestamp: new Date(timestamp).toLocaleString(),
+        level,
+        service,
+        message
+      }
+      
+      setLogs(prev => {
+        const newLogs = [...prev, logEntry]
+        return newLogs.slice(-maxLogs)
+      })
+    }
 
     // Service status updates
     newSocket.on('service_status_update', (data: any) => {
@@ -140,6 +206,18 @@ export const useSocket = () => {
     newSocket.on('cantina_event', (data: any) => {
       console.log('CantinaOS event:', data)
       setEventCount(prev => prev + 1)
+      
+      // Handle as potential log entry
+      handleSystemEvent(data)
+    })
+
+    // System log events
+    newSocket.on('system_log', (data: any) => {
+      console.log('System log:', data)
+      setEventCount(prev => prev + 1)
+      
+      // Handle as log entry
+      handleSystemEvent(data)
     })
 
     // Error events
@@ -184,6 +262,15 @@ export const useSocket = () => {
     }
   }
 
+  const sendSystemCommand = (action: string, mode?: string) => {
+    if (socket) {
+      socket.emit('system_command', { 
+        action, 
+        mode 
+      })
+    }
+  }
+
   return {
     socket,
     connected,
@@ -192,10 +279,14 @@ export const useSocket = () => {
     lastTranscription,
     musicStatus,
     djStatus,
+    systemMode,
+    modeTransition,
     performanceMetrics,
     eventCount,
+    logs,
     sendVoiceCommand,
     sendMusicCommand,
     sendDJCommand,
+    sendSystemCommand,
   }
 }
