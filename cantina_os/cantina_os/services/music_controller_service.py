@@ -1056,7 +1056,8 @@ class MusicControllerService(BaseService):
         self,
         status: ServiceStatus,
         message: str,
-        severity: Optional[LogLevel] = None
+        severity: Optional[LogLevel] = None,
+        force_emit: bool = False
     ) -> None:
         """Report service status change."""
         payload = ServiceStatusPayload(

@@ -2,18 +2,27 @@
 
 from enum import Enum
 
+
 class EventTopics(str, Enum):
     """Event topics used throughout the system."""
-    
+
     # System events
     SERVICE_STATUS = "service.status"
-    SERVICE_STATUS_UPDATE = "service.status.update"  # Added back - needed by MusicController
+    SERVICE_STATUS_UPDATE = (
+        "service.status.update"  # Added back - needed by MusicController
+    )
     SERVICE_STATUS_REQUEST = "service.status.request"  # Request for all services to emit their current status
     SERVICE_ERROR = "service.error"  # Added back
+    SERVICE_READY = (
+        "service.ready"  # Service has fully started and is ready to handle requests
+    )
+    SERVICE_STARTING = "service.starting"  # Service is in the process of starting up
     SYSTEM_STARTUP = "system.startup"  # Added back - needed by main.py
     SYSTEM_SHUTDOWN = "system.shutdown"  # Added back
     SYSTEM_MODE_CHANGE = "system.mode.change"
-    SYSTEM_MODE_CHANGED = "system.mode.changed" # Event emitted *after* mode change is complete
+    SYSTEM_MODE_CHANGED = (
+        "system.mode.changed"  # Event emitted *after* mode change is complete
+    )
     SYSTEM_SHUTDOWN_REQUESTED = "system.shutdown.requested"
     SYSTEM_SET_MODE_REQUEST = "system.set.mode.request"
     SYSTEM_ERROR = "system.error"  # Added back
@@ -38,7 +47,9 @@ class EventTopics(str, Enum):
     TRANSCRIPTION_FINAL = "transcription.final"
     TRANSCRIPTION_INTERIM = "transcription.interim"  # Added back
     TRANSCRIPTION_ERROR = "transcription.error"  # Added back
-    TRANSCRIPTION_METRICS = "transcription.metrics"  # Added back - needed by deepgram_direct_mic
+    TRANSCRIPTION_METRICS = (
+        "transcription.metrics"  # Added back - needed by deepgram_direct_mic
+    )
     VOICE_LISTENING_STARTED = "voice.listening.started"
     VOICE_LISTENING_STOPPED = "voice.listening.stopped"
     VOICE_TRANSCRIPTION_INTERIM = "voice.transcription.interim"
@@ -67,13 +78,19 @@ class EventTopics(str, Enum):
     SENTIMENT_ANALYSIS = "sentiment.analysis"
     COMMAND_CALL = "command.call"
     COMMAND_RESULT = "command.result"
-    MIC_RECORDING_START = "mic.recording.start"  # Added back - needed by deepgram_direct_mic
-    MIC_RECORDING_STOP = "mic.recording.stop"  # Added back - needed by deepgram_direct_mic
+    MIC_RECORDING_START = (
+        "mic.recording.start"  # Added back - needed by deepgram_direct_mic
+    )
+    MIC_RECORDING_STOP = (
+        "mic.recording.stop"  # Added back - needed by deepgram_direct_mic
+    )
     MOUSE_RECORDING_STOPPED = "mouse.recording.stopped"  # Added back
 
     # Output events
     SPEECH_SYNTHESIS = "speech.synthesis"
-    SPEECH_SYNTHESIS_STARTED = "speech.synthesis.started"  # Added back - needed by music_controller
+    SPEECH_SYNTHESIS_STARTED = (
+        "speech.synthesis.started"  # Added back - needed by music_controller
+    )
     SPEECH_SYNTHESIS_ENDED = "speech.synthesis.ended"  # Added back - needed by music_controller and eye_light_controller
     SPEECH_SYNTHESIS_AMPLITUDE = "speech.synthesis.amplitude"  # Added back
     SPEECH_SYNTHESIS_REQUESTED = "speech.synthesis.requested"  # Added back
@@ -87,10 +104,14 @@ class EventTopics(str, Enum):
     LLM_RESPONSE = "llm.response"
     LLM_RESPONSE_CHUNK = "llm.response.chunk"  # Added back
     LLM_RESPONSE_TEXT = "llm.response.text"  # Added back
-    LLM_SENTIMENT_ANALYZED = "llm.sentiment.analyzed"  # Added back - needed by eye_light_controller
+    LLM_SENTIMENT_ANALYZED = (
+        "llm.sentiment.analyzed"  # Added back - needed by eye_light_controller
+    )
     LLM_PROCESSING_STARTED = "llm.processing.started"  # Added back
     LLM_PROCESSING_ENDED = "llm.processing.ended"  # Added back
-    INTENT_EXECUTION_RESULT = "intent.execution.result"  # Added back - needed by gpt service
+    INTENT_EXECUTION_RESULT = (
+        "intent.execution.result"  # Added back - needed by gpt service
+    )
     INTENT_CONSUMED = "intent.consumed"  # Added back
     EYE_COMMAND = "eye.command"
     LED_COMMAND = "led.command"  # Added back - needed by eye_light_controller
@@ -129,7 +150,9 @@ class EventTopics(str, Enum):
     MEMORY_VALUE = "memory.value"  # Response event for MEMORY_GET requests
 
     # MusicController events
-    MUSIC_LIBRARY_UPDATED = "music.library.updated" # Emitted when the music library is loaded or changes
+    MUSIC_LIBRARY_UPDATED = (
+        "music.library.updated"  # Emitted when the music library is loaded or changes
+    )
     TRACK_PLAYING = "track.playing"
     TRACK_PAUSED = "track.paused"
     TRACK_STOPPED = "track.stopped"
@@ -140,7 +163,7 @@ class EventTopics(str, Enum):
     CROSSFADE_COMPLETE = "crossfade.complete"
     TRACK_METADATA_REQUEST = "track.metadata.request"
     TRACK_METADATA_RESPONSE = "track.metadata.response"
-    TRACK_ENDING_SOON = "track.ending.soon" # Emitted by MusicController when a track is nearing its end
+    TRACK_ENDING_SOON = "track.ending.soon"  # Emitted by MusicController when a track is nearing its end
 
     # CachedSpeechService events
     SPEECH_CACHE_REQUEST = "speech.cache.request"
@@ -153,17 +176,21 @@ class EventTopics(str, Enum):
     SPEECH_CACHE_UPDATED = "speech.cache.updated"
     SPEECH_CACHE_HIT = "speech.cache.hit"
     SPEECH_CACHE_CLEARED = "speech.cache.cleared"
-    SPEECH_CACHE_CLEANUP = "speech.cache.cleanup" # For triggering manual cleanup
+    SPEECH_CACHE_CLEANUP = "speech.cache.cleanup"  # For triggering manual cleanup
 
     # DJ Mode events
-    DJ_COMMAND = "dj.command" # Incoming CLI/voice commands for DJ mode (e.g., 'dj start', 'dj stop')
-    DJ_MODE_START = "dj.mode.start" # Emitted when DJ mode successfully starts
-    DJ_MODE_STOP = "dj.mode.stop"   # Emitted when DJ mode successfully stops
+    DJ_COMMAND = "dj.command"  # Incoming CLI/voice commands for DJ mode (e.g., 'dj start', 'dj stop')
+    DJ_MODE_START = "dj.mode.start"  # Emitted when DJ mode successfully starts
+    DJ_MODE_STOP = "dj.mode.stop"  # Emitted when DJ mode successfully stops
     DJ_MODE_CHANGED = "dj.mode.changed"  # Emitted when DJ mode state changes
-    DJ_NEXT_TRACK = "dj.next_track" # Emitted to trigger next track transition
-    DJ_NEXT_TRACK_SELECTED = "dj.next_track.selected" # Emitted by BrainService when the next track is chosen
-    DJ_COMMENTARY_REQUEST = "dj.commentary.request" # Emitted by BrainService to request GPT commentary
-    GPT_COMMENTARY_RESPONSE = "gpt.commentary.response" # Emitted by GPTService with generated commentary
+    DJ_NEXT_TRACK = "dj.next_track"  # Emitted to trigger next track transition
+    DJ_NEXT_TRACK_SELECTED = "dj.next_track.selected"  # Emitted by BrainService when the next track is chosen
+    DJ_COMMENTARY_REQUEST = (
+        "dj.commentary.request"  # Emitted by BrainService to request GPT commentary
+    )
+    GPT_COMMENTARY_RESPONSE = (
+        "gpt.commentary.response"  # Emitted by GPTService with generated commentary
+    )
     DJ_QUEUE_TRACK = "dj.queue.track"  # Added back
     DJ_TRACK_ENDING_SOON = "dj.track.ending.soon"  # Added back
     DJ_CROSSFADE_STARTED = "dj.crossfade.started"  # Added back
@@ -175,8 +202,8 @@ class EventTopics(str, Enum):
     BRAIN_MUSIC_STOP = "brain.music.stop"  # Added back
 
     # TTS events
-    TTS_REQUEST = "tts.request" # Request text-to-speech
-    TTS_AUDIO_DATA = "tts.audio.data" # Provide generated audio data
+    TTS_REQUEST = "tts.request"  # Request text-to-speech
+    TTS_AUDIO_DATA = "tts.audio.data"  # Provide generated audio data
     TTS_GENERATE_REQUEST = "tts.generate.request"  # Added back
     TTS_PREGENERATE_REQUEST = "tts.pregenerate.request"  # Added back
 

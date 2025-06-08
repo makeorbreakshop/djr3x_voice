@@ -114,6 +114,12 @@ class LoggingService(BaseService):
         self._deduplication_cache = {}
         self._tasks = []
         self._file_write_queue = asyncio.Queue(maxsize=self._config.max_queue_size)
+        
+        # Circuit breaker for excessive logging
+        self._log_count_window = 0
+        self._log_count_start = time.time()
+        self._circuit_breaker_active = False
+        self._max_logs_per_second = 50  # Emergency limit
 
     async def _start(self) -> None:
         """Start the logging service and install log handler."""
@@ -138,7 +144,7 @@ class LoggingService(BaseService):
         await self._emit_status(
             ServiceStatus.RUNNING, f"LoggingService started - Session: {session_id}"
         )
-        self.logger.info(f"LoggingService started - Session: {session_id}")
+        print(f"LoggingService started - Session: {session_id}")
 
     async def _stop(self) -> None:
         """Stop the logging service and cleanup resources."""
@@ -160,7 +166,7 @@ class LoggingService(BaseService):
                     asyncio.gather(*self._tasks, return_exceptions=True), timeout=5.0
                 )
             except asyncio.TimeoutError:
-                self.logger.warning("Timeout waiting for tasks to complete")
+                print("LoggingService: Timeout waiting for tasks to complete")
 
         # Flush any remaining logs to file
         await self._flush_remaining_logs()
@@ -193,15 +199,19 @@ class LoggingService(BaseService):
 
             # Smart deduplication
             if not self._should_deduplicate(log_entry):
-                # Add to memory buffer
-                asyncio.create_task(self._log_buffer.add_log(log_entry))
-
-                # Stream to dashboard if enabled
-                if self._config.enable_dashboard_streaming:
-                    asyncio.create_task(self._emit_dashboard_log(log_entry))
-
-                # Queue for file writing
-                asyncio.create_task(self._queue_for_file_write(log_entry))
+                # Use thread-safe synchronous operations from logging handler
+                try:
+                    # Add to file write queue synchronously (thread-safe)
+                    self._file_write_queue.put_nowait(log_entry)
+                    
+                    # Add to memory buffer synchronously
+                    if hasattr(self._log_buffer, '_buffer'):
+                        self._log_buffer._buffer.append(log_entry)
+                    
+                    # Dashboard emission now handled by background async task
+                        
+                except Exception as queue_error:
+                    print(f"LoggingService: Error queuing log entry: {queue_error}")
 
         except Exception as e:
             # Fallback logging to prevent infinite loops
@@ -229,17 +239,27 @@ class LoggingService(BaseService):
         """Filter out problematic loggers that cause feedback loops."""
         # List of logger names/patterns to filter out
         filtered_loggers = [
+            "cantina_os.logging_service",  # CRITICAL: Filter out own logs to prevent recursion
             "socketio",           # Socket.IO library logs
             "engineio",           # Engine.IO library logs  
             "websocket",          # WebSocket library logs
             "aiohttp",            # HTTP client logs that might include WebSocket traffic
             "urllib3",            # HTTP library that might log WebSocket requests
+            "uvicorn",            # FastAPI server logs
+            "uvloop",             # Event loop logs
+            "asyncio",            # Asyncio logs that can cause recursion
         ]
         
-        # Check if logger name starts with any filtered pattern
+        # AGGRESSIVE FILTERING: Check if logger name matches or contains any filtered pattern
         logger_lower = logger_name.lower()
         for filtered in filtered_loggers:
             if filtered in logger_lower:
+                return True
+        
+        # ADDITIONAL FILTER: Block any logger that contains websocket-related terms
+        websocket_terms = ["socket", "client", "connection", "packet", "ping", "pong"]
+        for term in websocket_terms:
+            if term in logger_lower and any(ws in logger_lower for ws in ["socket", "engine", "web"]):
                 return True
                 
         return False
@@ -284,7 +304,7 @@ class LoggingService(BaseService):
             await self.emit(EventTopics.DASHBOARD_LOG, dashboard_payload)
 
         except Exception as e:
-            self.logger.error(f"Error emitting dashboard log: {e}")
+            print(f"LoggingService: Error emitting dashboard log: {e}")
 
     async def _queue_for_file_write(self, log_entry: LogEntry) -> None:
         """Queue log entry for file writing."""
@@ -311,11 +331,16 @@ class LoggingService(BaseService):
 
                 if batch:
                     await self._write_logs_async(batch)
+                    
+                    # Also emit to dashboard for each log in batch
+                    if self._config.enable_dashboard_streaming:
+                        for log_entry in batch:
+                            await self._emit_dashboard_log(log_entry)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error(f"Error processing file queue: {e}")
+                print(f"LoggingService: Error processing file queue: {e}")
 
     async def _file_writer_loop(self) -> None:
         """Background task for writing logs to session file."""
@@ -326,7 +351,7 @@ class LoggingService(BaseService):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error(f"Error in file writer loop: {e}")
+                print(f"LoggingService: Error in file writer loop: {e}")
 
     async def _write_logs_async(self, logs_to_write: List[LogEntry]) -> None:
         """Write logs to file using async I/O."""
@@ -344,7 +369,7 @@ class LoggingService(BaseService):
             # Fallback to synchronous I/O
             await self._write_logs_sync(logs_to_write)
         except Exception as e:
-            self.logger.error(f"Error writing logs async: {e}")
+            print(f"LoggingService: Error writing logs async: {e}")
 
     async def _write_logs_sync(self, logs_to_write: List[LogEntry]) -> None:
         """Fallback synchronous file writing."""
@@ -356,7 +381,7 @@ class LoggingService(BaseService):
                     log_line = f"[{log_entry.timestamp}] {log_entry.level:8} {log_entry.service:20} {log_entry.message}\n"
                     f.write(log_line)
         except Exception as e:
-            self.logger.error(f"Error writing logs sync: {e}")
+            print(f"LoggingService: Error writing logs sync: {e}")
 
     async def _flush_session_file(self) -> None:
         """Flush pending logs to session file."""
@@ -373,7 +398,7 @@ class LoggingService(BaseService):
                 await self._write_logs_async(logs_to_write)
 
         except Exception as e:
-            self.logger.error(f"Error writing session file: {e}")
+            print(f"LoggingService: Error writing session file: {e}")
 
     async def _flush_remaining_logs(self) -> None:
         """Flush any remaining logs during shutdown."""
@@ -394,4 +419,4 @@ class LoggingService(BaseService):
             await self._flush_session_file()
 
         except Exception as e:
-            self.logger.error(f"Error flushing remaining logs: {e}")
+            print(f"LoggingService: Error flushing remaining logs: {e}")

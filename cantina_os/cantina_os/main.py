@@ -97,6 +97,24 @@ def set_global_log_level(level: int) -> None:
 
 # Initial level setting using the new function
 set_global_log_level(logging.INFO)
+
+# CRITICAL FIX: Silence problematic loggers that cause terminal spam
+# Set specific loggers to WARNING+ to prevent debug/info flooding
+problematic_loggers = [
+    "socketio.server",
+    "socketio.client", 
+    "engineio.server",
+    "engineio.client",
+    "uvicorn.access",
+    "uvicorn.error",
+    "websockets"
+]
+
+for logger_name in problematic_loggers:
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.WARNING)
+    # Also ensure these don't propagate up
+    logger.propagate = False
 # ----------------------------
 
 logger = logging.getLogger("cantina_os.main")
