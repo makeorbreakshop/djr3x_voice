@@ -572,11 +572,47 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: DJ Mode fully functional from dashboard + voice recording works correctly through proper engagement system
 - **Technical**: WebBridge event routing fixes + SystemModeControl component + architecture compliance with WEB_DASHBOARD_STANDARDS.md
 
-### 2025-06-08: Dashboard Service Name Mapping & Mode Transition UI Fixes
-- **Goal**: Fix Music Controller showing OFFLINE and resolve System Tab mode switching stuck in "TRANSITIONING..." state
-- **Solution**: Fixed service name mapping ("MusicController" vs "music_controller") + attempted event subscription fixes for mode transitions
-- **Impact**: Music Controller correctly shows ONLINE status, mode transition UI issues partially addressed but still pending resolution
-- **Technical**: Service name consistency + Socket.io centralized connections + event payload mapping attempts
+### 2025-06-08: Dashboard Connection & UI Issues Resolution
+- **Goal**: Fix frontend-backend connection issues, service display problems, auto-scrolling logs, and overly complex SystemTab interface
+- **Solution**: Fixed service name mapping + proper event handlers + SystemTab simplification (1,445→573 lines) + identified log flooding root causes
+- **Impact**: Dashboard properly connects showing all 18 services + clean system overview + root cause analysis complete for remaining issues
+- **Technical**: Service registry alignment + bulk updates + getServiceDisplayName helper + health score calculation + periodic emission analysis
+
+### 2025-06-08: CantinaOS LoggingService Complete Implementation & Integration
+- **Goal**: Implement production-grade centralized logging with comprehensive documentation, testing, and dashboard integration
+- **Solution**: Complete TDD implementation (20/20 tests) + comprehensive PRD/TODO documentation + frontend integration + critical feedback loop fixes
+- **Impact**: Professional logging infrastructure with real-time dashboard streaming, session persistence, and system stability
+- **Technical**: Queue-based async architecture + LogRingBuffer + logger filtering + WebBridge integration + comprehensive documentation
+
+### 2025-06-08: Global Activity Log Implementation
+- **Goal**: Implement user-requested global activity bar accessible from any tab with enhanced scrolling
+- **Solution**: Global log state in SocketContext + GlobalActivityBar component + bottom bar interface + expanded scrolling
+- **Impact**: Activity logs globally accessible across all dashboard tabs with enhanced scrollability
+- **Technical**: Global state management + bottom bar positioning + expand/collapse functionality + 100-entry scrolling
+
+### 2025-06-08: Health Check Logging Optimization Complete
+- **Goal**: Eliminate 90%+ health check log noise flooding CLI debugging while maintaining dashboard functionality
+- **Solution**: Analyzed dual health systems + implemented BaseService optimization (30s→5min, INFO→DEBUG) + WebBridge intelligent caching + event-driven updates
+- **Impact**: Clean CLI debugging experience + reduced event bus traffic + improved system performance
+- **Technical**: HealthCheckConfig model + intelligent caching + state-change-only emission + startup coordination
+
+### 2025-06-08: LoggingService Advanced Fixes & File Writing Optimization
+- **Goal**: Fix multiple LoggingService issues - recursive loops, duplicate file writing, and repetitive status messages
+- **Solution**: Eliminated self-logging + enhanced WebBridge filtering + corrected dual file writing architecture + misdiagnosis resolution
+- **Impact**: System completely stable (172MB → 49KB logs) + eliminated all duplicates + 99.97% log noise reduction
+- **Technical**: Self-exclusion + async/sync boundary management + single authoritative file writing + memory buffer separation
+
+### 2025-06-08: Input System & Dashboard Integration Improvements
+- **Goal**: Fix input conflicts between mouse/dashboard + VoiceTab stuck processing + MusicController parameter errors
+- **Solution**: Dashboard context awareness + WebBridge status tracking + VoiceTab visual feedback + event completion handlers + parameter fixes
+- **Impact**: Seamless dashboard/CLI coexistence + complete voice pipeline feedback + eliminated service errors
+- **Technical**: Context-aware input handling + two-phase recording logic + three-service coordination + method signature updates
+
+### 2025-06-08: WebBridge Service Music Status Bug - Service Instantiation Failure
+- **Goal**: Fix dashboard music status not showing when songs played despite MusicController emitting correctly
+- **Solution**: Discovered WebBridge service instance exists but BaseService lifecycle never calls _start() method
+- **Impact**: Dashboard completely disconnected from CantinaOS events - critical architecture violation identified
+- **Technical**: Service creation successful but constructor/lifecycle methods never execute + missing event subscriptions
 
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation

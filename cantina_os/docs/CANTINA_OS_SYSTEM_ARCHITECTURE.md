@@ -55,8 +55,9 @@ CantinaOS follows these key architectural principles:
 | YodaModeManagerService | System mode orchestration | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND | SYSTEM_MODE_CHANGE, MODE_TRANSITION_STARTED, MODE_TRANSITION_COMPLETE | None | None |
 | MouseInputService | Handles mouse input | Mouse events | MIC_RECORDING_START, MIC_RECORDING_STOP | None | Mouse |
 | CLIService | Command-line interface | CLI_RESPONSE | CLI_COMMAND | None | Terminal |
-| WebBridgeService | Web dashboard integration | SYSTEM_MODE_CHANGE, SERVICE_STATUS_UPDATE, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, DJ_MODE_CHANGED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND, DJ_COMMAND | web_port, cors_origins | None |
-| DebugService | Logging and diagnostics | DEBUG_LOG, Various events | None | log_level | None |
+| WebBridgeService | Web dashboard integration via FastAPI/Socket.IO | SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, VOICE_PROCESSING_COMPLETE, SPEECH_SYNTHESIS_COMPLETED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_PROGRESS, DJ_MODE_CHANGED, SYSTEM_MODE_CHANGE, DASHBOARD_LOG | SYSTEM_SET_MODE_REQUEST, MUSIC_COMMAND, DJ_COMMAND | web_port, cors_origins | None |
+| LoggingService | Centralized system logging and dashboard log streaming | All system events (as log capture) | DASHBOARD_LOG | log_level, session_file_path, enable_dashboard_streaming | None |
+| DebugService | Legacy logging and diagnostics | DEBUG_LOG, Various events | None | log_level | None |
 
 ## 3. Event Bus Topology
 
@@ -116,9 +117,19 @@ CantinaOS follows these key architectural principles:
 |-------------|------------|-------------|-------------------|---------|
 | CLI_COMMAND | CLIService, WebBridgeService | CommandDispatcherService | StandardCommandPayload | User command input |
 | CLI_RESPONSE | Various services | CLIService | CliResponsePayload | Command response |
-| SERVICE_STATUS_UPDATE | All services | DebugService, WebBridgeService | ServiceStatusPayload | Service health status |
+| SERVICE_STATUS_UPDATE | All services | DebugService, WebBridgeService, LoggingService | ServiceStatusPayload | Service health status |
 | DEBUG_LOG | All services | DebugService | DebugLogPayload | System logging |
+| DASHBOARD_LOG | LoggingService | WebBridgeService | DashboardLogPayload | Structured logs for web dashboard |
 | SYSTEM_SHUTDOWN_REQUESTED | CommandDispatcherService | CantinaOS | BaseEventPayload | Request system shutdown/restart |
+
+### 3.5 Web Dashboard Events
+
+| Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
+|-------------|------------|-------------|-------------------|---------|
+| VOICE_COMMAND | WebBridgeService | YodaModeManagerService (via SYSTEM_SET_MODE_REQUEST) | WebDashboardCommandPayload | Voice control from dashboard |
+| MUSIC_COMMAND | WebBridgeService | MusicControllerService | MusicCommandPayload | Music control from dashboard |
+| DJ_COMMAND | WebBridgeService | BrainService | DJCommandPayload | DJ mode control from dashboard |
+| SYSTEM_COMMAND | WebBridgeService | YodaModeManagerService | SystemCommandPayload | System mode changes from dashboard |
 
 ## 4. System Flow Diagrams
 
@@ -468,14 +479,136 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 
 **Web Dashboard Interface**:
 - Real-time web-based monitoring and control
-- Socket.io/WebSocket communication
-- Managed by WebBridgeService
+- Next.js frontend with React components
+- Socket.io/WebSocket communication via FastAPI bridge
+- Managed by WebBridgeService (backend) and dj-r3x-dashboard (frontend)
 - Must follow WEB_DASHBOARD_STANDARDS.md for proper integration
 - Requires proper event topic translation and service compliance
 
-## 7. Architecture Patterns
+## 7. Web Dashboard Architecture
 
-### 7.1 BaseService Pattern
+### 7.1 Dashboard Component Overview
+
+The DJ R3X Web Dashboard provides real-time monitoring and control capabilities through a modern web interface that connects to CantinaOS via the WebBridgeService.
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Next.js Web   │◄──►│  WebBridge      │◄──►│   CantinaOS     │
+│   Dashboard     │    │  Service        │    │   Event Bus     │
+│  (Port 3000)    │    │  (Port 8000)    │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 7.2 WebBridgeService Architecture
+
+**Purpose**: Bridge between web dashboard and CantinaOS event system
+**Location**: `cantina_os/cantina_os/services/web_bridge_service.py`
+**Port**: 8000 (FastAPI + Socket.IO)
+
+**Key Components**:
+- **FastAPI App**: REST API endpoints for system status and music library
+- **Socket.IO Server**: Real-time bidirectional communication
+- **Event Bridge**: Translates between web commands and CantinaOS events
+- **Client Management**: Tracks connected dashboard clients
+- **Event Filtering**: Throttles high-frequency events to prevent spam
+
+**Critical Event Handling**:
+- Subscribes to all major CantinaOS events for dashboard updates
+- Translates web dashboard commands to proper CantinaOS event topics
+- Provides real-time service status updates
+- Streams system logs via LoggingService integration
+
+### 7.3 Dashboard Frontend Architecture
+
+**Technology Stack**: Next.js 13+ with TypeScript, Tailwind CSS, Socket.io-client
+**Location**: `dj-r3x-dashboard/src/`
+**Port**: 3000 (Next.js dev server)
+
+**Component Structure**:
+```
+src/
+├── app/                 # Next.js 13 app router
+├── components/
+│   ├── tabs/           # Main dashboard tabs
+│   │   ├── MonitorTab.tsx    # System monitoring
+│   │   ├── VoiceTab.tsx      # Voice controls
+│   │   ├── MusicTab.tsx      # Music playback
+│   │   ├── DJTab.tsx         # DJ mode
+│   │   ├── ShowTab.tsx       # Performance view
+│   │   └── SystemTab.tsx     # System controls
+│   └── show/           # Performance/show components
+├── contexts/           # React contexts
+├── hooks/             # Custom React hooks
+└── types/             # TypeScript definitions
+```
+
+**Key Features**:
+- **Real-time Status**: Live service monitoring and system state
+- **Voice Control**: Web-based voice recording and transcription display
+- **Music Management**: Playback controls and library browsing
+- **DJ Mode**: Automated music mixing and transitions
+- **System Control**: Mode switching and configuration
+- **Star Wars Theme**: Custom holographic terminal aesthetic
+
+### 7.4 Communication Flow
+
+**Dashboard → CantinaOS**:
+1. User interacts with dashboard component
+2. Frontend emits Socket.IO event to WebBridgeService
+3. WebBridgeService translates to appropriate CantinaOS event
+4. CantinaOS processes event and responds
+
+**CantinaOS → Dashboard**:
+1. CantinaOS service emits event to event bus
+2. WebBridgeService receives event (via subscription)
+3. WebBridgeService broadcasts to all connected dashboard clients
+4. Dashboard updates UI in real-time
+
+### 7.5 LoggingService Integration
+
+**Purpose**: Centralized logging with dashboard streaming
+**Location**: `cantina_os/cantina_os/services/logging_service/logging_service.py`
+
+**Architecture**:
+- **Log Capture**: Custom Python logging handler captures all system logs
+- **Structured Format**: Converts logs to structured format with service identification
+- **Deduplication**: Smart filtering to prevent log flooding
+- **File Persistence**: Session-based log files for debugging
+- **Dashboard Streaming**: Real-time log events via DASHBOARD_LOG events
+- **Queue Processing**: Async batch processing for performance
+
+**Integration Points**:
+- Captures logs from all CantinaOS services
+- Emits DASHBOARD_LOG events consumed by WebBridgeService
+- Provides searchable, filterable log view in dashboard
+- Maintains session-based log files for persistence
+
+### 7.6 Deployment Architecture
+
+**Development Setup**:
+```bash
+# Terminal 1: Start CantinaOS + WebBridge
+cd cantina_os && python -m cantina_os.main
+
+# Terminal 2: Start Dashboard Frontend  
+cd dj-r3x-dashboard && npm run dev
+```
+
+**Production Setup**:
+```bash
+# Single command starts both systems
+./start-dashboard.sh
+```
+
+**Service Dependencies**:
+1. CantinaOS starts all core services including WebBridgeService
+2. WebBridgeService starts FastAPI server on port 8000
+3. Dashboard frontend connects to WebBridge via Socket.IO
+4. All communication flows through the event bus architecture
+
+## 8. Architecture Patterns
+
+### 8.1 BaseService Pattern
 
 All services inherit from the BaseService class, which provides:
 - Standardized lifecycle management (start/stop)
@@ -497,7 +630,7 @@ class BaseService:
         # Report status
 ```
 
-### 7.2 Event Subscription Patterns
+### 8.2 Event Subscription Patterns
 
 Services use a consistent pattern for event subscription:
 - Subscribe during initialization
@@ -513,7 +646,7 @@ async def _setup_subscriptions(self) -> None:
     )
 ```
 
-### 7.3 Error Handling Strategies
+### 8.3 Error Handling Strategies
 
 The system employs several error handling strategies:
 - **Service Level**: Each service handles its own errors
@@ -523,7 +656,7 @@ The system employs several error handling strategies:
 - **Retry Logic**: Critical operations include retry mechanisms
 - **Error Reporting**: Standardized error event format
 
-### 7.4 Thread-to-asyncio Bridging Patterns
+### 8.4 Thread-to-asyncio Bridging Patterns
 
 Several services bridge between threaded libraries and asyncio:
 - Queue-based communication between threads and asyncio
@@ -532,7 +665,7 @@ Several services bridge between threaded libraries and asyncio:
 - Background tasks for long-running operations
 - Event loop protection for thread safety
 
-### 7.5 Command Processing Patterns
+### 8.5 Command Processing Patterns
 
 The system implements a standardized command processing architecture:
 
@@ -548,6 +681,6 @@ The system implements a standardized command processing architecture:
 
 This architecture ensures consistent command handling across all services while maintaining clear separation of concerns.
 
-## 8. Conclusion
+## 9. Conclusion
 
 The CantinaOS architecture provides a flexible, extensible foundation for the DJ R3X voice application. Its event-driven design enables clean separation of concerns while maintaining the rich interactions needed for a responsive voice assistant. The system's modular nature allows for easy addition of new features and capabilities while ensuring reliable operation through comprehensive error handling and resource management.
