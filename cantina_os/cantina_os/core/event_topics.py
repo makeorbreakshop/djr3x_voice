@@ -127,6 +127,10 @@ class EventTopics(str, Enum):
     MUSIC_RESPONSE = "music.response"  # Added back
     MUSIC_PLAYBACK_STARTED = "music.playback.started"  # Added back
     MUSIC_PLAYBACK_STOPPED = "music.playback.stopped"  # Added back
+    MUSIC_PLAYBACK_PAUSED = "music.playback.paused"  # Music was paused
+    MUSIC_PLAYBACK_RESUMED = "music.playback.resumed"  # Music was resumed
+    MUSIC_QUEUE_UPDATED = "music.queue.updated"  # Play queue was updated
+    MUSIC_PROGRESS = "music.progress"  # Real-time playback progress updates
     MUSIC_VOLUME_CHANGED = "music.volume.changed"  # Added back
     MUSIC_ERROR = "music.error"  # Added back
     MUSIC_PLAY = "music.play"  # Added back

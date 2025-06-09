@@ -2,6 +2,19 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
+import { 
+  VoiceCommandSchema,
+  MusicCommandSchema, 
+  DJCommandSchema,
+  SystemCommandSchema,
+  VoiceActionEnum,
+  MusicActionEnum,
+  DJActionEnum,
+  SystemActionEnum,
+  SystemModeEnum,
+  WebCommandResponse,
+  WebCommandError
+} from '../types/schemas'
 
 export interface SystemStatus {
   cantina_os_connected: boolean
@@ -113,7 +126,7 @@ export const useSocket = () => {
 
     // Connection events
     newSocket.on('connect', () => {
-      console.log('Connected to bridge service')
+      console.log('🔌 Connected to bridge service at http://localhost:8000')
       setConnected(true)
       
       // Subscribe to all events
@@ -123,8 +136,13 @@ export const useSocket = () => {
     })
 
     newSocket.on('disconnect', () => {
-      console.log('Disconnected from bridge service')
+      console.log('🔌 Disconnected from bridge service')
       setConnected(false)
+    })
+
+    // Add generic event listener to see all events
+    newSocket.onAny((eventName, ...args) => {
+      console.log(`🔌 Socket event received: ${eventName}`, args)
     })
 
     newSocket.on('connect_error', (error) => {
@@ -138,12 +156,20 @@ export const useSocket = () => {
     })
 
     // Voice events
-    newSocket.on('voice_status', (data: VoiceStatus) => {
-      setVoiceStatus(data)
+    newSocket.on('voice_status', (data: any) => {
+      console.log('🎤 [Voice] Voice status update received:', data)
+      // Handle nested data structure from WebBridge (same fix as music status)
+      const voiceData = data.data || data
+      console.log('🎤 [Voice] Voice data processed:', voiceData)
+      setVoiceStatus(voiceData)
     })
 
-    newSocket.on('transcription_update', (data: TranscriptionUpdate) => {
-      setLastTranscription(data)
+    newSocket.on('transcription_update', (data: any) => {
+      console.log('🎤 [Voice] Transcription update received:', data)
+      // Handle nested data structure from WebBridge (same fix as music status)
+      const transcriptionData = data.data || data
+      console.log('🎤 [Voice] Transcription data processed:', transcriptionData)
+      setLastTranscription(transcriptionData)
     })
 
     // Music events
@@ -157,14 +183,18 @@ export const useSocket = () => {
     })
 
     // System mode events
-    newSocket.on('system_mode_change', (data: SystemModeStatus) => {
+    newSocket.on('system_mode_change', (data: any) => {
       console.log('System mode changed:', data)
-      setSystemMode(data)
+      // Handle nested data structure from WebBridge (same fix as music status)
+      const systemData = data.data || data
+      setSystemMode(systemData)
     })
 
-    newSocket.on('mode_transition', (data: ModeTransitionStatus) => {
+    newSocket.on('mode_transition', (data: any) => {
       console.log('Mode transition:', data)
-      setModeTransition(data)
+      // Handle nested data structure from WebBridge (same fix as music status)
+      const transitionData = data.data || data
+      setModeTransition(transitionData)
     })
 
     // Performance metrics
@@ -235,40 +265,194 @@ export const useSocket = () => {
     }
   }, [])
 
-  // Socket command functions
-  const sendVoiceCommand = (action: 'start' | 'stop', text?: string) => {
+  // Type-safe Socket command functions with generated schemas
+  const sendVoiceCommand = (
+    action: VoiceActionEnum, 
+    options?: { callback?: (response: WebCommandResponse | WebCommandError) => void }
+  ) => {
     if (socket) {
-      socket.emit('voice_command', { action, text })
+      const command: Omit<VoiceCommandSchema, 'source' | 'timestamp' | 'command_id'> = {
+        action
+      }
+      
+      if (options?.callback) {
+        socket.emit('voice_command', command, options.callback)
+      } else {
+        socket.emit('voice_command', command)
+      }
     }
   }
 
-  const sendMusicCommand = (action: string, trackId?: string, volume?: number) => {
+  const sendMusicCommand = (
+    action: MusicActionEnum,
+    options?: {
+      track_name?: string
+      track_id?: string
+      volume_level?: number
+      callback?: (response: WebCommandResponse | WebCommandError) => void
+    }
+  ) => {
     if (socket) {
-      socket.emit('music_command', { 
-        action, 
-        track_id: trackId, 
-        volume 
-      })
+      const command: Omit<MusicCommandSchema, 'source' | 'timestamp' | 'command_id'> = {
+        action,
+        ...(options?.track_name && { track_name: options.track_name }),
+        ...(options?.track_id && { track_id: options.track_id }),
+        ...(options?.volume_level !== undefined && { volume_level: options.volume_level })
+      }
+      
+      if (options?.callback) {
+        socket.emit('music_command', command, options.callback)
+      } else {
+        socket.emit('music_command', command)
+      }
     }
   }
 
-  const sendDJCommand = (action: string, autoTransition?: boolean, interval?: number) => {
+  const sendDJCommand = (
+    action: DJActionEnum, 
+    options?: {
+      auto_transition?: boolean
+      transition_duration?: number
+      genre_preference?: string
+      callback?: (response: WebCommandResponse | WebCommandError) => void
+    }
+  ) => {
     if (socket) {
-      socket.emit('dj_command', { 
-        action, 
-        auto_transition: autoTransition, 
-        interval 
-      })
+      const command: Omit<DJCommandSchema, 'source' | 'timestamp' | 'command_id'> = {
+        action,
+        ...(options?.auto_transition !== undefined && { auto_transition: options.auto_transition }),
+        ...(options?.transition_duration !== undefined && { transition_duration: options.transition_duration }),
+        ...(options?.genre_preference && { genre_preference: options.genre_preference })
+      }
+      
+      if (options?.callback) {
+        socket.emit('dj_command', command, options.callback)
+      } else {
+        socket.emit('dj_command', command)
+      }
     }
   }
 
-  const sendSystemCommand = (action: string, mode?: string) => {
-    if (socket) {
-      socket.emit('system_command', { 
-        action, 
-        mode 
-      })
+  const sendSystemCommand = (
+    action: SystemActionEnum, 
+    options?: {
+      mode?: SystemModeEnum
+      restart_delay?: number
+      callback?: (response: WebCommandResponse | WebCommandError) => void
     }
+  ) => {
+    if (socket) {
+      const command: Omit<SystemCommandSchema, 'source' | 'timestamp' | 'command_id'> = {
+        action,
+        ...(options?.mode && { mode: options.mode }),
+        ...(options?.restart_delay !== undefined && { restart_delay: options.restart_delay })
+      }
+      
+      if (options?.callback) {
+        socket.emit('system_command', command, options.callback)
+      } else {
+        socket.emit('system_command', command)
+      }
+    }
+  }
+
+  // Type guard functions for response validation
+  const isWebCommandError = (response: any): response is WebCommandError => {
+    return response && typeof response === 'object' && response.error === true
+  }
+
+  const isWebCommandResponse = (response: any): response is WebCommandResponse => {
+    return response && typeof response === 'object' && typeof response.success === 'boolean'
+  }
+
+  // Helper function to handle command responses with proper error logging
+  const handleCommandResponse = (
+    commandType: string,
+    response: any,
+    onSuccess?: (data: any) => void,
+    onError?: (error: WebCommandError) => void
+  ) => {
+    if (isWebCommandError(response)) {
+      console.error(`❌ ${commandType} command failed:`, response.message)
+      if (response.validation_errors?.length) {
+        console.error('Validation errors:', response.validation_errors)
+      }
+      onError?.(response)
+    } else if (isWebCommandResponse(response)) {
+      if (response.success) {
+        console.log(`✅ ${commandType} command successful:`, response.message)
+        onSuccess?.(response.data)
+      } else {
+        console.error(`❌ ${commandType} command failed:`, response.message)
+        onError?.({
+          error: true,
+          message: response.message,
+          command: commandType,
+          validation_errors: [],
+          timestamp: response.timestamp || new Date().toISOString()
+        })
+      }
+    } else {
+      console.warn(`⚠️ ${commandType} received unexpected response format:`, response)
+    }
+  }
+
+  // Enhanced command functions with response handling
+  const sendVoiceCommandWithResponse = (
+    action: VoiceActionEnum,
+    onSuccess?: (data: any) => void,
+    onError?: (error: WebCommandError) => void
+  ) => {
+    sendVoiceCommand(action, {
+      callback: (response) => handleCommandResponse('Voice', response, onSuccess, onError)
+    })
+  }
+
+  const sendMusicCommandWithResponse = (
+    action: MusicActionEnum,
+    options?: {
+      track_name?: string
+      track_id?: string
+      volume_level?: number
+    },
+    onSuccess?: (data: any) => void,
+    onError?: (error: WebCommandError) => void
+  ) => {
+    sendMusicCommand(action, {
+      ...options,
+      callback: (response) => handleCommandResponse('Music', response, onSuccess, onError)
+    })
+  }
+
+  const sendDJCommandWithResponse = (
+    action: DJActionEnum,
+    options?: {
+      auto_transition?: boolean
+      transition_duration?: number
+      genre_preference?: string
+    },
+    onSuccess?: (data: any) => void,
+    onError?: (error: WebCommandError) => void
+  ) => {
+    sendDJCommand(action, {
+      ...options,
+      callback: (response) => handleCommandResponse('DJ', response, onSuccess, onError)
+    })
+  }
+
+  const sendSystemCommandWithResponse = (
+    action: SystemActionEnum,
+    options?: {
+      mode?: SystemModeEnum
+      restart_delay?: number
+    },
+    onSuccess?: (data: any) => void,
+    onError?: (error: WebCommandError) => void
+  ) => {
+    sendSystemCommand(action, {
+      ...options,
+      callback: (response) => handleCommandResponse('System', response, onSuccess, onError)
+    })
   }
 
   return {
@@ -284,9 +468,21 @@ export const useSocket = () => {
     performanceMetrics,
     eventCount,
     logs,
+    // Type-safe command functions (without response handling)
     sendVoiceCommand,
     sendMusicCommand,
     sendDJCommand,
     sendSystemCommand,
+    // Enhanced command functions with response handling
+    sendVoiceCommandWithResponse,
+    sendMusicCommandWithResponse,
+    sendDJCommandWithResponse,
+    sendSystemCommandWithResponse,
+    // Type guards and utilities
+    isWebCommandError,
+    isWebCommandResponse,
+    handleCommandResponse,
+    // Note: Enum types are imported and used directly in function signatures
+    // Components should import them directly from '../types/schemas'
   }
 }

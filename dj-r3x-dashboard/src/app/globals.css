@@ -100,6 +100,15 @@
     50% { text-shadow: 0 0 10px theme('colors.sw-blue.400'), 0 0 20px theme('colors.sw-blue.400'), 0 0 30px theme('colors.sw-blue.400'); }
   }
 
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-fadeIn {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
   @keyframes data-stream {
     0% { transform: translateX(-100%); }
     100% { transform: translateX(100%); }
@@ -116,4 +125,513 @@
   .animate-data-stream {
     animation: data-stream 2s linear infinite;
   }
+
+  /* DJ Character Stage Animations */
+  @keyframes idle-glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(0, 135, 255, 0.3); }
+    50% { box-shadow: 0 0 40px rgba(0, 135, 255, 0.6), 0 0 60px rgba(0, 135, 255, 0.3); }
+  }
+
+  @keyframes listening-wave {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(2); opacity: 0; }
+  }
+
+  @keyframes thinking-particle {
+    0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(-30px) rotate(360deg); opacity: 0; }
+  }
+
+  @keyframes speaking-pulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(0, 135, 255, 0.5); }
+    50% { transform: scale(1.05); box-shadow: 0 0 40px rgba(0, 135, 255, 0.8), 0 0 60px rgba(0, 135, 255, 0.4); }
+  }
+
+  @keyframes djing-notes {
+    0% { transform: translateY(0) scale(1) rotate(0deg); opacity: 1; }
+    50% { transform: translateY(-20px) scale(1.2) rotate(180deg); opacity: 0.8; }
+    100% { transform: translateY(-40px) scale(0.8) rotate(360deg); opacity: 0; }
+  }
+
+  @keyframes waveform {
+    0%, 100% { height: 4px; }
+    50% { height: 20px; }
+  }
+
+  .animate-idle-glow {
+    animation: idle-glow 3s ease-in-out infinite;
+  }
+
+  .animate-listening-wave {
+    animation: listening-wave 1.5s ease-out infinite;
+  }
+
+  .animate-thinking-particle {
+    animation: thinking-particle 2s ease-out infinite;
+  }
+
+  .animate-speaking-pulse {
+    animation: speaking-pulse 0.8s ease-in-out infinite;
+  }
+
+  .animate-djing-notes {
+    animation: djing-notes 3s ease-out infinite;
+  }
+
+  .animate-waveform {
+    animation: waveform 0.5s ease-in-out infinite;
+  }
+
+  /* Conversation Display Animations */
+  @keyframes typing-cursor {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+
+  @keyframes message-slide-in {
+    0% { transform: translateY(20px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+
+  .animate-typing-cursor {
+    animation: typing-cursor 1s ease-in-out infinite;
+  }
+
+  .animate-message-slide {
+    animation: message-slide-in 0.4s ease-out forwards;
+  }
+
+  /* Custom scrollbar styles */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 135, 255, 0.5) rgba(10, 14, 22, 0.8);
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(10, 14, 22, 0.8);
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(0, 135, 255, 0.5);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 135, 255, 0.7);
+  }
+
+  /* Phase 3: Enhanced Star Wars Visual Polish */
+  
+  /* Authentic Star Wars Color Palette */
+  :root {
+    --cantina-green: #00FF66;
+    --targeting-yellow: #FFF200;
+    --warning-red: #FF4C00;
+    --deep-space: #000000;
+    --worn-metal: #4A5568;
+  }
+
+  /* Retro-Tech UI Elements */
+  .sw-targeting-reticle {
+    position: relative;
+  }
+  
+  .sw-targeting-reticle::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    right: -4px;
+    bottom: -4px;
+    border: 1px solid var(--cantina-green);
+    border-radius: 50%;
+  }
+  
+  .sw-targeting-reticle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2px;
+    height: 2px;
+    background: var(--cantina-green);
+    transform: translate(-50%, -50%);
+    box-shadow: 
+      0 0 4px var(--cantina-green),
+      0 0 8px var(--cantina-green);
+  }
+
+  /* Radar Sweep Animation */
+  @keyframes radar-sweep {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .sw-radar-sweep {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .sw-radar-sweep::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      var(--cantina-green) 30deg,
+      transparent 60deg
+    );
+    opacity: 0.3;
+    animation: radar-sweep 4s linear infinite;
+    pointer-events: none;
+  }
+
+  /* Holographic Flicker Effect */
+  @keyframes holo-flicker {
+    0%, 100% { opacity: 1; }
+    2% { opacity: 0.9; }
+    4% { opacity: 1; }
+    8% { opacity: 0.95; }
+    12% { opacity: 1; }
+    16% { opacity: 0.98; }
+    18% { opacity: 1; }
+    22% { opacity: 0.97; }
+    24% { opacity: 1; }
+    98% { opacity: 1; }
+  }
+
+  .sw-holo-flicker {
+    animation: holo-flicker 6s ease-in-out infinite;
+  }
+
+  /* Signal Interference Glitch */
+  @keyframes signal-glitch {
+    0%, 90%, 100% { transform: translate(0); }
+    10% { transform: translate(-1px, 1px); }
+    20% { transform: translate(1px, -1px); }
+    30% { transform: translate(-1px, -1px); }
+    40% { transform: translate(1px, 1px); }
+    50% { transform: translate(-1px, 1px); }
+    60% { transform: translate(1px, -1px); }
+    70% { transform: translate(-1px, -1px); }
+    80% { transform: translate(1px, 1px); }
+  }
+
+  .sw-signal-glitch {
+    animation: signal-glitch 0.3s ease-in-out infinite;
+  }
+
+  /* Worn Metal Texture */
+  .sw-worn-metal {
+    background: linear-gradient(
+      135deg,
+      var(--worn-metal) 0%,
+      #2D3748 25%,
+      var(--worn-metal) 50%,
+      #1A202C 75%,
+      var(--worn-metal) 100%
+    );
+    background-size: 20px 20px;
+    position: relative;
+  }
+
+  .sw-worn-metal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+      radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+      radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+      radial-gradient(circle at 40% 60%, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+    background-size: 15px 15px, 25px 25px, 18px 18px;
+  }
+
+  /* Blinking System Indicators */
+  @keyframes system-blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
+  }
+
+  .sw-system-blink {
+    animation: system-blink 2s ease-in-out infinite;
+  }
+
+  /* Event Ripple Effect */
+  @keyframes event-ripple {
+    0% {
+      transform: scale(0);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(4);
+      opacity: 0;
+    }
+  }
+
+  .sw-event-ripple {
+    position: relative;
+    overflow: visible;
+  }
+
+  .sw-event-ripple::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--cantina-green);
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    animation: event-ripple 1s ease-out;
+    pointer-events: none;
+  }
+
+  /* Scanline Effects */
+  @keyframes scanlines {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100vh); }
+  }
+
+  .sw-scanlines {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .sw-scanlines::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--cantina-green) 50%,
+      transparent 100%
+    );
+    opacity: 0.3;
+    animation: scanlines 3s linear infinite;
+    pointer-events: none;
+  }
+
+  /* Enhanced Panel Styles with Cantina Theme */
+  .sw-cantina-panel {
+    @apply p-6 rounded-lg backdrop-blur-sm;
+    background: linear-gradient(
+      135deg,
+      rgba(0, 255, 102, 0.05) 0%,
+      rgba(0, 0, 0, 0.8) 50%,
+      rgba(0, 255, 102, 0.02) 100%
+    );
+    border: 1px solid var(--cantina-green);
+    box-shadow: 
+      0 0 20px rgba(0, 255, 102, 0.1),
+      inset 0 1px 0 rgba(0, 255, 102, 0.2);
+  }
+
+  /* Terminal-style Text Effects */
+  .sw-terminal-text {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    text-shadow: 0 0 5px currentColor;
+    letter-spacing: 0.05em;
+  }
+
+  /* Targeting System Colors */
+  .sw-color-targeting {
+    color: var(--targeting-yellow);
+    text-shadow: 0 0 10px var(--targeting-yellow);
+  }
+
+  .sw-color-cantina {
+    color: var(--cantina-green);
+    text-shadow: 0 0 10px var(--cantina-green);
+  }
+
+  .sw-color-warning {
+    color: var(--warning-red);
+    text-shadow: 0 0 10px var(--warning-red);
+  }
+
+  /* System Status Enhanced */
+  .sw-status-cantina {
+    @apply rounded-full animate-pulse;
+    background: var(--cantina-green);
+    box-shadow: 
+      0 0 10px var(--cantina-green),
+      0 0 20px rgba(0, 255, 102, 0.5);
+  }
+
+  .sw-status-targeting {
+    @apply rounded-full animate-pulse;
+    background: var(--targeting-yellow);
+    box-shadow: 
+      0 0 10px var(--targeting-yellow),
+      0 0 20px rgba(255, 242, 0, 0.5);
+  }
+
+  .sw-status-critical {
+    @apply rounded-full animate-pulse;
+    background: var(--warning-red);
+    box-shadow: 
+      0 0 10px var(--warning-red),
+      0 0 20px rgba(255, 76, 0, 0.5);
+  }
+
+  /* Phase 3.3: Cantina Environment Simulation */
+  
+  /* Subtle Background Particles */
+  @keyframes particle-float {
+    0%, 100% { 
+      transform: translate(0, 0) scale(1); 
+      opacity: 0.3; 
+    }
+    50% { 
+      transform: translate(10px, -10px) scale(1.1); 
+      opacity: 0.6; 
+    }
+  }
+
+  @keyframes particle-drift {
+    0% { transform: translateY(0) translateX(0); }
+    100% { transform: translateY(-20px) translateX(5px); }
+  }
+
+  .sw-background-particles {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .sw-background-particles::before,
+  .sw-background-particles::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: var(--cantina-green);
+    border-radius: 50%;
+    opacity: 0.2;
+    animation: particle-float 8s ease-in-out infinite;
+  }
+
+  .sw-background-particles::before {
+    top: 20%;
+    left: 15%;
+    animation-delay: -2s;
+  }
+
+  .sw-background-particles::after {
+    top: 70%;
+    right: 25%;
+    animation-delay: -5s;
+  }
+
+  /* Ambient System Health Lighting */
+  .sw-ambient-optimal {
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(0, 255, 102, 0.03) 0%,
+      transparent 70%
+    );
+  }
+
+  .sw-ambient-warning {
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(255, 242, 0, 0.03) 0%,
+      transparent 70%
+    );
+  }
+
+  .sw-ambient-critical {
+    background: radial-gradient(
+      circle at 50% 50%,
+      rgba(255, 76, 0, 0.03) 0%,
+      transparent 70%
+    );
+  }
+
+  /* Enhanced Diegetic Terminal Elements */
+  .sw-diegetic-header {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 10px currentColor;
+  }
+
+  .sw-system-identifier {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.7rem;
+    opacity: 0.8;
+    letter-spacing: 0.05em;
+  }
+
+  /* Entertainment Terminal Branding */
+  .sw-entertainment-brand {
+    position: relative;
+  }
+
+  .sw-entertainment-brand::before {
+    content: '◆';
+    position: absolute;
+    left: -15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cantina-green);
+    font-size: 0.8em;
+    animation: glow-pulse 3s ease-in-out infinite;
+  }
+
+  .sw-entertainment-brand::after {
+    content: '◆';
+    position: absolute;
+    right: -15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--cantina-green);
+    font-size: 0.8em;
+    animation: glow-pulse 3s ease-in-out infinite;
+    animation-delay: 1.5s;
+  }
+
+  /* Operational Status Indicators */
+  .sw-operational-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .sw-operational-status::before {
+    content: '';
+    width: 4px;
+    height: 4px;
+    background: var(--cantina-green);
+    border-radius: 50%;
+    animation: system-blink 2s ease-in-out infinite;
+  }
+
+  /* Final Polish - Depth and Layering */
+  .sw-depth-layer-1 { z-index: 10; }
+  .sw-depth-layer-2 { z-index: 20; }
+  .sw-depth-layer-3 { z-index: 30; }
+  .sw-depth-layer-4 { z-index: 40; }
+  .sw-depth-layer-5 { z-index: 50; }
 }

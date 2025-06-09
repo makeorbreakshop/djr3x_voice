@@ -23,12 +23,21 @@ from pydantic import BaseModel
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
 from ..event_payloads import ServiceStatus
+from ..schemas.validation import SocketIOValidationMixin, validate_socketio_command
+from ..schemas.web_commands import (
+    VoiceCommandSchema,
+    MusicCommandSchema,
+    DJCommandSchema,
+    SystemCommandSchema,
+    validate_command_data
+)
+from ..schemas import BaseWebResponse, WebCommandError
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class WebBridgeService(BaseService):
+class WebBridgeService(BaseService, SocketIOValidationMixin):
     """
     Web Bridge Service for DJ R3X Dashboard
 
@@ -36,12 +45,12 @@ class WebBridgeService(BaseService):
     Bridges web client communication with CantinaOS event bus.
     """
 
-    def __init__(self, event_bus, config: Dict[str, Any] = None):
+    def __init__(self, event_bus, config=None, name="web_bridge"):
         """Initialize the Web Bridge Service."""
         super().__init__(
-            service_name="web_bridge",
+            service_name=name,
             event_bus=event_bus,
-            logger=logging.getLogger("cantina_os.services.web_bridge"),
+            logger=logging.getLogger(__name__)
         )
         
         # CRITICAL DEBUG: Use proper logging instead of print
@@ -93,41 +102,47 @@ class WebBridgeService(BaseService):
         logging.getLogger("cantina_os.main").critical("CRITICAL DEBUG: WebBridge._start() method called!")
         
         try:
-            self._logger.info("[WebBridge] Starting DJ R3X Web Bridge Service")
+            self._logger.critical("[WebBridge] Step 1: Starting DJ R3X Web Bridge Service")
 
             # Create FastAPI application
-            self._logger.info("[WebBridge] Creating FastAPI application")
+            self._logger.critical("[WebBridge] Step 2: About to create FastAPI application")
             self._create_fastapi_app()
+            self._logger.critical("[WebBridge] Step 2: FastAPI application created successfully")
 
             # Create Socket.IO server
-            self._logger.info("[WebBridge] Creating Socket.IO server")
+            self._logger.critical("[WebBridge] Step 3: About to create Socket.IO server")
             self._create_socketio_server()
+            self._logger.critical("[WebBridge] Step 3: Socket.IO server created successfully")
 
             # Subscribe to CantinaOS events
-            self._logger.info("[WebBridge] About to subscribe to events")
-            self._subscribe_to_events()
-            self._logger.info("[WebBridge] Finished subscribing to events")
+            self._logger.critical("[WebBridge] Step 4: About to subscribe to events")
+            await self._subscribe_to_events()
+            self._logger.critical("[WebBridge] Step 4: Event subscriptions completed")
 
             # Start the web server
-            self._logger.info("[WebBridge] Starting web server")
+            self._logger.critical("[WebBridge] Step 5: About to start web server")
             await self._start_web_server()
-            self._logger.info("[WebBridge] Web server started")
+            self._logger.critical("[WebBridge] Step 5: Web server started successfully")
 
             # Start background tasks
+            self._logger.critical("[WebBridge] Step 6: Starting background tasks")
             asyncio.create_task(self._periodic_status_broadcast())
+            self._logger.critical("[WebBridge] Step 6: Background tasks started")
 
             # Request status from all services that may have started before us
+            self._logger.critical("[WebBridge] Step 7: Requesting status from existing services")
             self._event_bus.emit(
                 EventTopics.SERVICE_STATUS_REQUEST,
                 {"source": "web_bridge", "timestamp": datetime.now().isoformat()},
             )
+            self._logger.critical("[WebBridge] Step 7: Status request sent")
 
-            self._logger.info("[WebBridge] All initialization complete")
+            self._logger.critical("[WebBridge] Step 8: ALL INITIALIZATION COMPLETE - WebBridge fully operational")
             
         except Exception as e:
-            self._logger.error(f"[WebBridge] CRITICAL ERROR in _start(): {e}")
+            self._logger.critical(f"[WebBridge] CRITICAL ERROR in _start(): {e}")
             import traceback
-            self._logger.error(f"[WebBridge] Traceback: {traceback.format_exc()}")
+            self._logger.critical(f"[WebBridge] Traceback: {traceback.format_exc()}")
             # Re-raise to ensure BaseService knows the start failed
             raise
 
@@ -287,192 +302,226 @@ class WebBridgeService(BaseService):
                 logger.info(f"Client {sid} subscribed to: {event_types}")
 
         @self._sio.event
-        async def voice_command(sid, data):
-            """Handle voice commands from dashboard"""
-            logger.info(f"Voice command from {sid}: {data}")
+        @validate_socketio_command("voice_command")
+        async def voice_command(sid, validated_command: VoiceCommandSchema):
+            """Handle voice commands from dashboard with validation"""
+            logger.info(f"Voice command from {sid}: action={validated_command.action}")
 
             try:
-                if data.get("action") == "start":
-                    # Follow proper CantinaOS engagement flow:
-                    # Dashboard → SYSTEM_SET_MODE_REQUEST (INTERACTIVE) → YodaModeManagerService → VOICE_LISTENING_STARTED
-                    self._event_bus.emit(
-                        EventTopics.SYSTEM_SET_MODE_REQUEST,
-                        {"mode": "INTERACTIVE", "source": "web_dashboard", "sid": sid},
-                    )
-                elif data.get("action") == "stop":
-                    # Return to AMBIENT mode when stopping voice recording
-                    self._event_bus.emit(
-                        EventTopics.SYSTEM_SET_MODE_REQUEST,
-                        {"mode": "AMBIENT", "source": "web_dashboard", "sid": sid},
-                    )
-            except Exception as e:
-                logger.error(f"Error forwarding voice command: {e}")
+                # Convert to CantinaOS event payload
+                event_payload = validated_command.to_cantina_event()
+                event_payload["sid"] = sid  # Add socket session ID
+                
+                # Emit to appropriate CantinaOS event topic
+                self._event_bus.emit(
+                    EventTopics.SYSTEM_SET_MODE_REQUEST,
+                    event_payload
+                )
+                
+                # Send success acknowledgment to client
+                response = BaseWebResponse.success_response(
+                    message=f"Voice command '{validated_command.action}' processed successfully",
+                    command_id=validated_command.command_id,
+                    data={"action": validated_command.action}
+                )
                 await self._sio.emit(
-                    "error",
-                    {"message": f"Failed to execute voice command: {e}"},
+                    "command_ack",
+                    response.dict(),
+                    room=sid,
+                )
+                
+            except Exception as e:
+                logger.error(f"Error processing voice command: {e}")
+                error_response = BaseWebResponse.error_response(
+                    message=f"Failed to process voice command: {e}",
+                    error_code="PROCESSING_ERROR",
+                    command_id=validated_command.command_id
+                )
+                await self._sio.emit(
+                    "command_ack",
+                    error_response.dict(),
                     room=sid,
                 )
 
         @self._sio.event
-        async def music_command(sid, data):
-            """Handle music commands from dashboard"""
-            logger.info(f"Music command from {sid}: {data}")
+        @validate_socketio_command("music_command")
+        async def music_command(sid, validated_command: MusicCommandSchema):
+            """Handle music commands from dashboard with validation"""
+            logger.info(f"Music command from {sid}: action={validated_command.action}")
 
             try:
-                action = data.get("action")
-                if action == "play":
-                    self._event_bus.emit(
-                        EventTopics.MUSIC_COMMAND,
-                        {
-                            "action": "play",
-                            "song_query": data.get(
-                                "track_name", data.get("track_id", "")
-                            ),
-                            "source": "web_dashboard",
-                            "conversation_id": None,
-                        },
-                    )
-                elif action in ["pause", "stop"]:
-                    self._event_bus.emit(
-                        EventTopics.MUSIC_COMMAND,
-                        {
-                            "action": "stop",
-                            "source": "web_dashboard",
-                            "conversation_id": None,
-                        },
-                    )
-                elif action == "next":
-                    self._event_bus.emit(
-                        EventTopics.DJ_NEXT_TRACK, {"source": "web_dashboard"}
-                    )
-            except Exception as e:
-                logger.error(f"Error forwarding music command: {e}")
+                # Convert to CantinaOS event payload
+                event_payload = validated_command.to_cantina_event()
+                event_payload["sid"] = sid  # Add socket session ID
+                
+                # Emit to CantinaOS MUSIC_COMMAND event topic
+                self._event_bus.emit(
+                    EventTopics.MUSIC_COMMAND,
+                    event_payload
+                )
+                
+                # Send success acknowledgment to client
+                response = BaseWebResponse.success_response(
+                    message=f"Music command '{validated_command.action}' processed successfully",
+                    command_id=validated_command.command_id,
+                    data={
+                        "action": validated_command.action,
+                        "track_name": validated_command.track_name,
+                        "volume_level": validated_command.volume_level
+                    }
+                )
                 await self._sio.emit(
-                    "error",
-                    {"message": f"Failed to execute music command: {e}"},
+                    "command_ack",
+                    response.dict(),
+                    room=sid,
+                )
+                
+            except Exception as e:
+                logger.error(f"Error processing music command: {e}")
+                error_response = BaseWebResponse.error_response(
+                    message=f"Failed to process music command: {e}",
+                    error_code="PROCESSING_ERROR",
+                    command_id=validated_command.command_id
+                )
+                await self._sio.emit(
+                    "command_ack",
+                    error_response.dict(),
                     room=sid,
                 )
 
         @self._sio.event
-        async def dj_command(sid, data):
-            """Handle DJ mode commands from dashboard"""
-            logger.info(f"DJ command from {sid}: {data}")
+        @validate_socketio_command("dj_command")
+        async def dj_command(sid, validated_command: DJCommandSchema):
+            """Handle DJ mode commands from dashboard with validation"""
+            logger.info(f"DJ command from {sid}: action={validated_command.action}")
 
             try:
-                action = data.get("action")
-                if action == "start":
-                    self._event_bus.emit(
-                        EventTopics.DJ_COMMAND,
-                        {
-                            "command": "dj start",
-                            "auto_transition": data.get("auto_transition", True),
-                            "source": "web_dashboard",
-                        },
-                    )
-                elif action == "stop":
-                    self._event_bus.emit(
-                        EventTopics.DJ_COMMAND,
-                        {"command": "dj stop", "source": "web_dashboard"},
-                    )
-                elif action == "next":
-                    self._event_bus.emit(
-                        EventTopics.DJ_NEXT_TRACK, {"source": "web_dashboard"}
-                    )
-            except Exception as e:
-                logger.error(f"Error forwarding DJ command: {e}")
-                await self._sio.emit(
-                    "error", {"message": f"Failed to execute DJ command: {e}"}, room=sid
+                # Convert to CantinaOS event payload
+                event_payload = validated_command.to_cantina_event()
+                event_payload["sid"] = sid  # Add socket session ID
+                
+                # Get appropriate event topic for this DJ command
+                event_topic = validated_command.get_event_topic()
+                
+                # Emit to appropriate CantinaOS event topic
+                self._event_bus.emit(event_topic, event_payload)
+                
+                # Send success acknowledgment to client
+                response = BaseWebResponse.success_response(
+                    message=f"DJ command '{validated_command.action}' processed successfully",
+                    command_id=validated_command.command_id,
+                    data={
+                        "action": validated_command.action,
+                        "auto_transition": validated_command.auto_transition,
+                        "event_topic": event_topic
+                    }
                 )
-
-        @self._sio.event
-        async def system_command(sid, data):
-            """Handle system commands from dashboard"""
-            logger.info(f"System command from {sid}: {data}")
-
-            try:
-                action = data.get("action")
-                if action == "set_mode":
-                    # Translate web dashboard mode requests to proper CantinaOS events
-                    mode = data.get("mode", "").upper()
-                    if mode in ["IDLE", "AMBIENT", "INTERACTIVE"]:
-                        self._event_bus.emit(
-                            EventTopics.SYSTEM_SET_MODE_REQUEST,
-                            {"mode": mode, "source": "web_dashboard", "sid": sid},
-                        )
-                    else:
-                        raise ValueError(f"Invalid mode: {mode}")
-                elif action == "restart":
-                    self._event_bus.emit(
-                        EventTopics.SYSTEM_SHUTDOWN_REQUESTED,
-                        {"restart": True, "source": "web_dashboard"},
-                    )
-                elif action == "refresh_config":
-                    # Emit config refresh request
-                    self._event_bus.emit(
-                        "CONFIG_REFRESH_REQUEST", {"source": "web_dashboard"}
-                    )
-            except Exception as e:
-                logger.error(f"Error forwarding system command: {e}")
                 await self._sio.emit(
-                    "error",
-                    {"message": f"Failed to execute system command: {e}"},
+                    "command_ack",
+                    response.dict(),
+                    room=sid,
+                )
+                
+            except Exception as e:
+                logger.error(f"Error processing DJ command: {e}")
+                error_response = BaseWebResponse.error_response(
+                    message=f"Failed to process DJ command: {e}",
+                    error_code="PROCESSING_ERROR",
+                    command_id=validated_command.command_id
+                )
+                await self._sio.emit(
+                    "command_ack",
+                    error_response.dict(),
                     room=sid,
                 )
 
-    def _subscribe_to_events(self) -> None:
+        @self._sio.event
+        @validate_socketio_command("system_command")
+        async def system_command(sid, validated_command: SystemCommandSchema):
+            """Handle system commands from dashboard with validation"""
+            logger.info(f"System command from {sid}: action={validated_command.action}")
+
+            try:
+                # Convert to CantinaOS event payload
+                event_payload = validated_command.to_cantina_event()
+                event_payload["sid"] = sid  # Add socket session ID
+                
+                # Get appropriate event topic for this system command
+                event_topic = validated_command.get_event_topic()
+                
+                # Emit to appropriate CantinaOS event topic
+                self._event_bus.emit(event_topic, event_payload)
+                
+                # Send success acknowledgment to client
+                response = BaseWebResponse.success_response(
+                    message=f"System command '{validated_command.action}' processed successfully",
+                    command_id=validated_command.command_id,
+                    data={
+                        "action": validated_command.action,
+                        "mode": validated_command.mode,
+                        "event_topic": event_topic
+                    }
+                )
+                await self._sio.emit(
+                    "command_ack",
+                    response.dict(),
+                    room=sid,
+                )
+                
+            except Exception as e:
+                logger.error(f"Error processing system command: {e}")
+                error_response = BaseWebResponse.error_response(
+                    message=f"Failed to process system command: {e}",
+                    error_code="PROCESSING_ERROR",
+                    command_id=validated_command.command_id
+                )
+                await self._sio.emit(
+                    "command_ack",
+                    error_response.dict(),
+                    room=sid,
+                )
+
+    async def _subscribe_to_events(self) -> None:
         """Subscribe to CantinaOS events for dashboard monitoring."""
         logger.info("[WebBridge] Subscribing to CantinaOS events...")
-        self._event_bus.on(
-            EventTopics.SERVICE_STATUS_UPDATE, self._handle_service_status_update
-        )
-        self._event_bus.on(
-            EventTopics.TRANSCRIPTION_FINAL, self._handle_transcription_final
-        )
-        self._event_bus.on(
-            EventTopics.TRANSCRIPTION_INTERIM, self._handle_transcription_interim
-        )
-        self._event_bus.on(
-            EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started
-        )
-        self._event_bus.on(
-            EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped
+        
+        # Use proper BaseService async subscription pattern
+        await asyncio.gather(
+            self.subscribe(EventTopics.SERVICE_STATUS_UPDATE, self._handle_service_status_update),
+            self.subscribe(EventTopics.TRANSCRIPTION_FINAL, self._handle_transcription_final),
+            self.subscribe(EventTopics.TRANSCRIPTION_INTERIM, self._handle_transcription_interim),
+            self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started),
+            self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped),
+            
+            # Voice completion events - critical for resetting voice status to idle
+            self.subscribe(EventTopics.VOICE_PROCESSING_COMPLETE, self._handle_voice_processing_complete),
+            self.subscribe(EventTopics.SPEECH_SYNTHESIS_COMPLETED, self._handle_speech_synthesis_completed),
+            self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_synthesis_ended),
+            self.subscribe(EventTopics.LLM_PROCESSING_ENDED, self._handle_llm_processing_ended),
+            self.subscribe(EventTopics.VOICE_ERROR, self._handle_voice_error),
+            
+            # Music events - CRITICAL for dashboard music status
+            self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_playback_started),
+            self.subscribe(EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_playback_stopped),
+            self.subscribe(EventTopics.MUSIC_PLAYBACK_PAUSED, self._handle_music_playback_paused),
+            self.subscribe(EventTopics.MUSIC_PLAYBACK_RESUMED, self._handle_music_playback_resumed),
+            self.subscribe(EventTopics.MUSIC_PROGRESS, self._handle_music_progress),
+            self.subscribe(EventTopics.MUSIC_QUEUE_UPDATED, self._handle_music_queue_updated),
+            
+            # Other events
+            self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed),
+            self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response),
+            self.subscribe(EventTopics.SYSTEM_ERROR, self._handle_system_error),
+            self.subscribe(EventTopics.DASHBOARD_LOG, self._handle_dashboard_log),
+            
+            # System mode events - critical for dashboard state synchronization
+            self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_system_mode_change),
+            self.subscribe("MODE_TRANSITION_STARTED", self._handle_mode_transition),
+            self.subscribe("MODE_TRANSITION_COMPLETE", self._handle_mode_transition)
         )
         
-        # Voice completion events - critical for resetting voice status to idle
-        self._event_bus.on(
-            EventTopics.VOICE_PROCESSING_COMPLETE, self._handle_voice_processing_complete
-        )
-        self._event_bus.on(
-            EventTopics.SPEECH_SYNTHESIS_COMPLETED, self._handle_speech_synthesis_completed
-        )
-        self._event_bus.on(
-            EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_synthesis_ended
-        )
-        self._event_bus.on(
-            EventTopics.LLM_PROCESSING_ENDED, self._handle_llm_processing_ended
-        )
-        self._event_bus.on(
-            EventTopics.VOICE_ERROR, self._handle_voice_error
-        )
-        self._event_bus.on(
-            EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_playback_started
-        )
-        logger.info(f"[WebBridge] Subscribed to {EventTopics.MUSIC_PLAYBACK_STARTED}")
-        self._event_bus.on(
-            EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_playback_stopped
-        )
-        logger.info(f"[WebBridge] Subscribed to {EventTopics.MUSIC_PLAYBACK_STOPPED}")
-        self._event_bus.on(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
-        self._event_bus.on(EventTopics.LLM_RESPONSE, self._handle_llm_response)
-        self._event_bus.on(EventTopics.SYSTEM_ERROR, self._handle_system_error)
-        self._event_bus.on(EventTopics.DASHBOARD_LOG, self._handle_dashboard_log)
-
-        # System mode events - critical for dashboard state synchronization
-        self._event_bus.on(
-            EventTopics.SYSTEM_MODE_CHANGE, self._handle_system_mode_change
-        )
-        self._event_bus.on("MODE_TRANSITION_STARTED", self._handle_mode_transition)
-        self._event_bus.on("MODE_TRANSITION_COMPLETE", self._handle_mode_transition)
+        logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STARTED}")
+        logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STOPPED}")
 
     async def _start_web_server(self) -> None:
         """Start the uvicorn web server."""
@@ -705,6 +754,49 @@ class WebBridgeService(BaseService):
             EventTopics.MUSIC_PLAYBACK_STOPPED,
             {"action": "stopped", "track_name": data.get("track_name")},
             "music_status",
+        )
+
+    async def _handle_music_playback_paused(self, data):
+        """Handle music playback paused event"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_PLAYBACK_PAUSED,
+            {"action": "paused", "track_name": data.get("track_name")},
+            "music_status",
+        )
+
+    async def _handle_music_playback_resumed(self, data):
+        """Handle music playback resumed event"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_PLAYBACK_RESUMED,
+            {"action": "resumed", "track_name": data.get("track_name")},
+            "music_status",
+        )
+
+    async def _handle_music_progress(self, data):
+        """Handle music progress updates"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_PROGRESS,
+            {
+                "action": "progress",
+                "track": data.get("track"),
+                "position_sec": data.get("position_sec", 0.0),
+                "duration_sec": data.get("duration_sec", 0.0),
+                "time_remaining_sec": data.get("time_remaining_sec", 0.0),
+                "progress_percent": data.get("progress_percent", 0.0)
+            },
+            "music_progress",
+        )
+
+    async def _handle_music_queue_updated(self, data):
+        """Handle music queue updates"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_QUEUE_UPDATED,
+            {
+                "action": "queue_updated",
+                "queue_length": data.get("queue_length", 0),
+                "added_track": data.get("added_track")
+            },
+            "music_queue",
         )
 
     async def _handle_dj_mode_changed(self, data):

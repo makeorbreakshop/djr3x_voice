@@ -22,9 +22,11 @@ interface MusicStatus {
 export default function MusicTab() {
   const { socket } = useSocketContext()
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null)
   const [volume, setVolume] = useState(75)
   const [progress, setProgress] = useState(0)
+  const [currentTime, setCurrentTime] = useState('0:00')
   const [searchTerm, setSearchTerm] = useState('')
   const [tracks, setTracks] = useState<Track[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -42,40 +44,54 @@ export default function MusicTab() {
   useEffect(() => {
     if (!socket) return
 
-    const handleMusicStatus = (data: MusicStatus) => {
+    const handleMusicStatus = (data: any) => {
       console.log('🎵 [MusicTab] Music status update received:', data)
-      console.log('🎵 [MusicTab] Track data received:', data.track)
+      
+      // WebBridge wraps payload in {topic, data, timestamp} structure
+      const musicData = data.data || data
+      console.log('🎵 [MusicTab] Track data received:', musicData.track)
       console.log('🎵 [MusicTab] Current isPlaying state:', isPlaying)
       console.log('🎵 [MusicTab] Current currentTrack state:', currentTrack)
       
-      if (data.action === 'started') {
+      if (musicData.action === 'started') {
         setIsPlaying(true)
-        if (data.track) {
+        setIsPaused(false)
+        if (musicData.track) {
           // Extract filename from filepath for display
-          const filename = data.track.filepath ? data.track.filepath.split('/').pop() || data.track.title : data.track.title;
+          const filename = musicData.track.filepath ? musicData.track.filepath.split('/').pop() || musicData.track.title : musicData.track.title;
           
           const track: Track = {
-            id: data.track.track_id || data.track.title || '',
-            title: data.track.title || '',
-            artist: data.track.artist || 'Unknown Artist',
-            duration: data.track.duration ? `${Math.floor(data.track.duration / 60)}:${String(Math.floor(data.track.duration % 60)).padStart(2, '0')}` : '0:00',
+            id: musicData.track.track_id || musicData.track.title || '',
+            title: musicData.track.title || '',
+            artist: musicData.track.artist || 'Unknown Artist',
+            duration: musicData.track.duration ? `${Math.floor(musicData.track.duration / 60)}:${String(Math.floor(musicData.track.duration % 60)).padStart(2, '0')}` : '0:00',
             file: filename,
-            path: data.track.filepath || ''
+            path: musicData.track.filepath || ''
           }
           console.log('🎵 [MusicTab] Created track object:', track)
           setCurrentTrack(track)
           console.log('🎵 [MusicTab] Updated currentTrack state')
         }
-      } else if (data.action === 'stopped') {
+      } else if (musicData.action === 'stopped') {
         console.log('🎵 [MusicTab] Music stopped event received')
         setIsPlaying(false)
+        setIsPaused(false)
         setProgress(0)
+        setCurrentTime('0:00')
+      } else if (musicData.action === 'paused') {
+        console.log('🎵 [MusicTab] Music paused event received')
+        setIsPlaying(false)
+        setIsPaused(true)
+      } else if (musicData.action === 'resumed') {
+        console.log('🎵 [MusicTab] Music resumed event received')
+        setIsPlaying(true)
+        setIsPaused(false)
       } else {
-        console.log('🎵 [MusicTab] Unknown action received:', data.action)
+        console.log('🎵 [MusicTab] Unknown action received:', musicData.action)
       }
       
-      if (data.volume !== undefined) {
-        setVolume(data.volume)
+      if (musicData.volume !== undefined) {
+        setVolume(musicData.volume)
       }
     }
 
@@ -84,19 +100,52 @@ export default function MusicTab() {
       loadMusicLibrary()
     }
 
+    const handleMusicProgress = (data: any) => {
+      // WebBridge wraps payload in {topic, data, timestamp} structure
+      const progressData = data.data || data
+      
+      if (progressData.action === 'progress') {
+        // Update progress bar with real-time position
+        setProgress(progressData.progress_percent || 0)
+        
+        // Update current time display
+        const positionSec = progressData.position_sec || 0
+        const minutes = Math.floor(positionSec / 60)
+        const seconds = Math.floor(positionSec % 60)
+        setCurrentTime(`${minutes}:${String(seconds).padStart(2, '0')}`)
+        
+        console.log(`🎵 [MusicTab] Progress update: ${progressData.position_sec?.toFixed(1)}s / ${progressData.duration_sec?.toFixed(1)}s (${progressData.progress_percent?.toFixed(1)}%)`)
+      }
+    }
+
     const handleServiceStatus = (data: any) => {
       if (data.service === 'MusicController') {
         setMusicServiceStatus(data.status === 'RUNNING' ? 'online' : 'offline')
       }
     }
 
+    const handleMusicQueue = (data: any) => {
+      console.log('🎵 [MusicTab] Queue update received:', data)
+      // Handle queue updates from backend
+      const queueData = data.data || data
+      if (queueData.action === 'queue_updated') {
+        console.log('🎵 [MusicTab] Queue updated - length:', queueData.queue_length)
+        // Note: We're managing queue locally for UI responsiveness
+        // Backend queue is separate for actual playback logic
+      }
+    }
+
     socket.on('music_status', handleMusicStatus)
+    socket.on('music_progress', handleMusicProgress)
     socket.on('music_library_updated', handleMusicLibraryUpdated)
+    socket.on('music_queue', handleMusicQueue)
     socket.on('service_status_update', handleServiceStatus)
 
     return () => {
       socket.off('music_status', handleMusicStatus)
+      socket.off('music_progress', handleMusicProgress)
       socket.off('music_library_updated', handleMusicLibraryUpdated)
+      socket.off('music_queue', handleMusicQueue)
       socket.off('service_status_update', handleServiceStatus)
     }
   }, [socket])
@@ -126,10 +175,17 @@ export default function MusicTab() {
     if (!socket) return
 
     if (isPlaying) {
+      // Currently playing, so pause it
       socket.emit('music_command', {
         action: 'pause'
       })
+    } else if (isPaused && currentTrack) {
+      // Currently paused, so resume
+      socket.emit('music_command', {
+        action: 'resume'
+      })
     } else if (currentTrack) {
+      // Not playing and not paused, so start playing
       socket.emit('music_command', {
         action: 'play',
         track_name: currentTrack.title,
@@ -205,7 +261,7 @@ export default function MusicTab() {
                 ></div>
               </div>
               <div className="flex justify-between text-xs text-sw-blue-400">
-                <span>0:00</span>
+                <span>{currentTime}</span>
                 <span>{currentTrack.duration}</span>
               </div>
             </div>
@@ -224,7 +280,7 @@ export default function MusicTab() {
                 className="sw-button w-12 h-12 rounded-full text-lg"
                 disabled={!currentTrack}
               >
-                {isPlaying ? '⏸' : '▶'}
+                {isPlaying ? '⏸' : isPaused ? '▶' : '▶'}
               </button>
               <button 
                 onClick={handleNext}
@@ -295,6 +351,15 @@ export default function MusicTab() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
+                          // Send queue command to backend
+                          if (socket) {
+                            socket.emit('music_command', {
+                              action: 'queue',
+                              track_name: track.title,
+                              track_id: track.id
+                            })
+                          }
+                          // Also update local queue for UI feedback
                           setQueue(prev => [...prev, track])
                         }}
                         className="text-sw-blue-400 hover:text-sw-blue-300 text-sm"

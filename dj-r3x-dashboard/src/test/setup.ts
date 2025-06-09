@@ -6,12 +6,14 @@ import * as matchers from '@testing-library/jest-dom/matchers'
 expect.extend(matchers)
 
 // Clean up after each test case
-afterEach(() => {
-  cleanup()
-})
+afterEach(cleanup)
 
 // Mock IntersectionObserver
-global.IntersectionObserver = class IntersectionObserver {
+(global as any).IntersectionObserver = class IntersectionObserver {
+  root = null
+  rootMargin = ''
+  thresholds = []
+  
   constructor() {}
   observe() {
     return null
@@ -21,6 +23,9 @@ global.IntersectionObserver = class IntersectionObserver {
   }
   unobserve() {
     return null
+  }
+  takeRecords() {
+    return []
   }
 }
 

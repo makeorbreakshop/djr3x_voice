@@ -12,6 +12,7 @@ const tabs = [
   { id: 'voice' as TabType, label: 'VOICE', description: 'Audio Processing' },
   { id: 'music' as TabType, label: 'MUSIC', description: 'Playback Control' },
   { id: 'dj' as TabType, label: 'DJ MODE', description: 'Auto DJ' },
+  { id: 'show' as TabType, label: 'SHOW', description: 'Entertainment Display' },
   { id: 'system' as TabType, label: 'SYSTEM', description: 'Debug & Logs' },
 ]
 

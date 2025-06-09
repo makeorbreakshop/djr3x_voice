@@ -3,14 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "npm run schemas:generate && next dev",
+    "build": "npm run schemas:generate && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "schemas:generate": "cd ../cantina_os && python scripts/generate_typescript_schemas.py",
+    "schemas:watch": "cd ../cantina_os && python scripts/generate_typescript_schemas.py --watch",
+    "prebuild": "npm run schemas:generate",
+    "predev": "npm run schemas:generate"
   },
   "dependencies": {
     "next": "^14.2.0",

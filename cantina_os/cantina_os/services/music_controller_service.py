@@ -93,6 +93,9 @@ class MusicControllerService(BaseService):
         self.is_crossfading = False
         self.dj_mode_active = False
         self.track_end_timer: Optional[asyncio.Task] = None # Use Optional[asyncio.Task]
+        self._progress_task: Optional[asyncio.Task] = None  # Progress tracking task
+        self.is_paused = False  # Track pause state
+        self.play_queue: List[MusicTrack] = []  # Simple play queue
         
         # Create VLC instance with proper configuration and fallback options
         self.vlc_instance = self._create_vlc_instance()
@@ -219,6 +222,9 @@ class MusicControllerService(BaseService):
         register_service_commands(self, self._event_bus)
         self.logger.info("Auto-registered music commands using decorators")
         
+        # Start background progress tracking task
+        self._progress_task = asyncio.create_task(self._progress_tracking_loop())
+        
         # Set service status to running
         self.logger.info(f"Music controller started with {len(self.tracks)} tracks loaded")
         await self._emit_status(ServiceStatus.RUNNING, "Music controller started")
@@ -226,7 +232,16 @@ class MusicControllerService(BaseService):
     async def stop(self):
         """Stop the music controller service and cleanup resources."""
         try:
-            # Cancel track end timer first
+            # Cancel progress tracking task first
+            if self._progress_task and not self._progress_task.done():
+                self._progress_task.cancel()
+                try:
+                    await self._progress_task
+                except asyncio.CancelledError:
+                    pass
+                self._progress_task = None
+            
+            # Cancel track end timer
             if self.track_end_timer and not self.track_end_timer.done():
                 self.track_end_timer.cancel()
                 try:
@@ -503,8 +518,23 @@ class MusicControllerService(BaseService):
             if payload["action"] == "play":
                 await self._handle_play_request(MusicCommandPayload(**payload))
                 return
+            elif payload["action"] == "pause":
+                await self._handle_pause_request()
+                return
+            elif payload["action"] == "resume":
+                await self._handle_resume_request()
+                return
             elif payload["action"] == "stop":
                 await self._handle_stop_request(MusicCommandPayload(**payload))
+                return
+            elif payload["action"] == "next":
+                await self._handle_next_track_request()
+                return
+            elif payload["action"] == "queue":
+                await self._handle_queue_request(MusicCommandPayload(**payload))
+                return
+            elif payload["action"] == "volume":
+                await self._handle_volume_request(payload)
                 return
             elif payload["action"] == "crossfade":
                 # Handle crossfade action from TimelineExecutorService
@@ -821,8 +851,9 @@ class MusicControllerService(BaseService):
             self.player = None
             self.current_track = None
             
-            # Reset audio ducking state
+            # Reset audio ducking and pause state
             self.is_ducking = False
+            self.is_paused = False
             
             # Emit stopped event
             await self.emit(
@@ -871,6 +902,175 @@ class MusicControllerService(BaseService):
                 "service": self.service_name
             }
         )
+
+    async def _handle_pause_request(self) -> None:
+        """Handle pause request - pause current playback."""
+        try:
+            if not self.player or not self.player.is_playing():
+                await self._send_error("No music is currently playing")
+                return
+                
+            self.player.pause()
+            self.is_paused = True
+            
+            # Emit paused event
+            await self.emit(
+                EventTopics.MUSIC_PLAYBACK_PAUSED,
+                {
+                    "track_name": self.current_track.name if self.current_track else "Unknown"
+                }
+            )
+            
+            await self._send_success("Music paused")
+            
+        except Exception as e:
+            self.logger.error(f"Error pausing playback: {e}")
+            await self._send_error(f"Error pausing music: {str(e)}")
+
+    async def _handle_resume_request(self) -> None:
+        """Handle resume request - resume paused playback."""
+        try:
+            if not self.player:
+                await self._send_error("No music to resume")
+                return
+                
+            if not self.is_paused:
+                await self._send_error("Music is not paused")
+                return
+                
+            self.player.play()
+            self.is_paused = False
+            
+            # Emit resumed event
+            await self.emit(
+                EventTopics.MUSIC_PLAYBACK_RESUMED,
+                {
+                    "track_name": self.current_track.name if self.current_track else "Unknown"
+                }
+            )
+            
+            await self._send_success("Music resumed")
+            
+        except Exception as e:
+            self.logger.error(f"Error resuming playback: {e}")
+            await self._send_error(f"Error resuming music: {str(e)}")
+
+    async def _handle_next_track_request(self) -> None:
+        """Handle next track request - play next track from queue or random."""
+        try:
+            next_track = None
+            
+            # First check if there's a track in the queue
+            if self.play_queue:
+                next_track = self.play_queue.pop(0)
+                self.logger.info(f"Playing next track from queue: {next_track.name}")
+            else:
+                # No queue, pick a random different track
+                available_tracks = [track for track in self.tracks.values() 
+                                  if track != self.current_track]
+                if available_tracks:
+                    import random
+                    next_track = random.choice(available_tracks)
+                    self.logger.info(f"Playing random next track: {next_track.name}")
+                else:
+                    await self._send_error("No other tracks available")
+                    return
+            
+            # Play the next track
+            if next_track:
+                await self._play_track_by_name(next_track.name, source="next")
+            
+        except Exception as e:
+            self.logger.error(f"Error playing next track: {e}")
+            await self._send_error(f"Error playing next track: {str(e)}")
+
+    async def _handle_queue_request(self, payload: MusicCommandPayload) -> None:
+        """Handle queue request - add track to play queue."""
+        try:
+            song_query = payload.song_query
+            if not song_query:
+                await self._send_error("No track specified for queue")
+                return
+                
+            success = await self.add_to_queue(song_query)
+            if success:
+                await self._send_success(f"Added '{song_query}' to queue")
+            else:
+                await self._send_error(f"Could not add '{song_query}' to queue")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling queue request: {e}")
+            await self._send_error(f"Error adding to queue: {str(e)}")
+
+    async def _handle_volume_request(self, payload: Dict[str, Any]) -> None:
+        """Handle volume adjustment request."""
+        try:
+            volume_level = payload.get("volume")
+            if volume_level is None:
+                await self._send_error("No volume level specified")
+                return
+            
+            # Convert 0.0-1.0 range to 0-100 range for VLC
+            if isinstance(volume_level, float) and 0.0 <= volume_level <= 1.0:
+                vlc_volume = int(volume_level * 100)
+            elif isinstance(volume_level, int) and 0 <= volume_level <= 100:
+                vlc_volume = volume_level
+            else:
+                await self._send_error("Volume level must be between 0.0 and 1.0 (float) or 0 and 100 (int)")
+                return
+            
+            # Set volume on active player
+            if self.player and self.current_track:
+                self.player.audio_set_volume(vlc_volume)
+                
+                # Update normal_volume for future tracks (but maintain ducking_volume separate)
+                if not self.is_ducking:
+                    self.normal_volume = vlc_volume
+                
+                self.logger.info(f"Volume set to {vlc_volume}% (normalized: {volume_level})")
+                await self._send_success(f"Volume set to {vlc_volume}%")
+                
+                # Emit volume change event for dashboard
+                await self.emit(
+                    EventTopics.MUSIC_VOLUME_CHANGED,
+                    {
+                        "volume": volume_level,  # Normalized 0.0-1.0
+                        "vlc_volume": vlc_volume,  # 0-100 for VLC
+                        "is_ducking": self.is_ducking
+                    }
+                )
+            else:
+                await self._send_error("No music currently playing")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling volume request: {e}")
+            await self._send_error(f"Error setting volume: {str(e)}")
+
+    async def add_to_queue(self, track_name: str) -> bool:
+        """Add a track to the play queue."""
+        try:
+            track = self.tracks.get(track_name)
+            if not track:
+                self.logger.warning(f"Track not found for queue: {track_name}")
+                return False
+                
+            self.play_queue.append(track)
+            self.logger.info(f"Added to queue: {track_name}")
+            
+            # Emit queue updated event
+            await self.emit(
+                EventTopics.MUSIC_QUEUE_UPDATED,
+                {
+                    "queue_length": len(self.play_queue),
+                    "added_track": track_name
+                }
+            )
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error adding track to queue: {e}")
+            return False
 
     def _get_available_tracks(self) -> List[str]:
         """Get list of available tracks"""
@@ -1468,6 +1668,37 @@ class MusicControllerService(BaseService):
              progress_data['next_track'] = self.next_track.dict()
 
         return progress_data
+
+    async def _progress_tracking_loop(self) -> None:
+        """Background loop to emit progress updates while music is playing."""
+        while True:
+            try:
+                # Only emit progress if music is actively playing
+                if self.player and self.player.is_playing() and self.current_track:
+                    progress_data = await self.get_track_progress()
+                    
+                    # Emit progress event for WebBridge to forward to dashboard
+                    await self.emit(
+                        EventTopics.MUSIC_PROGRESS,
+                        {
+                            "track": progress_data.get("current_track"),
+                            "position_sec": progress_data.get("position_sec", 0.0),
+                            "duration_sec": progress_data.get("duration_sec", 0.0),
+                            "time_remaining_sec": progress_data.get("time_remaining_sec", 0.0),
+                            "progress_percent": (progress_data.get("position_sec", 0.0) / progress_data.get("duration_sec", 1.0)) * 100 if progress_data.get("duration_sec", 0.0) > 0 else 0.0
+                        }
+                    )
+                
+                # Update every 1 second for smooth progress bar
+                await asyncio.sleep(1.0)
+                
+            except asyncio.CancelledError:
+                # Task was cancelled, break the loop
+                break
+            except Exception as e:
+                # Log error but continue loop
+                self.logger.debug(f"Error in progress tracking: {e}")
+                await asyncio.sleep(1.0)
 
     async def _handle_dj_start_command(self) -> None:
         """Handle the 'dj start' CLI command to activate DJ mode"""

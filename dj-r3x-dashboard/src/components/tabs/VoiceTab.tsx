@@ -2,14 +2,18 @@
 
 import { useEffect, useState } from 'react'
 import { useSocketContext } from '@/contexts/SocketContext'
+import { VoiceActionEnum, SystemActionEnum, SystemModeEnum } from '../../types/schemas'
 
 export default function VoiceTab() {
   const { 
     voiceStatus, 
     lastTranscription, 
     sendVoiceCommand,
+    sendSystemCommand,
     connected,
-    systemStatus 
+    systemStatus,
+    systemMode,
+    modeTransition 
   } = useSocketContext()
 
   // Track processing pipeline status
@@ -21,44 +25,143 @@ export default function VoiceTab() {
     audioPlayback: 'idle'
   })
 
-  // Update pipeline status based on voice events
+  // Track interaction phase for two-phase recording
+  const [interactionPhase, setInteractionPhase] = useState<'idle' | 'engaged' | 'recording'>('idle')
+
+  // Update interaction phase based on system mode
+  useEffect(() => {
+    if (systemMode.current_mode === 'INTERACTIVE' && voiceStatus.status === 'recording') {
+      setInteractionPhase('recording')
+    } else if (systemMode.current_mode === 'INTERACTIVE') {
+      setInteractionPhase('engaged')
+    } else {
+      setInteractionPhase('idle')
+    }
+  }, [systemMode.current_mode, voiceStatus.status])
+
+  // Update pipeline status based on voice events and completion feedback
   useEffect(() => {
     if (voiceStatus.status === 'recording') {
       setPipelineStatus(prev => ({
         ...prev,
         voiceInput: 'active',
         speechRecognition: 'idle',
-        aiProcessing: 'idle'
+        aiProcessing: 'idle',
+        responseSynthesis: 'idle',
+        audioPlayback: 'idle'
       }))
     } else if (voiceStatus.status === 'processing') {
       setPipelineStatus(prev => ({
         ...prev,
         voiceInput: 'idle',
         speechRecognition: 'processing',
-        aiProcessing: lastTranscription?.final ? 'processing' : 'idle'
+        aiProcessing: lastTranscription?.final ? 'processing' : 'idle',
+        responseSynthesis: 'idle',
+        audioPlayback: 'idle'
       }))
-    } else {
+    } else if (voiceStatus.status === 'idle' && systemMode.current_mode === 'IDLE') {
+      // Voice interaction completed, reset pipeline
       setPipelineStatus(prev => ({
         ...prev,
         voiceInput: 'idle',
-        speechRecognition: 'idle'
+        speechRecognition: 'idle',
+        aiProcessing: 'idle',
+        responseSynthesis: 'idle',
+        audioPlayback: 'idle'
       }))
     }
-  }, [voiceStatus, lastTranscription])
+  }, [voiceStatus, lastTranscription, systemMode.current_mode])
+
+  // Update pipeline status for speech synthesis and playback based on system mode transitions
+  useEffect(() => {
+    if (modeTransition?.status === 'completed' && modeTransition?.new_mode === 'IDLE') {
+      // Voice interaction completed - show completion status briefly
+      setPipelineStatus(prev => ({
+        ...prev,
+        aiProcessing: 'idle',
+        responseSynthesis: 'idle',
+        audioPlayback: 'idle'
+      }))
+    } else if (modeTransition?.status === 'started' && modeTransition?.old_mode === 'INTERACTIVE') {
+      // System transitioning back to IDLE - show synthesis and playback as active
+      setPipelineStatus(prev => ({
+        ...prev,
+        responseSynthesis: 'active',
+        audioPlayback: 'active'
+      }))
+    } else if (systemMode.current_mode === 'INTERACTIVE' && voiceStatus.status === 'idle' && lastTranscription?.final) {
+      // AI processing and speech synthesis active
+      setPipelineStatus(prev => ({
+        ...prev,
+        aiProcessing: 'processing',
+        responseSynthesis: 'processing'
+      }))
+    }
+  }, [modeTransition, systemMode.current_mode, voiceStatus.status, lastTranscription])
 
   const isRecording = voiceStatus.status === 'recording'
   const isProcessing = voiceStatus.status === 'processing'
 
-  const handleStartRecording = () => {
-    sendVoiceCommand('start')
-  }
-
-  const handleStopRecording = () => {
-    sendVoiceCommand('stop')
+  const handleVoiceInteraction = () => {
+    if (interactionPhase === 'idle') {
+      // Phase 1: Engage INTERACTIVE mode
+      sendSystemCommand(SystemActionEnum.SET_MODE, { mode: SystemModeEnum.INTERACTIVE })
+    } else if (interactionPhase === 'engaged') {
+      // Phase 2: Start recording
+      sendVoiceCommand(VoiceActionEnum.START)
+    } else if (interactionPhase === 'recording') {
+      // Stop recording
+      sendVoiceCommand(VoiceActionEnum.STOP)
+    }
   }
 
   return (
     <div className="space-y-6">
+      {/* System Mode Display */}
+      <div className="sw-panel">
+        <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
+          SYSTEM MODE STATUS
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <div className="text-sm text-sw-blue-300">Current Mode</div>
+            <div className={`text-2xl font-bold ${
+              systemMode.current_mode === 'IDLE' ? 'text-sw-blue-400' :
+              systemMode.current_mode === 'AMBIENT' ? 'text-sw-yellow' :
+              systemMode.current_mode === 'INTERACTIVE' ? 'text-sw-green' : 'text-sw-blue-400'
+            }`}>
+              {systemMode.current_mode}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm text-sw-blue-300">Interaction Phase</div>
+            <div className={`text-lg font-semibold ${
+              interactionPhase === 'idle' ? 'text-sw-blue-400' :
+              interactionPhase === 'engaged' ? 'text-sw-yellow' :
+              interactionPhase === 'recording' ? 'text-sw-green animate-pulse' : 'text-sw-blue-400'
+            }`}>
+              {interactionPhase.toUpperCase()}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm text-sw-blue-300">Mode Transition</div>
+            <div className={`text-sm ${
+              modeTransition?.status === 'started' ? 'text-sw-yellow' :
+              modeTransition?.status === 'completed' ? 'text-sw-green' :
+              modeTransition?.status === 'failed' ? 'text-sw-red' : 'text-sw-blue-400'
+            }`}>
+              {modeTransition ? 
+                `${modeTransition.old_mode} → ${modeTransition.new_mode}` : 
+                'No active transition'
+              }
+            </div>
+            {modeTransition?.error && (
+              <div className="text-xs text-sw-red/70">{modeTransition.error}</div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Voice Control */}
       <div className="sw-panel">
         <h3 className="text-lg font-semibold text-sw-blue-100 mb-6 sw-text-glow">
@@ -67,17 +170,22 @@ export default function VoiceTab() {
         
         <div className="flex justify-center mb-6">
           <button
-            onClick={isRecording ? handleStopRecording : handleStartRecording}
+            onClick={handleVoiceInteraction}
+            disabled={!connected}
             className={`
               w-32 h-32 rounded-full text-white font-bold text-lg
-              transition-all duration-200 transform hover:scale-105
-              ${isRecording 
+              transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed
+              ${interactionPhase === 'recording' 
                 ? 'bg-sw-red hover:bg-red-600 animate-pulse' 
+                : interactionPhase === 'engaged'
+                ? 'bg-sw-green hover:bg-green-600 sw-border-glow animate-pulse'
                 : 'bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow'
               }
             `}
           >
-            {isRecording ? 'STOP' : 'RECORD'}
+            {interactionPhase === 'recording' ? 'STOP' : 
+             interactionPhase === 'engaged' ? 'RECORD' : 
+             'ENGAGE'}
           </button>
         </div>
 
@@ -85,14 +193,21 @@ export default function VoiceTab() {
           <p className="text-sm text-sw-blue-300/70">
             {!connected 
               ? 'Bridge service disconnected'
-              : isRecording 
+              : interactionPhase === 'recording'
                 ? 'Recording in progress... Click to stop' 
-                : 'Click to start voice recording'
+                : interactionPhase === 'engaged'
+                ? 'System ready for voice input. Click to start recording.'
+                : 'Click to engage INTERACTIVE mode'
             }
           </p>
           {!connected && (
             <p className="text-xs text-sw-red/70 mt-1">
               Connect to CantinaOS to enable voice recording
+            </p>
+          )}
+          {connected && interactionPhase === 'idle' && (
+            <p className="text-xs text-sw-blue-400/70 mt-1">
+              Two-phase interaction: Engage → Record (matches CLI behavior)
             </p>
           )}
         </div>

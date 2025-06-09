@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSocketContext } from '../../contexts/SocketContext'
 import SystemModeControl from '../SystemModeControl'
+import { SystemActionEnum, SystemModeEnum } from '../../types/schemas'
 
 interface ServiceData {
   name: string
@@ -495,7 +496,8 @@ export default function SystemTab() {
         currentMode={systemMode?.current_mode || 'IDLE'}
         onModeChange={(mode) => {
           console.log('Mode change requested:', mode)
-          sendSystemCommand('set_mode', mode.toLowerCase())
+          const systemMode = mode.toUpperCase() as keyof typeof SystemModeEnum
+          sendSystemCommand(SystemActionEnum.SET_MODE, { mode: SystemModeEnum[systemMode] })
         }}
         disabled={!socket}
       />

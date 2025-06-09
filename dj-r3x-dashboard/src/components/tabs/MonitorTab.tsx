@@ -124,7 +124,7 @@ export default function MonitorTab() {
           />
           <MetricCard 
             label="Dashboard Clients" 
-            value={systemStatus?.dashboard_clients?.toString() || "0"} 
+            value={(systemStatus as any)?.dashboard_clients?.toString() || "0"} 
           />
           <MetricCard 
             label="Events/Min" 

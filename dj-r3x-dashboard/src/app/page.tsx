@@ -9,9 +9,10 @@ import MonitorTab from '@/components/tabs/MonitorTab'
 import VoiceTab from '@/components/tabs/VoiceTab'
 import MusicTab from '@/components/tabs/MusicTab'
 import DJTab from '@/components/tabs/DJTab'
+import ShowTab from '@/components/tabs/ShowTab'
 import SystemTab from '@/components/tabs/SystemTab'
 
-export type TabType = 'monitor' | 'voice' | 'music' | 'dj' | 'system'
+export type TabType = 'monitor' | 'voice' | 'music' | 'dj' | 'show' | 'system'
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabType>('monitor')
@@ -26,6 +27,8 @@ export default function Home() {
         return <MusicTab />
       case 'dj':
         return <DJTab />
+      case 'show':
+        return <ShowTab />
       case 'system':
         return <SystemTab />
       default:
