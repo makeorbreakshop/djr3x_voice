@@ -220,3 +220,11 @@ class EventTopics(str, Enum):
 
     # Dashboard events
     DASHBOARD_LOG = "/dashboard/log"
+
+    # Web Dashboard Status Events (outbound to web frontend)
+    WEB_VOICE_STATUS = "web.voice.status"
+    WEB_MUSIC_STATUS = "web.music.status"
+    WEB_SYSTEM_STATUS = "web.system.status"
+    WEB_DJ_STATUS = "web.dj.status"
+    WEB_SERVICE_STATUS = "web.service.status"
+    WEB_PROGRESS_UPDATE = "web.progress.update"
