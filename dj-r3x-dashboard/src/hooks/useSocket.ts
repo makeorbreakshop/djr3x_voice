@@ -174,7 +174,10 @@ export const useSocket = () => {
 
     // Music events
     newSocket.on('music_status', (data: MusicStatus) => {
-      setMusicStatus(data)
+      const unwrappedData = (data as any).data || data
+      console.log('🎵 [useSocket] Music status received:', data)
+      console.log('🎵 [useSocket] Unwrapped music status:', unwrappedData)
+      setMusicStatus(unwrappedData)
     })
 
     // DJ events
