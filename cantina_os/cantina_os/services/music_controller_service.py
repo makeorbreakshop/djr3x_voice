@@ -93,9 +93,15 @@ class MusicControllerService(BaseService):
         self.is_crossfading = False
         self.dj_mode_active = False
         self.track_end_timer: Optional[asyncio.Task] = None # Use Optional[asyncio.Task]
-        self._progress_task: Optional[asyncio.Task] = None  # Progress tracking task
+        # REMOVED: self._progress_task (Phase 3.1 - Progress tracking now client-side)
         self.is_paused = False  # Track pause state
         self.play_queue: List[MusicTrack] = []  # Simple play queue
+        
+        # Timer-based progress tracking (replaces unreliable VLC timing)
+        self._playback_start_time: Optional[float] = None  # System time when playback started
+        self._pause_start_time: Optional[float] = None  # System time when paused
+        self._total_pause_duration: float = 0.0  # Total time spent paused
+        self._last_known_position: float = 0.0  # Last calculated position before pause
         
         # Create VLC instance with proper configuration and fallback options
         self.vlc_instance = self._create_vlc_instance()
@@ -222,8 +228,9 @@ class MusicControllerService(BaseService):
         register_service_commands(self, self._event_bus)
         self.logger.info("Auto-registered music commands using decorators")
         
-        # Start background progress tracking task
-        self._progress_task = asyncio.create_task(self._progress_tracking_loop())
+        # REMOVED: Background progress tracking task (Phase 3.1 - Music Progress System Cleanup)
+        # Progress tracking is now handled client-side in the web dashboard
+        # Server-side progress events were causing CLI event flooding (60+ events/min)
         
         # Set service status to running
         self.logger.info(f"Music controller started with {len(self.tracks)} tracks loaded")
@@ -232,14 +239,8 @@ class MusicControllerService(BaseService):
     async def stop(self):
         """Stop the music controller service and cleanup resources."""
         try:
-            # Cancel progress tracking task first
-            if self._progress_task and not self._progress_task.done():
-                self._progress_task.cancel()
-                try:
-                    await self._progress_task
-                except asyncio.CancelledError:
-                    pass
-                self._progress_task = None
+            # REMOVED: Progress tracking task cleanup (Phase 3.1 - Music Progress System Cleanup)
+            # Server-side progress task was removed - progress is now calculated client-side
             
             # Cancel track end timer
             if self.track_end_timer and not self.track_end_timer.done():
@@ -511,12 +512,19 @@ class MusicControllerService(BaseService):
         """
         Legacy music command handler - dispatches to appropriate methods.
         """
-        self.logger.debug(f"Legacy music handler received: {payload}")
+        self.logger.info(f"[MUSIC_COMMAND] Received music command: {payload}")
         
         # Handle action-based payloads (from other services)
         if isinstance(payload, dict) and "action" in payload:
+            self.logger.info(f"[MUSIC_COMMAND] Processing action: {payload['action']}")
             if payload["action"] == "play":
-                await self._handle_play_request(MusicCommandPayload(**payload))
+                self.logger.info(f"[MUSIC_COMMAND] Play request - song_query: {payload.get('song_query', 'NONE')}")
+                try:
+                    await self._handle_play_request(MusicCommandPayload(**payload))
+                except Exception as e:
+                    self.logger.error(f"[MUSIC_COMMAND] Error creating MusicCommandPayload: {e}")
+                    self.logger.error(f"[MUSIC_COMMAND] Payload was: {payload}")
+                    await self._send_error(f"Invalid play command: {str(e)}")
                 return
             elif payload["action"] == "pause":
                 await self._handle_pause_request()
@@ -657,10 +665,12 @@ class MusicControllerService(BaseService):
             source: Source of the play request (default: "cli" for CLI commands)
         """
         try:
-            self.logger.info(f"Smart track selection for query: '{track_query}'")
+            self.logger.info(f"[SMART_PLAY] Smart track selection for query: '{track_query}', source: {source}")
+            self.logger.info(f"[SMART_PLAY] Number of tracks available: {len(self.tracks)}")
             
             # If tracks list is empty, return error
             if not self.tracks:
+                self.logger.error("[SMART_PLAY] No tracks available!")
                 await self._send_error("No music tracks available. Please install music first.")
                 return
                 
@@ -681,9 +691,11 @@ class MusicControllerService(BaseService):
                     
             # Check for direct track name match
             if track_query in self.tracks:
-                self.logger.info(f"Found exact track name match: {track_query}")
+                self.logger.info(f"[SMART_PLAY] Found exact track name match: {track_query}")
                 await self._play_track_by_name(track_query, source)
                 return
+            else:
+                self.logger.info(f"[SMART_PLAY] No exact match for '{track_query}' in tracks: {list(self.tracks.keys())[:5]}...")
                 
             # Try fuzzy matching by track name
             matches = []
@@ -725,6 +737,8 @@ class MusicControllerService(BaseService):
             source: Source of the play request (cli, voice, dj)
         """
         try:
+            self.logger.info(f"[PLAY_BY_NAME] Attempting to play track: '{track_name}' from source: {source}")
+            
             # First, try direct lookup
             track = self.tracks.get(track_name)
             
@@ -744,11 +758,13 @@ class MusicControllerService(BaseService):
                 
                 if best_match:
                     track = self.tracks[best_match]
-                    self.logger.info(f"Fuzzy matched '{track_name}' to '{best_match}'")
+                    self.logger.info(f"[PLAY_BY_NAME] Fuzzy matched '{track_name}' to '{best_match}'")
                 else:
-                    self.logger.warning(f"No track found matching '{track_name}'")
+                    self.logger.warning(f"[PLAY_BY_NAME] No track found matching '{track_name}'")
                     await self._send_error(f"No track found matching '{track_name}'")
                     return
+            else:
+                self.logger.info(f"[PLAY_BY_NAME] Found track: {track.name} at path: {track.path}")
             
             # If we already have a track playing and DJ mode is active, crossfade
             if self.player and self.player.is_playing() and self.dj_mode_active:
@@ -762,9 +778,11 @@ class MusicControllerService(BaseService):
             
             # Check if VLC instance is available
             if not self.vlc_instance:
-                self.logger.error("VLC instance not available. Cannot play music.")
+                self.logger.error("[PLAY_BY_NAME] VLC instance not available. Cannot play music.")
                 await self._send_error("Music playback unavailable - VLC initialization failed")
                 return
+            else:
+                self.logger.info(f"[PLAY_BY_NAME] VLC instance available: {self.vlc_instance}")
             
             # Create a new media player
             self.player = self.vlc_instance.media_player_new()
@@ -781,6 +799,13 @@ class MusicControllerService(BaseService):
             # Start playback
             self.player.play()
             
+            # Initialize timer-based progress tracking
+            self._playback_start_time = time.time()
+            self._pause_start_time = None
+            self._total_pause_duration = 0.0
+            self._last_known_position = 0.0
+            self.is_paused = False
+            
             # Update current track
             self.current_track = track
             
@@ -789,7 +814,9 @@ class MusicControllerService(BaseService):
             payload = {
                 "track": track_data.model_dump(),
                 "source": source,
-                "mode": self.current_mode
+                "mode": self.current_mode,
+                "start_timestamp": self._playback_start_time,  # Phase 2.1: Add start timestamp for client-side progress
+                "duration": track.duration  # Phase 2.1: Add duration for client-side calculations
             }
             self.logger.info(f"[MusicController] Emitting MUSIC_PLAYBACK_STARTED with payload: {payload}")
             await self.emit(EventTopics.MUSIC_PLAYBACK_STARTED, payload)
@@ -855,6 +882,12 @@ class MusicControllerService(BaseService):
             self.is_ducking = False
             self.is_paused = False
             
+            # Reset timer-based progress tracking
+            self._playback_start_time = None
+            self._pause_start_time = None
+            self._total_pause_duration = 0.0
+            self._last_known_position = 0.0
+            
             # Emit stopped event
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_STOPPED,
@@ -910,14 +943,24 @@ class MusicControllerService(BaseService):
                 await self._send_error("No music is currently playing")
                 return
                 
-            self.player.pause()
+            # Calculate current position before pausing
+            if self._playback_start_time and not self.is_paused:
+                current_time = time.time()
+                self._last_known_position = (current_time - self._playback_start_time - self._total_pause_duration)
+            
+            # Record pause start time for accurate tracking
+            self._pause_start_time = time.time()
             self.is_paused = True
             
-            # Emit paused event
+            self.player.pause()
+            
+            # Emit paused event with position tracking (Phase 2.2)
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_PAUSED,
                 {
-                    "track_name": self.current_track.name if self.current_track else "Unknown"
+                    "track_name": self.current_track.name if self.current_track else "Unknown",
+                    "paused_at_position": self._last_known_position,  # Phase 2.2: Add position tracking
+                    "timestamp": self._pause_start_time  # Phase 2.2: Add precise timestamp
                 }
             )
             
@@ -937,15 +980,24 @@ class MusicControllerService(BaseService):
             if not self.is_paused:
                 await self._send_error("Music is not paused")
                 return
-                
-            self.player.play()
-            self.is_paused = False
             
-            # Emit resumed event
+            # Calculate total pause duration for accurate position tracking
+            resume_timestamp = time.time()
+            if self._pause_start_time:
+                pause_duration = resume_timestamp - self._pause_start_time
+                self._total_pause_duration += pause_duration
+                self._pause_start_time = None
+            
+            self.is_paused = False
+            self.player.play()
+            
+            # Emit resumed event with position tracking (Phase 2.2)
             await self.emit(
                 EventTopics.MUSIC_PLAYBACK_RESUMED,
                 {
-                    "track_name": self.current_track.name if self.current_track else "Unknown"
+                    "track_name": self.current_track.name if self.current_track else "Unknown",
+                    "resumed_timestamp": resume_timestamp,  # Phase 2.2: Add resume timestamp
+                    "resume_position": self._last_known_position  # Phase 2.2: Add position where resumed
                 }
             )
             
@@ -1213,16 +1265,20 @@ class MusicControllerService(BaseService):
         """
         try:
             song_query = payload.song_query
-            self.logger.info(f"Handling play music request for query: {song_query}")
+            self.logger.info(f"[PLAY_REQUEST] Handling play music request for query: '{song_query}'")
+            self.logger.info(f"[PLAY_REQUEST] Available tracks: {list(self.tracks.keys())}")
             
             # Check if this is from a conversation (voice request)
-            source = "voice" if payload.conversation_id else "cli"
+            source = "voice" if payload.conversation_id else "web"  # Changed default from 'cli' to 'web' for dashboard
+            self.logger.info(f"[PLAY_REQUEST] Source: {source}")
             
             # Pass the source to ensure voice requests get proper handling
             await self._smart_play_track(song_query, source=source)
             
         except Exception as e:
-            self.logger.error(f"Error handling play music request: {e}")
+            self.logger.error(f"[PLAY_REQUEST] Error handling play music request: {e}")
+            import traceback
+            self.logger.error(f"[PLAY_REQUEST] Traceback: {traceback.format_exc()}")
             await self._send_error(f"Error playing music: {str(e)}")
         
     async def _cleanup_player(self, player):
@@ -1589,6 +1645,13 @@ class MusicControllerService(BaseService):
             self.current_track = next_track
             self.next_track = None
             
+            # Reset timer-based progress tracking for new track
+            self._playback_start_time = time.time()
+            self._pause_start_time = None
+            self._total_pause_duration = 0.0
+            self._last_known_position = 0.0
+            self.is_paused = False
+            
             # Emit crossfade complete event
             await self.emit(
                 EventTopics.CROSSFADE_COMPLETE,
@@ -1636,8 +1699,9 @@ class MusicControllerService(BaseService):
         # but don't assign it to a player until crossfade starts.
 
     async def get_track_progress(self) -> Dict[str, Any]:
-        """Gets the current playback progress of the current track.
+        """Gets the current playback progress using timer-based tracking.
 
+        Uses system time calculations instead of unreliable VLC timing methods.
         Returns a dictionary with track information and progress.
         """
         progress_data = {
@@ -1645,23 +1709,46 @@ class MusicControllerService(BaseService):
             "current_track": None,
             "position_sec": 0.0,
             "duration_sec": 0.0,
-            "time_remaining_sec": 0.0
+            "time_remaining_sec": 0.0,
+            "progress_percent": 0.0
         }
 
-        if self.player and self.player.is_playing():
-            progress_data['is_playing'] = True
+        # Check if we have an active player and current track
+        if self.player and self.current_track:
+            # Determine if actually playing (not paused or stopped)
+            is_actively_playing = self.player.is_playing() and not self.is_paused
+            progress_data['is_playing'] = is_actively_playing
             progress_data['current_track'] = self.current_track.dict() if self.current_track else None
-
-            # Get player state and position
-            # VLC player.get_time() returns milliseconds
-            # VLC player.get_length() returns milliseconds
-            current_time_ms = self.player.get_time()
-            total_length_ms = self.player.get_length()
-
-            if total_length_ms > 0:
-                progress_data['position_sec'] = current_time_ms / 1000.0
-                progress_data['duration_sec'] = total_length_ms / 1000.0
-                progress_data['time_remaining_sec'] = (total_length_ms - current_time_ms) / 1000.0
+            
+            # Use known track duration from metadata
+            track_duration = self.current_track.duration or 0.0
+            progress_data['duration_sec'] = track_duration
+            
+            # Calculate current position using timer-based tracking
+            if self._playback_start_time and track_duration > 0:
+                self.logger.info(f"[TIMER_DEBUG] Timer calculation: start_time={self._playback_start_time}, duration={track_duration}, paused={self.is_paused}")
+                
+                if self.is_paused:
+                    # Use last known position when paused
+                    current_position = self._last_known_position
+                    self.logger.info(f"[TIMER_DEBUG] Timer calculation (paused): using last_known_position={current_position}")
+                else:
+                    # Calculate current position: elapsed time minus total pause time
+                    current_time = time.time()
+                    elapsed_time = current_time - self._playback_start_time
+                    current_position = elapsed_time - self._total_pause_duration
+                    self.logger.info(f"[TIMER_DEBUG] Timer calculation (playing): current_time={current_time}, elapsed={elapsed_time:.1f}s, pause_time={self._total_pause_duration:.1f}s, position={current_position:.1f}s")
+                
+                # Ensure position doesn't exceed track duration
+                current_position = max(0.0, min(current_position, track_duration))
+                
+                progress_data['position_sec'] = current_position
+                progress_data['time_remaining_sec'] = max(0.0, track_duration - current_position)
+                progress_data['progress_percent'] = (current_position / track_duration) * 100.0 if track_duration > 0 else 0.0
+                
+                self.logger.info(f"[TIMER_DEBUG] Timer-based progress calculated: {current_position:.1f}s / {track_duration:.1f}s ({progress_data['progress_percent']:.1f}%)")
+            else:
+                self.logger.info(f"[TIMER_DEBUG] Timer calculation skipped: start_time={self._playback_start_time}, duration={track_duration}")
 
         # Include information about the next track if preloaded
         if self.next_track:
@@ -1669,36 +1756,10 @@ class MusicControllerService(BaseService):
 
         return progress_data
 
-    async def _progress_tracking_loop(self) -> None:
-        """Background loop to emit progress updates while music is playing."""
-        while True:
-            try:
-                # Only emit progress if music is actively playing
-                if self.player and self.player.is_playing() and self.current_track:
-                    progress_data = await self.get_track_progress()
-                    
-                    # Emit progress event for WebBridge to forward to dashboard
-                    await self.emit(
-                        EventTopics.MUSIC_PROGRESS,
-                        {
-                            "track": progress_data.get("current_track"),
-                            "position_sec": progress_data.get("position_sec", 0.0),
-                            "duration_sec": progress_data.get("duration_sec", 0.0),
-                            "time_remaining_sec": progress_data.get("time_remaining_sec", 0.0),
-                            "progress_percent": (progress_data.get("position_sec", 0.0) / progress_data.get("duration_sec", 1.0)) * 100 if progress_data.get("duration_sec", 0.0) > 0 else 0.0
-                        }
-                    )
-                
-                # Update every 1 second for smooth progress bar
-                await asyncio.sleep(1.0)
-                
-            except asyncio.CancelledError:
-                # Task was cancelled, break the loop
-                break
-            except Exception as e:
-                # Log error but continue loop
-                self.logger.debug(f"Error in progress tracking: {e}")
-                await asyncio.sleep(1.0)
+    # REMOVED: _progress_tracking_loop method (Phase 3.1 - Music Progress System Cleanup)
+    # This method was causing CLI event flooding with 60+ events per minute
+    # Progress tracking is now handled client-side in the web dashboard
+    # for better performance and reduced network traffic
 
     async def _handle_dj_start_command(self) -> None:
         """Handle the 'dj start' CLI command to activate DJ mode"""

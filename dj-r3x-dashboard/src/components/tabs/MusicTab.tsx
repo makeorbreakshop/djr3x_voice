@@ -27,6 +27,7 @@ export default function MusicTab() {
   const [volume, setVolume] = useState(75)
   const [progress, setProgress] = useState(0)
   const [currentTime, setCurrentTime] = useState('0:00')
+  const [isClient, setIsClient] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [tracks, setTracks] = useState<Track[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -34,6 +35,124 @@ export default function MusicTab() {
   const [vlcBackendStatus, setVlcBackendStatus] = useState('offline')
   const [queue, setQueue] = useState<Track[]>([])
   const [ducking, setDucking] = useState(false)
+
+  // Client-side progress tracking state (Phase 2.3)
+  const [progressTimer, setProgressTimer] = useState<NodeJS.Timeout | null>(null)
+  const [trackStartTime, setTrackStartTime] = useState<number | null>(null)
+  const [trackDuration, setTrackDuration] = useState<number | null>(null)
+  const [pausedAt, setPausedAt] = useState<number | null>(null)
+  const [totalPauseTime, setTotalPauseTime] = useState<number>(0)
+
+  // Client-side progress calculation functions (Phase 2.3)
+  const startProgressTracking = (startTimestamp: number, duration: number) => {
+    console.log('🎵 [ClientProgress] Starting client-side progress tracking', { startTimestamp, duration })
+    
+    // Clear any existing timer
+    if (progressTimer) {
+      clearInterval(progressTimer)
+    }
+    
+    // Set tracking state
+    setTrackStartTime(startTimestamp * 1000) // Convert to milliseconds
+    setTrackDuration(duration)
+    setPausedAt(null)
+    setTotalPauseTime(0)
+    
+    // Start progress timer (update every 100ms for smooth animation)
+    const timer = setInterval(() => {
+      updateProgress()
+    }, 100)
+    
+    setProgressTimer(timer)
+  }
+
+  const stopProgressTracking = () => {
+    console.log('🎵 [ClientProgress] Stopping client-side progress tracking')
+    
+    if (progressTimer) {
+      clearInterval(progressTimer)
+      setProgressTimer(null)
+    }
+    
+    // Reset all tracking state
+    setTrackStartTime(null)
+    setTrackDuration(null)
+    setPausedAt(null)
+    setTotalPauseTime(0)
+    setProgress(0)
+    setCurrentTime('0:00')
+  }
+
+  const pauseProgressTracking = (pausedAtPosition: number) => {
+    console.log('🎵 [ClientProgress] Pausing progress tracking at position:', pausedAtPosition)
+    
+    if (progressTimer) {
+      clearInterval(progressTimer)
+      setProgressTimer(null)
+    }
+    
+    setPausedAt(Date.now())
+  }
+
+  const resumeProgressTracking = (resumePosition: number) => {
+    console.log('🎵 [ClientProgress] Resuming progress tracking from position:', resumePosition)
+    
+    // Calculate total pause time and update tracking
+    if (pausedAt && trackStartTime) {
+      const pauseDuration = Date.now() - pausedAt
+      setTotalPauseTime(prev => prev + pauseDuration)
+    }
+    
+    setPausedAt(null)
+    
+    // Restart the timer
+    const timer = setInterval(() => {
+      updateProgress()
+    }, 100)
+    
+    setProgressTimer(timer)
+  }
+
+  const updateProgress = () => {
+    if (!trackStartTime || !trackDuration || pausedAt) {
+      return // Can't calculate progress without timing data or while paused
+    }
+    
+    const now = Date.now()
+    const elapsed = (now - trackStartTime - totalPauseTime) / 1000 // Convert to seconds
+    const currentPosition = Math.max(0, Math.min(elapsed, trackDuration))
+    
+    // Update progress percentage
+    const progressPercent = (currentPosition / trackDuration) * 100
+    setProgress(progressPercent)
+    
+    // Update current time display
+    const minutes = Math.floor(currentPosition / 60)
+    const seconds = Math.floor(currentPosition % 60)
+    setCurrentTime(`${minutes}:${String(seconds).padStart(2, '0')}`)
+    
+    // Check if track has ended
+    if (currentPosition >= trackDuration) {
+      console.log('🎵 [ClientProgress] Track ended, stopping progress tracking')
+      stopProgressTracking()
+      setIsPlaying(false)
+      setIsPaused(false)
+    }
+  }
+
+  // Cleanup timer on component unmount
+  useEffect(() => {
+    return () => {
+      if (progressTimer) {
+        clearInterval(progressTimer)
+      }
+    }
+  }, [progressTimer])
+
+  // Client-side hydration fix
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
 
   // Load music library on component mount
   useEffect(() => {
@@ -71,21 +190,34 @@ export default function MusicTab() {
           console.log('🎵 [MusicTab] Created track object:', track)
           setCurrentTrack(track)
           console.log('🎵 [MusicTab] Updated currentTrack state')
+          
+          // Phase 2.3: Start client-side progress tracking
+          if (musicData.start_timestamp && musicData.duration) {
+            startProgressTracking(musicData.start_timestamp, musicData.duration)
+          }
         }
       } else if (musicData.action === 'stopped') {
         console.log('🎵 [MusicTab] Music stopped event received')
         setIsPlaying(false)
         setIsPaused(false)
-        setProgress(0)
-        setCurrentTime('0:00')
+        // Phase 2.3: Stop client-side progress tracking
+        stopProgressTracking()
       } else if (musicData.action === 'paused') {
         console.log('🎵 [MusicTab] Music paused event received')
         setIsPlaying(false)
         setIsPaused(true)
+        // Phase 2.3: Pause client-side progress tracking
+        if (musicData.paused_at_position !== undefined) {
+          pauseProgressTracking(musicData.paused_at_position)
+        }
       } else if (musicData.action === 'resumed') {
         console.log('🎵 [MusicTab] Music resumed event received')
         setIsPlaying(true)
         setIsPaused(false)
+        // Phase 2.3: Resume client-side progress tracking
+        if (musicData.resume_position !== undefined) {
+          resumeProgressTracking(musicData.resume_position)
+        }
       } else {
         console.log('🎵 [MusicTab] Unknown action received:', musicData.action)
       }
@@ -101,21 +233,12 @@ export default function MusicTab() {
     }
 
     const handleMusicProgress = (data: any) => {
-      // WebBridge wraps payload in {topic, data, timestamp} structure
-      const progressData = data.data || data
+      // Phase 2.3: Server-side progress updates are now replaced by client-side calculation
+      // This handler is kept for backward compatibility but progress is calculated locally
+      console.log('🎵 [MusicTab] Server progress update received (now using client-side calculation):', data)
       
-      if (progressData.action === 'progress') {
-        // Update progress bar with real-time position
-        setProgress(progressData.progress_percent || 0)
-        
-        // Update current time display
-        const positionSec = progressData.position_sec || 0
-        const minutes = Math.floor(positionSec / 60)
-        const seconds = Math.floor(positionSec % 60)
-        setCurrentTime(`${minutes}:${String(seconds).padStart(2, '0')}`)
-        
-        console.log(`🎵 [MusicTab] Progress update: ${progressData.position_sec?.toFixed(1)}s / ${progressData.duration_sec?.toFixed(1)}s (${progressData.progress_percent?.toFixed(1)}%)`)
-      }
+      // Optional: Could use server progress as a fallback or validation
+      // But client-side calculation should be more accurate and responsive
     }
 
     const handleServiceStatus = (data: any) => {
@@ -257,7 +380,7 @@ export default function MusicTab() {
               <div className="bg-sw-dark-700 rounded-full h-2 overflow-hidden">
                 <div 
                   className="bg-sw-blue-500 h-2 rounded-full transition-all duration-1000"
-                  style={{ width: `${progress}%` }}
+                  style={{ width: isClient ? `${progress}%` : '0%' }}
                 ></div>
               </div>
               <div className="flex justify-between text-xs text-sw-blue-400">
@@ -441,7 +564,7 @@ export default function MusicTab() {
                   className={`h-2 rounded-full transition-all duration-200 ${
                     ducking ? 'bg-sw-yellow' : 'bg-sw-blue-500'
                   }`}
-                  style={{ width: `${volume}%` }}
+                  style={{ width: isClient ? `${volume}%` : '75%' }}
                 ></div>
                 {ducking && (
                   <div className="absolute inset-0 flex items-center justify-center">

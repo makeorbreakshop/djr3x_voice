@@ -267,9 +267,10 @@ class CantinaOSEventMixin:
         Returns:
             Event payload dictionary with standardized metadata
         """
+        import time
         payload = {
             "source": "web_dashboard",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": time.time(),  # Use Unix timestamp (float) to match BaseEventPayload
             **base_data
         }
         

@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
 from ..event_payloads import ServiceStatus
-from ..schemas.validation import SocketIOValidationMixin, validate_socketio_command
+from ..schemas.validation import SocketIOValidationMixin, StatusPayloadValidationMixin, validate_socketio_command
 from ..schemas.web_commands import (
     VoiceCommandSchema,
     MusicCommandSchema,
@@ -37,7 +37,7 @@ from ..schemas import BaseWebResponse, WebCommandError
 logger = logging.getLogger(__name__)
 
 
-class WebBridgeService(BaseService, SocketIOValidationMixin):
+class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValidationMixin):
     """
     Web Bridge Service for DJ R3X Dashboard
 
@@ -301,189 +301,17 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
                 )
                 logger.info(f"Client {sid} subscribed to: {event_types}")
 
-        @self._sio.event
-        @validate_socketio_command("voice_command")
-        async def voice_command(sid, validated_command: VoiceCommandSchema):
-            """Handle voice commands from dashboard with validation"""
-            logger.info(f"Voice command from {sid}: action={validated_command.action}")
-
-            try:
-                # Convert to CantinaOS event payload
-                event_payload = validated_command.to_cantina_event()
-                event_payload["sid"] = sid  # Add socket session ID
-                
-                # Emit to appropriate CantinaOS event topic
-                self._event_bus.emit(
-                    EventTopics.SYSTEM_SET_MODE_REQUEST,
-                    event_payload
-                )
-                
-                # Send success acknowledgment to client
-                response = BaseWebResponse.success_response(
-                    message=f"Voice command '{validated_command.action}' processed successfully",
-                    command_id=validated_command.command_id,
-                    data={"action": validated_command.action}
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    response.dict(),
-                    room=sid,
-                )
-                
-            except Exception as e:
-                logger.error(f"Error processing voice command: {e}")
-                error_response = BaseWebResponse.error_response(
-                    message=f"Failed to process voice command: {e}",
-                    error_code="PROCESSING_ERROR",
-                    command_id=validated_command.command_id
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    error_response.dict(),
-                    room=sid,
-                )
-
-        @self._sio.event
-        @validate_socketio_command("music_command")
-        async def music_command(sid, validated_command: MusicCommandSchema):
-            """Handle music commands from dashboard with validation"""
-            logger.info(f"Music command from {sid}: action={validated_command.action}")
-
-            try:
-                # Convert to CantinaOS event payload
-                event_payload = validated_command.to_cantina_event()
-                event_payload["sid"] = sid  # Add socket session ID
-                
-                # Emit to CantinaOS MUSIC_COMMAND event topic
-                self._event_bus.emit(
-                    EventTopics.MUSIC_COMMAND,
-                    event_payload
-                )
-                
-                # Send success acknowledgment to client
-                response = BaseWebResponse.success_response(
-                    message=f"Music command '{validated_command.action}' processed successfully",
-                    command_id=validated_command.command_id,
-                    data={
-                        "action": validated_command.action,
-                        "track_name": validated_command.track_name,
-                        "volume_level": validated_command.volume_level
-                    }
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    response.dict(),
-                    room=sid,
-                )
-                
-            except Exception as e:
-                logger.error(f"Error processing music command: {e}")
-                error_response = BaseWebResponse.error_response(
-                    message=f"Failed to process music command: {e}",
-                    error_code="PROCESSING_ERROR",
-                    command_id=validated_command.command_id
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    error_response.dict(),
-                    room=sid,
-                )
-
-        @self._sio.event
-        @validate_socketio_command("dj_command")
-        async def dj_command(sid, validated_command: DJCommandSchema):
-            """Handle DJ mode commands from dashboard with validation"""
-            logger.info(f"DJ command from {sid}: action={validated_command.action}")
-
-            try:
-                # Convert to CantinaOS event payload
-                event_payload = validated_command.to_cantina_event()
-                event_payload["sid"] = sid  # Add socket session ID
-                
-                # Get appropriate event topic for this DJ command
-                event_topic = validated_command.get_event_topic()
-                
-                # Emit to appropriate CantinaOS event topic
-                self._event_bus.emit(event_topic, event_payload)
-                
-                # Send success acknowledgment to client
-                response = BaseWebResponse.success_response(
-                    message=f"DJ command '{validated_command.action}' processed successfully",
-                    command_id=validated_command.command_id,
-                    data={
-                        "action": validated_command.action,
-                        "auto_transition": validated_command.auto_transition,
-                        "event_topic": event_topic
-                    }
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    response.dict(),
-                    room=sid,
-                )
-                
-            except Exception as e:
-                logger.error(f"Error processing DJ command: {e}")
-                error_response = BaseWebResponse.error_response(
-                    message=f"Failed to process DJ command: {e}",
-                    error_code="PROCESSING_ERROR",
-                    command_id=validated_command.command_id
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    error_response.dict(),
-                    room=sid,
-                )
-
-        @self._sio.event
-        @validate_socketio_command("system_command")
-        async def system_command(sid, validated_command: SystemCommandSchema):
-            """Handle system commands from dashboard with validation"""
-            logger.info(f"System command from {sid}: action={validated_command.action}")
-
-            try:
-                # Convert to CantinaOS event payload
-                event_payload = validated_command.to_cantina_event()
-                event_payload["sid"] = sid  # Add socket session ID
-                
-                # Get appropriate event topic for this system command
-                event_topic = validated_command.get_event_topic()
-                
-                # Emit to appropriate CantinaOS event topic
-                self._event_bus.emit(event_topic, event_payload)
-                
-                # Send success acknowledgment to client
-                response = BaseWebResponse.success_response(
-                    message=f"System command '{validated_command.action}' processed successfully",
-                    command_id=validated_command.command_id,
-                    data={
-                        "action": validated_command.action,
-                        "mode": validated_command.mode,
-                        "event_topic": event_topic
-                    }
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    response.dict(),
-                    room=sid,
-                )
-                
-            except Exception as e:
-                logger.error(f"Error processing system command: {e}")
-                error_response = BaseWebResponse.error_response(
-                    message=f"Failed to process system command: {e}",
-                    error_code="PROCESSING_ERROR",
-                    command_id=validated_command.command_id
-                )
-                await self._sio.emit(
-                    "command_ack",
-                    error_response.dict(),
-                    room=sid,
-                )
+        # Register validated command handlers
+        self._sio.on("voice_command", self._handle_voice_command)
+        self._sio.on("music_command", self._handle_music_command)
+        self._sio.on("dj_command", self._handle_dj_command)
+        self._sio.on("system_command", self._handle_system_command)
 
     async def _subscribe_to_events(self) -> None:
         """Subscribe to CantinaOS events for dashboard monitoring."""
         logger.info("[WebBridge] Subscribing to CantinaOS events...")
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: About to subscribe to {EventTopics.MUSIC_PLAYBACK_STARTED}")
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Handler function: {self._handle_music_playback_started}")
         
         # Use proper BaseService async subscription pattern
         await asyncio.gather(
@@ -516,12 +344,14 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
             
             # System mode events - critical for dashboard state synchronization
             self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_system_mode_change),
-            self.subscribe("MODE_TRANSITION_STARTED", self._handle_mode_transition),
-            self.subscribe("MODE_TRANSITION_COMPLETE", self._handle_mode_transition)
+            self.subscribe(EventTopics.MODE_TRANSITION_STARTED, self._handle_mode_transition),
+            self.subscribe(EventTopics.MODE_TRANSITION_COMPLETE, self._handle_mode_transition)
         )
         
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Subscription completed for {EventTopics.MUSIC_PLAYBACK_STARTED}")
         logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STARTED}")
         logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STOPPED}")
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Music event subscriptions complete - handler is {self._handle_music_playback_started}")
 
     async def _start_web_server(self) -> None:
         """Start the uvicorn web server."""
@@ -599,18 +429,28 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
             await asyncio.sleep(30)
 
     async def _broadcast_event_to_dashboard(
-        self, event_topic: str, data: Dict[str, Any], event_name: str = None
+        self, event_topic: str, data: Dict[str, Any], event_name: str = None, skip_validation: bool = False
     ):
-        """Broadcast an event to dashboard clients."""
+        """Broadcast an event to all connected dashboard clients."""
         if not self._dashboard_clients or not self._sio:
             return
 
+        # The `skip_validation` parameter indicates the data is already validated
+        # and serialized by `validate_and_serialize_status`.
+        # The logic here should simply be to wrap and emit.
+        
+        # All validation logic has been removed from this function as it was
+        # redundant and causing serialization issues. The `StatusPayloadValidationMixin`
+        # is now the single source of truth for status validation.
+
         event_data = {
             "topic": event_topic,
-            "data": data,
+            "data": data, # `data` is now assumed to be the validated payload
             "timestamp": datetime.now().isoformat(),
+            "validated": skip_validation # Use skip_validation flag to indicate status
         }
 
+        # Broadcast to all connected clients
         for sid in self._dashboard_clients.keys():
             try:
                 await self._sio.emit(
@@ -730,60 +570,233 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
         )
 
     async def _handle_music_playback_started(self, data):
-        """Handle music playback started event"""
+        """Handle music playback started event with enhanced validation"""
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: _handle_music_playback_started called with data: {data}")
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Data type: {type(data)}")
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+        
         track_data = data.get("track", {})
         logger.info(f"[WebBridge] Music playback started - track data: {track_data}")
         
-        payload = {
+        # Use enhanced validation for music status payload
+        raw_payload = {
             "action": "started",
             "track": track_data,
             "source": data.get("source", "unknown"),
             "mode": data.get("mode", "INTERACTIVE"),
+            # Phase 2.3: Add timing data for client-side progress calculation
+            "start_timestamp": data.get("start_timestamp"),
+            "duration": data.get("duration"),
         }
-        logger.info(f"[WebBridge] Broadcasting music_status event: {payload}")
         
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MUSIC_PLAYBACK_STARTED,
-            payload,
-            "music_status",
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: Built raw_payload: {raw_payload}")
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "action": "started",
+            "track": None,
+            "source": "music_controller",
+            "mode": "INTERACTIVE",
+            "start_timestamp": None,
+            "duration": None
+        }
+        
+        # Use the enhanced validation system
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: About to call broadcast_validated_status")
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=raw_payload,
+            event_topic=EventTopics.MUSIC_PLAYBACK_STARTED,
+            socket_event_name="music_status",
+            fallback_data=fallback_payload
         )
+        logger.critical(f"[WebBridge] CRITICAL DEBUG: broadcast_validated_status returned: {success}")
+        
+        if success:
+            logger.info(f"[WebBridge] Successfully broadcast validated music status")
+        else:
+            logger.warning(f"[WebBridge] Failed to broadcast music status, using fallback method")
+            # Fallback to original method if validation broadcast fails
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MUSIC_PLAYBACK_STARTED,
+                raw_payload,
+                "music_status",
+            )
 
     async def _handle_music_playback_stopped(self, data):
-        """Handle music playback stopped event"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MUSIC_PLAYBACK_STOPPED,
-            {"action": "stopped", "track_name": data.get("track_name")},
-            "music_status",
+        """Handle music playback stopped event with enhanced validation"""
+        # Use enhanced validation for music status payload
+        raw_payload = {
+            "action": "stopped",
+            "track": data.get("track"),
+            "track_name": data.get("track_name"),
+            "source": data.get("source", "music_controller"),
+            "mode": data.get("mode", "INTERACTIVE"),
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "action": "stopped",
+            "track": None,
+            "source": "music_controller",
+            "mode": "INTERACTIVE"
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=raw_payload,
+            event_topic=EventTopics.MUSIC_PLAYBACK_STOPPED,
+            socket_event_name="music_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast music stopped status, using fallback method")
+            # Fallback to original method if validation broadcast fails
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MUSIC_PLAYBACK_STOPPED,
+                raw_payload,
+                "music_status",
+            )
 
     async def _handle_music_playback_paused(self, data):
-        """Handle music playback paused event"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MUSIC_PLAYBACK_PAUSED,
-            {"action": "paused", "track_name": data.get("track_name")},
-            "music_status",
+        """Handle music playback paused event with enhanced validation"""
+        # Use enhanced validation for music status payload
+        raw_payload = {
+            "action": "paused",
+            "track": data.get("track"),
+            "source": data.get("source", "music_controller"),
+            "mode": data.get("mode", "INTERACTIVE"),
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "action": "paused",
+            "track": None,
+            "source": "music_controller",
+            "mode": "INTERACTIVE"
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=raw_payload,
+            event_topic=EventTopics.MUSIC_PLAYBACK_PAUSED,
+            socket_event_name="music_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast music paused status, using fallback method")
+            # Fallback to original method if validation broadcast fails
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MUSIC_PLAYBACK_PAUSED,
+                raw_payload,
+                "music_status",
+            )
 
     async def _handle_music_playback_resumed(self, data):
-        """Handle music playback resumed event"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MUSIC_PLAYBACK_RESUMED,
-            {"action": "resumed", "track_name": data.get("track_name")},
-            "music_status",
+        """Handle music playback resumed event with enhanced validation"""
+        # Use enhanced validation for music status payload
+        raw_payload = {
+            "action": "resumed",
+            "track": data.get("track"),
+            "source": data.get("source", "music_controller"),
+            "mode": data.get("mode", "INTERACTIVE"),
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "action": "resumed",
+            "track": None,
+            "source": "music_controller",
+            "mode": "INTERACTIVE"
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=raw_payload,
+            event_topic=EventTopics.MUSIC_PLAYBACK_RESUMED,
+            socket_event_name="music_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast music resumed status, using fallback method")
+            # Fallback to original method if validation broadcast fails
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MUSIC_PLAYBACK_RESUMED,
+                raw_payload,
+                "music_status",
+            )
 
     async def _handle_music_progress(self, data):
-        """Handle music progress updates"""
+        """Handle music progress updates with enhanced validation"""
+        logger.info(f"[WebBridge] [PROGRESS_DEBUG] Received music progress data: {data}")
+        
+        # Convert progress from 0-100 to 0.0-1.0 for Pydantic validation
+        progress_percent = data.get("progress_percent", 0.0)
+        progress_normalized = progress_percent / 100.0 if progress_percent > 1.0 else progress_percent
+        
+        # Build payload that matches WebProgressPayload structure
+        pydantic_payload = {
+            "operation": "music_playback",
+            "progress": progress_normalized,  # 0.0-1.0 range expected by Pydantic
+            "status": data.get("status", "playing"),
+            "details": f"Position: {data.get('position_sec', 0.0):.1f}s / {data.get('duration_sec', 0.0):.1f}s",
+            "timestamp": data.get("timestamp", datetime.now().isoformat())
+        }
+        
+        # Build frontend payload with all the data the dashboard needs
+        frontend_payload = {
+            "action": "progress",  # Required by frontend for progress identification
+            "operation": "music_playback",
+            "progress": progress_normalized,
+            "status": data.get("status", "playing"),
+            "track": data.get("track"),
+            "position_sec": data.get("position_sec", 0.0),
+            "duration_sec": data.get("duration_sec", 0.0),
+            "time_remaining_sec": data.get("time_remaining_sec", 0.0),
+            "progress_percent": progress_percent,  # Keep original for frontend compatibility
+            "timestamp": data.get("timestamp", datetime.now().isoformat())
+        }
+        
+        logger.info(f"[WebBridge] [PROGRESS_DEBUG] Built Pydantic payload: {pydantic_payload}")
+        logger.info(f"[WebBridge] [PROGRESS_DEBUG] Built frontend payload: {frontend_payload}")
+        
+        # Create fallback payload matching WebProgressPayload structure
+        fallback_payload = {
+            "operation": "music_playback",
+            "progress": 0.0,
+            "status": "idle",
+            "details": "Progress data unavailable"
+        }
+        
+        # Try the enhanced validation system first
+        try:
+            success = await self.broadcast_validated_status(
+                status_type="progress",
+                data=pydantic_payload,  # Use Pydantic-compatible structure
+                event_topic=EventTopics.MUSIC_PROGRESS,
+                socket_event_name="music_progress",
+                fallback_data=fallback_payload
+            )
+            
+            if success:
+                logger.info(f"[WebBridge] [PROGRESS_DEBUG] Successfully validated and broadcast progress data")
+                return
+            else:
+                logger.warning(f"[WebBridge] [PROGRESS_DEBUG] Pydantic validation failed, trying direct broadcast")
+        except Exception as e:
+            logger.error(f"[WebBridge] [PROGRESS_DEBUG] Error in enhanced validation: {e}")
+        
+        # Fallback: Direct broadcast without Pydantic validation but with frontend-compatible data
+        logger.info(f"[WebBridge] [PROGRESS_DEBUG] Using direct broadcast with frontend payload")
         await self._broadcast_event_to_dashboard(
             EventTopics.MUSIC_PROGRESS,
-            {
-                "action": "progress",
-                "track": data.get("track"),
-                "position_sec": data.get("position_sec", 0.0),
-                "duration_sec": data.get("duration_sec", 0.0),
-                "time_remaining_sec": data.get("time_remaining_sec", 0.0),
-                "progress_percent": data.get("progress_percent", 0.0)
-            },
+            frontend_payload,  # Send the full frontend-compatible payload
             "music_progress",
         )
 
@@ -860,22 +873,239 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
         )
 
     async def _handle_dashboard_log(self, data):
-        """Handle dashboard log events from LoggingService."""
+        """Handle dashboard log events from LoggingService with throttling to reduce CLI flooding."""
         try:
+            # PHASE 1.2: Filter out DEBUG level logs and high-frequency events to reduce CLI flooding
+            log_level = data.get("level", "INFO")
+            log_message = data.get("message", "")
+            
+            # Filter out DEBUG logs entirely (they are rarely needed in dashboard)
+            if log_level == "DEBUG":
+                return
+            
+            # Filter out specific high-frequency, noisy log patterns that flood CLI
+            noise_patterns = [
+                "Progress update:",
+                "Timer calculation:",
+                "Generated progress data",
+                "Successfully emitted MUSIC_PROGRESS",
+                "[PROGRESS_DEBUG]",
+                "[TIMER_DEBUG]",
+                "VLC player.is_playing()",
+                "audio_callback",
+                "Core Audio"  # Filters VLC Core Audio warnings
+            ]
+            
+            for pattern in noise_patterns:
+                if pattern in log_message:
+                    return  # Skip broadcasting this log
+            
+            # Rate limiting: Only send system logs every 10 seconds instead of continuously
+            current_time = time.time()
+            throttle_key = f"dashboard_log_{data.get('service', 'unknown')}"
+            last_sent = self._event_throttle_state[throttle_key]["last_sent"]
+            
+            # Allow ERROR and WARNING logs to pass through immediately
+            # Throttle INFO and other levels to once per 10 seconds per service
+            if log_level not in ["ERROR", "WARNING", "CRITICAL"]:
+                if current_time - last_sent < 10.0:  # 10 second throttle for INFO logs
+                    return
+            
+            # Update throttle state
+            self._event_throttle_state[throttle_key]["last_sent"] = current_time
+            
             # Validate the log payload
             log_data = {
                 "timestamp": data.get("timestamp", datetime.now().isoformat()),
-                "level": data.get("level", "INFO"),
+                "level": log_level,
                 "service": data.get("service", "Unknown"),
-                "message": data.get("message", ""),
+                "message": log_message,
                 "session_id": data.get("session_id", ""),
                 "entry_id": data.get("entry_id", ""),
             }
 
-            # Broadcast to all connected dashboard clients
+            # Broadcast to all connected dashboard clients (not CLI)
             await self._broadcast_event_to_dashboard(
                 EventTopics.DASHBOARD_LOG, log_data, "system_log"
             )
 
         except Exception as e:
             logger.error(f"Error handling dashboard log: {e}")
+
+    # Socket.IO Command Handlers (with validation decorators)
+    
+    @validate_socketio_command("voice_command")
+    async def _handle_voice_command(self, sid, validated_command: VoiceCommandSchema):
+        """Handle voice commands from dashboard with validation"""
+        logger.info(f"Voice command from {sid}: action={validated_command.action}")
+
+        try:
+            # Convert to CantinaOS event payload
+            event_payload = validated_command.to_cantina_event()
+            event_payload["sid"] = sid  # Add socket session ID
+            
+            # Emit to appropriate CantinaOS event topic
+            self._event_bus.emit(
+                EventTopics.SYSTEM_SET_MODE_REQUEST,
+                event_payload
+            )
+            
+            # Send success acknowledgment to client
+            response = BaseWebResponse.success_response(
+                message=f"Voice command '{validated_command.action}' processed successfully",
+                command_id=validated_command.command_id,
+                data={"action": validated_command.action}
+            )
+            await self._sio.emit(
+                "command_ack",
+                response.dict(),
+                room=sid,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error processing voice command: {e}")
+            error_response = BaseWebResponse.error_response(
+                message=f"Failed to process voice command: {e}",
+                error_code="PROCESSING_ERROR",
+                command_id=validated_command.command_id
+            )
+            await self._sio.emit(
+                "command_ack",
+                error_response.model_dump(mode='json'),
+                room=sid,
+            )
+
+    @validate_socketio_command("music_command")
+    async def _handle_music_command(self, sid, validated_command: MusicCommandSchema):
+        """Handle music commands from dashboard with validation"""
+        logger.info(f"Music command from {sid}: action={validated_command.action}")
+
+        try:
+            # Convert to CantinaOS event payload
+            event_payload = validated_command.to_cantina_event()
+            event_payload["sid"] = sid  # Add socket session ID
+            
+            # Emit to CantinaOS MUSIC_COMMAND event topic
+            self._event_bus.emit(
+                EventTopics.MUSIC_COMMAND,
+                event_payload
+            )
+            
+            # Send success acknowledgment to client
+            response = BaseWebResponse.success_response(
+                message=f"Music command '{validated_command.action}' processed successfully",
+                command_id=validated_command.command_id,
+                data={
+                    "action": validated_command.action,
+                    "track_name": validated_command.track_name,
+                    "volume_level": validated_command.volume_level
+                }
+            )
+            await self._sio.emit(
+                "command_ack",
+                response.model_dump(mode='json'),
+                room=sid,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error processing music command: {e}")
+            error_response = BaseWebResponse.error_response(
+                message=f"Failed to process music command: {e}",
+                error_code="PROCESSING_ERROR",
+                command_id=validated_command.command_id
+            )
+            await self._sio.emit(
+                "command_ack",
+                error_response.model_dump(mode='json'),
+                room=sid,
+            )
+
+    @validate_socketio_command("dj_command")
+    async def _handle_dj_command(self, sid, validated_command: DJCommandSchema):
+        """Handle DJ mode commands from dashboard with validation"""
+        logger.info(f"DJ command from {sid}: action={validated_command.action}")
+
+        try:
+            # Convert to CantinaOS event payload
+            event_payload = validated_command.to_cantina_event()
+            event_payload["sid"] = sid  # Add socket session ID
+            
+            # Get appropriate event topic for this DJ command
+            event_topic = validated_command.get_event_topic()
+            
+            # Emit to appropriate CantinaOS event topic
+            self._event_bus.emit(event_topic, event_payload)
+            
+            # Send success acknowledgment to client
+            response = BaseWebResponse.success_response(
+                message=f"DJ command '{validated_command.action}' processed successfully",
+                command_id=validated_command.command_id,
+                data={
+                    "action": validated_command.action,
+                    "auto_transition": validated_command.auto_transition,
+                    "event_topic": event_topic
+                }
+            )
+            await self._sio.emit(
+                "command_ack",
+                response.dict(),
+                room=sid,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error processing DJ command: {e}")
+            error_response = BaseWebResponse.error_response(
+                message=f"Failed to process DJ command: {e}",
+                error_code="PROCESSING_ERROR",
+                command_id=validated_command.command_id
+            )
+            await self._sio.emit(
+                "command_ack",
+                error_response.model_dump(mode='json'),
+                room=sid,
+            )
+
+    @validate_socketio_command("system_command")
+    async def _handle_system_command(self, sid, validated_command: SystemCommandSchema):
+        """Handle system commands from dashboard with validation"""
+        logger.info(f"System command from {sid}: action={validated_command.action}")
+
+        try:
+            # Convert to CantinaOS event payload
+            event_payload = validated_command.to_cantina_event()
+            event_payload["sid"] = sid  # Add socket session ID
+            
+            # Get appropriate event topic for this system command
+            event_topic = validated_command.get_event_topic()
+            
+            # Emit to appropriate CantinaOS event topic
+            self._event_bus.emit(event_topic, event_payload)
+            
+            # Send success acknowledgment to client
+            response = BaseWebResponse.success_response(
+                message=f"System command '{validated_command.action}' processed successfully",
+                command_id=validated_command.command_id,
+                data={
+                    "action": validated_command.action,
+                    "mode": validated_command.mode,
+                    "event_topic": event_topic
+                }
+            )
+            await self._sio.emit(
+                "command_ack",
+                response.dict(),
+                room=sid,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error processing system command: {e}")
+            error_response = BaseWebResponse.error_response(
+                message=f"Failed to process system command: {e}",
+                error_code="PROCESSING_ERROR",
+                command_id=validated_command.command_id
+            )
+            await self._sio.emit(
+                "command_ack",
+                error_response.model_dump(mode='json'),
+                room=sid,
+            )

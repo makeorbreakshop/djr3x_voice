@@ -221,6 +221,12 @@ class EventTopics(str, Enum):
     # Dashboard events
     DASHBOARD_LOG = "/dashboard/log"
 
+    # Web Dashboard Command Events (inbound from web frontend)
+    WEB_VOICE_COMMAND = "web.voice.command"
+    WEB_MUSIC_COMMAND = "web.music.command"
+    WEB_SYSTEM_COMMAND = "web.system.command"
+    WEB_DJ_COMMAND = "web.dj.command"
+
     # Web Dashboard Status Events (outbound to web frontend)
     WEB_VOICE_STATUS = "web.voice.status"
     WEB_MUSIC_STATUS = "web.music.status"

@@ -254,40 +254,150 @@ def _map_service_status(self, cantina_status: str) -> str:
 
 ## 6. Command Validation and Security
 
-### 6.1 Command Validation
+### 6.1 Pydantic Command Validation System
 
-All web commands must be validated before processing:
+**MANDATORY**: All web commands must use the centralized Pydantic validation system implemented in `cantina_os/schemas/validation.py`.
+
+#### 6.1.1 Validation Mixins
+
+WebBridge services must inherit from the validation mixins:
 
 ```python
-async def _validate_web_command(self, command: dict) -> bool:
-    """Validate web commands before processing."""
+from ..schemas.validation import SocketIOValidationMixin, StatusPayloadValidationMixin
+
+class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValidationMixin):
+    """Web bridge service with built-in validation capabilities."""
     
-    # Required fields validation
-    if "action" not in command:
-        raise ValueError("Command missing required 'action' field")
-    
-    # Action-specific validation
-    if command["action"] == "set_mode":
-        if "mode" not in command:
-            raise ValueError("Mode change command missing 'mode' field")
-        if command["mode"] not in ["IDLE", "AMBIENT", "INTERACTIVE"]:
-            raise ValueError(f"Invalid mode: {command['mode']}")
-    
-    elif command["action"] == "play_music":
-        if "track_name" not in command:
-            raise ValueError("Music command missing 'track_name' field")
-    
-    return True
+    async def _handle_music_command(self, sid: str, data: Dict[str, Any]) -> None:
+        """Handle music commands with automatic validation."""
+        response = await self.validate_and_emit_command("music_command", data, sid)
+        await self._sio.emit("command_response", response.model_dump(mode='json'), room=sid)
 ```
 
-### 6.2 Security Standards
+#### 6.1.2 Socket.IO Handler Validation
+
+Use the `@validate_socketio_command` decorator for automatic validation:
+
+```python
+from ..schemas.validation import validate_socketio_command
+
+class WebBridgeService(BaseService):
+    
+    @validate_socketio_command("music_command")
+    async def _handle_music_command(self, sid: str, validated_command: MusicCommandSchema) -> None:
+        """Handler receives pre-validated command instance."""
+        # Command is already validated - use directly
+        event_payload = validated_command.to_cantina_event()
+        self._event_bus.emit(EventTopics.MUSIC_COMMAND, event_payload)
+```
+
+#### 6.1.3 Command Schema System
+
+All commands must be defined using Pydantic schemas:
+
+```python
+from ..schemas.web_commands import (
+    VoiceCommandSchema,
+    MusicCommandSchema,
+    DJCommandSchema,
+    SystemCommandSchema,
+    validate_command_data
+)
+
+# Example: Validate music command
+try:
+    validated_command = validate_command_data("music_command", {
+        "action": "play",
+        "track_name": "cantina_band.mp3",
+        "source": "web_dashboard"
+    })
+    # Command is now type-safe and validated
+except WebCommandError as e:
+    # Handle validation errors with detailed feedback
+    logger.error(f"Validation failed: {e.message}")
+```
+
+#### 6.1.4 Status Payload Validation
+
+All outbound status payloads must be validated using the StatusPayloadValidationMixin:
+
+```python
+async def _handle_music_status_update(self, payload: Dict[str, Any]) -> None:
+    """Handle music status updates with validation."""
+    try:
+        # Validate and serialize with automatic fallback
+        validated_payload = self.validate_and_serialize_status(
+            "music", 
+            payload,
+            fallback_data={"action": "stopped", "source": "web_bridge", "mode": "UNKNOWN"}
+        )
+        
+        # Broadcast validated payload to dashboard
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_PLAYBACK_STARTED,
+            validated_payload,
+            "music_status"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling music status: {e}")
+```
+
+### 6.2 JSON Serialization Standards
+
+**CRITICAL**: All Socket.IO responses must use Pydantic's `model_dump(mode='json')` for proper datetime serialization:
+
+```python
+# CORRECT: Proper JSON serialization
+response = BaseWebResponse.success_response(message="Command processed")
+await self._sio.emit("command_response", response.model_dump(mode='json'), room=sid)
+
+# INCORRECT: Will cause datetime serialization errors
+await self._sio.emit("command_response", response.dict(), room=sid)
+```
+
+#### 6.2.1 Status Payload Serialization
+
+All status payloads must be serialized using the validation system:
+
+```python
+# Map fields from CantinaOS to web format
+mapped_data = self._map_status_fields("service", payload)
+
+# Validate and serialize with datetime handling
+validated_payload = self.validate_and_serialize_status("service", mapped_data)
+
+# Safe to emit - datetime fields are now ISO strings
+await self._sio.emit("service_status", validated_payload, room=sid)
+```
+
+#### 6.2.2 Error Response Standards
+
+All error responses must use standardized format:
+
+```python
+from ..schemas import BaseWebResponse, WebCommandError
+
+# Command validation error
+try:
+    command = validate_command_data("music_command", data)
+except WebCommandError as e:
+    error_response = BaseWebResponse.error_response(
+        message=e.message,
+        error_code="VALIDATION_ERROR",
+        data={"validation_errors": e.validation_errors}
+    )
+    await self._sio.emit("command_error", error_response.model_dump(mode='json'), room=sid)
+```
+
+### 6.3 Security Standards
 
 Web integrations must implement proper security measures:
 
-1. **Input Validation**: Validate all incoming web commands
+1. **Pydantic Validation**: All commands automatically validated by schema system
 2. **Rate Limiting**: Prevent command flooding
 3. **Authentication**: Verify client permissions (if required)
-4. **Error Handling**: Avoid exposing internal system details
+4. **Error Handling**: Use standardized error responses
 
 ```python
 class CommandRateLimiter:
@@ -555,15 +665,137 @@ class WebBridgeConfig(BaseModel):
 **Cause**: Improper service initialization order
 **Solution**: Ensure WebBridge starts after all core services are initialized
 
-## 13. Conclusion
+### 12.5 Pydantic Validation Errors
 
-Web dashboard integration with CantinaOS requires strict adherence to the established event-driven architecture. By following these standards, web interfaces can provide rich user experiences while maintaining the integrity and reliability of the core CantinaOS system.
+**Problem**: Commands failing with validation errors or datetime serialization issues
+**Cause**: Incorrect data structure or missing required fields
+**Solution**: Use proper validation mixins and `model_dump(mode='json')` for serialization
+
+```python
+# COMMON ERROR: Missing required fields
+{
+    "action": "play"  # Missing track_name for music command
+}
+
+# SOLUTION: Include all required fields
+{
+    "action": "play",
+    "track_name": "cantina_band.mp3",
+    "source": "web_dashboard"
+}
+```
+
+### 12.6 Socket.IO Handler Signature Mismatches
+
+**Problem**: Socket.IO handlers failing with decorator errors
+**Cause**: Incorrect function signature for validation decorators
+**Solution**: Use proper method signature with self parameter
+
+```python
+# INCORRECT: Missing self parameter
+@validate_socketio_command("music_command")
+async def music_command(sid, validated_command):
+    pass
+
+# CORRECT: Proper instance method signature  
+@validate_socketio_command("music_command")
+async def _handle_music_command(self, sid, validated_command):
+    pass
+```
+
+### 12.7 JSON Serialization Failures
+
+**Problem**: Socket.IO emit failing with "Object of type datetime is not JSON serializable"
+**Cause**: Using `.dict()` instead of `.model_dump(mode='json')`
+**Solution**: Always use Pydantic's JSON mode for datetime handling
+
+```python
+# INCORRECT: Will fail with datetime fields
+await self._sio.emit("status", response.dict(), room=sid)
+
+# CORRECT: Handles datetime serialization
+await self._sio.emit("status", response.model_dump(mode='json'), room=sid)
+```
+
+## 13. Pydantic Schema System Requirements
+
+### 13.1 Schema File Organization
+
+All Pydantic schemas must be organized in the `cantina_os/schemas/` directory:
+
+```
+cantina_os/schemas/
+├── __init__.py                    # Base classes and exports
+├── validation.py                  # Validation mixins and decorators
+├── web_commands.py               # Web command schemas
+└── README.md                     # Schema documentation
+```
+
+### 13.2 Required Schema Imports
+
+WebBridge services must import the complete validation system:
+
+```python
+from ..schemas.validation import (
+    SocketIOValidationMixin,
+    StatusPayloadValidationMixin,
+    validate_socketio_command
+)
+from ..schemas.web_commands import (
+    VoiceCommandSchema,
+    MusicCommandSchema,
+    DJCommandSchema,
+    SystemCommandSchema,
+    validate_command_data
+)
+from ..schemas import BaseWebResponse, WebCommandError
+```
+
+### 13.3 Validation Pipeline Requirements
+
+All web commands must follow the 4-level validation pipeline:
+
+1. **Schema Validation**: Pydantic model validation
+2. **Field Mapping**: CantinaOS compatibility mapping  
+3. **Event Translation**: Convert to proper CantinaOS events
+4. **Fallback Handling**: Graceful degradation for invalid data
+
+### 13.4 Error Handling Standards
+
+All validation errors must use the standardized error response system:
+
+```python
+# Use WebCommandError for validation failures
+except ValidationError as e:
+    error = WebCommandError(
+        message="Validation failed",
+        command=command_type,
+        validation_errors=[str(err) for err in e.errors()]
+    )
+    return BaseWebResponse.error_response(
+        message=error.message,
+        error_code="VALIDATION_ERROR",
+        data=error.to_dict()
+    )
+```
+
+## 14. Conclusion
+
+Web dashboard integration with CantinaOS requires strict adherence to the established event-driven architecture and the new Pydantic validation system. By following these standards, web interfaces can provide rich user experiences while maintaining the integrity and reliability of the core CantinaOS system.
 
 **Key Takeaways**:
 - Always follow the Event Bus Topology defined in the system architecture
 - Never bypass core services like YodaModeManagerService
-- Implement proper event topic translation between web and CantinaOS
+- **Use the centralized Pydantic validation system for all commands and status payloads**
+- **Implement proper JSON serialization with `model_dump(mode='json')`**
+- **Inherit from validation mixins for automatic validation capabilities**
 - Maintain real-time state synchronization
 - Follow CantinaOS service patterns for all web bridge components
+
+**New Pydantic Requirements**:
+- All commands must use schema validation
+- All status payloads must be validated before emission
+- Socket.IO handlers must use validation decorators
+- JSON serialization must handle datetime fields properly
 
 Failure to follow these standards will result in integration failures, broken functionality, and inconsistent user experiences.

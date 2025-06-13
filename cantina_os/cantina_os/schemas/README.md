@@ -32,9 +32,11 @@ This is the **Phase 1** foundation implementation as specified in the design doc
 
 3. **Validation Infrastructure** (`validation.py`)
    - `@validate_socketio_command`: Decorator for automatic validation
-   - `SocketIOValidationMixin`: WebBridge service integration
+   - `SocketIOValidationMixin`: WebBridge service integration for command validation
+   - `StatusPayloadValidationMixin`: WebBridge service integration for status validation  
    - `CommandSchemaRegistry`: Central schema registry
    - Error formatting and compatibility validation
+   - Status payload validation with fallback mechanisms
 
 ## Supported Commands
 
@@ -75,9 +77,9 @@ This is the **Phase 1** foundation implementation as specified in the design doc
 ### WebBridge Service Integration
 
 ```python
-from cantina_os.schemas.validation import SocketIOValidationMixin, validate_socketio_command
+from cantina_os.schemas.validation import SocketIOValidationMixin, StatusPayloadValidationMixin, validate_socketio_command
 
-class WebBridgeService(BaseService, SocketIOValidationMixin):
+class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValidationMixin):
     
     @validate_socketio_command("music_command")
     async def music_command(self, sid: str, validated_command: MusicCommandSchema):
@@ -87,6 +89,24 @@ class WebBridgeService(BaseService, SocketIOValidationMixin):
         event_payload["sid"] = sid
         
         self._event_bus.emit(EventTopics.MUSIC_COMMAND, event_payload)
+    
+    async def _handle_music_playback_started(self, data):
+        """Handle music status with enhanced validation."""
+        raw_payload = {
+            "action": "started",
+            "track": data.get("track", {}),
+            "source": data.get("source", "unknown"),
+            "mode": data.get("mode", "INTERACTIVE"),
+        }
+        
+        # Use enhanced validation with fallback
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=raw_payload,
+            event_topic=EventTopics.MUSIC_PLAYBACK_STARTED,
+            socket_event_name="music_status",
+            fallback_data={"action": "started", "source": "fallback", "mode": "ERROR"}
+        )
 ```
 
 ### Manual Validation
@@ -107,6 +127,40 @@ try:
 except WebCommandError as e:
     print(f"Validation failed: {e.message}")
     print(f"Errors: {e.validation_errors}")
+```
+
+### Status Payload Validation
+
+The enhanced validation system provides robust status payload validation for outbound data:
+
+```python
+from cantina_os.schemas.validation import StatusPayloadValidationMixin
+
+class WebBridgeService(BaseService, StatusPayloadValidationMixin):
+    
+    async def send_music_status(self, data):
+        """Send validated music status with automatic fallback."""
+        # Enhanced validation with fallback support
+        success = await self.broadcast_validated_status(
+            status_type="music",
+            data=data,
+            event_topic=EventTopics.MUSIC_PLAYBACK_STARTED,
+            socket_event_name="music_status",
+            fallback_data={"action": "stopped", "source": "fallback", "mode": "ERROR"}
+        )
+        
+        if not success:
+            logger.error("Failed to broadcast validated status")
+
+# Individual validation functions
+from cantina_os.schemas.validation import validate_music_status_payload
+
+# Validate and auto-correct music status
+validated = validate_music_status_payload({
+    "action": "",  # Will be corrected to "stopped"
+    "track": {"name": "test.mp3"}
+    # Missing required fields will be auto-filled
+})
 ```
 
 ## Event Bus Integration

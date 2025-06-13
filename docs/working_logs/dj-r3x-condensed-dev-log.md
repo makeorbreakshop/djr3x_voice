@@ -650,6 +650,36 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: All dashboard commands functional + stable connections + returned to proven architecture
 - **Technical**: Signature fix (3→2 parameters) + architectural reversion + incremental over revolutionary approach
 
+### 2025-06-11: Dashboard NOW PLAYING Data Unwrapping Fix
+- **Issue**: Dashboard showed "No track selected" despite music playing successfully in backend
+- **Solution**: Fixed Socket.IO event data unwrapping in useSocket.ts and MusicTab.tsx - applied `const unwrappedData = (data as any).data || data` pattern
+- **Impact**: NOW PLAYING section fully functional with track display, playback controls, and library highlighting
+- **Technical**: Consistent data unwrapping pattern across all dashboard event handlers (music_status, voice_status, system_status)
+
+### 2025-06-11: Web Dashboard Pydantic Expansion - Missing Implementation Complete
+- **Issue**: Previous commit documented "Pydantic expansion" but actual implementation was missing - music track clicking broken
+- **Solution**: Implemented complete Pydantic validation layer using parallel agents for event payloads, validation helper, and WebBridge enhancement
+- **Impact**: Type-safe web dashboard validation with 4-level fallback system and 100% backward compatibility
+- **Technical**: StatusPayloadValidationMixin + validate_and_serialize_status() + comprehensive error handling + enhanced WebBridge service
+
+### 2025-06-11: WebBridge Socket.IO Handler Function Signature Fix
+- **Issue**: Music track clicking failing due to decorator function signature mismatch - handlers missing 'self' parameter
+- **Solution**: Converted nested functions to instance methods with correct signature for @validate_socketio_command decorator
+- **Impact**: Fixed event flow from frontend clicks → WebBridge validation → MusicControllerService execution
+- **Technical**: Changed `async def music_command(sid, validated_command)` to `async def _handle_music_command(self, sid, validated_command)`
+
+### 2025-06-11: JSON Serialization DateTime Error Resolution
+- **Issue**: `Object of type datetime is not JSON serializable` preventing music commands and service status updates
+- **Solution**: Fixed JSON serialization using `model_dump(mode='json')` + added service status field mapping (service→service_name, online→running)
+- **Impact**: Eliminated JSON serialization errors + proper field compatibility between CantinaOS and dashboard
+- **Technical**: Enhanced validation.py with _map_status_fields() + datetime-aware serialization + comprehensive field mapping
+
+### 2025-06-11: Final Socket.IO Response Serialization Fix
+- **Issue**: Command acknowledgment responses still failing with datetime serialization despite validation fixes
+- **Solution**: Updated all WebBridge Socket.IO response emissions from `.dict()` to `.model_dump(mode='json')`
+- **Impact**: Music track clicking fully restored - complete end-to-end functionality working
+- **Technical**: Fixed BaseWebResponse emission pattern + applied consistent Pydantic serialization across all Socket.IO responses
+
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation
 - Implement conversation persistence

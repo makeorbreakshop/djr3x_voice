@@ -2,7 +2,26 @@
 
 import { useEffect, useState } from 'react'
 import { useSocketContext } from '@/contexts/SocketContext'
+import AudioSpectrum from '../AudioSpectrum.dynamic'
 import { VoiceActionEnum, SystemActionEnum, SystemModeEnum } from '../../types/schemas'
+import {
+  Activity,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Zap,
+  Cpu,
+  Server,
+  Cloud,
+  BrainCircuit,
+  Settings,
+  Bot,
+} from 'lucide-react'
+import { Slider } from '@/components/ui/slider'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { Progress } from '@/components/ui/progress'
 
 export default function VoiceTab() {
   const { 
@@ -16,6 +35,9 @@ export default function VoiceTab() {
     modeTransition 
   } = useSocketContext()
 
+  // Client-side hydration fix
+  const [isClient, setIsClient] = useState(false)
+
   // Track processing pipeline status
   const [pipelineStatus, setPipelineStatus] = useState({
     voiceInput: 'idle',
@@ -27,6 +49,11 @@ export default function VoiceTab() {
 
   // Track interaction phase for two-phase recording
   const [interactionPhase, setInteractionPhase] = useState<'idle' | 'engaged' | 'recording'>('idle')
+
+  // Client-side hydration effect
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
 
   // Update interaction phase based on system mode
   useEffect(() => {
@@ -236,7 +263,7 @@ export default function VoiceTab() {
                 <div className="flex-1 bg-sw-dark-700 rounded-full h-2">
                   <div 
                     className="bg-sw-blue-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${lastTranscription.confidence * 100}%` }}
+                    style={{ width: isClient ? `${lastTranscription.confidence * 100}%` : '0%' }}
                   ></div>
                 </div>
                 <span className="text-xs text-sw-blue-200 font-mono">

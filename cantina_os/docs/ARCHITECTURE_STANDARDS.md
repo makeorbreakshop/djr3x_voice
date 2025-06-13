@@ -574,11 +574,18 @@ When implementing web dashboard functionality, developers MUST follow the standa
 2. **Service Architecture Respect**: Web integration must not bypass core services like YodaModeManagerService
 3. **Proper Event Flow**: Follow established Event Bus Topology for all web interactions
 4. **State Synchronization**: Maintain real-time sync between web dashboard and CantinaOS state
+5. **Pydantic Validation**: All web commands and status payloads must use the centralized validation system
 
 **Critical Event Flows for Web Integration**:
 - System mode changes: `Web → SYSTEM_SET_MODE_REQUEST → YodaModeManagerService → SYSTEM_MODE_CHANGE`
 - Voice commands: `Web → SYSTEM_SET_MODE_REQUEST (INTERACTIVE) → VOICE_LISTENING_STARTED`
 - Music commands: `Web → CLI_COMMAND → CommandDispatcherService → MusicControllerService`
+
+**Required Pydantic Integration**:
+- WebBridge services must inherit from `SocketIOValidationMixin` and `StatusPayloadValidationMixin`
+- All Socket.IO handlers must use `@validate_socketio_command` decorator
+- JSON serialization must use `model_dump(mode='json')` for datetime compatibility
+- Command validation must follow the 4-level pipeline (schema → mapping → translation → fallback)
 
 Failure to follow web dashboard standards will result in integration failures and broken functionality.
 
@@ -931,9 +938,166 @@ log_listener = logging.handlers.QueueListener(log_queue, console_handler)
 - Ensures smooth application operation even with high logging volume.
 - Decouples log generation from log output I/O.
 
-## 12. Preventing Event Subscription Race Conditions
+## 12. Pydantic Validation Standards
 
-### 12.1 Critical Pattern - Always Await Subscriptions
+### 12.1 Schema Organization
+
+All Pydantic schemas must be organized in the `cantina_os/schemas/` directory structure:
+
+```
+cantina_os/schemas/
+├── __init__.py                    # Base classes and common exports
+├── validation.py                  # Validation mixins and decorators
+├── web_commands.py               # Web command schemas
+└── README.md                     # Schema documentation
+```
+
+### 12.2 WebBridge Service Requirements
+
+All WebBridge services must implement the Pydantic validation system:
+
+#### 12.2.1 Required Inheritance
+
+```python
+from ..schemas.validation import SocketIOValidationMixin, StatusPayloadValidationMixin
+
+class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValidationMixin):
+    """WebBridge with built-in validation capabilities."""
+    pass
+```
+
+#### 12.2.2 Command Validation
+
+Use the validation decorator for all Socket.IO handlers:
+
+```python
+from ..schemas.validation import validate_socketio_command
+
+@validate_socketio_command("music_command")
+async def _handle_music_command(self, sid: str, validated_command: MusicCommandSchema) -> None:
+    """Handler receives pre-validated command instance."""
+    event_payload = validated_command.to_cantina_event()
+    self._event_bus.emit(EventTopics.MUSIC_COMMAND, event_payload)
+```
+
+#### 12.2.3 Status Payload Validation
+
+All outbound status payloads must be validated:
+
+```python
+async def _handle_music_status_update(self, payload: Dict[str, Any]) -> None:
+    """Handle music status with validation and fallback."""
+    validated_payload = self.validate_and_serialize_status(
+        "music", 
+        payload,
+        fallback_data={"action": "stopped", "source": "web_bridge", "mode": "UNKNOWN"}
+    )
+    
+    await self._broadcast_event_to_dashboard(
+        EventTopics.MUSIC_PLAYBACK_STARTED,
+        validated_payload,
+        "music_status"
+    )
+```
+
+#### 12.2.4 JSON Serialization Requirements
+
+**CRITICAL**: All Socket.IO responses must use proper JSON serialization:
+
+```python
+# CORRECT: Handles datetime serialization
+response = BaseWebResponse.success_response(message="Command processed")
+await self._sio.emit("command_response", response.model_dump(mode='json'), room=sid)
+
+# INCORRECT: Will cause datetime serialization errors
+await self._sio.emit("command_response", response.dict(), room=sid)
+```
+
+### 12.3 Command Schema Standards
+
+#### 12.3.1 Schema Definition
+
+All web commands must be defined using Pydantic schemas:
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
+from ..schemas import BaseWebCommand
+
+class MusicCommandSchema(BaseWebCommand):
+    """Schema for music control commands from web dashboard."""
+    
+    action: Literal["play", "stop", "pause", "next", "previous"]
+    track_name: Optional[str] = Field(None, description="Name of track to play")
+    source: str = Field(default="web_dashboard", description="Command source")
+    
+    def to_cantina_event(self) -> Dict[str, Any]:
+        """Convert to CantinaOS event payload."""
+        return {
+            "action": self.action,
+            "track_name": self.track_name,
+            "source": self.source,
+            "command_id": self.command_id
+        }
+```
+
+#### 12.3.2 Error Handling Standards
+
+All validation errors must use standardized error responses:
+
+```python
+from ..schemas import BaseWebResponse, WebCommandError
+
+try:
+    command = validate_command_data("music_command", data)
+except WebCommandError as e:
+    error_response = BaseWebResponse.error_response(
+        message=e.message,
+        error_code="VALIDATION_ERROR",
+        data={"validation_errors": e.validation_errors}
+    )
+    await self._sio.emit("command_error", error_response.model_dump(mode='json'), room=sid)
+```
+
+### 12.4 Validation Pipeline Requirements
+
+All web commands must follow the 4-level validation pipeline:
+
+1. **Schema Validation**: Pydantic model validation against command schema
+2. **Field Mapping**: Transform fields for CantinaOS compatibility
+3. **Event Translation**: Convert validated command to proper CantinaOS event
+4. **Fallback Handling**: Graceful degradation for invalid data
+
+```python
+async def validate_and_emit_command(self, command_type: str, data: Dict[str, Any], sid: str = None) -> BaseWebResponse:
+    """Complete validation and emission pipeline."""
+    try:
+        # Step 1: Schema validation
+        command = validate_command_data(command_type, data)
+        
+        # Step 2: Field mapping (if needed)
+        event_payload = command.to_cantina_event()
+        
+        # Step 3: Event translation
+        event_topic = self._get_event_topic_for_command(command)
+        
+        # Step 4: Emit to CantinaOS
+        self._event_bus.emit(event_topic, event_payload)
+        
+        return BaseWebResponse.success_response(
+            message=f"{command_type} command processed successfully"
+        )
+    except Exception as e:
+        # Step 4: Fallback handling
+        return BaseWebResponse.error_response(
+            message=f"Failed to process {command_type}",
+            error_code="PROCESSING_ERROR"
+        )
+```
+
+## 13. Preventing Event Subscription Race Conditions
+
+### 13.1 Critical Pattern - Always Await Subscriptions
 
 Services that need responses from other services during startup MUST await their subscriptions:
 
@@ -953,9 +1117,14 @@ async def _start(self) -> None:
 async def _start(self) -> None:
     asyncio.create_task(self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory))
     await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode"})  # Response might be missed!
+```
 
+## 14. Conclusion
 
-## Conclusion
+Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. The new Pydantic validation system provides type safety and robust error handling for web dashboard integration. These standards should be reviewed and updated as needed based on project evolution and team feedback.
 
-
-Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. These standards should be reviewed and updated as needed based on project evolution and team feedback. 
+**Key New Requirements**:
+- All WebBridge services must use Pydantic validation mixins
+- Socket.IO handlers must use validation decorators
+- JSON serialization must handle datetime fields properly
+- Command validation must follow the 4-level pipeline 

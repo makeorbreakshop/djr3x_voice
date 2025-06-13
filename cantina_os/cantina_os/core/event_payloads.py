@@ -39,25 +39,62 @@ class DashboardLogPayload(BaseModel):
     entry_id: str
 
 
+# Web Dashboard Command Payloads (inbound from web frontend)
+
+class WebDashboardCommandPayload(BaseModel):
+    """Base web dashboard command payload."""
+    action: str
+    source: str = "web_dashboard"
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    data: Optional[Dict[str, Any]] = None
+
+
+class WebVoiceCommandPayload(WebDashboardCommandPayload):
+    """Voice commands from web dashboard."""
+    action: Literal["start", "stop"]
+
+
+class WebMusicCommandPayload(WebDashboardCommandPayload):
+    """Music commands from web dashboard."""
+    action: Literal["play", "pause", "stop", "next", "volume"]
+    track_id: Optional[str] = None
+    track_name: Optional[str] = None
+    volume: Optional[int] = None
+
+
+class WebSystemCommandPayload(WebDashboardCommandPayload):
+    """System commands from web dashboard."""
+    action: Literal["set_mode", "restart", "refresh_config"]
+    mode: Optional[Literal["IDLE", "AMBIENT", "INTERACTIVE"]] = None
+
+
+class WebDJCommandPayload(WebDashboardCommandPayload):
+    """DJ mode commands from web dashboard."""
+    action: Literal["start", "stop", "next_track", "set_personality"]
+    personality_mode: Optional[str] = None
+
+
 # Web Dashboard Status Payloads (outbound to web frontend)
 
 class WebMusicStatusPayload(BaseModel):
     """Music status updates for web dashboard."""
-    action: Literal["started", "stopped", "paused", "resumed", "track_changed", "volume_changed"]
+    action: Literal["started", "stopped", "paused", "resumed"]
     track: Optional[Dict[str, Any]] = None
     source: str
     mode: str
-    volume: Optional[int] = None
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    # Phase 2.3: Client-side progress calculation fields
+    start_timestamp: Optional[float] = None  # Unix timestamp for when playback started
+    duration: Optional[float] = None  # Track duration in seconds
 
 
 class WebVoiceStatusPayload(BaseModel):
     """Voice status updates for web dashboard."""
-    status: Literal["idle", "recording", "processing", "speaking", "error"]
+    status: Literal["idle", "recording", "processing", "speaking"]
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    error: Optional[str] = None
     transcript: Optional[str] = None
     confidence: Optional[float] = None
-    error: Optional[str] = None
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class WebSystemStatusPayload(BaseModel):

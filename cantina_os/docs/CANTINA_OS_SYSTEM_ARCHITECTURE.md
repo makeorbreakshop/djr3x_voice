@@ -55,7 +55,7 @@ CantinaOS follows these key architectural principles:
 | YodaModeManagerService | System mode orchestration | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND | SYSTEM_MODE_CHANGE, MODE_TRANSITION_STARTED, MODE_TRANSITION_COMPLETE | None | None |
 | MouseInputService | Handles mouse input | Mouse events | MIC_RECORDING_START, MIC_RECORDING_STOP | None | Mouse |
 | CLIService | Command-line interface | CLI_RESPONSE | CLI_COMMAND | None | Terminal |
-| WebBridgeService | Web dashboard integration via FastAPI/Socket.IO | SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, VOICE_PROCESSING_COMPLETE, SPEECH_SYNTHESIS_COMPLETED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_PROGRESS, DJ_MODE_CHANGED, SYSTEM_MODE_CHANGE, DASHBOARD_LOG | SYSTEM_SET_MODE_REQUEST, MUSIC_COMMAND, DJ_COMMAND | web_port, cors_origins | None |
+| WebBridgeService | Web dashboard integration via FastAPI/Socket.IO with Pydantic validation | SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, VOICE_PROCESSING_COMPLETE, SPEECH_SYNTHESIS_COMPLETED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_PROGRESS, DJ_MODE_CHANGED, SYSTEM_MODE_CHANGE, DASHBOARD_LOG | SYSTEM_SET_MODE_REQUEST, MUSIC_COMMAND, DJ_COMMAND | web_port, cors_origins, validation_schemas | None |
 | LoggingService | Centralized system logging and dashboard log streaming | All system events (as log capture) | DASHBOARD_LOG | log_level, session_file_path, enable_dashboard_streaming | None |
 | DebugService | Legacy logging and diagnostics | DEBUG_LOG, Various events | None | log_level | None |
 
@@ -126,10 +126,17 @@ CantinaOS follows these key architectural principles:
 
 | Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
 |-------------|------------|-------------|-------------------|---------|
-| VOICE_COMMAND | WebBridgeService | YodaModeManagerService (via SYSTEM_SET_MODE_REQUEST) | WebDashboardCommandPayload | Voice control from dashboard |
-| MUSIC_COMMAND | WebBridgeService | MusicControllerService | MusicCommandPayload | Music control from dashboard |
-| DJ_COMMAND | WebBridgeService | BrainService | DJCommandPayload | DJ mode control from dashboard |
-| SYSTEM_COMMAND | WebBridgeService | YodaModeManagerService | SystemCommandPayload | System mode changes from dashboard |
+| VOICE_COMMAND | WebBridgeService | YodaModeManagerService (via SYSTEM_SET_MODE_REQUEST) | VoiceCommandSchema (validated) | Voice control from dashboard |
+| MUSIC_COMMAND | WebBridgeService | MusicControllerService | MusicCommandSchema (validated) | Music control from dashboard |
+| DJ_COMMAND | WebBridgeService | BrainService | DJCommandSchema (validated) | DJ mode control from dashboard |
+| SYSTEM_COMMAND | WebBridgeService | YodaModeManagerService | SystemCommandSchema (validated) | System mode changes from dashboard |
+
+### 3.6 Pydantic Validation Events
+
+| Event Topic | Publishers | Subscribers | Payload Structure | Purpose |
+|-------------|------------|-------------|-------------------|---------|
+| VALIDATION_ERROR | WebBridgeService | LoggingService, DebugService | WebCommandError | Command validation failures |
+| COMMAND_VALIDATED | WebBridgeService | Various services | BaseWebResponse | Successful command validation |
 
 ## 4. System Flow Diagrams
 
@@ -284,6 +291,14 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 **4. Web Dashboard Integration Failures**
 - **Issue**: Dashboard bypassing CantinaOS event system or using wrong event topics
 - **Solution**: Follow WEB_DASHBOARD_STANDARDS.md for proper event topic translation and service compliance
+
+**5. Pydantic Validation Errors**
+- **Issue**: Commands failing with validation errors or JSON serialization issues
+- **Solution**: Use proper validation mixins and `model_dump(mode='json')` for datetime serialization
+
+**6. Socket.IO Handler Signature Mismatches**
+- **Issue**: Validation decorators failing due to incorrect method signatures
+- **Solution**: Ensure handlers use proper instance method signature with self parameter
 
 
 ## 5. Service Details
@@ -514,9 +529,10 @@ The DJ R3X Web Dashboard provides real-time monitoring and control capabilities 
 
 **Critical Event Handling**:
 - Subscribes to all major CantinaOS events for dashboard updates
-- Translates web dashboard commands to proper CantinaOS event topics
-- Provides real-time service status updates
+- Translates web dashboard commands to proper CantinaOS event topics using Pydantic validation
+- Provides real-time service status updates with validated payloads
 - Streams system logs via LoggingService integration
+- Implements comprehensive command validation pipeline
 
 ### 7.3 Dashboard Frontend Architecture
 
@@ -552,17 +568,25 @@ src/
 
 ### 7.4 Communication Flow
 
-**Dashboard → CantinaOS**:
+**Dashboard → CantinaOS** (with Pydantic Validation):
 1. User interacts with dashboard component
 2. Frontend emits Socket.IO event to WebBridgeService
-3. WebBridgeService translates to appropriate CantinaOS event
-4. CantinaOS processes event and responds
+3. WebBridgeService validates command using Pydantic schemas
+4. WebBridgeService translates validated command to appropriate CantinaOS event
+5. CantinaOS processes event and responds
 
-**CantinaOS → Dashboard**:
+**CantinaOS → Dashboard** (with Status Validation):
 1. CantinaOS service emits event to event bus
 2. WebBridgeService receives event (via subscription)
-3. WebBridgeService broadcasts to all connected dashboard clients
-4. Dashboard updates UI in real-time
+3. WebBridgeService validates status payload using StatusPayloadValidationMixin
+4. WebBridgeService broadcasts validated payload to all connected dashboard clients
+5. Dashboard updates UI in real-time with type-safe data
+
+**Validation Pipeline**:
+- **Schema Validation**: All commands validated against Pydantic models
+- **Field Mapping**: CantinaOS compatibility transformations
+- **Error Handling**: Standardized error responses with fallback mechanisms
+- **JSON Serialization**: Proper datetime handling with `model_dump(mode='json')`
 
 ### 7.5 LoggingService Integration
 
