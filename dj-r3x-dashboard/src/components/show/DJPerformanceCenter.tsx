@@ -28,6 +28,12 @@ export default function DJPerformanceCenter() {
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [transitionProgress, setTransitionProgress] = useState(0)
   const [nextTrackCountdown, setNextTrackCountdown] = useState<number | null>(null)
+  const [isClient, setIsClient] = useState(false)
+
+  // Client-side hydration guard
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
 
   // CantinaOS event integration
   useEffect(() => {
@@ -159,7 +165,7 @@ export default function DJPerformanceCenter() {
                 <div className="w-full bg-sw-dark-700 rounded-full h-2 border border-sw-blue-600/30">
                   <div 
                     className="bg-gradient-to-r from-sw-green to-sw-blue-400 h-full rounded-full transition-all duration-1000"
-                    style={{ width: `${currentTrack.progress || 0}%` }}
+                    style={{ width: isClient ? `${currentTrack.progress || 0}%` : '0%' }}
                   ></div>
                 </div>
                 <div className="flex justify-between text-xs text-sw-blue-400 font-mono">
@@ -234,7 +240,7 @@ export default function DJPerformanceCenter() {
               <div className="w-full bg-sw-dark-700 rounded-full h-2 border border-sw-yellow/30">
                 <div 
                   className="bg-gradient-to-r from-sw-yellow to-sw-green h-full rounded-full transition-all duration-100"
-                  style={{ width: `${transitionProgress}%` }}
+                  style={{ width: isClient ? `${transitionProgress}%` : '0%' }}
                 ></div>
               </div>
               <div className="text-xs text-sw-yellow/80 font-mono mt-1">

@@ -1,9 +1,16 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useSocketContext } from '@/contexts/SocketContext'
 
 export default function Header() {
   const { connected, systemStatus } = useSocketContext()
+  const [isClient, setIsClient] = useState(false)
+  
+  // Prevent hydration mismatch by only rendering dynamic content after client mount
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
   
   const getConnectionStatus = (): 'connecting' | 'connected' | 'disconnected' => {
     if (!connected) return 'disconnected'
@@ -11,7 +18,7 @@ export default function Header() {
     return 'connecting'
   }
   
-  const connectionStatus = getConnectionStatus()
+  const connectionStatus = isClient ? getConnectionStatus() : 'disconnected'
 
   const getStatusColor = () => {
     switch (connectionStatus) {
@@ -27,6 +34,7 @@ export default function Header() {
   }
 
   const getStatusText = () => {
+    if (!isClient) return 'INITIALIZING...'
     switch (connectionStatus) {
       case 'connected':
         return 'CANTINA OS ONLINE'

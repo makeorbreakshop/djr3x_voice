@@ -11,6 +11,13 @@ export default function MonitorTab() {
     performanceMetrics,
     connected 
   } = useSocketContext()
+  
+  const [isClient, setIsClient] = useState(false)
+  
+  // Prevent hydration mismatch by only rendering dynamic content after client mount
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
 
   // Real-time transcription feed
   const [transcriptionFeed, setTranscriptionFeed] = useState<Array<{
@@ -74,10 +81,10 @@ export default function MonitorTab() {
           <AudioSpectrum 
             height={128}
             className="h-32"
-            isActive={connected && systemStatus?.cantina_os_connected}
+            isActive={isClient && connected && systemStatus?.cantina_os_connected}
           />
           <div className="mt-2 text-xs text-sw-blue-300/70 text-center">
-            {connected && systemStatus?.cantina_os_connected 
+            {isClient && connected && systemStatus?.cantina_os_connected 
               ? 'Real-time microphone frequency analysis'
               : 'Connect to CantinaOS to enable audio visualization'
             }
@@ -104,7 +111,7 @@ export default function MonitorTab() {
               </div>
             ) : (
               <div className="text-sw-blue-300/50 text-sm">
-                {connected ? 'Waiting for voice activity...' : 'Connect to CantinaOS to see transcriptions'}
+                {isClient && connected ? 'Waiting for voice activity...' : 'Connect to CantinaOS to see transcriptions'}
               </div>
             )}
           </div>
@@ -132,13 +139,13 @@ export default function MonitorTab() {
           />
           <MetricCard 
             label="Last Update" 
-            value={systemStatus?.timestamp ? new Date(systemStatus.timestamp).toLocaleTimeString() : "--:--:--"} 
+            value={isClient && systemStatus?.timestamp ? new Date(systemStatus.timestamp).toLocaleTimeString() : "--:--:--"} 
           />
         </div>
       </div>
 
       {/* Connection Status Banner */}
-      {!connected && (
+      {isClient && !connected && (
         <div className="sw-panel border-sw-red/50 bg-sw-red/10">
           <div className="flex items-center justify-center space-x-2">
             <div className="w-3 h-3 bg-sw-red rounded-full animate-pulse"></div>
@@ -204,7 +211,7 @@ function ServiceCard({ name, status, details, uptime, lastUpdate }: ServiceCardP
         )}
         {lastUpdate && (
           <p className="text-xs text-sw-blue-300/50">
-            Updated: {new Date(lastUpdate).toLocaleTimeString()}
+            Updated: {typeof window !== 'undefined' ? new Date(lastUpdate).toLocaleTimeString() : '--:--:--'}
           </p>
         )}
       </div>

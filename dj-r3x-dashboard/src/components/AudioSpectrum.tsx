@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface AudioSpectrumProps {
   width?: number
@@ -21,6 +21,12 @@ export default function AudioSpectrum({
   const analyser = useRef<AnalyserNode | null>(null)
   const source = useRef<MediaStreamAudioSourceNode | null>(null)
   const stream = useRef<MediaStream | null>(null)
+  const [isBrowserReady, setIsBrowserReady] = useState(false)
+  
+  // Ensure we only initialize audio in browser environment
+  useEffect(() => {
+    setIsBrowserReady(typeof window !== 'undefined')
+  }, [])
 
   useEffect(() => {
     const setupAudio = async () => {
@@ -102,7 +108,7 @@ export default function AudioSpectrum({
       audioContext.current = null;
     };
 
-    if (isActive) {
+    if (isBrowserReady && isActive) {
       setupAudio();
     } else {
       cleanup();
@@ -110,7 +116,7 @@ export default function AudioSpectrum({
 
     // This is the cleanup function that will be called when the component unmounts OR when isActive becomes false.
     return cleanup;
-  }, [isActive, width, height]); // Rerun effect if isActive, width, or height changes
+  }, [isBrowserReady, isActive, width, height]); // Rerun effect if browser ready, isActive, width, or height changes
 
   return (
     <div className={`relative ${className}`}>

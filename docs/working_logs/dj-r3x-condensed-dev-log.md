@@ -693,6 +693,48 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - System memory usage: < 500MB
 - Test coverage: 90%+ critical paths
 
+### 2025-06-12: Music Controller Architecture Documentation
+- **Issue**: Need to understand music system architecture for debugging dashboard display issues
+- **Solution**: Documented complete event flow from CLI/Dashboard → CommandDispatcher → MusicController → EventBus → WebBridge → Dashboard
+- **Impact**: Clear understanding of data flow enabling targeted debugging of music progress display
+- **Technical**: Event flow diagram + component responsibilities + payload schemas + event types documentation
+
+### 2025-06-12: Dashboard Music Progress Display - Empty Data Investigation
+- **Issue**: Music plays but dashboard shows empty data with progress at 0:00 despite validation passing
+- **Solution**: Isolated issue to Socket.IO emission or client handling - validation and data flow confirmed working
+- **Impact**: Narrowed problem scope from entire pipeline to final emission/reception stage
+- **Technical**: Confirmed MusicController emits correctly + WebBridge validates successfully + Socket.IO payload investigation needed
+
+### 2025-06-12: Music Progress System - Root Cause Analysis
+- **Issue**: Skip_validation fix didn't resolve empty dashboard data - addressed wrong problem
+- **Solution**: Identified real issue in Pydantic model serialization for Socket.IO transmission
+- **Impact**: Discovered serialization path from validated model to Socket.IO needs investigation
+- **Technical**: Data present in schema + validation succeeding + serialization dropping Optional fields hypothesis
+
+### 2025-06-12: Music Progress Bug - Faulty Validation Logic in WebBridge
+- **Issue**: _broadcast_event_to_dashboard() had redundant validation logic corrupting already-validated data
+- **Solution**: Removed 50+ lines of redundant validation, trusting upstream StatusPayloadValidationMixin
+- **Impact**: Clean single-responsibility function preserving data integrity from MusicController to dashboard
+- **Technical**: Refactored to simple event wrapping without data alteration
+
+### 2025-06-12: Music Progress - Definitive Root Cause: Silent Subscription Failure
+- **Issue**: WebBridgeService never received music events due to asyncio.gather() failing on invalid topic strings
+- **Solution**: Fixed hardcoded "MODE_TRANSITION_STARTED" strings to use EventTopics enum members
+- **Impact**: WebBridge now properly subscribes to all events including music playback
+- **Technical**: Invalid topic in gather() halted ALL subsequent subscriptions - critical silent failure
+
+### 2025-06-12: React Hydration Error Freezing Music Progress UI
+- **Issue**: AudioSpectrum component executing browser APIs during SSR causing hydration mismatch + AudioContext crash
+- **Solution**: Created AudioSpectrum.dynamic.tsx with SSR disabled + refactored lifecycle management
+- **Impact**: Fixed application-wide rendering freeze - music progress now updates correctly
+- **Technical**: Dynamic import with ssr:false + proper AudioContext lifecycle + lucide-react dependency
+
+### 2025-06-12: Hydration Errors Final Fix - Dynamic Style Protection
+- **Issue**: Progress/volume bars using dynamic styles causing server/client HTML mismatches
+- **Solution**: Added isClient hydration guards for all dynamic styles in MusicTab and VoiceTab
+- **Impact**: Eliminated all React hydration errors - restored rendering lifecycle
+- **Technical**: useState(false) + useEffect setIsClient(true) + conditional style rendering
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)

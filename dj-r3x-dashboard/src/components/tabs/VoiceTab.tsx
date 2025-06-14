@@ -18,10 +18,6 @@ import {
   Settings,
   Bot,
 } from 'lucide-react'
-import { Slider } from '@/components/ui/slider'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import { Progress } from '@/components/ui/progress'
 
 export default function VoiceTab() {
   const { 

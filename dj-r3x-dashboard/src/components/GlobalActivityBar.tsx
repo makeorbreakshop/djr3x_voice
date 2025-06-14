@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSocketContext } from '@/contexts/SocketContext'
 import { LogEntry } from '@/hooks/useSocket'
 
@@ -21,8 +21,30 @@ const getLogLevelColor = (level: LogEntry['level']) => {
 export default function GlobalActivityBar() {
   const { logs } = useSocketContext()
   const [isExpanded, setIsExpanded] = useState(false)
+  const [isClient, setIsClient] = useState(false)
   
-  const latestLog = logs[logs.length - 1]
+  // Prevent hydration mismatch by only rendering content after client mount
+  useEffect(() => {
+    setIsClient(true)
+  }, [])
+  
+  const latestLog = logs && logs.length > 0 ? logs[logs.length - 1] : null
+  
+  // Return minimal server-side content to prevent hydration mismatch
+  if (!isClient) {
+    return (
+      <div className="fixed bottom-0 left-0 right-0 bg-sw-dark-700 border-t border-sw-blue-500/30 z-50">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-xs">
+            <span className="text-sw-blue-400">Loading activity...</span>
+          </div>
+          <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
+            <span className="text-xs text-sw-blue-400">0 logs</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-sw-dark-700 border-t border-sw-blue-500/30 z-50">

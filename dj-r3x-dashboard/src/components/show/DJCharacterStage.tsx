@@ -8,11 +8,31 @@ interface DJCharacterStageProps {
 
 export default function DJCharacterStage({ characterState }: DJCharacterStageProps) {
   const [animationKey, setAnimationKey] = useState(0)
+  const [isClient, setIsClient] = useState(false)
+  const [waveformHeights, setWaveformHeights] = useState<number[]>([])
+  const [waveformAnimations, setWaveformAnimations] = useState<number[]>([])
+
+  // Client-side hydration guard and waveform initialization
+  useEffect(() => {
+    setIsClient(true)
+    // Generate stable random values for waveform on client side only
+    const heights = Array.from({ length: 32 }, () => Math.random() * 100)
+    const animations = Array.from({ length: 32 }, () => 0.5 + Math.random() * 0.5)
+    setWaveformHeights(heights)
+    setWaveformAnimations(animations)
+  }, [])
 
   // Trigger animation refresh on state change
   useEffect(() => {
     setAnimationKey(prev => prev + 1)
-  }, [characterState])
+    // Regenerate waveform on state change (client side only)
+    if (isClient) {
+      const heights = Array.from({ length: 32 }, () => Math.random() * 100)
+      const animations = Array.from({ length: 32 }, () => 0.5 + Math.random() * 0.5)
+      setWaveformHeights(heights)
+      setWaveformAnimations(animations)
+    }
+  }, [characterState, isClient])
 
   const getCharacterStyles = () => {
     switch (characterState) {
@@ -112,8 +132,8 @@ export default function DJCharacterStage({ characterState }: DJCharacterStagePro
                         key={i}
                         className="bg-cyan-400 w-1"
                         style={{
-                          height: `${Math.random() * 100}%`,
-                          animation: `pulse ${0.5 + Math.random() * 0.5}s ease-in-out infinite`
+                          height: isClient && waveformHeights[i] !== undefined ? `${waveformHeights[i]}%` : '50%',
+                          animation: isClient && waveformAnimations[i] !== undefined ? `pulse ${waveformAnimations[i]}s ease-in-out infinite` : 'pulse 0.75s ease-in-out infinite'
                         }}
                       ></div>
                     ))}

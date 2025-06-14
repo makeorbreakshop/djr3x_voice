@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSocketContext } from '../../contexts/SocketContext'
 
 interface Track {
@@ -36,118 +36,72 @@ export default function MusicTab() {
   const [queue, setQueue] = useState<Track[]>([])
   const [ducking, setDucking] = useState(false)
 
-  // Client-side progress tracking state (Phase 2.3)
-  const [progressTimer, setProgressTimer] = useState<NodeJS.Timeout | null>(null)
-  const [trackStartTime, setTrackStartTime] = useState<number | null>(null)
-  const [trackDuration, setTrackDuration] = useState<number | null>(null)
-  const [pausedAt, setPausedAt] = useState<number | null>(null)
-  const [totalPauseTime, setTotalPauseTime] = useState<number>(0)
+  // --- REBUILT PROGRESS TRACKING SYSTEM ---
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const timingDataRef = useRef<{
+    startTime: number | null
+    duration: number | null
+  }>({ startTime: null, duration: null })
 
-  // Client-side progress calculation functions (Phase 2.3)
-  const startProgressTracking = (startTimestamp: number, duration: number) => {
-    console.log('🎵 [ClientProgress] Starting client-side progress tracking', { startTimestamp, duration })
-    
-    // Clear any existing timer
-    if (progressTimer) {
-      clearInterval(progressTimer)
+  // This is the single, stable function for the timer.
+  // It reads the latest data from the ref, preventing stale closures.
+  const updateProgress = useCallback(() => {
+    const { startTime, duration } = timingDataRef.current
+    if (startTime === null || duration === null || isPaused) {
+      return
     }
-    
-    // Set tracking state
-    setTrackStartTime(startTimestamp * 1000) // Convert to milliseconds
-    setTrackDuration(duration)
-    setPausedAt(null)
-    setTotalPauseTime(0)
-    
-    // Start progress timer (update every 100ms for smooth animation)
-    const timer = setInterval(() => {
-      updateProgress()
-    }, 100)
-    
-    setProgressTimer(timer)
-  }
 
-  const stopProgressTracking = () => {
-    console.log('🎵 [ClientProgress] Stopping client-side progress tracking')
-    
-    if (progressTimer) {
-      clearInterval(progressTimer)
-      setProgressTimer(null)
-    }
-    
-    // Reset all tracking state
-    setTrackStartTime(null)
-    setTrackDuration(null)
-    setPausedAt(null)
-    setTotalPauseTime(0)
-    setProgress(0)
-    setCurrentTime('0:00')
-  }
+    const elapsed = (Date.now() / 1000) - startTime
+    const currentPosition = Math.max(0, Math.min(elapsed, duration))
+    const progressPercent = (currentPosition / duration) * 100
 
-  const pauseProgressTracking = (pausedAtPosition: number) => {
-    console.log('🎵 [ClientProgress] Pausing progress tracking at position:', pausedAtPosition)
-    
-    if (progressTimer) {
-      clearInterval(progressTimer)
-      setProgressTimer(null)
-    }
-    
-    setPausedAt(Date.now())
-  }
-
-  const resumeProgressTracking = (resumePosition: number) => {
-    console.log('🎵 [ClientProgress] Resuming progress tracking from position:', resumePosition)
-    
-    // Calculate total pause time and update tracking
-    if (pausedAt && trackStartTime) {
-      const pauseDuration = Date.now() - pausedAt
-      setTotalPauseTime(prev => prev + pauseDuration)
-    }
-    
-    setPausedAt(null)
-    
-    // Restart the timer
-    const timer = setInterval(() => {
-      updateProgress()
-    }, 100)
-    
-    setProgressTimer(timer)
-  }
-
-  const updateProgress = () => {
-    if (!trackStartTime || !trackDuration || pausedAt) {
-      return // Can't calculate progress without timing data or while paused
-    }
-    
-    const now = Date.now()
-    const elapsed = (now - trackStartTime - totalPauseTime) / 1000 // Convert to seconds
-    const currentPosition = Math.max(0, Math.min(elapsed, trackDuration))
-    
-    // Update progress percentage
-    const progressPercent = (currentPosition / trackDuration) * 100
     setProgress(progressPercent)
-    
-    // Update current time display
-    const minutes = Math.floor(currentPosition / 60)
-    const seconds = Math.floor(currentPosition % 60)
-    setCurrentTime(`${minutes}:${String(seconds).padStart(2, '0')}`)
-    
-    // Check if track has ended
-    if (currentPosition >= trackDuration) {
-      console.log('🎵 [ClientProgress] Track ended, stopping progress tracking')
-      stopProgressTracking()
+    setCurrentTime(formatTime(currentPosition))
+
+    if (currentPosition >= duration) {
       setIsPlaying(false)
       setIsPaused(false)
     }
-  }
+  }, [isPaused]) // Only depends on isPaused state
 
-  // Cleanup timer on component unmount
+  // This effect is the single source of truth for managing the timer's lifecycle.
   useEffect(() => {
-    return () => {
-      if (progressTimer) {
-        clearInterval(progressTimer)
+    if (isPlaying && !isPaused) {
+      // Start the timer with 100ms intervals for smooth progress
+      timerRef.current = setInterval(updateProgress, 100)
+    } else {
+      // Stop the timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
       }
     }
-  }, [progressTimer])
+
+    // Cleanup function to stop the timer when the component unmounts
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [isPlaying, isPaused, updateProgress])
+
+  const resetProgress = useCallback(() => {
+    timingDataRef.current = { startTime: null, duration: null }
+    setProgress(0)
+    setCurrentTime('0:00')
+  }, [])
+  // --- END REBUILT SYSTEM ---
+
+  // Debounce mechanism to prevent rapid track selection
+  const [isSelectingTrack, setIsSelectingTrack] = useState(false)
+  const trackSelectionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Format time helper
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${String(secs).padStart(2, '0')}`
+  }
 
   // Client-side hydration fix
   useEffect(() => {
@@ -164,17 +118,13 @@ export default function MusicTab() {
     if (!socket) return
 
     const handleMusicStatus = (data: any) => {
-      console.log('🎵 [MusicTab] Music status update received:', data)
-      
       // WebBridge wraps payload in {topic, data, timestamp} structure
       const musicData = data.data || data
-      console.log('🎵 [MusicTab] Track data received:', musicData.track)
-      console.log('🎵 [MusicTab] Current isPlaying state:', isPlaying)
-      console.log('🎵 [MusicTab] Current currentTrack state:', currentTrack)
       
       if (musicData.action === 'started') {
-        setIsPlaying(true)
         setIsPaused(false)
+        setIsSelectingTrack(false)
+        
         if (musicData.track) {
           // Extract filename from filepath for display
           const filename = musicData.track.filepath ? musicData.track.filepath.split('/').pop() || musicData.track.title : musicData.track.title;
@@ -187,39 +137,42 @@ export default function MusicTab() {
             file: filename,
             path: musicData.track.filepath || ''
           }
-          console.log('🎵 [MusicTab] Created track object:', track)
           setCurrentTrack(track)
-          console.log('🎵 [MusicTab] Updated currentTrack state')
           
-          // Phase 2.3: Start client-side progress tracking
-          if (musicData.start_timestamp && musicData.duration) {
-            startProgressTracking(musicData.start_timestamp, musicData.duration)
+          // Store backend timing data directly in the ref
+          const duration = musicData.duration || musicData.track?.duration
+          const startTimestamp = musicData.start_timestamp
+          
+          if (startTimestamp) {
+            timingDataRef.current = {
+              startTime: startTimestamp,
+              duration: (duration && duration > 0) ? duration : 180,
+            }
+            // Set isPlaying to true, which will trigger the useEffect to start the timer.
+            setIsPlaying(true)
+            // Immediately update progress to prevent "nothing happens" feel
+            updateProgress()
+          } else {
+            console.error('🎵 [MusicTab] No start_timestamp provided in music status event')
           }
         }
       } else if (musicData.action === 'stopped') {
-        console.log('🎵 [MusicTab] Music stopped event received')
         setIsPlaying(false)
         setIsPaused(false)
-        // Phase 2.3: Stop client-side progress tracking
-        stopProgressTracking()
+        setCurrentTrack(null)
+        setIsSelectingTrack(false)
+        resetProgress()
       } else if (musicData.action === 'paused') {
-        console.log('🎵 [MusicTab] Music paused event received')
         setIsPlaying(false)
         setIsPaused(true)
-        // Phase 2.3: Pause client-side progress tracking
-        if (musicData.paused_at_position !== undefined) {
-          pauseProgressTracking(musicData.paused_at_position)
-        }
       } else if (musicData.action === 'resumed') {
-        console.log('🎵 [MusicTab] Music resumed event received')
-        setIsPlaying(true)
-        setIsPaused(false)
-        // Phase 2.3: Resume client-side progress tracking
-        if (musicData.resume_position !== undefined) {
-          resumeProgressTracking(musicData.resume_position)
+        // Backend sends new start_timestamp on resume - use it
+        const newStartTimestamp = musicData.start_timestamp
+        if (newStartTimestamp) {
+          timingDataRef.current.startTime = newStartTimestamp
         }
-      } else {
-        console.log('🎵 [MusicTab] Unknown action received:', musicData.action)
+        setIsPaused(false)
+        setIsPlaying(true)
       }
       
       if (musicData.volume !== undefined) {
@@ -228,17 +181,11 @@ export default function MusicTab() {
     }
 
     const handleMusicLibraryUpdated = (data: any) => {
-      console.log('Music library updated:', data)
       loadMusicLibrary()
     }
 
     const handleMusicProgress = (data: any) => {
-      // Phase 2.3: Server-side progress updates are now replaced by client-side calculation
-      // This handler is kept for backward compatibility but progress is calculated locally
-      console.log('🎵 [MusicTab] Server progress update received (now using client-side calculation):', data)
-      
-      // Optional: Could use server progress as a fallback or validation
-      // But client-side calculation should be more accurate and responsive
+      // Server-side progress events are ignored - using client-side calculation
     }
 
     const handleServiceStatus = (data: any) => {
@@ -248,11 +195,9 @@ export default function MusicTab() {
     }
 
     const handleMusicQueue = (data: any) => {
-      console.log('🎵 [MusicTab] Queue update received:', data)
       // Handle queue updates from backend
       const queueData = data.data || data
       if (queueData.action === 'queue_updated') {
-        console.log('🎵 [MusicTab] Queue updated - length:', queueData.queue_length)
         // Note: We're managing queue locally for UI responsiveness
         // Backend queue is separate for actual playback logic
       }
@@ -271,7 +216,7 @@ export default function MusicTab() {
       socket.off('music_queue', handleMusicQueue)
       socket.off('service_status_update', handleServiceStatus)
     }
-  }, [socket])
+  }, [socket, resetProgress, updateProgress])
 
   const loadMusicLibrary = async () => {
     try {
@@ -317,15 +262,44 @@ export default function MusicTab() {
     }
   }
 
-  const handleTrackSelect = (track: Track) => {
+  const handleTrackSelect = useCallback((track: Track) => {
     if (!socket) return
 
+    // Prevent rapid track selection
+    if (isSelectingTrack) {
+      console.log('Track selection in progress, ignoring click')
+      return
+    }
+
+    // Clear any existing timeout
+    if (trackSelectionTimeoutRef.current) {
+      clearTimeout(trackSelectionTimeoutRef.current)
+    }
+
+    // Set selecting state
+    setIsSelectingTrack(true)
+
+    // Send the command
     socket.emit('music_command', {
       action: 'play',
       track_name: track.title,
       track_id: track.id
     })
-  }
+
+    // Reset selecting state after a delay
+    trackSelectionTimeoutRef.current = setTimeout(() => {
+      setIsSelectingTrack(false)
+    }, 1000) // 1 second cooldown between track selections
+  }, [socket, isSelectingTrack])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (trackSelectionTimeoutRef.current) {
+        clearTimeout(trackSelectionTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleVolumeChange = (newVolume: number) => {
     setVolume(newVolume)
@@ -379,7 +353,7 @@ export default function MusicTab() {
             <div className="space-y-2">
               <div className="bg-sw-dark-700 rounded-full h-2 overflow-hidden">
                 <div 
-                  className="bg-sw-blue-500 h-2 rounded-full transition-all duration-1000"
+                  className="bg-sw-blue-500 h-2 rounded-full transition-all duration-100 ease-linear"
                   style={{ width: isClient ? `${progress}%` : '0%' }}
                 ></div>
               </div>
@@ -458,8 +432,9 @@ export default function MusicTab() {
                 >
                   <div className="flex items-center justify-between">
                     <div 
-                      className="flex-1 cursor-pointer"
+                      className={`flex-1 cursor-pointer ${isSelectingTrack ? 'opacity-50 cursor-wait' : ''}`}
                       onClick={() => handleTrackSelect(track)}
+                      title={isSelectingTrack ? 'Please wait...' : `Play ${track.title}`}
                     >
                       <h4 className="font-medium text-sw-blue-100">{track.title}</h4>
                       <p className="text-sm text-sw-blue-300">{track.artist}</p>
