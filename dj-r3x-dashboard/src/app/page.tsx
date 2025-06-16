@@ -39,9 +39,15 @@ export default function Home() {
   return (
     <SocketProvider>
       <div className="min-h-screen bg-sw-dark-900 pb-16">
-        <Header />
+        <header className="border-b border-sw-blue-600/30 bg-sw-dark-800/50 backdrop-blur-sm">
+          <div className="container mx-auto px-4 py-2">
+            <div className="flex items-center justify-between">
+              <Header />
+              <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+            </div>
+          </div>
+        </header>
         <div className="container mx-auto px-4 py-6">
-          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
           <div className="mt-6">
             {renderActiveTab()}
           </div>

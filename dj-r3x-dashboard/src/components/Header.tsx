@@ -48,28 +48,21 @@ export default function Header() {
   }
 
   return (
-    <header className="border-b border-sw-blue-600/30 bg-sw-dark-800/50 backdrop-blur-sm">
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex items-center justify-between">
-          {/* Logo and Title */}
-          <div className="flex items-center space-x-4">
-            <div className="text-2xl font-bold text-sw-blue-100 sw-text-glow">
-              DJ R3X
-            </div>
-            <div className="text-sm text-sw-blue-300/70 uppercase tracking-wider">
-              MONITORING DASHBOARD
-            </div>
-          </div>
-
-          {/* Connection Status */}
-          <div className="flex items-center space-x-3">
-            <div className={`sw-status-indicator ${getStatusColor()}`}></div>
-            <span className="text-sm font-medium text-sw-blue-200 uppercase tracking-wide">
-              {getStatusText()}
-            </span>
-          </div>
+    <>
+      {/* Logo and Title */}
+      <div className="flex items-center space-x-4">
+        <div className="text-2xl font-bold text-sw-blue-100 sw-text-glow">
+          DJ R3X
         </div>
       </div>
-    </header>
+
+      {/* Connection Status */}
+      <div className="flex items-center space-x-3">
+        <div className={`sw-status-indicator ${getStatusColor()}`}></div>
+        <span className="text-sm font-medium text-sw-blue-200 uppercase tracking-wide">
+          {getStatusText()}
+        </span>
+      </div>
+    </>
   )
 }
