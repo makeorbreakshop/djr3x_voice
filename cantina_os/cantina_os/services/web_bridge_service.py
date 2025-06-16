@@ -72,6 +72,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         self._service_status = {}
         self._cached_service_status = {}  # Cache for intelligent status caching
         self._last_status_update = 0  # Timestamp of last status update
+        self._music_library_cache = {}  # Cache for music library data with durations
 
         # Event filtering and throttling
         self._event_throttle_state = defaultdict(lambda: {"last_sent": 0, "count": 0})
@@ -136,6 +137,17 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 {"source": "web_bridge", "timestamp": datetime.now().isoformat()},
             )
             self._logger.critical("[WebBridge] Step 7: Status request sent")
+            
+            # Request music library update if music controller is already running
+            self._logger.info("[WebBridge] Requesting music library update from music controller")
+            self._event_bus.emit(
+                EventTopics.COMMAND,
+                {
+                    "command": "refresh_music_library",
+                    "source": "web_bridge",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
 
             self._logger.critical("[WebBridge] Step 8: ALL INITIALIZATION COMPLETE - WebBridge fully operational")
             
@@ -224,32 +236,56 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         async def get_music_library():
             """Get music library from CantinaOS"""
             try:
-                # Get music from assets directory
-                music_dir = os.path.join(
-                    os.path.dirname(__file__), "..", "assets", "music"
-                )
                 tracks = []
+                
+                # First, try to use cached data with actual durations
+                if self._music_library_cache:
+                    logger.info(f"[WebBridge] Serving {len(self._music_library_cache)} tracks from cache")
+                    
+                    for i, (track_name, track_data) in enumerate(self._music_library_cache.items()):
+                        # Format duration properly
+                        duration_seconds = track_data.get("duration")
+                        if duration_seconds is not None:
+                            # Convert seconds to MM:SS format
+                            minutes = int(duration_seconds // 60)
+                            seconds = int(duration_seconds % 60)
+                            duration_str = f"{minutes}:{seconds:02d}"
+                        else:
+                            duration_str = "Unknown"
+                        
+                        tracks.append({
+                            "id": str(i + 1),
+                            "title": track_data.get("title", track_name),
+                            "artist": track_data.get("artist", "Cantina Band"),
+                            "duration": duration_str,
+                            "file": os.path.basename(track_data.get("path", "")),
+                            "path": track_data.get("path", "")
+                        })
+                else:
+                    # Fallback to filesystem if no cached data available
+                    logger.info("[WebBridge] No cached music library, falling back to filesystem")
+                    music_dir = os.path.join(
+                        os.path.dirname(__file__), "..", "assets", "music"
+                    )
+                    
+                    if os.path.exists(music_dir):
+                        for i, filename in enumerate(os.listdir(music_dir)):
+                            if filename.endswith((".mp3", ".wav", ".m4a")):
+                                name, _ = os.path.splitext(filename)
+                                if " - " in name:
+                                    artist, title = name.split(" - ", 1)
+                                else:
+                                    artist = "Cantina Band"
+                                    title = name
 
-                if os.path.exists(music_dir):
-                    for i, filename in enumerate(os.listdir(music_dir)):
-                        if filename.endswith((".mp3", ".wav", ".m4a")):
-                            name, _ = os.path.splitext(filename)
-                            if " - " in name:
-                                artist, title = name.split(" - ", 1)
-                            else:
-                                artist = "Cantina Band"
-                                title = name
-
-                            tracks.append(
-                                {
+                                tracks.append({
                                     "id": str(i + 1),
                                     "title": title.strip(),
                                     "artist": artist.strip(),
-                                    "duration": "3:00",
+                                    "duration": "Unknown",  # Changed from hardcoded "3:00"
                                     "file": filename,
                                     "path": os.path.join(music_dir, filename),
-                                }
-                            )
+                                })
 
                 return {"tracks": tracks}
             except Exception as e:
@@ -335,6 +371,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             self.subscribe(EventTopics.MUSIC_PLAYBACK_RESUMED, self._handle_music_playback_resumed),
             self.subscribe(EventTopics.MUSIC_PROGRESS, self._handle_music_progress),
             self.subscribe(EventTopics.MUSIC_QUEUE_UPDATED, self._handle_music_queue_updated),
+            self.subscribe(EventTopics.MUSIC_LIBRARY_UPDATED, self._handle_music_library_updated),
             
             # Other events
             self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed),
@@ -810,6 +847,24 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 "added_track": data.get("added_track")
             },
             "music_queue",
+        )
+
+    async def _handle_music_library_updated(self, data):
+        """Handle music library updates with track duration information"""
+        # Cache the music library data for API endpoint
+        tracks = data.get("tracks", {})
+        self._music_library_cache = tracks
+        
+        logger.info(f"[WebBridge] Updated music library cache with {len(tracks)} tracks")
+        
+        # Broadcast the update to connected dashboard clients
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MUSIC_LIBRARY_UPDATED,
+            {
+                "track_count": data.get("track_count", 0),
+                "tracks": tracks
+            },
+            "music_library_updated",
         )
 
     async def _handle_dj_mode_changed(self, data):
