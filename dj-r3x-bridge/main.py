@@ -63,6 +63,7 @@ cantina_os_connected = False
 dashboard_clients: Dict[str, Any] = {}
 event_buffer = []  # Buffer events when dashboard not connected
 service_status = {}  # Track real service status from CantinaOS
+music_library_cache = {}  # Cache music library data from CantinaOS
 
 # Event filtering and throttling
 event_throttle_state = defaultdict(lambda: {'last_sent': 0, 'count': 0})
@@ -319,32 +320,35 @@ async def dj_command_api(command: DJModeRequest):
 async def get_music_library():
     """Get music library from CantinaOS"""
     try:
-        if cantina_os_event_bus and cantina_os_connected:
-            # Request music library from CantinaOS
-            # For now, use the actual file list from assets directory
-            import os
-            music_dir = os.path.join(os.path.dirname(__file__), '..', 'cantina_os', 'cantina_os', 'assets', 'music')
+        if cantina_os_event_bus and cantina_os_connected and music_library_cache:
+            # Use the cached music library data from CantinaOS
             tracks = []
             
-            if os.path.exists(music_dir):
-                for i, filename in enumerate(os.listdir(music_dir)):
-                    if filename.endswith(('.mp3', '.wav', '.m4a')):
-                        # Parse artist and title from filename
-                        name, _ = os.path.splitext(filename)
-                        if " - " in name:
-                            artist, title = name.split(" - ", 1)
-                        else:
-                            artist = "Cantina Band"
-                            title = name
-                        
-                        tracks.append({
-                            "id": str(i + 1),
-                            "title": title.strip(),
-                            "artist": artist.strip(),
-                            "duration": "3:00",  # Default duration
-                            "file": filename,
-                            "path": os.path.join(music_dir, filename)
-                        })
+            for i, (track_name, track_data) in enumerate(music_library_cache.items()):
+                # Parse artist and title from track name or use provided metadata
+                if track_data.get('artist') and track_data.get('title'):
+                    artist = track_data['artist']
+                    title = track_data['title']
+                elif " - " in track_name:
+                    artist, title = track_name.split(" - ", 1)
+                else:
+                    artist = "Cantina Band"
+                    title = track_data.get('title') or track_name
+                
+                # Use duration from CantinaOS data (already calculated)
+                duration_seconds = track_data.get('duration', 180)  # Default 3 minutes if missing
+                
+                # Convert duration to MM:SS format
+                duration_str = f"{int(duration_seconds // 60)}:{int(duration_seconds % 60):02d}"
+                
+                tracks.append({
+                    "id": str(i + 1),
+                    "title": title.strip(),
+                    "artist": artist.strip(),
+                    "duration": duration_str,
+                    "file": track_data.get('name', track_name),
+                    "path": track_data.get('path', '')
+                })
             
             return {"tracks": tracks}
         else:
@@ -606,7 +610,9 @@ async def handle_music_playback_started(data):
             'action': 'started',
             'track': data.get('track', {}),
             'source': data.get('source', 'unknown'),
-            'mode': data.get('mode', 'INTERACTIVE')
+            'mode': data.get('mode', 'INTERACTIVE'),
+            'start_timestamp': data.get('start_timestamp', time.time()),
+            'duration': data.get('duration')
         },
         'music_status'
     )
@@ -624,6 +630,10 @@ async def handle_music_playback_stopped(data):
 
 async def handle_music_library_updated(data):
     """Handle music library updated event"""
+    global music_library_cache
+    # Store the music library data from CantinaOS
+    music_library_cache = data.get('tracks', {})
+    
     await broadcast_event_to_dashboard(
         EventTopics.MUSIC_LIBRARY_UPDATED,
         {

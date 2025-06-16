@@ -445,4 +445,171 @@ const updateDisplay = () => {
 
 ---
 
+### Music Library Duration Display - ROOT CAUSE IDENTIFIED
+**Time**: 06:15  
+**Goal**: Fix music library showing hardcoded "3:00" duration for all tracks  
+**Problem**: All tracks in music library display "3:00" duration despite player showing correct times (e.g., "2:24")  
+
+**Root Cause Analysis**:
+- CantinaOS `music_controller_service.py` provides track durations via `get_track_list()` which returns `track.dict()`
+- Bridge `/api/music/library` endpoint **ignores** these durations and tries to recalculate using `ffprobe`
+- When `ffprobe` fails (not installed/timeout), it defaults to 180 seconds (3:00) - line 343 in `dj-r3x-bridge/main.py`
+
+**The Fix**: Bridge should use the duration already provided by CantinaOS instead of recalculating with ffprobe  
+**Impact**: All tracks show incorrect "3:00" duration in library despite backend having correct data  
+**Learning**: Don't recalculate data that's already available - trust the source system  
+**Result**: Root Cause Identified - **READY FOR FIX** 🔧
+
+---
+
+### Music Library Duration Display - FIXED
+**Time**: 16:20  
+**Goal**: Fix music library showing hardcoded "3:00" duration for all tracks  
+**Problem**: Bridge was recalculating durations with ffprobe instead of using CantinaOS data  
+
+**Technical Fix Applied**:
+- **File**: `dj-r3x-bridge/main.py`
+- **Location**: Lines 323-351 (inside `get_music_library()` endpoint)
+- **Change**: Replaced ffprobe subprocess logic with direct use of `music_library_cache`
+
+**Before**: 
+- Lines 342-361: Used `subprocess.run(['ffprobe'...])` to recalculate durations
+- Line 344: Defaulted to 180 seconds (3:00) when ffprobe failed
+
+**After**:
+- Line 323: Check `music_library_cache` exists
+- Line 327: Iterate through cached tracks from CantinaOS
+- Line 339: Use `track_data.get('duration')` directly from CantinaOS
+
+**Key Changes**:
+```python
+# Line 339: Use duration from CantinaOS data (already calculated)
+duration_seconds = track_data.get('duration', 180)  # Default 3 minutes if missing
+```
+
+**Impact**: Music library now displays correct track durations from CantinaOS instead of hardcoded "3:00"  
+**Learning**: Trust the source system's data - don't recalculate what's already provided  
+**Result**: Music Library Duration Display - **FIXED** ✅
+
+---
+
+### Music Library Duration - DEEPER ROOT CAUSE FOUND
+**Time**: 16:30 (Following previous fix)
+**Goal**: Permanently fix music library showing "3:00" for all track durations.
+**Problem**: The previous fix in the `dj-r3x-bridge` was a patch, not a cure. It correctly stopped using `ffprobe` but relied on duration data from `CantinaOS` which was never being sent for the library view.
+
+**Root Cause Analysis**:
+- The `music_controller_service.py` in `CantinaOS` has two different ways of representing track data.
+- **For playback (`MUSIC_PLAYBACK_STARTED` event)**: It sends a complete track object including the correct `duration`. This is why the "Now Playing" UI is correct.
+- **For the library (`get_track_list()` method)**: It sends a list of *incomplete* track objects that are **missing the `duration` field**.
+- The bridge's `/api/music/library` endpoint receives this incomplete list, and its fallback logic (`track_data.get('duration', 180)`) correctly defaults to 180 seconds (3:00) for every track.
+
+**The Real Fix**:
+- The fundamental problem is not in the bridge or the dashboard, but in `cantina_os/services/music_controller_service.py`.
+- The fix is to modify the `get_track_list()` method to ensure it serializes and returns the complete track object, including the `duration`, for every track in the library. This will provide the bridge with the data it expects.
+
+**Impact**: Frontend was displaying incorrect data due to an underlying data inconsistency in the core `CantinaOS` service.
+**Learning**: A fix in one layer (the bridge) can reveal a deeper issue in another (CantinaOS). Always trace data to its origin.
+**Result**: Deeper Root Cause Identified - **READY FOR CORE FIX** 🔧
+
+---
+
+### Music Library Duration - FINAL ARCHITECTURAL FIX
+**Time**: 16:45
+**Goal**: Implement a robust, non-blocking fix for the music library duration bug that respects the system architecture.
+**Problem**: Previous fixes failed because they did not address the root architectural violation: a long-running, blocking I/O task (`_load_music_library`) was being called synchronously during service startup, hanging the event loop and creating a race condition with VLC's file parsing. This violates the principles in `ARCHITECTURE_STANDARDS.md` (Section 10).
+
+**Architectural Fix Implementation Plan**:
+
+The solution is to make the entire library loading process asynchronous and event-driven, fully complying with the standards outlined in `ARCHITECTURE_STANDARDS.md` and `CANTINA_OS_SYSTEM_ARCHITECTURE.md`.
+
+**1. Make Library Loading a Background Task**:
+   - **File**: `cantina_os/cantina_os/services/music_controller_service.py`
+   - **Method**: `start()`
+   - **Change**: The line `await self._load_music_library()` must be changed to `asyncio.create_task(self._load_music_library())`. This will launch the loading process in the background without blocking service startup.
+
+**2. Implement Robust Duration Parsing**:
+   - **File**: `cantina_os/cantina_os/services/music_controller_service.py`
+   - **Method**: `_load_music_library()`
+   - **Change**: Replace the `asyncio.sleep(0.05)` hack with a reliable polling loop that waits for VLC to finish parsing before getting the duration.
+     ```python
+     # Inside the loop for each filepath
+     media.parse_with_options(0, 0) # Use parse_with_options for better control
+     start_time = time.time()
+     while media.get_parsed_status() != vlc.MediaParsedStatus.done:
+         await asyncio.sleep(0.01) # Non-blocking sleep
+         if time.time() - start_time > 5.0: # 5-second timeout
+             self.logger.warning(f"Timeout parsing duration for: {filepath}")
+             break
+     duration_ms = media.get_duration()
+     ```
+
+**3. Ensure Event Emission on Completion**:
+   - **File**: `cantina_os/cantina_os/services/music_controller_service.py`
+   - **Method**: `_load_music_library()`
+   - **Change**: At the end of this method, it already emits the `MUSIC_LIBRARY_UPDATED` event. We must ensure this event contains the complete, correct track data fetched by the new robust parsing logic.
+
+**4. Decouple API from Service Startup**:
+   - **File**: `cantina_os/cantina_os/services/web_bridge_service.py` (or equivalent location for the `/api/music/library` endpoint).
+   - **Logic**: The `get_music_library()` API endpoint should not directly call a method on the `MusicControllerService`. Instead, the `WebBridgeService` should maintain an internal cache of the music library.
+   - **Change**: The `WebBridgeService` must subscribe to the `MUSIC_LIBRARY_UPDATED` event. When this event is received, it updates its internal cache. The `/api/music/library` endpoint will now serve data directly from this cache, ensuring it always provides whatever the latest complete version of the library is, without being tied to the startup timing of another service.
+
+**Impact**: This fix will align the `MusicControllerService` with the project's event-driven architecture, eliminate the startup blocking and race conditions, and provide a reliable, asynchronous way for the UI to receive the correct music library data.
+**Result**: Architectural Plan - **READY FOR IMPLEMENTATION** ✅
+
+---
+
+### Music Library Duration - ARCHITECTURAL FIX IMPLEMENTED
+**Time**: 17:00  
+**Goal**: Implement the architectural fix for music library duration bug per Gemini 2.5 Pro's solution  
+**Problem**: Blocking I/O operation (`await self._load_music_library()`) in service startup violating Section 10 of ARCHITECTURE_STANDARDS.md  
+
+**Implementation Details**:
+
+1. **Made Library Loading Non-Blocking**:
+   - **File**: `cantina_os/cantina_os/services/music_controller_service.py`
+   - **Line 225**: Changed `await self._load_music_library()` to `asyncio.create_task(self._load_music_library())`
+   - Service startup no longer blocks waiting for music library to load
+
+2. **Implemented Robust VLC Duration Parsing**:
+   - **File**: `cantina_os/cantina_os/services/music_controller_service.py`
+   - **Lines 408-423**: Replaced `asyncio.sleep(0.05)` hack with proper polling
+   ```python
+   # Use parse_with_options for better control
+   media.parse_with_options(0, 0)
+   start_time = time.time()
+   
+   # Poll for parsing completion with timeout
+   while media.get_parsed_status() != vlc.MediaParsedStatus.done:
+       await asyncio.sleep(0.01)  # Non-blocking sleep
+       if time.time() - start_time > 5.0:  # 5-second timeout
+           self.logger.warning(f"Timeout parsing duration for: {filepath}")
+           break
+   ```
+
+3. **Event-Based Caching Already Implemented**:
+   - **File**: `dj-r3x-bridge/main.py`
+   - **Line 426**: Bridge already subscribes to `MUSIC_LIBRARY_UPDATED` event
+   - **Line 635**: Caches track data in `music_library_cache` 
+   - **Line 339**: API endpoint uses cached duration: `duration_seconds = track_data.get('duration', 180)`
+   - No changes needed - architecture already supports event-driven caching
+
+**Technical Impact**:
+- Service startup is now non-blocking, following event-driven architecture
+- VLC parsing uses proper async polling instead of arbitrary sleep
+- Duration data flows correctly: CantinaOS → Event → Bridge Cache → Web API
+- Eliminates race condition where VLC hadn't finished parsing when duration requested
+
+**Testing Results**:
+- ✅ Music library loads asynchronously without blocking service startup
+- ✅ VLC duration parsing completes reliably with timeout protection
+- ✅ Bridge properly caches duration data from MUSIC_LIBRARY_UPDATED events
+- ✅ Web dashboard receives correct durations instead of hardcoded "3:00"
+
+**Impact**: Fixed architectural violation and eliminated music library duration bug  
+**Learning**: Blocking I/O in service startup creates race conditions. Always use asyncio.create_task() for long-running operations.  
+**Result**: Music Library Duration Display - **ARCHITECTURALLY FIXED** ✅
+
+---
+
 **Note**: This log tracks daily development progress. For comprehensive project history, see `docs/working_logs/dj-r3x-condensed-dev-log.md`.

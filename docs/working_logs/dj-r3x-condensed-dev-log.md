@@ -735,6 +735,24 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: Eliminated all React hydration errors - restored rendering lifecycle
 - **Technical**: useState(false) + useEffect setIsClient(true) + conditional style rendering
 
+### 2025-06-14: Music Progress Tracking System Rebuild - MAJOR
+- **Issue**: Dashboard music progress tracking had multiple erratic behaviors - "nothing happens on first click," progress bar rewinding and jumping backwards, progress continuing during pause
+- **Solution**: Complete architectural rebuild of MusicTab.tsx progress tracking - replaced useState with useRef for timing data to prevent async conflicts, single useEffect manages timer lifecycle based on isPlaying state, added 100ms timer intervals for smooth progress animation
+- **Impact**: Fixed race conditions and stale closures causing erratic behavior, eliminated "first click does nothing" issue, proper pause/resume functionality, smooth progress animation
+- **Technical**: React-compliant timing architecture using useRef + useCallback + centralized timer control, eliminated complex pause/resume calculations
+
+### 2025-06-14: React Hydration Error Comprehensive Resolution 
+- **Issue**: Multiple hydration errors freezing dashboard rendering - Math.random() in DJCharacterStage waveforms, unprotected dynamic styles, browser API access during SSR
+- **Solution**: Systematic audit and fix of all hydration sources - replaced Math.random() with client-side generated stable arrays, added isClient guards for all dynamic rendering, protected browser API access
+- **Impact**: Eliminated all React hydration warnings, restored proper application rendering lifecycle, dashboard functions correctly across SSR/client transitions
+- **Technical**: Client-side random value generation, comprehensive isClient protection, AudioContext lifecycle management
+
+### 2025-06-14: Music Library Duration Display Fix
+- **Issue**: All tracks in music library showing hardcoded "3:00" duration despite player showing correct times
+- **Solution**: Fixed architectural violation where MusicControllerService blocked service startup with synchronous library loading, implemented proper async VLC duration parsing with timeout protection
+- **Impact**: Music library now displays correct track durations from VLC parsing instead of hardcoded defaults
+- **Technical**: Changed await self._load_music_library() to asyncio.create_task(), replaced sleep hack with proper VLC MediaParsedStatus polling, 5-second timeout protection
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)

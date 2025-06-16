@@ -220,9 +220,9 @@ class MusicControllerService(BaseService):
         self.logger.debug("Setting up event subscriptions")
         await self.subscribe_to_events()
         
-        # Load the music library
-        self.logger.debug("Loading music library")
-        await self._load_music_library()
+        # Load the music library in the background (non-blocking)
+        self.logger.debug("Starting background music library loading")
+        asyncio.create_task(self._load_music_library())
         
         # Auto-register compound commands using decorators
         register_service_commands(self, self._event_bus)
@@ -405,9 +405,22 @@ class MusicControllerService(BaseService):
                                     self.logger.debug(f"VLC media creation failed for {filepath}")
                                     duration = None
                                 else:
-                                    media.parse()
+                                    # Use parse_with_options for better control
+                                    media.parse_with_options(0, 0)
+                                    start_time = time.time()
+                                    
+                                    # Poll for parsing completion with timeout
+                                    while media.get_parsed_status() != vlc.MediaParsedStatus.done:
+                                        await asyncio.sleep(0.01)  # Non-blocking sleep
+                                        if time.time() - start_time > 5.0:  # 5-second timeout
+                                            self.logger.warning(f"Timeout parsing duration for: {filepath}")
+                                            break
+                                    
                                     duration_ms = media.get_duration()
                                     duration = duration_ms / 1000.0 if duration_ms > 0 else None
+                                    
+                                    if duration is None:
+                                        self.logger.warning(f"Failed to get duration for track: {filepath}. It will default to 0 in the library.")
                         except Exception as e:
                             self.logger.debug(f"Could not get duration for {filepath}: {e}")
                             duration = None
