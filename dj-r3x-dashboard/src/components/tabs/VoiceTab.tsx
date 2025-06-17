@@ -17,6 +17,8 @@ import {
   BrainCircuit,
   Settings,
   Bot,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 
 export default function VoiceTab() {
@@ -50,6 +52,9 @@ export default function VoiceTab() {
 
   // Track interaction phase for two-phase recording (like DJTab's djModeActive)
   const [interactionPhase, setInteractionPhase] = useState<'idle' | 'engaged' | 'recording'>('idle')
+  
+  // UI State for collapsible sections
+  const [showAdvancedStatus, setShowAdvancedStatus] = useState(false)
   
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
@@ -211,252 +216,318 @@ export default function VoiceTab() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* System Mode Display */}
-      <div className="sw-panel">
-        <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-          SYSTEM MODE STATUS
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <div className="text-sm text-sw-blue-300">Current Mode</div>
-            <div className={`text-2xl font-bold ${
-              systemMode.current_mode === 'IDLE' ? 'text-sw-blue-400' :
-              systemMode.current_mode === 'AMBIENT' ? 'text-sw-yellow' :
-              systemMode.current_mode === 'INTERACTIVE' ? 'text-sw-green' : 'text-sw-blue-400'
-            }`}>
-              {systemMode.current_mode}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm text-sw-blue-300">Interaction Phase</div>
-            <div className={`text-lg font-semibold ${
-              interactionPhase === 'idle' ? 'text-sw-blue-400' :
-              interactionPhase === 'engaged' ? 'text-sw-yellow' :
-              interactionPhase === 'recording' ? 'text-sw-green animate-pulse' : 'text-sw-blue-400'
-            }`}>
-              {interactionPhase.toUpperCase()}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <div className="text-sm text-sw-blue-300">Mode Transition</div>
-            <div className={`text-sm ${
-              modeTransition?.status === 'started' ? 'text-sw-yellow' :
-              modeTransition?.status === 'completed' ? 'text-sw-green' :
-              modeTransition?.status === 'failed' ? 'text-sw-red' : 'text-sw-blue-400'
-            }`}>
-              {modeTransition ? 
-                `${modeTransition.old_mode} → ${modeTransition.new_mode}` : 
-                'No active transition'
-              }
-            </div>
-            {modeTransition?.error && (
-              <div className="text-xs text-sw-red/70">{modeTransition.error}</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Voice Control */}
-      <div className="sw-panel">
-        <h3 className="text-lg font-semibold text-sw-blue-100 mb-6 sw-text-glow">
-          VOICE INTERACTION CONTROL
-        </h3>
-        
-        <div className="flex justify-center mb-6">
-          {interactionPhase === 'idle' ? (
-            <button
-              onClick={handleVoiceInteraction}
-              disabled={!connected}
-              className="w-32 h-32 rounded-full text-white font-bold text-lg bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ENGAGE
-            </button>
-          ) : (
-            <div className="flex space-x-4">
-              <button
-                onClick={handleVoiceInteraction}
-                disabled={!connected}
-                className={`
-                  w-28 h-28 rounded-full text-white font-bold text-lg
-                  transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed
-                  ${interactionPhase === 'recording'
-                    ? 'bg-sw-red hover:bg-red-600 animate-pulse'
-                    : 'bg-sw-green hover:bg-green-600 sw-border-glow'
-                  }
-                `}
-              >
-                {interactionPhase === 'recording' ? 'STOP' : 'TALK'}
-              </button>
-              <button
-                onClick={handleDisengage}
-                disabled={!connected}
-                className="w-28 h-28 rounded-full text-white font-bold text-lg bg-sw-yellow hover:bg-yellow-600 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                DISENGAGE
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="text-center">
-          <p className="text-sm text-sw-blue-300/70">
-            {!connected 
-              ? 'Bridge service disconnected'
-              : interactionPhase === 'recording'
-                ? 'Recording in progress... Click STOP to finish' 
-                : interactionPhase === 'engaged'
-                ? 'System ready. Click TALK to start recording or DISENGAGE to return to idle.'
-                : 'Click ENGAGE to switch to INTERACTIVE mode'
-            }
-          </p>
-          {!connected && (
-            <p className="text-xs text-sw-red/70 mt-1">
-              Connect to CantinaOS to enable voice recording
-            </p>
-          )}
-          {connected && interactionPhase === 'idle' && (
-            <p className="text-xs text-sw-blue-400/70 mt-1">
-              Two-phase interaction: Engage → Talk → Record (matches CLI behavior)
-            </p>
-          )}
-          {connected && interactionPhase === 'engaged' && (
-            <p className="text-xs text-sw-green/70 mt-1">
-              INTERACTIVE mode active - ready for voice input
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Conversation History */}
-        <div className="sw-panel">
-          <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-            CONVERSATION HISTORY
-          </h3>
-          
-          {/* Chat Messages Container */}
-          <div className="h-80 bg-sw-dark-700/50 rounded-lg border border-sw-blue-600/20 p-4 overflow-y-auto">
-            {conversationHistory.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-center">
-                <div>
-                  <div className="text-sw-blue-300/50 text-sm italic mb-2">
-                    Conversation will appear here...
-                  </div>
-                  <div className="text-xs text-sw-blue-400/30">
-                    Click ENGAGE → TALK to start a voice interaction
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {conversationHistory.map((message) => (
-                  <div key={message.id} className="flex flex-col space-y-1">
-                    {/* Speaker identifier */}
-                    <div className="flex items-center space-x-2">
-                      <span className={`text-xs font-mono font-bold ${
-                        message.speaker === 'user' ? 'text-sw-yellow' : 'text-sw-blue-300'
-                      }`}>
-                        {message.speaker === 'user' ? '● USER' : '● DJ R3X'}
-                      </span>
-                      <span className="text-xs text-sw-blue-400/50 font-mono">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                      </span>
-                      {message.confidence && (
-                        <span className="text-xs text-sw-green/60 font-mono">
-                          {Math.round(message.confidence * 100)}%
-                        </span>
-                      )}
-                    </div>
-                    
-                    {/* Message bubble */}
-                    <div className={`
-                      p-3 rounded-lg text-sm leading-relaxed
-                      ${message.speaker === 'user' 
-                        ? 'bg-sw-dark-600/80 border-l-4 border-sw-yellow text-sw-blue-100 ml-0 mr-8' 
-                        : 'bg-sw-dark-600/60 border-l-4 border-sw-blue-400 text-sw-blue-200 ml-8 mr-0'
-                      }
-                    `}>
-                      {message.text}
-                    </div>
-                  </div>
-                ))}
-                
-                {/* Auto-scroll target */}
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </div>
-          
-          {/* Latest Transcription Confidence (if available) */}
-          {lastTranscription && lastTranscription.confidence > 0 && (
-            <div className="flex items-center space-x-2 mt-4">
-              <span className="text-xs text-sw-blue-300">Latest Confidence:</span>
-              <div className="flex-1 bg-sw-dark-700 rounded-full h-2">
-                <div 
-                  className="bg-sw-blue-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: isClient ? `${lastTranscription.confidence * 100}%` : '0%' }}
-                ></div>
-              </div>
-              <span className="text-xs text-sw-blue-200 font-mono">
-                {Math.round(lastTranscription.confidence * 100)}%
+    <div className="h-full flex flex-col">
+      {/* Compact Status Header */}
+      <div className="sw-panel mb-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-sw-blue-300">System:</span>
+              <span className={`text-sm font-semibold ${
+                systemMode.current_mode === 'IDLE' ? 'text-sw-blue-400' :
+                systemMode.current_mode === 'AMBIENT' ? 'text-sw-yellow' :
+                systemMode.current_mode === 'INTERACTIVE' ? 'text-sw-green' : 'text-sw-blue-400'
+              }`}>
+                {systemMode.current_mode}
               </span>
             </div>
-          )}
-        </div>
-
-        {/* Processing Status */}
-        <div className="sw-panel">
-          <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-            PROCESSING STATUS
-          </h3>
-          <div className="space-y-3">
-            <StatusItem 
-              label="Voice Input" 
-              status={pipelineStatus.voiceInput as any}
-              subtitle={systemStatus?.services?.deepgram_direct_mic?.status === 'online' ? 'Deepgram Connected' : 'Service Offline'}
-            />
-            <StatusItem 
-              label="Speech Recognition" 
-              status={pipelineStatus.speechRecognition as any}
-              subtitle={lastTranscription?.confidence ? `${Math.round(lastTranscription.confidence * 100)}% confidence` : undefined}
-            />
-            <StatusItem 
-              label="AI Processing" 
-              status={pipelineStatus.aiProcessing as any}
-              subtitle={systemStatus?.services?.gpt_service?.status === 'online' ? 'GPT Connected' : 'Service Offline'}
-            />
-            <StatusItem 
-              label="Response Synthesis" 
-              status={pipelineStatus.responseSynthesis as any}
-              subtitle={systemStatus?.services?.elevenlabs_service?.status === 'online' ? 'ElevenLabs Connected' : 'Service Offline'}
-            />
-            <StatusItem 
-              label="Audio Playback" 
-              status={pipelineStatus.audioPlayback as any}
-              subtitle="VLC Output"
-            />
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-sw-blue-300">Phase:</span>
+              <span className={`text-sm font-semibold ${
+                interactionPhase === 'idle' ? 'text-sw-blue-400' :
+                interactionPhase === 'engaged' ? 'text-sw-yellow' :
+                interactionPhase === 'recording' ? 'text-sw-green animate-pulse' : 'text-sw-blue-400'
+              }`}>
+                {interactionPhase.toUpperCase()}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-sw-green' : 'bg-sw-red'}`}></div>
+            <span className="text-sm text-sw-blue-300">
+              {connected ? 'CANTINA OS ONLINE' : 'DISCONNECTED'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Voice Levels */}
-      <div className="sw-panel">
-        <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-          AUDIO LEVELS
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm text-sw-blue-300 mb-2">Input Level</label>
-            <div className="bg-sw-dark-700 rounded-lg h-4 overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-sw-green via-sw-yellow to-sw-red w-0 transition-all duration-100"></div>
+      {/* Three-Panel Layout */}
+      <div className="flex-1 grid grid-cols-12 gap-4">
+        {/* Left Sidebar - Voice Controls */}
+        <div className="col-span-12 lg:col-span-3 space-y-4">
+          <div className="sw-panel p-4">
+            <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
+              VOICE CONTROLS
+            </h3>
+            
+            {/* Control Buttons */}
+            <div className="space-y-3 mb-6">
+              {interactionPhase === 'idle' ? (
+                <button
+                  onClick={handleVoiceInteraction}
+                  disabled={!connected}
+                  className="w-full h-16 rounded-lg text-white font-bold text-sm bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ENGAGE
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <button
+                    onClick={handleVoiceInteraction}
+                    disabled={!connected}
+                    className={`
+                      w-full h-16 rounded-lg text-white font-bold text-sm transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed
+                      ${interactionPhase === 'recording'
+                        ? 'bg-sw-red hover:bg-red-600 animate-pulse'
+                        : 'bg-sw-green hover:bg-green-600 sw-border-glow'
+                      }
+                    `}
+                  >
+                    {interactionPhase === 'recording' ? 'STOP' : 'TALK'}
+                  </button>
+                  <button
+                    onClick={handleDisengage}
+                    disabled={!connected}
+                    className="w-full h-12 rounded-lg text-white font-bold text-sm bg-sw-yellow hover:bg-yellow-600 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    DISENGAGE
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Status Message */}
+            <div className="text-center">
+              <p className="text-xs text-sw-blue-300/70">
+                {!connected 
+                  ? 'Bridge service disconnected'
+                  : interactionPhase === 'recording'
+                    ? 'Recording... Click STOP to finish' 
+                    : interactionPhase === 'engaged'
+                    ? 'Ready for voice input'
+                    : 'Click ENGAGE to start'
+                }
+              </p>
             </div>
           </div>
-          <div>
-            <label className="block text-sm text-sw-blue-300 mb-2">Output Level</label>
-            <div className="bg-sw-dark-700 rounded-lg h-4 overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-sw-blue-500 to-sw-blue-300 w-0 transition-all duration-100"></div>
+
+          {/* Audio Levels */}
+          <div className="sw-panel p-4">
+            <h3 className="text-sm font-semibold text-sw-blue-100 mb-3 sw-text-glow">
+              AUDIO LEVELS
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-sw-blue-300 mb-1">Input</label>
+                <div className="bg-sw-dark-700 rounded h-2 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-sw-green via-sw-yellow to-sw-red w-0 transition-all duration-100"></div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-sw-blue-300 mb-1">Output</label>
+                <div className="bg-sw-dark-700 rounded h-2 overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-sw-blue-500 to-sw-blue-300 w-0 transition-all duration-100"></div>
+                </div>
+              </div>
             </div>
+          </div>
+        </div>
+
+        {/* Main Center - Conversation Area */}
+        <div className="col-span-12 lg:col-span-6">
+          <div className="sw-panel h-full flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow">
+                CONVERSATION
+              </h3>
+              {conversationHistory.length > 0 && (
+                <button
+                  onClick={clearConversationHistory}
+                  className="text-xs text-sw-blue-400 hover:text-sw-blue-300 px-2 py-1 rounded border border-sw-blue-600/30 hover:border-sw-blue-500/50 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            
+            {/* Chat Messages Container - Takes full remaining height */}
+            <div className="flex-1 bg-sw-dark-700/30 rounded-lg border border-sw-blue-600/20 p-4 overflow-y-auto min-h-0">
+              {conversationHistory.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-center">
+                  <div>
+                    <div className="text-sw-blue-300/50 text-base italic mb-3">
+                      Start a conversation with DJ R3X
+                    </div>
+                    <div className="text-sm text-sw-blue-400/60 mb-2">
+                      Click ENGAGE → TALK to begin
+                    </div>
+                    <div className="text-xs text-sw-blue-400/40">
+                      Your voice interactions will appear here
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {conversationHistory.map((message, index) => (
+                    <div key={message.id} className={`flex ${message.speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] ${message.speaker === 'user' ? 'ml-4' : 'mr-4'}`}>
+                        {/* Speaker identifier */}
+                        <div className={`flex items-center space-x-2 mb-2 ${message.speaker === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <span className={`text-xs font-mono font-bold ${
+                            message.speaker === 'user' ? 'text-sw-yellow' : 'text-sw-blue-300'
+                          }`}>
+                            {message.speaker === 'user' ? 'USER' : 'DJ R3X'}
+                          </span>
+                          <span className="text-xs text-sw-blue-400/50 font-mono">
+                            {new Date(message.timestamp).toLocaleTimeString()}
+                          </span>
+                          {message.confidence && (
+                            <span className="text-xs text-sw-green/60 font-mono">
+                              {Math.round(message.confidence * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        
+                        {/* Message bubble */}
+                        <div className={`
+                          p-4 rounded-lg text-base leading-relaxed
+                          ${message.speaker === 'user' 
+                            ? 'bg-sw-yellow/10 border border-sw-yellow/30 text-sw-blue-100' 
+                            : 'bg-sw-blue-600/10 border border-sw-blue-400/30 text-sw-blue-200'
+                          }
+                        `}>
+                          {message.text}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* Auto-scroll target */}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
+            
+            {/* Latest Transcription Confidence */}
+            {lastTranscription && lastTranscription.confidence > 0 && (
+              <div className="flex items-center space-x-2 mt-3 pt-3 border-t border-sw-blue-600/20">
+                <span className="text-xs text-sw-blue-300">Confidence:</span>
+                <div className="flex-1 bg-sw-dark-700 rounded-full h-2">
+                  <div 
+                    className="bg-sw-green h-2 rounded-full transition-all duration-300"
+                    style={{ width: isClient ? `${lastTranscription.confidence * 100}%` : '0%' }}
+                  ></div>
+                </div>
+                <span className="text-xs text-sw-blue-200 font-mono">
+                  {Math.round(lastTranscription.confidence * 100)}%
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Sidebar - Status Information */}
+        <div className="col-span-12 lg:col-span-3 space-y-4">
+          {/* Service Status */}
+          <div className="sw-panel p-4">
+            <h3 className="text-sm font-semibold text-sw-blue-100 mb-3 sw-text-glow">
+              SERVICE STATUS
+            </h3>
+            <div className="space-y-2">
+              <ServiceStatusItem 
+                label="Voice Input" 
+                status={systemStatus?.services?.deepgram_direct_mic?.status === 'online' ? 'online' : 'offline'}
+                subtitle="Deepgram"
+              />
+              <ServiceStatusItem 
+                label="AI Processing" 
+                status={systemStatus?.services?.gpt_service?.status === 'online' ? 'online' : 'offline'}
+                subtitle="GPT"
+              />
+              <ServiceStatusItem 
+                label="Voice Synthesis" 
+                status={systemStatus?.services?.elevenlabs_service?.status === 'online' ? 'online' : 'offline'}
+                subtitle="ElevenLabs"
+              />
+            </div>
+          </div>
+
+          {/* Processing Pipeline */}
+          <div className="sw-panel p-4">
+            <h3 className="text-sm font-semibold text-sw-blue-100 mb-3 sw-text-glow">
+              PIPELINE STATUS
+            </h3>
+            <div className="space-y-2">
+              <PipelineStageItem 
+                label="Recording" 
+                status={pipelineStatus.voiceInput as any}
+              />
+              <PipelineStageItem 
+                label="Recognition" 
+                status={pipelineStatus.speechRecognition as any}
+              />
+              <PipelineStageItem 
+                label="Processing" 
+                status={pipelineStatus.aiProcessing as any}
+              />
+              <PipelineStageItem 
+                label="Synthesis" 
+                status={pipelineStatus.responseSynthesis as any}
+              />
+              <PipelineStageItem 
+                label="Playback" 
+                status={pipelineStatus.audioPlayback as any}
+              />
+            </div>
+          </div>
+
+          {/* Advanced Status (Collapsible) */}
+          <div className="sw-panel p-4">
+            <button
+              onClick={() => setShowAdvancedStatus(!showAdvancedStatus)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <h3 className="text-sm font-semibold text-sw-blue-100 sw-text-glow">
+                ADVANCED STATUS
+              </h3>
+              {showAdvancedStatus ? (
+                <ChevronUp className="w-4 h-4 text-sw-blue-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-sw-blue-400" />
+              )}
+            </button>
+            
+            {showAdvancedStatus && (
+              <div className="mt-3 space-y-3">
+                {/* Mode Transition */}
+                <div>
+                  <div className="text-xs text-sw-blue-300 mb-1">Mode Transition</div>
+                  <div className={`text-xs ${
+                    modeTransition?.status === 'started' ? 'text-sw-yellow' :
+                    modeTransition?.status === 'completed' ? 'text-sw-green' :
+                    modeTransition?.status === 'failed' ? 'text-sw-red' : 'text-sw-blue-400'
+                  }`}>
+                    {modeTransition ? 
+                      `${modeTransition.old_mode} → ${modeTransition.new_mode}` : 
+                      'No active transition'
+                    }
+                  </div>
+                  {modeTransition?.error && (
+                    <div className="text-xs text-sw-red/70 mt-1">{modeTransition.error}</div>
+                  )}
+                </div>
+
+                {/* Latest Transcription Details */}
+                {lastTranscription && (
+                  <div>
+                    <div className="text-xs text-sw-blue-300 mb-1">Latest Transcription</div>
+                    <div className="text-xs text-sw-blue-200 bg-sw-dark-700/50 rounded p-2 max-h-20 overflow-y-auto">
+                      {lastTranscription.text || 'No transcription'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -464,24 +535,48 @@ export default function VoiceTab() {
   )
 }
 
-interface StatusItemProps {
+// Service Status Component
+interface ServiceStatusItemProps {
   label: string
-  status: 'active' | 'processing' | 'idle' | 'error'
+  status: 'online' | 'offline'
   subtitle?: string
 }
 
-function StatusItem({ label, status, subtitle }: StatusItemProps) {
+function ServiceStatusItem({ label, status, subtitle }: ServiceStatusItemProps) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <div>
+        <div className="text-sw-blue-200">{label}</div>
+        {subtitle && <div className="text-sw-blue-400/60">{subtitle}</div>}
+      </div>
+      <div className="flex items-center space-x-2">
+        <div className={`w-2 h-2 rounded-full ${status === 'online' ? 'bg-sw-green' : 'bg-sw-red'}`}></div>
+        <span className={`font-mono ${status === 'online' ? 'text-sw-green' : 'text-sw-red'}`}>
+          {status.toUpperCase()}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// Pipeline Stage Component
+interface PipelineStageItemProps {
+  label: string
+  status: 'active' | 'processing' | 'idle' | 'error'
+}
+
+function PipelineStageItem({ label, status }: PipelineStageItemProps) {
   const getStatusClass = () => {
     switch (status) {
       case 'active':
-        return 'sw-status-online'
+        return 'bg-sw-green'
       case 'processing':
-        return 'sw-status-warning animate-pulse'
+        return 'bg-sw-yellow animate-pulse'
       case 'error':
-        return 'sw-status-offline'
+        return 'bg-sw-red'
       case 'idle':
       default:
-        return 'bg-sw-dark-600'
+        return 'bg-sw-blue-600'
     }
   }
 
@@ -500,16 +595,11 @@ function StatusItem({ label, status, subtitle }: StatusItemProps) {
   }
 
   return (
-    <div className="flex items-center justify-between p-3 bg-sw-dark-700/30 rounded-lg border border-sw-blue-600/20">
-      <div className="flex-1">
-        <div className="text-sm text-sw-blue-200">{label}</div>
-        {subtitle && (
-          <div className="text-xs text-sw-blue-300/70 mt-1">{subtitle}</div>
-        )}
-      </div>
+    <div className="flex items-center justify-between text-xs">
+      <div className="text-sw-blue-200">{label}</div>
       <div className="flex items-center space-x-2">
         <div className={`w-2 h-2 rounded-full ${getStatusClass()}`}></div>
-        <span className="text-xs text-sw-blue-300 font-mono uppercase">
+        <span className="text-sw-blue-300 font-mono">
           {getStatusText()}
         </span>
       </div>
