@@ -76,6 +76,14 @@ export interface LogEntry {
   message: string
 }
 
+export interface ConversationMessage {
+  id: string
+  speaker: 'user' | 'dj_r3x'
+  text: string
+  timestamp: string
+  confidence?: number
+}
+
 interface SocketEvents {
   system_status: (data: SystemStatus) => void
   voice_status: (data: VoiceStatus) => void
@@ -111,6 +119,7 @@ export const useSocket = () => {
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
   const [eventCount, setEventCount] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([])
   
   const socketRef = useRef<Socket | null>(null)
   const maxLogs = 100
@@ -170,6 +179,18 @@ export const useSocket = () => {
       const transcriptionData = data.data || data
       console.log('🎤 [Voice] Transcription data processed:', transcriptionData)
       setLastTranscription(transcriptionData)
+      
+      // Add final user transcriptions to conversation history
+      if (transcriptionData.final && transcriptionData.text) {
+        const userMessage: ConversationMessage = {
+          id: `user-${Date.now()}`,
+          speaker: 'user',
+          text: transcriptionData.text,
+          timestamp: transcriptionData.timestamp || new Date().toISOString(),
+          confidence: transcriptionData.confidence
+        }
+        setConversationHistory(prev => [...prev, userMessage])
+      }
     })
 
     // Music events
@@ -258,6 +279,23 @@ export const useSocket = () => {
     // Error events
     newSocket.on('error', (data: any) => {
       console.error('Bridge error:', data)
+    })
+
+    // LLM Response events for conversation history
+    newSocket.on('llm_response', (data: any) => {
+      console.log('🤖 [LLM] Response received:', data)
+      // Handle nested data structure from WebBridge
+      const responseData = data.data || data
+      
+      if (responseData.response || responseData.text || responseData.content) {
+        const djMessage: ConversationMessage = {
+          id: `dj_r3x-${Date.now()}`,
+          speaker: 'dj_r3x',
+          text: responseData.response || responseData.text || responseData.content,
+          timestamp: responseData.timestamp || new Date().toISOString()
+        }
+        setConversationHistory(prev => [...prev, djMessage])
+      }
     })
 
     // Event replay for reconnections
@@ -473,6 +511,8 @@ export const useSocket = () => {
     performanceMetrics,
     eventCount,
     logs,
+    conversationHistory,
+    clearConversationHistory: () => setConversationHistory([]),
     // Type-safe command functions (without response handling)
     sendVoiceCommand,
     sendMusicCommand,

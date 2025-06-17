@@ -4,7 +4,7 @@
  * This file is auto-generated from Python Pydantic models.
  * DO NOT EDIT MANUALLY - changes will be overwritten.
  * 
- * Generated on: 2025-06-17T14:28:10.692779
+ * Generated on: 2025-06-17T15:27:21.872077
  * Source: cantina_os/schemas/web_commands.py
  */
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useSocketContext } from '@/contexts/SocketContext'
 import AudioSpectrum from '../AudioSpectrum.dynamic'
 import { VoiceActionEnum, SystemActionEnum, SystemModeEnum } from '../../types/schemas'
@@ -28,8 +28,13 @@ export default function VoiceTab() {
     connected,
     systemStatus,
     systemMode,
-    modeTransition 
+    modeTransition,
+    conversationHistory,
+    clearConversationHistory
   } = useSocketContext()
+  
+  // Ref for auto-scrolling conversation
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Client-side hydration fix
   const [isClient, setIsClient] = useState(false)
@@ -45,11 +50,21 @@ export default function VoiceTab() {
 
   // Track interaction phase for two-phase recording (like DJTab's djModeActive)
   const [interactionPhase, setInteractionPhase] = useState<'idle' | 'engaged' | 'recording'>('idle')
+  
+  // Auto-scroll to bottom when new messages arrive
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   // Client-side hydration effect
   useEffect(() => {
     setIsClient(true)
   }, [])
+  
+  // Auto-scroll when conversation updates
+  useEffect(() => {
+    scrollToBottom()
+  }, [conversationHistory])
 
   // Sync interaction phase with voice status and system mode (but let local state take precedence like DJTab)
   useEffect(() => {
@@ -187,6 +202,9 @@ export default function VoiceTab() {
     // Update state immediately for responsive UI (like DJTab)
     setInteractionPhase('idle')
     
+    // Clear conversation history on disengage (as planned in dev log)
+    clearConversationHistory()
+    
     if (socket) {
       socket.emit('command', { command: 'disengage' })
     }
@@ -311,37 +329,80 @@ export default function VoiceTab() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Real-time Transcription */}
+        {/* Conversation History */}
         <div className="sw-panel">
           <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-            TRANSCRIPTION
+            CONVERSATION HISTORY
           </h3>
-          <div className="space-y-4">
-            <div className="h-40 bg-sw-dark-700/50 rounded-lg border border-sw-blue-600/20 p-4 overflow-y-auto">
-              {lastTranscription ? (
-                <div className="text-sw-blue-100">{lastTranscription.text}</div>
-              ) : (
-                <div className="text-sw-blue-300/50 text-sm italic">
-                  Voice transcription will appear here...
+          
+          {/* Chat Messages Container */}
+          <div className="h-80 bg-sw-dark-700/50 rounded-lg border border-sw-blue-600/20 p-4 overflow-y-auto">
+            {conversationHistory.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-center">
+                <div>
+                  <div className="text-sw-blue-300/50 text-sm italic mb-2">
+                    Conversation will appear here...
+                  </div>
+                  <div className="text-xs text-sw-blue-400/30">
+                    Click ENGAGE → TALK to start a voice interaction
+                  </div>
                 </div>
-              )}
-            </div>
-            
-            {lastTranscription && lastTranscription.confidence > 0 && (
-              <div className="flex items-center space-x-2">
-                <span className="text-xs text-sw-blue-300">Confidence:</span>
-                <div className="flex-1 bg-sw-dark-700 rounded-full h-2">
-                  <div 
-                    className="bg-sw-blue-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: isClient ? `${lastTranscription.confidence * 100}%` : '0%' }}
-                  ></div>
-                </div>
-                <span className="text-xs text-sw-blue-200 font-mono">
-                  {Math.round(lastTranscription.confidence * 100)}%
-                </span>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {conversationHistory.map((message) => (
+                  <div key={message.id} className="flex flex-col space-y-1">
+                    {/* Speaker identifier */}
+                    <div className="flex items-center space-x-2">
+                      <span className={`text-xs font-mono font-bold ${
+                        message.speaker === 'user' ? 'text-sw-yellow' : 'text-sw-blue-300'
+                      }`}>
+                        {message.speaker === 'user' ? '● USER' : '● DJ R3X'}
+                      </span>
+                      <span className="text-xs text-sw-blue-400/50 font-mono">
+                        {new Date(message.timestamp).toLocaleTimeString()}
+                      </span>
+                      {message.confidence && (
+                        <span className="text-xs text-sw-green/60 font-mono">
+                          {Math.round(message.confidence * 100)}%
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Message bubble */}
+                    <div className={`
+                      p-3 rounded-lg text-sm leading-relaxed
+                      ${message.speaker === 'user' 
+                        ? 'bg-sw-dark-600/80 border-l-4 border-sw-yellow text-sw-blue-100 ml-0 mr-8' 
+                        : 'bg-sw-dark-600/60 border-l-4 border-sw-blue-400 text-sw-blue-200 ml-8 mr-0'
+                      }
+                    `}>
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+                
+                {/* Auto-scroll target */}
+                <div ref={messagesEndRef} />
               </div>
             )}
           </div>
+          
+          {/* Latest Transcription Confidence (if available) */}
+          {lastTranscription && lastTranscription.confidence > 0 && (
+            <div className="flex items-center space-x-2 mt-4">
+              <span className="text-xs text-sw-blue-300">Latest Confidence:</span>
+              <div className="flex-1 bg-sw-dark-700 rounded-full h-2">
+                <div 
+                  className="bg-sw-blue-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: isClient ? `${lastTranscription.confidence * 100}%` : '0%' }}
+                ></div>
+              </div>
+              <span className="text-xs text-sw-blue-200 font-mono">
+                {Math.round(lastTranscription.confidence * 100)}%
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Processing Status */}
