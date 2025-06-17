@@ -24,7 +24,7 @@ export default function VoiceTab() {
     voiceStatus, 
     lastTranscription, 
     sendVoiceCommand,
-    sendSystemCommand,
+    socket,
     connected,
     systemStatus,
     systemMode,
@@ -43,7 +43,7 @@ export default function VoiceTab() {
     audioPlayback: 'idle'
   })
 
-  // Track interaction phase for two-phase recording
+  // Track interaction phase for two-phase recording (like DJTab's djModeActive)
   const [interactionPhase, setInteractionPhase] = useState<'idle' | 'engaged' | 'recording'>('idle')
 
   // Client-side hydration effect
@@ -51,15 +51,16 @@ export default function VoiceTab() {
     setIsClient(true)
   }, [])
 
-  // Update interaction phase based on system mode
+  // Sync interaction phase with voice status and system mode (but let local state take precedence like DJTab)
   useEffect(() => {
-    if (systemMode.current_mode === 'INTERACTIVE' && voiceStatus.status === 'recording') {
+    // Only update from server state when recording status changes or system goes to IDLE
+    if (voiceStatus.status === 'recording' && interactionPhase !== 'recording') {
       setInteractionPhase('recording')
-    } else if (systemMode.current_mode === 'INTERACTIVE') {
-      setInteractionPhase('engaged')
-    } else {
+    } else if (voiceStatus.status === 'idle' && systemMode.current_mode === 'IDLE' && interactionPhase !== 'idle') {
+      // System returned to IDLE - sync with server state
       setInteractionPhase('idle')
     }
+    // Don't override local state for 'engaged' phase - let user actions drive the UI
   }, [systemMode.current_mode, voiceStatus.status])
 
   // Update pipeline status based on voice events and completion feedback
@@ -127,14 +128,37 @@ export default function VoiceTab() {
 
   const handleVoiceInteraction = () => {
     if (interactionPhase === 'idle') {
-      // Phase 1: Engage INTERACTIVE mode
-      sendSystemCommand(SystemActionEnum.SET_MODE, { mode: SystemModeEnum.INTERACTIVE })
+      // Phase 1: Engage INTERACTIVE mode using simple CLI command like DJ Mode
+      // Update state immediately for responsive UI (like DJTab)
+      setInteractionPhase('engaged')
+      
+      if (socket) {
+        socket.emit('command', { command: 'engage' })
+      }
     } else if (interactionPhase === 'engaged') {
-      // Phase 2: Start recording
-      sendVoiceCommand(VoiceActionEnum.START)
+      // Phase 2: Start recording using correct MIC_RECORDING_START event (like MouseInputService)
+      // Update state immediately for responsive UI
+      setInteractionPhase('recording')
+      
+      if (socket) {
+        socket.emit('voice_recording_start', {})
+      }
     } else if (interactionPhase === 'recording') {
-      // Stop recording
-      sendVoiceCommand(VoiceActionEnum.STOP)
+      // Stop recording using correct MIC_RECORDING_STOP event (like MouseInputService)
+      if (socket) {
+        socket.emit('voice_recording_stop', {})
+      }
+      // Note: Don't update state here - let the voice status handle the transition
+    }
+  }
+
+  const handleDisengage = () => {
+    // Return to IDLE mode using simple CLI command
+    // Update state immediately for responsive UI (like DJTab)
+    setInteractionPhase('idle')
+    
+    if (socket) {
+      socket.emit('command', { command: 'disengage' })
     }
   }
 
@@ -192,24 +216,39 @@ export default function VoiceTab() {
         </h3>
         
         <div className="flex justify-center mb-6">
-          <button
-            onClick={handleVoiceInteraction}
-            disabled={!connected}
-            className={`
-              w-32 h-32 rounded-full text-white font-bold text-lg
-              transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed
-              ${interactionPhase === 'recording' 
-                ? 'bg-sw-red hover:bg-red-600 animate-pulse' 
-                : interactionPhase === 'engaged'
-                ? 'bg-sw-green hover:bg-green-600 sw-border-glow animate-pulse'
-                : 'bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow'
-              }
-            `}
-          >
-            {interactionPhase === 'recording' ? 'STOP' : 
-             interactionPhase === 'engaged' ? 'RECORD' : 
-             'ENGAGE'}
-          </button>
+          {interactionPhase === 'idle' ? (
+            <button
+              onClick={handleVoiceInteraction}
+              disabled={!connected}
+              className="w-32 h-32 rounded-full text-white font-bold text-lg bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ENGAGE
+            </button>
+          ) : (
+            <div className="flex space-x-4">
+              <button
+                onClick={handleVoiceInteraction}
+                disabled={!connected}
+                className={`
+                  w-28 h-28 rounded-full text-white font-bold text-lg
+                  transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed
+                  ${interactionPhase === 'recording'
+                    ? 'bg-sw-red hover:bg-red-600 animate-pulse'
+                    : 'bg-sw-green hover:bg-green-600 sw-border-glow'
+                  }
+                `}
+              >
+                {interactionPhase === 'recording' ? 'STOP' : 'TALK'}
+              </button>
+              <button
+                onClick={handleDisengage}
+                disabled={!connected}
+                className="w-28 h-28 rounded-full text-white font-bold text-lg bg-sw-yellow hover:bg-yellow-600 sw-border-glow transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                DISENGAGE
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="text-center">
@@ -217,10 +256,10 @@ export default function VoiceTab() {
             {!connected 
               ? 'Bridge service disconnected'
               : interactionPhase === 'recording'
-                ? 'Recording in progress... Click to stop' 
+                ? 'Recording in progress... Click STOP to finish' 
                 : interactionPhase === 'engaged'
-                ? 'System ready for voice input. Click to start recording.'
-                : 'Click to engage INTERACTIVE mode'
+                ? 'System ready. Click TALK to start recording or DISENGAGE to return to idle.'
+                : 'Click ENGAGE to switch to INTERACTIVE mode'
             }
           </p>
           {!connected && (
@@ -230,7 +269,12 @@ export default function VoiceTab() {
           )}
           {connected && interactionPhase === 'idle' && (
             <p className="text-xs text-sw-blue-400/70 mt-1">
-              Two-phase interaction: Engage → Record (matches CLI behavior)
+              Two-phase interaction: Engage → Talk → Record (matches CLI behavior)
+            </p>
+          )}
+          {connected && interactionPhase === 'engaged' && (
+            <p className="text-xs text-sw-green/70 mt-1">
+              INTERACTIVE mode active - ready for voice input
             </p>
           )}
         </div>

@@ -187,16 +187,18 @@ export const useSocket = () => {
 
     // System mode events
     newSocket.on('system_mode_change', (data: any) => {
-      console.log('System mode changed:', data)
+      console.log('🎯 [useSocket] System mode change received:', data)
       // Handle nested data structure from WebBridge (same fix as music status)
       const systemData = data.data || data
+      console.log('🎯 [useSocket] System mode data processed:', systemData)
       setSystemMode(systemData)
     })
 
     newSocket.on('mode_transition', (data: any) => {
-      console.log('Mode transition:', data)
+      console.log('🔄 [useSocket] Mode transition received:', data)
       // Handle nested data structure from WebBridge (same fix as music status)
       const transitionData = data.data || data
+      console.log('🔄 [useSocket] Mode transition data processed:', transitionData)
       setModeTransition(transitionData)
     })
 

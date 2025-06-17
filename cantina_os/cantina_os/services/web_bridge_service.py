@@ -349,6 +349,10 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         # REMOVED dj_command - DJ commands should go through regular command system
         self._sio.on("system_command", self._handle_system_command)
         
+        # Voice recording control handlers (for VoiceTab Talk/Stop buttons)
+        self._sio.on("voice_recording_start", self._handle_voice_recording_start)
+        self._sio.on("voice_recording_stop", self._handle_voice_recording_stop)
+        
         # Handle regular CLI-style commands from dashboard
         @self._sio.event
         async def command(sid, data):
@@ -1007,12 +1011,12 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
 
     async def _handle_system_mode_change(self, data):
         """Handle system mode changes from YodaModeManagerService"""
-        logger.info(f"System mode changed: {data}")
+        logger.info(f"[WebBridge] System mode change received: {data}")
         await self._broadcast_event_to_dashboard(
             EventTopics.SYSTEM_MODE_CHANGE,
             {
-                "current_mode": data.get("mode", "IDLE"),
-                "previous_mode": data.get("previous_mode"),
+                "current_mode": data.get("new_mode", "IDLE"),  # Backend uses new_mode
+                "previous_mode": data.get("old_mode"),  # Backend uses old_mode
                 "timestamp": data.get("timestamp", datetime.now().isoformat()),
             },
             "system_mode_change",
@@ -1132,7 +1136,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             )
             await self._sio.emit(
                 "command_ack",
-                response.dict(),
+                response.model_dump(mode='json'),
                 room=sid,
             )
             
@@ -1223,7 +1227,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             )
             await self._sio.emit(
                 "command_ack",
-                response.dict(),
+                response.model_dump(mode='json'),
                 room=sid,
             )
             
@@ -1239,3 +1243,35 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 error_response.model_dump(mode='json'),
                 room=sid,
             )
+
+    async def _handle_voice_recording_start(self, sid, data):
+        """Handle voice recording start from VoiceTab Talk button"""
+        logger.info(f"Voice recording start from {sid}")
+        
+        try:
+            # Emit MIC_RECORDING_START event directly to CantinaOS (same as MouseInputService)
+            self._event_bus.emit(EventTopics.MIC_RECORDING_START, {
+                "source": "dashboard",
+                "sid": sid
+            })
+            
+            logger.info(f"Emitted MIC_RECORDING_START for VoiceTab from {sid}")
+            
+        except Exception as e:
+            logger.error(f"Error processing voice recording start: {e}")
+
+    async def _handle_voice_recording_stop(self, sid, data):
+        """Handle voice recording stop from VoiceTab Stop button"""
+        logger.info(f"Voice recording stop from {sid}")
+        
+        try:
+            # Emit MIC_RECORDING_STOP event directly to CantinaOS (same as MouseInputService)
+            self._event_bus.emit(EventTopics.MIC_RECORDING_STOP, {
+                "source": "dashboard", 
+                "sid": sid
+            })
+            
+            logger.info(f"Emitted MIC_RECORDING_STOP for VoiceTab from {sid}")
+            
+        except Exception as e:
+            logger.error(f"Error processing voice recording stop: {e}")

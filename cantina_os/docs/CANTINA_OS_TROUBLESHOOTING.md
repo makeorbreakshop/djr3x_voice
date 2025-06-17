@@ -1,6 +1,6 @@
 # CantinaOS Troubleshooting Guide
 
-This comprehensive troubleshooting guide documents common issues, debugging techniques, and resolution patterns for CantinaOS development. Based on 2+ years of development experience and real-world issue resolution.
+This comprehensive troubleshooting guide documents common issues, debugging techniques, and resolution patterns for CantinaOS development. Based on 1 year of development experience and real-world issue resolution.
 
 ## 📋 Table of Contents
 
