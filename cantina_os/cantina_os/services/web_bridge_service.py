@@ -8,7 +8,7 @@ Bridges the web dashboard with CantinaOS event bus for real-time monitoring and 
 """
 SERVICE: WebBridgeService
 PURPOSE: Web dashboard connectivity bridge with FastAPI REST API and Socket.IO real-time communication
-EVENTS_IN: SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, VOICE_LISTENING_STARTED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_LIBRARY_UPDATED, DJ_MODE_CHANGED, LLM_RESPONSE, SYSTEM_MODE_CHANGE, DASHBOARD_LOG
+EVENTS_IN: SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, MIC_RECORDING_START, MIC_RECORDING_STOP, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_LIBRARY_UPDATED, DJ_MODE_CHANGED, LLM_RESPONSE, SYSTEM_MODE_CHANGE, DASHBOARD_LOG
 EVENTS_OUT: MUSIC_COMMAND, SYSTEM_SET_MODE_REQUEST, USER_INPUT, SERVICE_STATUS_REQUEST
 KEY_METHODS: _handle_music_command, _handle_voice_command, _handle_system_command, _broadcast_event_to_dashboard, broadcast_validated_status
 DEPENDENCIES: FastAPI, Socket.IO, uvicorn web server, CORS middleware for web dashboard connectivity
@@ -386,6 +386,10 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started),
             self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped),
             
+            # Voice recording events - critical for recording status
+            self.subscribe(EventTopics.MIC_RECORDING_START, self._handle_mic_recording_start),
+            self.subscribe(EventTopics.MIC_RECORDING_STOP, self._handle_mic_recording_stop),
+            
             # Voice completion events - critical for resetting voice status to idle
             self.subscribe(EventTopics.VOICE_PROCESSING_COMPLETE, self._handle_voice_processing_complete),
             self.subscribe(EventTopics.SPEECH_SYNTHESIS_COMPLETED, self._handle_speech_synthesis_completed),
@@ -593,6 +597,22 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         """Handle voice listening stopped event"""
         await self._broadcast_event_to_dashboard(
             EventTopics.VOICE_LISTENING_STOPPED,
+            {"status": "processing"},
+            "voice_status",
+        )
+
+    async def _handle_mic_recording_start(self, data):
+        """Handle mic recording start event - emit recording status"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MIC_RECORDING_START,
+            {"status": "recording"},
+            "voice_status",
+        )
+
+    async def _handle_mic_recording_stop(self, data):
+        """Handle mic recording stop event - emit processing status"""
+        await self._broadcast_event_to_dashboard(
+            EventTopics.MIC_RECORDING_STOP,
             {"status": "processing"},
             "voice_status",
         )
