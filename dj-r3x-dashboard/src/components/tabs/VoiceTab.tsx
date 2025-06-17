@@ -123,6 +123,34 @@ export default function VoiceTab() {
     }
   }, [modeTransition, systemMode.current_mode, voiceStatus.status, lastTranscription])
 
+  // Socket event listeners for voice recording state synchronization
+  useEffect(() => {
+    if (!socket) return
+
+    // Helper to unwrap WebBridge payload format (same pattern as DJTab)
+    const unwrap = (raw: any) => (raw && raw.data ? raw.data : raw)
+
+    // Handle voice status changes from backend - WebBridge sends VOICE_LISTENING_STOPPED as "voice_status" events
+    const handleVoiceStatusChange = (raw: any) => {
+      const data = unwrap(raw)
+      console.log('Voice status change:', data)
+      
+      // Check if this is a "processing" status which indicates recording stopped
+      // WebBridge sends status: "processing" when VOICE_LISTENING_STOPPED event occurs
+      // Should switch back to "engaged" state (showing TALK button) not idle
+      if (data.status === 'processing' && interactionPhase === 'recording') {
+        console.log('Voice recording stopped detected - switching back to engaged')
+        setInteractionPhase('engaged')
+      }
+    }
+
+    socket.on('voice_status', handleVoiceStatusChange)
+
+    return () => {
+      socket.off('voice_status', handleVoiceStatusChange)
+    }
+  }, [socket, interactionPhase])
+
   const isRecording = voiceStatus.status === 'recording'
   const isProcessing = voiceStatus.status === 'processing'
 
@@ -145,10 +173,12 @@ export default function VoiceTab() {
       }
     } else if (interactionPhase === 'recording') {
       // Stop recording using correct MIC_RECORDING_STOP event (like MouseInputService)
+      // Update state immediately for responsive UI (like DJTab pattern)
+      setInteractionPhase('engaged')
+      
       if (socket) {
         socket.emit('voice_recording_stop', {})
       }
-      // Note: Don't update state here - let the voice status handle the transition
     }
   }
 

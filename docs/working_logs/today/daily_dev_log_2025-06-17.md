@@ -658,4 +658,102 @@ Voice status flow now complete: idle → recording → processing → speaking �
 
 ---
 
+### VoiceTab Stop Button UI State Fix - EVENT NAME MISMATCH RESOLVED
+**Time**: 16:45  
+**Goal**: Fix VoiceTab stop button not updating UI state back to "ENGAGE" after clicking stop  
+**Issue**: Backend emits `VOICE_LISTENING_STOPPED` correctly but VoiceTab UI remains stuck showing dual buttons instead of returning to idle state  
+
+**Root Cause Identified**:
+**Event Name Mismatch** (Troubleshooting Guide Section 1.3 - Event Topic Subscription Mismatches)
+
+**Evidence**:
+- **Backend Log Line 310**: "Emitted VOICE_LISTENING_STOPPED with final transcript." ✅ Backend working correctly
+- **WebBridge Line 641**: `socket_event_name="voice_status"` ❌ Sending wrong event name to frontend  
+- **VoiceTab Line 143**: `socket.on('voice_listening_stopped'...)` ❌ Listening for wrong event name
+
+**The Problem**:
+WebBridge service receives `VOICE_LISTENING_STOPPED` event correctly and has proper handler, but sends it to frontend as `"voice_status"` Socket.IO event instead of `"voice_listening_stopped"`.
+
+**Implementation**:
+Fixed VoiceTab to listen for the actual event being sent:
+```typescript
+// OLD (BROKEN): Listening for wrong event name
+socket.on('voice_listening_stopped', handleVoiceListeningStopped)
+
+// NEW (FIXED): Listen for actual event and check status  
+socket.on('voice_status', handleVoiceStatusChange)
+// Check if status === 'processing' && interactionPhase === 'recording'
+// This indicates recording stopped - switch to idle
+```
+
+**Key Change**:
+1. **Listen for `'voice_status'` events** (what WebBridge actually sends)
+2. **Check for `status === 'processing'`** (what WebBridge sends when `VOICE_LISTENING_STOPPED` occurs)
+3. **Only reset when currently recording** (prevents false triggers)
+
+**Solution Pattern**:
+This follows the exact pattern from troubleshooting guide section 1.3 - subscribe to the actual event being emitted, not the expected one.
+
+**Result**: VoiceTab stop button now properly switches UI back to "ENGAGE" state when clicked.
+
+**Learning**: The backend was working perfectly - the issue was subscribing to the wrong Socket.IO event name. Always check what events the WebBridge actually sends vs what the frontend expects.
+
+**Result**: VoiceTab Stop Button UI State Fix - **FULLY COMPLETE** ✅
+
+---
+
+### VoiceTab Stop Button Delay Fix - IMMEDIATE UI RESPONSIVENESS RESTORED
+**Time**: 17:30  
+**Goal**: Fix delay when clicking VoiceTab stop button to match DJTab's immediate responsiveness  
+**Issue**: User reported stop button works correctly but has noticeable delay before UI updates  
+
+**Root Cause Analysis**:
+The stop button handler was waiting for backend voice status events to update UI state instead of updating immediately like other buttons.
+
+**Code Analysis**:
+```typescript
+// BEFORE (SLOW): No immediate state update
+} else if (interactionPhase === 'recording') {
+  if (socket) {
+    socket.emit('voice_recording_stop', {})
+  }
+  // Note: Don't update state here - let the voice status handle the transition
+}
+```
+
+**Problem**: UI waits for backend voice_status event roundtrip before switching from [STOP] back to [TALK] button.
+
+**Solution**: Applied DJTab pattern - immediate local state update followed by backend command:
+```typescript
+// AFTER (IMMEDIATE): Instant UI response
+} else if (interactionPhase === 'recording') {
+  // Update state immediately for responsive UI (like DJTab pattern)
+  setInteractionPhase('engaged')
+  
+  if (socket) {
+    socket.emit('voice_recording_stop', {})
+  }
+}
+```
+
+**Implementation**:
+- **File**: `dj-r3x-dashboard/src/components/tabs/VoiceTab.tsx`  
+- **Line**: 177 - Added `setInteractionPhase('engaged')` before socket command
+- **Pattern**: Follows exact DJTab responsiveness pattern used throughout the application
+- **Result**: Stop button now immediately switches from [STOP] [DISENGAGE] → [TALK] [DISENGAGE]
+
+**Technical Details**:
+- **Frontend-only fix** - no backend changes required
+- **Maintains consistency** - backend voice status events still work for state synchronization
+- **Zero breaking changes** - backend event flow unchanged
+- **User experience** - Immediate button response, no perceived delay
+
+**Result**: VoiceTab Stop Button Delay Fix - **FULLY COMPLETE** ✅
+
+**Impact**: VoiceTab now has identical responsiveness to DJTab - all button clicks produce immediate UI feedback while maintaining proper backend integration.
+
+**Learning**: UI responsiveness requires immediate local state updates. Waiting for backend confirmation creates perceived delays even when backend processes commands correctly.
+
+---
+
 **Note**: This log tracks daily development progress. For comprehensive project history, see `docs/working_logs/dj-r3x-condensed-dev-log.md`
