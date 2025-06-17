@@ -65,7 +65,76 @@ cd cantina_os
 grep -r "emit.*['\"]" . --include="*.py" | grep -v EventTopics
 ```
 
-### 1.3 Event Subscription Race Conditions
+### 1.3 Event Topic Subscription Mismatches
+
+**Symptoms:**
+- Service has handler method but never receives events
+- Other services receive the same event successfully  
+- Log shows "events emitted but handler never called"
+- WebBridge missing dashboard updates despite backend working
+
+**Root Cause:**
+Service subscribes to wrong event topic - similar events with different names.
+
+**Real-World Example:**
+```python
+# VoiceTab UI stuck because WebBridge subscribed to wrong event
+# PROBLEM: WebBridge subscribed to SPEECH_SYNTHESIS_STARTED
+await self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_speech_started)
+
+# REALITY: ElevenLabsService actually emits SPEECH_GENERATION_STARTED  
+await self.emit(EventTopics.SPEECH_GENERATION_STARTED, payload)
+
+# SOLUTION: Subscribe to the actual event being emitted
+await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_started)
+```
+
+**Debugging Steps:**
+1. **Find which service receives the event successfully:**
+   ```bash
+   # Search for log messages that prove event is being emitted
+   grep -r "Speech started\|pattern to SPEAKING" logs/
+   ```
+
+2. **Check what events that service subscribes to:**
+   ```bash
+   # Find the working service and check its subscriptions
+   grep -A20 "subscribe.*SPEECH" services/eye_light_controller_service.py
+   ```
+
+3. **Compare with broken service subscriptions:**
+   ```bash
+   # Check if broken service has different event subscriptions
+   grep -A20 "subscribe.*SPEECH" services/web_bridge_service.py
+   ```
+
+4. **Verify actual event emission:**
+   ```bash
+   # Find where the event is actually emitted
+   grep -r "emit.*SPEECH_GENERATION_STARTED" services/
+   ```
+
+**Resolution Pattern:**
+```python
+# TYPICAL PATTERN: Services subscribe to multiple related events
+# Eye controller (WORKING) subscribes to both:
+await self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_speech_started)
+await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_started)
+
+# WebBridge (BROKEN) only subscribed to one:
+await self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_speech_started)
+
+# FIX: Add missing subscription
+await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_started)
+```
+
+**Prevention:**
+- Always check what events are actually being emitted, not just what you expect
+- Look at working services for subscription patterns  
+- Use consistent event naming conventions across services
+- Subscribe to all variants of related events when in doubt
+
+### 1.4 Event Subscription Race Conditions
 
 **Symptoms:**
 - Services start successfully but miss early events

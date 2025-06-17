@@ -392,8 +392,11 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             
             # Voice completion events - critical for resetting voice status to idle
             self.subscribe(EventTopics.VOICE_PROCESSING_COMPLETE, self._handle_voice_processing_complete),
+            self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_speech_synthesis_started),
+            self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_synthesis_started),  # CRITICAL: Missing event!
             self.subscribe(EventTopics.SPEECH_SYNTHESIS_COMPLETED, self._handle_speech_synthesis_completed),
             self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_synthesis_ended),
+            self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_generation_complete),
             self.subscribe(EventTopics.LLM_PROCESSING_ENDED, self._handle_llm_processing_ended),
             self.subscribe(EventTopics.VOICE_ERROR, self._handle_voice_error),
             
@@ -588,74 +591,325 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         )
 
     async def _handle_voice_listening_started(self, data):
-        """Handle voice listening started event"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.VOICE_LISTENING_STARTED, {"status": "recording"}, "voice_status"
+        """Handle voice listening started event with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "recording",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "recording",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.VOICE_LISTENING_STARTED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast voice listening started status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.VOICE_LISTENING_STARTED, raw_payload, "voice_status"
+            )
 
     async def _handle_voice_listening_stopped(self, data):
-        """Handle voice listening stopped event"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.VOICE_LISTENING_STOPPED,
-            {"status": "processing"},
-            "voice_status",
+        """Handle voice listening stopped event with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "processing",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "processing",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.VOICE_LISTENING_STOPPED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast voice listening stopped status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.VOICE_LISTENING_STOPPED, raw_payload, "voice_status"
+            )
 
     async def _handle_mic_recording_start(self, data):
-        """Handle mic recording start event - emit recording status"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MIC_RECORDING_START,
-            {"status": "recording"},
-            "voice_status",
+        """Handle mic recording start event - emit recording status with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "recording",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "recording",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.MIC_RECORDING_START,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast mic recording start status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MIC_RECORDING_START, raw_payload, "voice_status"
+            )
 
     async def _handle_mic_recording_stop(self, data):
-        """Handle mic recording stop event - emit processing status"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.MIC_RECORDING_STOP,
-            {"status": "processing"},
-            "voice_status",
+        """Handle mic recording stop event - emit processing status with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "processing",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "processing",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.MIC_RECORDING_STOP,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast mic recording stop status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.MIC_RECORDING_STOP, raw_payload, "voice_status"
+            )
 
     async def _handle_voice_processing_complete(self, data):
-        """Handle voice processing completion - reset to idle"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.VOICE_PROCESSING_COMPLETE,
-            {"status": "idle"},
-            "voice_status",
+        """Handle voice processing completion - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.VOICE_PROCESSING_COMPLETE,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast voice processing complete status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.VOICE_PROCESSING_COMPLETE, raw_payload, "voice_status"
+            )
+
+    async def _handle_speech_synthesis_started(self, data):
+        """Handle speech synthesis started - set status to speaking with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "speaking",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "speaking",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.SPEECH_SYNTHESIS_STARTED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
+        )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast speech synthesis started status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.SPEECH_SYNTHESIS_STARTED, raw_payload, "voice_status"
+            )
 
     async def _handle_speech_synthesis_completed(self, data):
-        """Handle speech synthesis completion - reset to idle"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.SPEECH_SYNTHESIS_COMPLETED,
-            {"status": "idle"},
-            "voice_status",
+        """Handle speech synthesis completion - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.SPEECH_SYNTHESIS_COMPLETED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast speech synthesis completed status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.SPEECH_SYNTHESIS_COMPLETED, raw_payload, "voice_status"
+            )
 
     async def _handle_speech_synthesis_ended(self, data):
-        """Handle speech synthesis ended - reset to idle"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.SPEECH_SYNTHESIS_ENDED,
-            {"status": "idle"},
-            "voice_status",
+        """Handle speech synthesis ended - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.SPEECH_SYNTHESIS_ENDED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast speech synthesis ended status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.SPEECH_SYNTHESIS_ENDED, raw_payload, "voice_status"
+            )
+
+    async def _handle_speech_generation_complete(self, data):
+        """Handle speech generation complete - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.SPEECH_GENERATION_COMPLETE,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
+        )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast speech generation complete status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.SPEECH_GENERATION_COMPLETE, raw_payload, "voice_status"
+            )
 
     async def _handle_llm_processing_ended(self, data):
-        """Handle LLM processing completion - reset to idle"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.LLM_PROCESSING_ENDED,
-            {"status": "idle"},
-            "voice_status",
+        """Handle LLM processing completion - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.LLM_PROCESSING_ENDED,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast LLM processing ended status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.LLM_PROCESSING_ENDED, raw_payload, "voice_status"
+            )
 
     async def _handle_voice_error(self, data):
-        """Handle voice processing error - reset to idle"""
-        await self._broadcast_event_to_dashboard(
-            EventTopics.VOICE_ERROR,
-            {"status": "idle", "error": data.get("error", "Voice processing error")},
-            "voice_status",
+        """Handle voice processing error - reset to idle with enhanced validation"""
+        # Use enhanced validation for voice status payload
+        raw_payload = {
+            "status": "idle",
+            "error": data.get("error", "Voice processing error"),
+            "timestamp": datetime.now().isoformat()  # Always use ISO string format
+        }
+        
+        # Create fallback payload in case of validation failure
+        fallback_payload = {
+            "status": "idle",
+            "error": "Voice processing error",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Use the enhanced validation system
+        success = await self.broadcast_validated_status(
+            status_type="voice",
+            data=raw_payload,
+            event_topic=EventTopics.VOICE_ERROR,
+            socket_event_name="voice_status",
+            fallback_data=fallback_payload
         )
+        
+        if not success:
+            logger.warning(f"[WebBridge] Failed to broadcast voice error status, using fallback method")
+            await self._broadcast_event_to_dashboard(
+                EventTopics.VOICE_ERROR, raw_payload, "voice_status"
+            )
 
     async def _handle_music_playback_started(self, data):
         """Handle music playback started event with enhanced validation"""
