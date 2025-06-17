@@ -5,6 +5,15 @@ CantinaOS service that provides web dashboard connectivity via FastAPI and Socke
 Bridges the web dashboard with CantinaOS event bus for real-time monitoring and control.
 """
 
+"""
+SERVICE: WebBridgeService
+PURPOSE: Web dashboard connectivity bridge with FastAPI REST API and Socket.IO real-time communication
+EVENTS_IN: SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, VOICE_LISTENING_STARTED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_LIBRARY_UPDATED, DJ_MODE_CHANGED, LLM_RESPONSE, SYSTEM_MODE_CHANGE, DASHBOARD_LOG
+EVENTS_OUT: MUSIC_COMMAND, SYSTEM_SET_MODE_REQUEST, USER_INPUT, SERVICE_STATUS_REQUEST
+KEY_METHODS: _handle_music_command, _handle_voice_command, _handle_system_command, _broadcast_event_to_dashboard, broadcast_validated_status
+DEPENDENCIES: FastAPI, Socket.IO, uvicorn web server, CORS middleware for web dashboard connectivity
+"""
+
 import asyncio
 import json
 import logging
@@ -53,9 +62,6 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             logger=logging.getLogger(__name__)
         )
         
-        # CRITICAL DEBUG: Use proper logging instead of print
-        self._logger.critical("CRITICAL DEBUG: WebBridge.__init__() called and completed super().__init__()")
-        logging.getLogger("cantina_os.main").critical("CRITICAL DEBUG: WebBridge constructor completed")
 
         self._config = config or {}
         self._host = self._config.get("host", "127.0.0.1")
@@ -141,7 +147,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             # Request music library update if music controller is already running
             self._logger.info("[WebBridge] Requesting music library update from music controller")
             self._event_bus.emit(
-                EventTopics.COMMAND,
+                EventTopics.MUSIC_COMMAND,
                 {
                     "command": "refresh_music_library",
                     "source": "web_bridge",
@@ -340,14 +346,33 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         # Register validated command handlers
         self._sio.on("voice_command", self._handle_voice_command)
         self._sio.on("music_command", self._handle_music_command)
-        self._sio.on("dj_command", self._handle_dj_command)
+        # REMOVED dj_command - DJ commands should go through regular command system
         self._sio.on("system_command", self._handle_system_command)
+        
+        # Handle regular CLI-style commands from dashboard
+        @self._sio.event
+        async def command(sid, data):
+            """Handle simple CLI commands from dashboard"""
+            command_text = data.get("command", "").strip()
+            logger.info(f"Command from dashboard {sid}: {command_text}")
+            
+            # Parse the command text just like CLI does
+            parts = command_text.split()
+            command = parts[0] if parts else ""
+            args = parts[1:] if len(parts) > 1 else []
+            
+            # Emit to command dispatcher with proper payload structure
+            self._event_bus.emit(EventTopics.CLI_COMMAND, {
+                "command": command,
+                "args": args,
+                "raw_input": command_text,
+                "source": "dashboard",
+                "sid": sid
+            })
 
     async def _subscribe_to_events(self) -> None:
         """Subscribe to CantinaOS events for dashboard monitoring."""
         logger.info("[WebBridge] Subscribing to CantinaOS events...")
-        logger.critical(f"[WebBridge] CRITICAL DEBUG: About to subscribe to {EventTopics.MUSIC_PLAYBACK_STARTED}")
-        logger.critical(f"[WebBridge] CRITICAL DEBUG: Handler function: {self._handle_music_playback_started}")
         
         # Use proper BaseService async subscription pattern
         await asyncio.gather(
@@ -373,8 +398,13 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             self.subscribe(EventTopics.MUSIC_QUEUE_UPDATED, self._handle_music_queue_updated),
             self.subscribe(EventTopics.MUSIC_LIBRARY_UPDATED, self._handle_music_library_updated),
             
-            # Other events
+            # DJ Mode and Commentary events - CRITICAL for dashboard status indicators
             self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed),
+            self.subscribe(EventTopics.GPT_COMMENTARY_RESPONSE, self._handle_gpt_commentary_response),
+            self.subscribe(EventTopics.CROSSFADE_STARTED, self._handle_crossfade_started),
+            self.subscribe(EventTopics.DJ_NEXT_TRACK_SELECTED, self._handle_dj_next_track_selected),
+            
+            # Other events
             self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response),
             self.subscribe(EventTopics.SYSTEM_ERROR, self._handle_system_error),
             self.subscribe(EventTopics.DASHBOARD_LOG, self._handle_dashboard_log),
@@ -382,13 +412,10 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             # System mode events - critical for dashboard state synchronization
             self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_system_mode_change),
             self.subscribe(EventTopics.MODE_TRANSITION_STARTED, self._handle_mode_transition),
-            self.subscribe(EventTopics.MODE_TRANSITION_COMPLETE, self._handle_mode_transition)
+            self.subscribe(EventTopics.MODE_TRANSITION_COMPLETE, self._handle_mode_transition),
         )
         
-        logger.critical(f"[WebBridge] CRITICAL DEBUG: Subscription completed for {EventTopics.MUSIC_PLAYBACK_STARTED}")
-        logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STARTED}")
-        logger.info(f"[WebBridge] Successfully subscribed to all events including {EventTopics.MUSIC_PLAYBACK_STOPPED}")
-        logger.critical(f"[WebBridge] CRITICAL DEBUG: Music event subscriptions complete - handler is {self._handle_music_playback_started}")
+        logger.info(f"[WebBridge] Successfully subscribed to all events")
 
     async def _start_web_server(self) -> None:
         """Start the uvicorn web server."""
@@ -880,6 +907,84 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             "dj_status",
         )
 
+    async def _handle_gpt_commentary_response(self, data):
+        """Handle GPT commentary responses - forwards as llm_response to dashboard"""
+        self.logger.critical(f"[WebBridge] CRITICAL DEBUG: _handle_gpt_commentary_response called with data: {data}")
+        
+        # Fix: Use commentary_text field from the actual payload
+        commentary_text = data.get("commentary_text", "") or data.get("text", "")
+        self.logger.info(f"[WebBridge] Forwarding GPT commentary to dashboard: {commentary_text[:50]}...")
+        
+        # Forward as 'llm_response' event that DJTab expects
+        await self._broadcast_event_to_dashboard(
+            EventTopics.GPT_COMMENTARY_RESPONSE,
+            {
+                "text": commentary_text,
+                "context": data.get("context", ""),
+                "request_id": data.get("request_id", ""),
+                "is_partial": data.get("is_partial", False)
+            },
+            "llm_response",  # DJTab listens for this event name
+        )
+        self.logger.critical(f"[WebBridge] CRITICAL DEBUG: Successfully broadcast llm_response event")
+
+    async def _handle_crossfade_started(self, data):
+        """Handle crossfade started events"""
+        self.logger.info(f"[WebBridge] Forwarding crossfade started to dashboard")
+        
+        # Forward as 'crossfade_started' event that DJTab expects
+        await self._broadcast_event_to_dashboard(
+            EventTopics.CROSSFADE_STARTED,
+            {
+                "from_track": data.get("from_track", ""),
+                "to_track": data.get("to_track", ""),
+                "duration": data.get("duration", 8.0),
+                "crossfade_id": data.get("crossfade_id", "")
+            },
+            "crossfade_started",  # DJTab listens for this event name
+        )
+
+    async def _handle_dj_next_track_selected(self, data):
+        """Handle DJ next track selection - updates upcoming queue"""
+        self.logger.critical(f"[WebBridge] CRITICAL DEBUG: _handle_dj_next_track_selected called with data: {data}")
+        self.logger.info(f"[WebBridge] CRITICAL FIX: DJ next track selected event received!")
+        self.logger.info(f"[WebBridge] DJ next track selected: {data.get('track', {}).get('title', 'Unknown')}")
+        self.logger.info(f"[WebBridge] Full data payload: {data}")
+        
+        # Extract track information
+        track_info = data.get("track", {})
+        
+        # Create queue entry format that DJTab expects
+        queue_track = {
+            "title": track_info.get("title", "Unknown Track"),
+            "artist": track_info.get("artist", "Unknown Artist"),
+            "duration": self._format_duration(track_info.get("duration", 0)),
+            "track_id": track_info.get("track_id", track_info.get("title", ""))
+        }
+        
+        self.logger.critical(f"[WebBridge] CRITICAL DEBUG: Created queue_track: {queue_track}")
+        
+        # For now, send as a single-item queue (future enhancement: maintain full queue)
+        await self._broadcast_event_to_dashboard(
+            EventTopics.DJ_NEXT_TRACK_SELECTED,
+            {
+                "upcoming_queue": [queue_track],
+                "next_track": queue_track,
+                "queue_length": 1
+            },
+            "dj_queue_update",  # Custom event name for queue updates
+        )
+        self.logger.critical(f"[WebBridge] CRITICAL DEBUG: Successfully broadcast dj_queue_update event")
+    
+    def _format_duration(self, duration_seconds):
+        """Format duration from seconds to MM:SS format"""
+        if not duration_seconds or duration_seconds <= 0:
+            return "Unknown"
+        
+        minutes = int(duration_seconds // 60)
+        seconds = int(duration_seconds % 60)
+        return f"{minutes}:{seconds:02d}"
+
     async def _handle_llm_response(self, data):
         """Handle LLM response events"""
         await self._broadcast_event_to_dashboard(
@@ -955,19 +1060,33 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 if pattern in log_message:
                     return  # Skip broadcasting this log
             
+            # CRITICAL FIX: Allow important DJ Mode logs to pass through without throttling
+            important_dj_patterns = [
+                "Selected next track:",
+                "Starting crossfade from",
+                "DJ mode activated",
+                "DJ mode deactivated",
+                "Crossfade",
+                "Generated commentary:",
+                "Track ending soon"
+            ]
+            
+            is_important_dj_log = any(pattern in log_message for pattern in important_dj_patterns)
+            
             # Rate limiting: Only send system logs every 10 seconds instead of continuously
             current_time = time.time()
             throttle_key = f"dashboard_log_{data.get('service', 'unknown')}"
             last_sent = self._event_throttle_state[throttle_key]["last_sent"]
             
-            # Allow ERROR and WARNING logs to pass through immediately
-            # Throttle INFO and other levels to once per 10 seconds per service
-            if log_level not in ["ERROR", "WARNING", "CRITICAL"]:
-                if current_time - last_sent < 10.0:  # 10 second throttle for INFO logs
+            # Allow ERROR, WARNING, CRITICAL, and important DJ logs to pass through immediately
+            # Throttle other INFO and other levels to once per 10 seconds per service
+            if log_level not in ["ERROR", "WARNING", "CRITICAL"] and not is_important_dj_log:
+                if current_time - last_sent < 10.0:  # 10 second throttle for non-important INFO logs
                     return
             
-            # Update throttle state
-            self._event_throttle_state[throttle_key]["last_sent"] = current_time
+            # Update throttle state only for non-important logs to avoid throttling important ones
+            if not is_important_dj_log:
+                self._event_throttle_state[throttle_key]["last_sent"] = current_time
             
             # Validate the log payload
             log_data = {
@@ -1075,50 +1194,6 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 room=sid,
             )
 
-    @validate_socketio_command("dj_command")
-    async def _handle_dj_command(self, sid, validated_command: DJCommandSchema):
-        """Handle DJ mode commands from dashboard with validation"""
-        logger.info(f"DJ command from {sid}: action={validated_command.action}")
-
-        try:
-            # Convert to CantinaOS event payload
-            event_payload = validated_command.to_cantina_event()
-            event_payload["sid"] = sid  # Add socket session ID
-            
-            # Get appropriate event topic for this DJ command
-            event_topic = validated_command.get_event_topic()
-            
-            # Emit to appropriate CantinaOS event topic
-            self._event_bus.emit(event_topic, event_payload)
-            
-            # Send success acknowledgment to client
-            response = BaseWebResponse.success_response(
-                message=f"DJ command '{validated_command.action}' processed successfully",
-                command_id=validated_command.command_id,
-                data={
-                    "action": validated_command.action,
-                    "auto_transition": validated_command.auto_transition,
-                    "event_topic": event_topic
-                }
-            )
-            await self._sio.emit(
-                "command_ack",
-                response.dict(),
-                room=sid,
-            )
-            
-        except Exception as e:
-            logger.error(f"Error processing DJ command: {e}")
-            error_response = BaseWebResponse.error_response(
-                message=f"Failed to process DJ command: {e}",
-                error_code="PROCESSING_ERROR",
-                command_id=validated_command.command_id
-            )
-            await self._sio.emit(
-                "command_ack",
-                error_response.model_dump(mode='json'),
-                room=sid,
-            )
 
     @validate_socketio_command("system_command")
     async def _handle_system_command(self, sid, validated_command: SystemCommandSchema):

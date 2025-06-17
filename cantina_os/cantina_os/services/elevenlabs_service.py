@@ -1,3 +1,19 @@
+"""
+ElevenLabs Service for CantinaOS
+
+This service handles text-to-speech generation using ElevenLabs API with streaming support
+and integrated music ducking coordination through the timeline system.
+"""
+
+"""
+SERVICE: ElevenLabsService
+PURPOSE: Text-to-speech generation and playback with ElevenLabs API, supporting both streaming and non-streaming modes
+EVENTS_IN: SPEECH_GENERATION_REQUEST, LLM_RESPONSE, TTS_REQUEST, TTS_GENERATE_REQUEST
+EVENTS_OUT: SPEECH_GENERATION_STARTED, SPEECH_GENERATION_COMPLETE, PLAN_READY, TTS_AUDIO_DATA, SERVICE_STATUS_UPDATE
+KEY_METHODS: _handle_speech_generation_request, _handle_llm_response, _create_speech_timeline_plan, _audio_worker_loop, _generate_speech
+DEPENDENCIES: ElevenLabs API key, sounddevice (optional for non-streaming), elevenlabs SDK for streaming, audio hardware
+"""
+
 import asyncio
 import logging
 import os

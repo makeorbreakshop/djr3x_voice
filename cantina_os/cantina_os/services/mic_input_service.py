@@ -5,6 +5,15 @@ This service is responsible for capturing raw audio input from the system microp
 and emitting it as events on the bus. It supports both continuous and push-to-talk modes.
 """
 
+"""
+SERVICE: MicInputService
+PURPOSE: Captures raw audio input from system microphone and emits audio chunk events for transcription services
+EVENTS_IN: VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, MIC_RECORDING_START, MIC_RECORDING_STOP
+EVENTS_OUT: AUDIO_RAW_CHUNK, SERVICE_STATUS_UPDATE
+KEY_METHODS: start_capture, stop_capture, _process_audio_queue, _audio_callback, _process_audio_chunk
+DEPENDENCIES: sounddevice for audio capture, numpy for audio processing, system microphone hardware
+"""
+
 import asyncio
 import logging
 import queue

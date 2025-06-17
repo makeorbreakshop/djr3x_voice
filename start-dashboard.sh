@@ -195,11 +195,12 @@ if ! pgrep -f "cantina_os.main" > /dev/null; then
     # Install requirements if needed
     if [ ! -f ".requirements_installed" ]; then
         echo -e "${YELLOW}Installing CantinaOS dependencies...${NC}"
-        pip install -r requirements.txt
+        ../venv/bin/pip install -r requirements.txt
         touch .requirements_installed
     fi
     
-    python -m cantina_os.main > ../logs/cantina_os.log 2>&1 &
+    # Use virtual environment Python explicitly to ensure dependencies are available
+    ../venv/bin/python -m cantina_os.main > ../logs/cantina_os.log 2>&1 &
     CANTINA_PID=$!
     cd ..
     echo -e "${GREEN}✅ CantinaOS with Web Bridge started (PID: $CANTINA_PID)${NC}"

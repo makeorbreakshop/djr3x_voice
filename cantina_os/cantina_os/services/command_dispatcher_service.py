@@ -6,6 +6,15 @@ using a registration-based system. It decouples command processing from the CLI
 interface and ensures proper event-driven communication.
 """
 
+"""
+SERVICE: CommandDispatcherService
+PURPOSE: Central command routing service that maps CLI commands to appropriate service handlers
+EVENTS_IN: CLI_COMMAND, REGISTER_COMMAND, CLI_HELP_REQUEST, CLI_STATUS_REQUEST
+EVENTS_OUT: MUSIC_COMMAND, EYE_COMMAND, DEBUG_COMMAND, SYSTEM_SET_MODE_REQUEST, CLI_RESPONSE, SYSTEM_SHUTDOWN_REQUESTED
+KEY_METHODS: register_command, _handle_command, _handle_help_request, _handle_status_request, _create_standardized_payload
+DEPENDENCIES: Command registry system, service topic mapping
+"""
+
 import logging
 from typing import Dict, Tuple, Optional, Any, List
 import asyncio

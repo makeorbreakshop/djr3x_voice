@@ -5,6 +5,15 @@ This service handles mode-specific commands and provides a clean interface
 for mode transitions and status reporting.
 """
 
+"""
+SERVICE: ModeCommandHandlerService
+PURPOSE: Handles mode transition commands and provides status reporting with integrated YodaModeManagerService coordination
+EVENTS_IN: MODE_COMMAND, SYSTEM_MODE_CHANGE, MODE_TRANSITION_COMPLETE
+EVENTS_OUT: CLI_RESPONSE, SERVICE_STATUS_UPDATE
+KEY_METHODS: handle_engage, handle_disengage, handle_ambient, handle_idle, _handle_mode_command, _get_help_text
+DEPENDENCIES: YodaModeManagerService integration, sounddevice for microphone info, command decorators
+"""
+
 import logging
 from typing import Dict, Optional, Any
 

@@ -6,6 +6,15 @@ It receives audio chunks from MicInputService, processes them via Deepgram,
 and emits transcription events (both interim and final).
 """
 
+"""
+SERVICE: DeepgramTranscriptionService
+PURPOSE: Real-time speech-to-text conversion using Deepgram streaming API with dedicated thread handling
+EVENTS_IN: AUDIO_RAW_CHUNK, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED
+EVENTS_OUT: TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, SERVICE_STATUS_UPDATE
+KEY_METHODS: start_streaming, stop_streaming, _process_transcripts, _process_single_transcript, _extract_audio_samples
+DEPENDENCIES: Deepgram API key, Deepgram SDK, threading for WebSocket I/O, asyncio queues
+"""
+
 import asyncio
 import logging
 import time

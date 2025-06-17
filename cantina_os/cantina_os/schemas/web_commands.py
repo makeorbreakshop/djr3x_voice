@@ -218,29 +218,41 @@ class DJCommandSchema(BaseWebCommand, CantinaOSEventMixin):
         """
         self.validate_action_allowed()
         
+        # BrainService expects standardized CLI command format
+        # with "command", "subcommand", "args", and "raw_input" fields
         if self.action == DJActionEnum.START:
             return self.create_cantina_event_payload({
                 "command": "dj start",
-                "auto_transition": self.auto_transition,
-                "transition_duration": self.transition_duration,
-                "genre_preference": self.genre_preference,
+                "subcommand": "",
+                "args": [],
+                "raw_input": "dj start"
             }, self.command_id)
             
         elif self.action == DJActionEnum.STOP:
             return self.create_cantina_event_payload({
                 "command": "dj stop",
+                "subcommand": "",
+                "args": [],
+                "raw_input": "dj stop"
             }, self.command_id)
             
         elif self.action == DJActionEnum.NEXT:
             # DJ next uses different event topic for immediate response
-            return self.create_cantina_event_payload({}, self.command_id)
+            return self.create_cantina_event_payload({
+                "command": "dj next",
+                "subcommand": "",
+                "args": [],
+                "raw_input": "dj next"
+            }, self.command_id)
             
         elif self.action == DJActionEnum.UPDATE_SETTINGS:
+            # For now, update_settings is not supported via the standardized format
+            # This would need to be implemented differently
             return self.create_cantina_event_payload({
                 "command": "dj update_settings",
-                "auto_transition": self.auto_transition,
-                "transition_duration": self.transition_duration,
-                "genre_preference": self.genre_preference,
+                "subcommand": "",
+                "args": [],
+                "raw_input": "dj update_settings"
             }, self.command_id)
     
     def get_event_topic(self) -> str:

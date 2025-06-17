@@ -5,6 +5,15 @@ This service uses Deepgram's built-in Microphone class to handle audio capture a
 eliminating the need for intermediate audio handling and reducing complexity.
 """
 
+"""
+SERVICE: DeepgramDirectMicService
+PURPOSE: Real-time speech-to-text transcription using Deepgram API with direct microphone integration
+EVENTS_IN: VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, MIC_RECORDING_START, MIC_RECORDING_STOP
+EVENTS_OUT: TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, TRANSCRIPTION_ERROR, TRANSCRIPTION_METRICS, SERVICE_STATUS_UPDATE
+KEY_METHODS: _start_listening, _stop_listening, _on_transcript, _on_error, _collect_metrics
+DEPENDENCIES: Deepgram API key, microphone hardware, Deepgram SDK
+"""
+
 import logging
 from typing import Optional, Dict, Any
 import asyncio

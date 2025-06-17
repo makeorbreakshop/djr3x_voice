@@ -6,6 +6,15 @@ It translates abstract pattern commands into specific LED instructions and manag
 serial communication with the Arduino hardware.
 """
 
+"""
+SERVICE: EyeLightControllerService
+PURPOSE: LED pattern control for DJ R3X's eyes via Arduino communication with mode-aware pattern switching
+EVENTS_IN: LED_COMMAND, EYE_COMMAND, LLM_SENTIMENT_ANALYZED, SPEECH_SYNTHESIS_STARTED, SPEECH_SYNTHESIS_ENDED, TRANSCRIPTION_FINAL, VOICE_LISTENING_STARTED, SYSTEM_MODE_CHANGE, LLM_RESPONSE_CHUNK
+EVENTS_OUT: CLI_RESPONSE, DEBUG_LOG, SERVICE_STATUS_UPDATE
+KEY_METHODS: set_pattern, set_brightness, handle_eye_test, handle_eye_status, handle_eye_pattern, _auto_detect_arduino, _connect_to_arduino
+DEPENDENCIES: Arduino hardware (optional, falls back to mock mode), serial communication, SimpleEyeAdapter
+"""
+
 import asyncio
 import json
 import logging

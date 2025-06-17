@@ -1,3 +1,18 @@
+"""
+Voice Manager Service for CantinaOS
+
+This service manages voice interaction states and coordinates voice components.
+"""
+
+"""
+SERVICE: VoiceManagerService
+PURPOSE: Manages voice interaction states and coordinates speech recognition, NLP, and synthesis components
+EVENTS_IN: SYSTEM_MODE_CHANGE
+EVENTS_OUT: SERVICE_STATUS_UPDATE, SERVICE_STATE_CHANGED
+KEY_METHODS: _handle_mode_changed, _update_state, _initialize_resources, _cleanup_resources
+DEPENDENCIES: Event bus coordination, asyncio task management
+"""
+
 import asyncio
 import logging
 from typing import Dict, Any, Optional

@@ -753,6 +753,54 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: Music library now displays correct track durations from VLC parsing instead of hardcoded defaults
 - **Technical**: Changed await self._load_music_library() to asyncio.create_task(), replaced sleep hack with proper VLC MediaParsedStatus polling, 5-second timeout protection
 
+### 2025-06-16: Music Library Duration Unit Tests - Comprehensive Implementation
+- **Issue**: Need comprehensive unit tests for music library duration functionality to verify architectural fixes
+- **Solution**: Created two test suites with 23 total tests (12 for MusicController, 11 for WebBridge) covering async library loading, VLC parsing, event emission, error handling, and concurrent operations
+- **Impact**: Comprehensive test coverage ensures architectural fix is working correctly and provides foundation for future improvements
+- **Technical**: Mock VLC objects with parsing state simulation, AsyncMock for event-driven testing, performance testing for concurrent operations
+
+### 2025-06-16: WebBridge Music Duration Fix - Complete Implementation
+- **Issue**: Dashboard showing hardcoded "3:00" for all tracks despite music controller properly loading durations
+- **Solution**: Added MUSIC_LIBRARY_UPDATED event subscription to WebBridge, implemented music library cache, updated /api/music/library endpoint to return cached data with actual durations
+- **Impact**: Web dashboard now displays actual track durations instead of hardcoded "3:00"
+- **Technical**: Event-driven cache updates, MM:SS duration formatting, startup synchronization with fallback to filesystem scanning
+
+### 2025-06-16: DJ Mode Dashboard Command Integration - Complete Fix
+- **Issue**: DJ Mode dashboard commands failing with validation errors and not integrating with existing CLI command system
+- **Solution**: Removed complex Pydantic validation, implemented simple command handler using CLI_COMMAND events, fixed payload parsing to match CommandDispatcherService expectations
+- **Impact**: DJ Mode commands from dashboard now work exactly like CLI with proper command/args/raw_input structure
+- **Technical**: Simplified from complex dj_command Socket.IO events to standard CLI command pipeline integration
+
+### 2025-06-16: DJ Mode Dashboard UI Redesign - Complete Implementation
+- **Issue**: DJ Mode interface cluttered with unnecessary auto-transition settings and poor visual feedback
+- **Solution**: Removed auto-transition settings panel, redesigned state-based controls (single start button → dual stop/next controls), enhanced visual design with pulsing indicators and improved Star Wars theming
+- **Impact**: Clean, professional DJ Mode interface focused on core functionality without settings clutter
+- **Technical**: State-based rendering, responsive grid layout, enhanced visual feedback with shadows and glows
+
+### 2025-06-16: DJ Mode Dashboard Environment Fix - Implementation
+- **Issue**: Dashboard failing with "No module named 'pydub'" error due to wrong Python interpreter
+- **Solution**: Fixed start-dashboard.sh script to explicitly use virtual environment Python interpreter instead of system Python
+- **Impact**: Dashboard now launches CantinaOS with correct Python interpreter that has access to all required dependencies
+- **Technical**: Changed python to ../venv/bin/python in launch script, also fixed pip install command
+
+### 2025-06-16: DJ Mode Dashboard Status Indicators Fix - Complete Implementation
+- **Issue**: Dashboard status indicators showing offline/empty despite CantinaOS working perfectly - missing event subscriptions in WebBridge
+- **Solution**: Added missing event subscriptions (GPT_COMMENTARY_RESPONSE, CROSSFADE_STARTED, DJ_NEXT_TRACK_SELECTED) with corresponding handlers to forward CantinaOS status to dashboard
+- **Impact**: Dashboard now receives real-time status updates from CantinaOS instead of flying blind
+- **Technical**: Bidirectional WebBridge with proper event output handling, complies with WEB_DASHBOARD_STANDARDS.md Section 5.1
+
+### 2025-06-16: DJ Mode Dashboard Track Display - Final Fix Implementation
+- **Issue**: Dashboard showing "Generating track queue..." indefinitely despite backend logs confirming track selection working perfectly
+- **Solution**: Fixed payload unwrapping in DJTab.tsx - WebBridge wraps events in standardized format with nested data property, added unwrap helper for all socket event handlers
+- **Impact**: DJ Mode dashboard now correctly displays upcoming tracks as soon as backend selects them
+- **Technical**: Added payload unwrapping pattern (raw.data || raw) to access nested event payloads correctly
+
+### 2025-06-16: DJ Mode Dashboard Commentary Display Fix - Field Name Correction
+- **Issue**: Commentary counter incrementing but actual commentary text not displaying - field name mismatch between backend and WebBridge
+- **Solution**: Fixed WebBridge _handle_gpt_commentary_response() to extract commentary_text field instead of text field with fallback for backward compatibility
+- **Impact**: DJ Mode dashboard now correctly displays generated commentary text instead of "Waiting for next commentary..."
+- **Technical**: Fixed field name extraction from data.get("text") to data.get("commentary_text") or data.get("text") fallback
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)

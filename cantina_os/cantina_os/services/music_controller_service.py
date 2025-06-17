@@ -4,6 +4,15 @@ Music Controller Service for CantinaOS
 This service manages music playback with mode-aware behavior and audio ducking during speech.
 """
 
+"""
+SERVICE: MusicControllerService
+PURPOSE: Music playback management with VLC backend, audio ducking, crossfading, and DJ mode support
+EVENTS_IN: MUSIC_COMMAND, SYSTEM_MODE_CHANGE, SPEECH_SYNTHESIS_STARTED, SPEECH_SYNTHESIS_ENDED, AUDIO_DUCKING_START, AUDIO_DUCKING_STOP, DJ_MODE_CHANGED, DJ_NEXT_TRACK
+EVENTS_OUT: MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_PLAYBACK_PAUSED, MUSIC_PLAYBACK_RESUMED, MUSIC_LIBRARY_UPDATED, TRACK_ENDING_SOON, CROSSFADE_STARTED, CROSSFADE_COMPLETE, CLI_RESPONSE
+KEY_METHODS: handle_play_music, handle_stop_music, handle_list_music, _crossfade_to_track, _smart_play_track, get_track_progress, _setup_track_end_timer
+DEPENDENCIES: VLC media player, music directory (configurable path), audio hardware
+"""
+
 import os
 import asyncio
 import logging

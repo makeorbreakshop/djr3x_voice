@@ -26,9 +26,6 @@ interface CommentaryData {
 export default function DJTab() {
   const { socket } = useSocketContext()
   const [djModeActive, setDjModeActive] = useState(false)
-  const [autoTransition, setAutoTransition] = useState(true)
-  const [transitionInterval, setTransitionInterval] = useState(300) // seconds
-  const [crossfadeDuration, setCrossfadeDuration] = useState(5) // seconds
   const [upcomingQueue, setUpcomingQueue] = useState<Track[]>([])
   const [commentary, setCommentary] = useState<CommentaryData>({
     generated_count: 0,
@@ -38,34 +35,38 @@ export default function DJTab() {
   })
   const [crossfadeStatus, setCrossfadeStatus] = useState('offline')
   const [commentaryStatus, setCommentaryStatus] = useState('offline')
+  const [lastCommand, setLastCommand] = useState<string>('')
 
   // Socket event listeners
   useEffect(() => {
     if (!socket) return
 
-    const handleDJStatus = (data: DJStatus) => {
+    // Many events from the WebBridge wrap the real payload under a `data` key.
+    // Helper to unwrap this pattern for easier access.
+    const unwrap = (raw: any) => (raw && raw.data ? raw.data : raw)
+
+    const handleDJStatus = (raw: any) => {
+      const data = unwrap(raw) as DJStatus
       console.log('DJ status update:', data)
       
       if (data.is_active !== undefined) {
         setDjModeActive(data.is_active)
       }
-      
-      if (data.auto_transition !== undefined) {
-        setAutoTransition(data.auto_transition)
-      }
     }
 
-    const handleCrossfadeUpdate = (data: any) => {
+    const handleCrossfadeUpdate = (raw: any) => {
+      const data = unwrap(raw)
       console.log('Crossfade update:', data)
       setCrossfadeStatus('active')
       
       // Reset crossfade status after completion
       setTimeout(() => {
         setCrossfadeStatus('ready')
-      }, (crossfadeDuration + 1) * 1000)
+      }, 6000) // 5s default + 1s buffer
     }
 
-    const handleCommentaryUpdate = (data: any) => {
+    const handleCommentaryUpdate = (raw: any) => {
+      const data = unwrap(raw)
       console.log('Commentary update:', data)
       setCommentary(prev => ({
         ...prev,
@@ -75,9 +76,21 @@ export default function DJTab() {
       setCommentaryStatus('active')
     }
 
-    const handleServiceStatus = (data: any) => {
+    const handleServiceStatus = (raw: any) => {
+      const data = unwrap(raw)
       if (data.service === 'BrainService') {
         setCommentaryStatus(data.status === 'RUNNING' ? 'ready' : 'offline')
+      }
+    }
+
+    const handleQueueUpdate = (raw: any) => {
+      const data = unwrap(raw)
+      console.log('Queue update:', data)
+      if (data.upcoming_queue) {
+        setUpcomingQueue(data.upcoming_queue)
+      } else if (data.next_track) {
+        // Handle the case where only the next track is sent
+        setUpcomingQueue([data.next_track])
       }
     }
 
@@ -85,194 +98,167 @@ export default function DJTab() {
     socket.on('crossfade_started', handleCrossfadeUpdate)
     socket.on('llm_response', handleCommentaryUpdate)
     socket.on('service_status_update', handleServiceStatus)
+    socket.on('dj_queue_update', handleQueueUpdate)
 
     return () => {
       socket.off('dj_status', handleDJStatus)
       socket.off('crossfade_started', handleCrossfadeUpdate)
       socket.off('llm_response', handleCommentaryUpdate)
       socket.off('service_status_update', handleServiceStatus)
+      socket.off('dj_queue_update', handleQueueUpdate)
     }
-  }, [socket, crossfadeDuration])
+  }, [socket])
 
   const handleDJModeToggle = () => {
     if (!socket) return
 
     const newDJModeActive = !djModeActive
+    const command = newDJModeActive ? 'dj start' : 'dj stop'
     
-    socket.emit('dj_command', {
-      action: newDJModeActive ? 'start' : 'stop',
-      auto_transition: autoTransition,
-      interval: transitionInterval
+    // Update state immediately for responsive UI
+    setDjModeActive(newDJModeActive)
+    setLastCommand(command)
+    
+    // Send command exactly like CLI - using working simple command system
+    socket.emit('command', {
+      command: command
     })
   }
 
   const handleNextTrack = () => {
     if (!socket || !djModeActive) return
 
-    socket.emit('dj_command', {
-      action: 'next'
+    setLastCommand('dj next')
+    
+    // Send command exactly like CLI - using working simple command system
+    socket.emit('command', {
+      command: 'dj next'
     })
   }
-
-  const handleSettingsUpdate = () => {
-    if (!socket || !djModeActive) return
-
-    // Send updated settings to CantinaOS
-    socket.emit('dj_command', {
-      action: 'update_settings',
-      auto_transition: autoTransition,
-      interval: transitionInterval,
-      crossfade_duration: crossfadeDuration
-    })
-  }
-
-  // Update settings when they change (if DJ mode is active)
-  useEffect(() => {
-    if (djModeActive) {
-      handleSettingsUpdate()
-    }
-  }, [autoTransition, transitionInterval, crossfadeDuration, djModeActive])
 
   return (
     <div className="space-y-6">
-      {/* DJ Mode Control */}
+      {/* DJ Mode Control - Redesigned with state-based layout */}
       <div className="sw-panel">
         <h3 className="text-lg font-semibold text-sw-blue-100 mb-6 sw-text-glow">
           DJ MODE CONTROL
         </h3>
         
-        <div className="flex items-center justify-center mb-6">
-          <button
-            onClick={handleDJModeToggle}
-            className={`
-              px-8 py-4 rounded-lg text-white font-bold text-lg uppercase
-              transition-all duration-200 transform hover:scale-105
-              ${djModeActive 
-                ? 'bg-sw-red hover:bg-red-600 sw-border-glow' 
-                : 'bg-sw-green hover:bg-green-600 sw-border-glow'
-              }
-            `}
-          >
-            {djModeActive ? 'Stop DJ Mode' : 'Start DJ Mode'}
-          </button>
-        </div>
-
-        <div className="text-center">
-          <p className="text-sm text-sw-blue-300/70 mb-2">
-            {djModeActive 
-              ? 'DJ Mode is active - Automatic track transitions enabled' 
-              : 'Click to activate automatic DJ mode'
-            }
-          </p>
-          {djModeActive && (
-            <div className="flex items-center justify-center space-x-2">
-              <div className="w-2 h-2 bg-sw-green rounded-full animate-pulse"></div>
-              <span className="text-xs text-sw-green uppercase font-semibold">LIVE</span>
+        {!djModeActive ? (
+          // Inactive State: Single Start Button
+          <div className="flex flex-col items-center space-y-4">
+            <button
+              onClick={handleDJModeToggle}
+              className="
+                px-12 py-6 rounded-lg text-white font-bold text-xl uppercase
+                transition-all duration-200 transform hover:scale-105
+                bg-sw-green hover:bg-green-600 sw-border-glow
+                shadow-lg shadow-green-500/20
+              "
+            >
+              Start DJ Mode
+            </button>
+            <p className="text-sm text-sw-blue-300/70 text-center max-w-md">
+              Click to activate automatic DJ mode with intelligent track selection and seamless transitions
+            </p>
+          </div>
+        ) : (
+          // Active State: Stop and Next Track Controls
+          <div className="flex flex-col items-center space-y-6">
+            <div className="flex items-center justify-center space-x-2 mb-4">
+              <div className="w-3 h-3 bg-sw-green rounded-full animate-pulse"></div>
+              <span className="text-lg text-sw-green uppercase font-bold tracking-wider">
+                DJ MODE ACTIVE
+              </span>
+              <div className="w-3 h-3 bg-sw-green rounded-full animate-pulse"></div>
             </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
+              <button
+                onClick={handleDJModeToggle}
+                className="
+                  px-6 py-4 rounded-lg text-white font-bold text-lg uppercase
+                  transition-all duration-200 transform hover:scale-105
+                  bg-sw-red hover:bg-red-600 sw-border-glow
+                  shadow-lg shadow-red-500/20
+                "
+              >
+                Stop DJ
+              </button>
+              <button
+                onClick={handleNextTrack}
+                className="
+                  px-6 py-4 rounded-lg text-white font-bold text-lg uppercase
+                  transition-all duration-200 transform hover:scale-105
+                  bg-sw-blue-600 hover:bg-sw-blue-500 sw-border-glow
+                  shadow-lg shadow-blue-500/20
+                "
+              >
+                Next Track
+              </button>
+            </div>
+            
+            <p className="text-sm text-sw-blue-300/70 text-center">
+              DJ mode is running with automatic track transitions and commentary generation
+            </p>
+            {lastCommand && (
+              <p className="text-xs text-sw-blue-400/60 text-center">
+                Last command: {lastCommand}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Track Queue */}
+      <div className="sw-panel">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow">
+            UPCOMING QUEUE
+          </h3>
+          {djModeActive && (
+            <div className="flex items-center space-x-2 text-xs text-sw-blue-400">
+              <div className="w-2 h-2 bg-sw-blue-400 rounded-full animate-pulse"></div>
+              <span>Auto-generating</span>
+            </div>
+          )}
+        </div>
+        
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {upcomingQueue.length === 0 ? (
+            <div className="text-center py-8 text-sw-blue-300/50">
+              {djModeActive ? (
+                <div className="space-y-2">
+                  <div className="animate-spin w-6 h-6 border-2 border-sw-blue-500 border-t-transparent rounded-full mx-auto"></div>
+                  <p>Generating track queue...</p>
+                </div>
+              ) : (
+                'Start DJ mode to see upcoming tracks'
+              )}
+            </div>
+          ) : (
+            upcomingQueue.map((track, index) => (
+              <div 
+                key={`${track.track_id || track.title}-${index}`}
+                className="p-3 bg-sw-dark-700/30 rounded-lg border border-sw-blue-600/20 hover:border-sw-blue-500/40 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-sw-blue-100">{track.title}</h4>
+                    <p className="text-xs text-sw-blue-300">{track.artist}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-sw-blue-300">{track.duration}</p>
+                    <p className="text-xs text-sw-blue-400">#{index + 1}</p>
+                  </div>
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Auto-Transition Settings */}
-        <div className="sw-panel">
-          <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-            AUTO-TRANSITION SETTINGS
-          </h3>
-          
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm text-sw-blue-300">Auto-Transition</label>
-              <button
-                onClick={() => setAutoTransition(!autoTransition)}
-                className={`
-                  w-12 h-6 rounded-full transition-colors duration-200
-                  ${autoTransition ? 'bg-sw-blue-600' : 'bg-sw-dark-600'}
-                `}
-              >
-                <div className={`
-                  w-4 h-4 bg-white rounded-full transition-transform duration-200 m-1
-                  ${autoTransition ? 'translate-x-6' : 'translate-x-0'}
-                `}></div>
-              </button>
-            </div>
-
-            <div>
-              <label className="block text-sm text-sw-blue-300 mb-2">
-                Transition Interval: {Math.floor(transitionInterval / 60)}:{(transitionInterval % 60).toString().padStart(2, '0')}
-              </label>
-              <input
-                type="range"
-                min="60"
-                max="600"
-                value={transitionInterval}
-                onChange={(e) => setTransitionInterval(parseInt(e.target.value))}
-                className="w-full accent-sw-blue-500"
-                disabled={!autoTransition}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-sw-blue-300 mb-2">
-                Crossfade Duration: {crossfadeDuration}s
-              </label>
-              <input
-                type="range"
-                min="1"
-                max="15"
-                value={crossfadeDuration}
-                onChange={(e) => setCrossfadeDuration(parseInt(e.target.value))}
-                className="w-full accent-sw-blue-500"
-                disabled={!autoTransition}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Track Queue */}
-        <div className="sw-panel">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow">
-              UPCOMING QUEUE
-            </h3>
-            <button 
-              onClick={handleNextTrack}
-              className="sw-button text-sm"
-              disabled={!djModeActive}
-            >
-              Next Track
-            </button>
-          </div>
-          
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {upcomingQueue.length === 0 ? (
-              <div className="text-center py-6 text-sw-blue-300/50">
-                {djModeActive ? 'Queue will populate automatically...' : 'Start DJ mode to see upcoming tracks'}
-              </div>
-            ) : (
-              upcomingQueue.map((track, index) => (
-                <div 
-                  key={`${track.track_id || track.title}-${index}`}
-                  className="p-3 bg-sw-dark-700/30 rounded-lg border border-sw-blue-600/20"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-sm font-medium text-sw-blue-100">{track.title}</h4>
-                      <p className="text-xs text-sw-blue-300">{track.artist}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-sw-blue-300">{track.duration}</p>
-                      <p className="text-xs text-sw-blue-400">#{index + 1}</p>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Commentary Generation */}
+      {/* Commentary Status */}
       <div className="sw-panel">
         <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
           COMMENTARY STATUS
@@ -314,7 +300,7 @@ export default function DJTab() {
         </div>
       </div>
 
-      {/* DJ Mode Status */}
+      {/* System Status */}
       <div className="sw-panel">
         <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
           SYSTEM STATUS

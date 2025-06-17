@@ -241,8 +241,8 @@ class LoggingService(BaseService):
         # List of logger names/patterns to filter out
         filtered_loggers = [
             "cantina_os.logging_service",  # CRITICAL: Filter out own logs to prevent recursion
-            "cantina_os.services.web_bridge",  # WebBridge service logger to prevent dashboard feedback
-            "cantina_os.services.web_bridge_service",  # WebBridge module logger
+            # "cantina_os.services.web_bridge",  # Temporarily allow for debugging
+            # "cantina_os.services.web_bridge_service",  # Temporarily allow for debugging
             "socketio",           # Socket.IO library logs
             "engineio",           # Engine.IO library logs  
             "websocket",          # WebSocket library logs

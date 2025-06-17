@@ -72,43 +72,39 @@ Web Dashboard → SYSTEM_SET_MODE_REQUEST (INTERACTIVE) → YodaModeManagerServi
 ❌ Web Dashboard → direct microphone control
 ```
 
-### 3.2 Event Topic Translation Requirements
+### 3.2 Simple Command Handler Implementation
 
-The WebBridge service MUST translate web events to proper CantinaOS event topics:
+**CURRENT WORKING APPROACH**: WebBridge uses a simple command handler that integrates with the standard CLI command pipeline:
 
 ```python
-# REQUIRED: Event topic translation patterns
-def _translate_web_event_to_cantina_topic(self, web_event: dict) -> Tuple[str, dict]:
-    """Translate web events to proper CantinaOS event topics and payloads."""
+# ACTUAL WORKING IMPLEMENTATION
+@self._sio.event
+async def command(sid, data):
+    """Handle simple CLI commands from dashboard"""
+    command_text = data.get("command", "").strip()
+    logger.info(f"Command from dashboard {sid}: {command_text}")
     
-    # System mode changes
-    if web_event.get("action") == "set_mode":
-        return (
-            EventTopics.SYSTEM_SET_MODE_REQUEST,
-            {"mode": web_event["mode"].upper(), "source": "web_dashboard"}
-        )
+    # Parse the command text just like CLI does
+    parts = command_text.split()
+    command = parts[0] if parts else ""
+    args = parts[1:] if len(parts) > 1 else []
     
-    # DJ Mode commands
-    elif web_event.get("action") == "dj_start":
-        return (
-            EventTopics.DJ_COMMAND,
-            {"command": "dj start", "source": "web_dashboard"}
-        )
-    
-    # Music commands - must go through proper command flow
-    elif web_event.get("action") == "play_music":
-        return (
-            EventTopics.CLI_COMMAND,
-            {
-                "command": "play music",
-                "args": [web_event.get("track_name", "")],
-                "source": "web_dashboard"
-            }
-        )
-    
-    else:
-        raise ValueError(f"Unknown web event action: {web_event.get('action')}")
+    # Emit to command dispatcher with proper payload structure
+    self._event_bus.emit(EventTopics.CLI_COMMAND, {
+        "command": command,
+        "args": args,
+        "raw_input": command_text,
+        "source": "dashboard",
+        "sid": sid
+    })
 ```
+
+**Command Flow**:
+1. Dashboard sends: `socket.emit('command', { command: 'dj start' })`
+2. WebBridge parses: `"dj start"` → `command="dj"`, `args=["start"]`
+3. WebBridge emits: `CLI_COMMAND` with parsed structure
+4. CommandDispatcher routes: `"dj start"` compound command → `DJ_COMMAND` topic
+5. BrainService handles: DJ mode activation via registered handler
 
 ### 3.3 Event Topic Registration
 
@@ -185,7 +181,7 @@ WebBridge services must be properly registered in the CantinaOS Service Registry
 
 | Service Name | Purpose | Events Subscribed (Inputs) | Events Published (Outputs) | Configuration | Hardware Dependencies |
 |--------------|---------|----------------------------|----------------------------|---------------|----------------------|
-| WebBridgeService | Web dashboard integration | SYSTEM_MODE_CHANGE, SERVICE_STATUS_UPDATE, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, DJ_MODE_CHANGED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND, DJ_COMMAND | web_port, cors_origins | None |
+| WebBridgeService | Web dashboard integration | SYSTEM_MODE_CHANGE, SERVICE_STATUS_UPDATE, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, DJ_MODE_CHANGED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED | CLI_COMMAND | web_port, cors_origins | None |
 
 ## 5. State Synchronization Standards
 
@@ -254,9 +250,23 @@ def _map_service_status(self, cantina_status: str) -> str:
 
 ## 6. Command Validation and Security
 
-### 6.1 Pydantic Command Validation System
+### 6.1 Command Processing Approaches
 
-**MANDATORY**: All web commands must use the centralized Pydantic validation system implemented in `cantina_os/schemas/validation.py`.
+**TWO VALID APPROACHES** for web command processing:
+
+#### 6.1.1 Simple Command Handler (CURRENT WORKING - DJ Commands)
+For commands that map directly to CLI commands (DJ, Music, etc.), use the simple approach:
+
+```python
+@self._sio.event
+async def command(sid, data):
+    """Handle simple CLI commands from dashboard"""
+    # Parse command string and emit to CLI_COMMAND topic
+    # This integrates with existing CommandDispatcher routing
+```
+
+#### 6.1.2 Pydantic Command Validation System (Complex Commands)
+For complex commands that need validation, use the centralized Pydantic validation system implemented in `cantina_os/schemas/validation.py`.
 
 #### 6.1.1 Validation Mixins
 
@@ -585,12 +595,12 @@ SYSTEM_MODE_COMMAND = WebAPICommand(
 
 All web events must be documented with their CantinaOS mappings:
 
-| Web Event | CantinaOS Event Topic | Purpose | Payload Format |
-|-----------|----------------------|---------|----------------|
+| Web Event | CantinaOS Event Flow | Purpose | Payload Format |
+|-----------|---------------------|---------|----------------|
 | `set_mode` | `SYSTEM_SET_MODE_REQUEST` | Change system mode | `{"mode": "INTERACTIVE"}` |
 | `start_recording` | `SYSTEM_SET_MODE_REQUEST` | Start voice recording | `{"mode": "INTERACTIVE"}` |
-| `dj_start` | `DJ_COMMAND` | Activate DJ mode | `{"command": "dj start"}` |
-| `play_music` | `CLI_COMMAND` | Play music track | `{"command": "play music", "args": ["track_name"]}` |
+| `command` (DJ) | `CLI_COMMAND` → `DJ_COMMAND` | DJ mode control | `{"command": "dj start"}` |
+| `command` (Music) | `CLI_COMMAND` → `MUSIC_COMMAND` | Music control | `{"command": "play music"}` |
 
 ## 11. Deployment Standards
 
@@ -665,24 +675,28 @@ class WebBridgeConfig(BaseModel):
 **Cause**: Improper service initialization order
 **Solution**: Ensure WebBridge starts after all core services are initialized
 
-### 12.5 Pydantic Validation Errors
+### 12.5 Command Handler Selection Issues
 
-**Problem**: Commands failing with validation errors or datetime serialization issues
-**Cause**: Incorrect data structure or missing required fields
-**Solution**: Use proper validation mixins and `model_dump(mode='json')` for serialization
+**Problem**: Commands failing due to using wrong handler approach
+**Cause**: Using Pydantic validation for simple CLI commands or vice versa
+**Solution**: Choose the appropriate handler pattern
 
 ```python
-# COMMON ERROR: Missing required fields
-{
-    "action": "play"  # Missing track_name for music command
-}
+# FOR DJ/MUSIC COMMANDS: Use simple command handler
+socket.emit('command', { command: 'dj start' });  // ✅ CORRECT
 
-# SOLUTION: Include all required fields
-{
-    "action": "play",
-    "track_name": "cantina_band.mp3",
-    "source": "web_dashboard"
-}
+// NOT this complex approach:
+socket.emit('dj_command', {  // ❌ WRONG - removed system
+    action: 'start',
+    command_id: generateUUID()
+});
+
+# FOR COMPLEX VALIDATION: Use Pydantic schemas  
+socket.emit('voice_command', {  // ✅ CORRECT for complex commands
+    action: 'start',
+    command_id: generateUUID(),
+    source: 'web_dashboard'
+});
 ```
 
 ### 12.6 Socket.IO Handler Signature Mismatches
@@ -781,21 +795,24 @@ except ValidationError as e:
 
 ## 14. Conclusion
 
-Web dashboard integration with CantinaOS requires strict adherence to the established event-driven architecture and the new Pydantic validation system. By following these standards, web interfaces can provide rich user experiences while maintaining the integrity and reliability of the core CantinaOS system.
+Web dashboard integration with CantinaOS requires adherence to the established event-driven architecture while choosing the appropriate command processing approach. By following these standards, web interfaces can provide rich user experiences while maintaining the integrity and reliability of the core CantinaOS system.
 
 **Key Takeaways**:
 - Always follow the Event Bus Topology defined in the system architecture
 - Never bypass core services like YodaModeManagerService
-- **Use the centralized Pydantic validation system for all commands and status payloads**
-- **Implement proper JSON serialization with `model_dump(mode='json')`**
-- **Inherit from validation mixins for automatic validation capabilities**
+- **Choose the right command approach: Simple CLI integration for DJ/Music commands, Pydantic validation for complex commands**
+- **Use the simple `command` handler for commands that map directly to CLI (DJ, Music)**
+- **Use Pydantic validation only for commands requiring complex validation**
 - Maintain real-time state synchronization
 - Follow CantinaOS service patterns for all web bridge components
 
-**New Pydantic Requirements**:
-- All commands must use schema validation
-- All status payloads must be validated before emission
-- Socket.IO handlers must use validation decorators
-- JSON serialization must handle datetime fields properly
+**Command Processing Guidelines**:
+- **DJ/Music Commands**: Use simple `socket.emit('command', { command: 'dj start' })` approach
+- **Complex Commands**: Use Pydantic schemas with proper validation
+- **All Commands**: Flow through proper event bus topology (never bypass CommandDispatcher)
+- **Status Updates**: Use proper JSON serialization with `model_dump(mode='json')`
+
+**Working Implementation Reference**:
+The DJ Mode dashboard implementation (as of 2025-06-16) demonstrates the simple command approach that successfully integrates with the CLI command pipeline without complex validation overhead.
 
 Failure to follow these standards will result in integration failures, broken functionality, and inconsistent user experiences.

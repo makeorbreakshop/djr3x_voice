@@ -1,4 +1,14 @@
 """Service for executing LLM-requested tools safely and returning results."""
+
+"""
+SERVICE: ToolExecutorService
+PURPOSE: Executes LLM-requested tools safely with timeout protection and returns execution results
+EVENTS_IN: TOOL_REGISTRATION_REQUEST, TOOL_CALL_REQUEST
+EVENTS_OUT: TOOL_CALL_RESULT, TOOL_CALL_ERROR, SERVICE_STATUS_UPDATE
+KEY_METHODS: _handle_tool_registration, _handle_tool_execution_request, _execute_tool, _emit_tool_error
+DEPENDENCIES: Asyncio for timeout handling, thread execution for sync tools
+"""
+
 import asyncio
 from typing import Any, Dict, Optional, Callable
 from pydantic import BaseModel

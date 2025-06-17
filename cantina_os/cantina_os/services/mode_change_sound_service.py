@@ -4,6 +4,15 @@ Mode Change Sound Service for CantinaOS
 This service plays a sound effect when system mode changes.
 """
 
+"""
+SERVICE: ModeChangeSoundService
+PURPOSE: Plays audio feedback sounds during system mode transitions
+EVENTS_IN: SYSTEM_MODE_CHANGE
+EVENTS_OUT: SERVICE_STATUS_UPDATE
+KEY_METHODS: _handle_mode_change, _find_sound_file
+DEPENDENCIES: Audio utilities for sound playback, StarTours audio files
+"""
+
 import logging
 import os
 from typing import Dict, Optional, Any

@@ -5,6 +5,15 @@ This service routes intents detected by the GPT service to appropriate hardware 
 It acts as a translation layer between natural language intents and specific command formats.
 """
 
+"""
+SERVICE: IntentRouterService
+PURPOSE: Routes intents detected by GPT service to appropriate hardware commands, translating natural language into specific command formats
+EVENTS_IN: INTENT_DETECTED
+EVENTS_OUT: INTENT_EXECUTION_RESULT, CLI_COMMAND
+KEY_METHODS: _handle_intent, _handle_play_music_intent, _handle_stop_music_intent, _handle_set_eye_color_intent, _select_smart_track
+DEPENDENCIES: Command dispatcher service integration, music library access
+"""
+
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List

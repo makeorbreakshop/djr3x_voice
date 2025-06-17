@@ -6,6 +6,15 @@ intent processing, command routing, and orchestrating DJ mode transitions,
 including commentary generation and caching.
 """
 
+"""
+SERVICE: BrainService
+PURPOSE: Central orchestration service for DJ mode, track selection, commentary caching, and timeline plan creation
+EVENTS_IN: DJ_COMMAND, DJ_MODE_CHANGED, DJ_NEXT_TRACK, MUSIC_LIBRARY_UPDATED, GPT_COMMENTARY_RESPONSE, TRACK_ENDING_SOON, SPEECH_CACHE_READY, SPEECH_CACHE_ERROR, PLAN_ENDED
+EVENTS_OUT: DJ_MODE_START, DJ_MODE_STOP, DJ_MODE_CHANGED, MUSIC_COMMAND, DJ_COMMENTARY_REQUEST, PLAN_READY, CLI_RESPONSE, MEMORY_SET, SPEECH_CACHE_REQUEST
+KEY_METHODS: handle_dj_start, handle_dj_stop, handle_dj_next, handle_dj_queue, _smart_track_selection, _create_and_emit_transition_plan, _commentary_caching_loop
+DEPENDENCIES: Music library, MemoryService coordination, persona files (dj_r3x-transition-persona.txt, dj_r3x-verbal-feedback-persona.txt)
+"""
+
 import asyncio
 import logging
 import time
@@ -603,6 +612,19 @@ class BrainService(BaseService):
                         continue
 
                     self.logger.info(f"Commentary caching loop: Selected next track: {self._next_track.title}")
+
+                    # CRITICAL FIX: Emit DJ_NEXT_TRACK_SELECTED event for dashboard queue updates
+                    try:
+                        track_payload = self._create_track_data_payload(self._next_track).model_dump()
+                        self.logger.info(f"CRITICAL FIX: About to emit DJ_NEXT_TRACK_SELECTED for track: {self._next_track.title}")
+                        await self.emit(EventTopics.DJ_NEXT_TRACK_SELECTED, {
+                            "track": track_payload,
+                            "timestamp": time.time(),
+                            "source": "brain_service"
+                        })
+                        self.logger.info(f"CRITICAL FIX: Successfully emitted DJ_NEXT_TRACK_SELECTED event for track: {self._next_track.title}")
+                    except Exception as e:
+                        self.logger.error(f"CRITICAL FIX: Failed to emit DJ_NEXT_TRACK_SELECTED event: {e}", exc_info=True)
 
                     # Generate a unique request ID for this commentary request
                     request_id = str(uuid.uuid4())

@@ -7,6 +7,15 @@ to start/stop recording through mouse clicks. Includes dashboard context awarene
 to prevent input conflicts when the web dashboard is active.
 """
 
+"""
+SERVICE: MouseInputService
+PURPOSE: Manages mouse click input for microphone recording control with dashboard context awareness
+EVENTS_IN: SYSTEM_MODE_CHANGE, SERVICE_STATUS_UPDATE
+EVENTS_OUT: MIC_RECORDING_START, MIC_RECORDING_STOP, MOUSE_RECORDING_STOPPED, SERVICE_STATUS_UPDATE
+KEY_METHODS: _handle_mouse_click, _setup_mouse_listener, _handle_mode_change, _is_dashboard_context_active, get_context_status
+DEPENDENCIES: pynput for mouse input detection, YodaModeManagerService integration
+"""
+
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List
