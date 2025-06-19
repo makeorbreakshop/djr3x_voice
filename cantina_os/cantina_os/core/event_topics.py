@@ -169,6 +169,13 @@ class EventTopics(str, Enum):
     TRACK_METADATA_RESPONSE = "track.metadata.response"
     TRACK_ENDING_SOON = "track.ending.soon"  # Emitted by MusicController when a track is nearing its end
 
+    # MusicSourceManagerService events
+    MUSIC_PROVIDER_CHANGED = "music.provider.changed"  # Provider switch events
+    SPOTIFY_COMMAND = "music.spotify.command"  # Spotify-specific commands
+    MUSIC_SOURCE_STATUS = "music.source.status"  # Source availability status
+    MUSIC_LIBRARY_SEARCH = "music.library.search"  # Cross-provider search
+    MUSIC_PROVIDER_HEALTH = "music.provider.health"  # Provider health updates
+
     # CachedSpeechService events
     SPEECH_CACHE_REQUEST = "speech.cache.request"
     SPEECH_CACHE_READY = "speech.cache.ready"

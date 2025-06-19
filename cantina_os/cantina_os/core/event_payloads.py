@@ -1,6 +1,6 @@
 """Event payload models for CantinaOS."""
 
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, Literal, List
 from enum import Enum
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -131,3 +131,42 @@ class WebProgressPayload(BaseModel):
     status: str
     details: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# MusicSourceManagerService payloads
+
+class MusicProviderChangedPayload(BaseModel):
+    """Payload for music provider change events."""
+    previous_provider: str = Field(..., description="The previously active music provider")
+    current_provider: str = Field(..., description="The newly active music provider")
+    reason: str = Field(..., description="Reason for the provider change (user_request, fallback, auto_switch, etc.)")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the change occurred")
+    available_providers: List[str] = Field(..., description="List of all available providers")
+
+
+class SpotifyCommandPayload(BaseModel):
+    """Payload for Spotify-specific commands."""
+    action: str = Field(..., description="The Spotify action to perform (play, search, auth, status, etc.)")
+    query: Optional[str] = Field(None, description="Search query or command parameter")
+    track_id: Optional[str] = Field(None, description="Spotify track ID")
+    playlist_id: Optional[str] = Field(None, description="Spotify playlist ID")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the command was issued")
+
+
+class MusicSourceStatusPayload(BaseModel):
+    """Payload for music source status updates."""
+    provider: str = Field(..., description="The music provider name")
+    status: str = Field(..., description="Provider status (available, unavailable, error, initializing)")
+    health_score: float = Field(..., ge=0.0, le=1.0, description="Health score from 0.0 to 1.0")
+    last_check: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the status was last checked")
+    error_message: Optional[str] = Field(None, description="Error message if status is error")
+    library_size: Optional[int] = Field(None, description="Number of tracks available from this provider")
+
+
+class MusicLibrarySearchPayload(BaseModel):
+    """Payload for cross-provider music library search requests."""
+    query: str = Field(..., description="The search query")
+    providers: List[str] = Field(..., description="List of providers to search")
+    max_results: int = Field(default=20, description="Maximum number of results to return")
+    search_type: str = Field(default="all", description="Type of search (track, artist, album, all)")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the search was requested")

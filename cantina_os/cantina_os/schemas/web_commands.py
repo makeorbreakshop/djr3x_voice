@@ -154,7 +154,7 @@ class MusicCommandSchema(BaseWebCommand, CantinaOSEventMixin):
         if action_value in ["play", "queue"]:
             # Use track_name if provided, otherwise track_id, otherwise empty string for general play
             song_query = self.track_name or self.track_id or ""
-            payload_data["song_query"] = song_query
+            payload_data["track_name"] = song_query
             
         elif action_value == "volume":
             if self.volume_level is None:

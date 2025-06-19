@@ -18,6 +18,9 @@ python-vlc>=3.0.20000  # VLC media player integration for music playback
 openai>=1.3.7  # GPT-4 integration
 anthropic>=0.7.7  # Claude integration (optional)
 
+# Music Streaming
+spotipy>=2.23.0  # Spotify Web API client
+
 # Speech Synthesis
 elevenlabs>=2.3.0  # Text-to-speech (using modern streaming API)
 soundfile>=0.12.1  # Audio file reading/writing for sounddevice

@@ -33,6 +33,7 @@ from .services import (
     MouseInputService,
     IntentRouterService
 )
+from .services.music_source_manager_service.music_source_manager_service import MusicSourceManagerService
 from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
 from .services.command_dispatcher_service import CommandDispatcherService
@@ -201,6 +202,20 @@ class CantinaOS:
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
+            
+            # Music Source Manager Configuration
+            "MUSIC_DEFAULT_PROVIDER": os.getenv("MUSIC_DEFAULT_PROVIDER", "local"),
+            "ENABLE_SPOTIFY": os.getenv("ENABLE_SPOTIFY", "false").lower() == "true",
+            "MUSIC_PROVIDER_TIMEOUT": int(os.getenv("MUSIC_PROVIDER_TIMEOUT", "30")),
+            "MUSIC_MAX_RETRIES": int(os.getenv("MUSIC_MAX_RETRIES", "3")),
+            "MUSIC_HEALTH_CHECK_INTERVAL": int(os.getenv("MUSIC_HEALTH_CHECK_INTERVAL", "300")),
+            "MUSIC_SEARCH_ALL_PROVIDERS": os.getenv("MUSIC_SEARCH_ALL_PROVIDERS", "true").lower() == "true",
+            "MUSIC_MAX_SEARCH_RESULTS": int(os.getenv("MUSIC_MAX_SEARCH_RESULTS", "50")),
+            
+            # Spotify Configuration
+            "SPOTIFY_CLIENT_ID": os.getenv("SPOTIFY_CLIENT_ID", ""),
+            "SPOTIFY_CLIENT_SECRET": os.getenv("SPOTIFY_CLIENT_SECRET", ""),
+            "SPOTIFY_REDIRECT_URI": os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback"),
         }
         
         # Log loaded configuration (masking API keys for security)
@@ -285,6 +300,15 @@ class CantinaOS:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "debug_service", EventTopics.DEBUG_COMMAND)
         
+        # Spotify commands
+        spotify_commands = [
+            "spotify play", "spotify search", "spotify stop", "spotify status",
+            "play spotify", "search spotify", "switch to spotify", "switch to local"
+        ]
+        for cmd in spotify_commands:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command(cmd, "music_source_manager", EventTopics.SPOTIFY_COMMAND)
+        
         # Log registered commands for debugging
         commands = dispatcher.get_registered_commands()
         self.logger.info(f"Registered commands: {', '.join(commands)}")
@@ -304,6 +328,8 @@ class CantinaOS:
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
             "memory_service",  # Initialize memory service early as other services depend on it
+            "music_controller",  # Initialize music controller before music source manager
+            "music_source_manager",  # Initialize music source manager after music controller
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
@@ -313,7 +339,6 @@ class CantinaOS:
             "elevenlabs",  # Add ElevenLabs service to convert LLM responses to speech
             "cached_speech_service",  # Add cached speech service for DJ Mode transitions
             "mode_change_sound",
-            "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
             "web_bridge",  # Add web bridge service for dashboard connectivity
             "debug",  # Add debug service for LLM response logging
@@ -499,6 +524,7 @@ class CantinaOS:
             "brain_service": BrainService,
             "timeline_executor_service": TimelineExecutorService,
             "memory_service": MemoryService,
+            "music_source_manager": MusicSourceManagerService,
             "cached_speech_service": CachedSpeechService,
             "web_bridge": WebBridgeService,
             "debug": DebugService,
@@ -568,6 +594,38 @@ class CantinaOS:
                 service_config["music_dir"] = music_dir
             else:
                 service_config = {"music_dir": music_dir}
+                
+        elif service_name == "music_source_manager":
+            # Configure music source manager with provider settings
+            # Set up music directory - use the same pattern as music_controller
+            music_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "audio", "music")
+            
+            # Create music directory if it doesn't exist
+            os.makedirs(music_dir, exist_ok=True)
+            
+            spotify_config = None
+            if self._config.get("ENABLE_SPOTIFY") and self._config.get("SPOTIFY_CLIENT_ID") and self._config.get("SPOTIFY_CLIENT_SECRET"):
+                spotify_config = {
+                    "client_id": self._config.get("SPOTIFY_CLIENT_ID"),
+                    "client_secret": self._config.get("SPOTIFY_CLIENT_SECRET"),
+                    "redirect_uri": self._config.get("SPOTIFY_REDIRECT_URI", "http://localhost:8080/callback"),
+                    "cache_directory": ".spotify_cache",
+                    "search_limit": self._config.get("MUSIC_MAX_SEARCH_RESULTS", 50),
+                    "library_cache_minutes": 30
+                }
+            
+            service_config = {
+                "default_provider": self._config.get("MUSIC_DEFAULT_PROVIDER", "local"),
+                "enable_spotify": self._config.get("ENABLE_SPOTIFY", False),
+                "spotify_config": spotify_config,
+                "fallback_enabled": True,
+                "local_music_directory": music_dir,
+                "provider_timeout": int(self._config.get("MUSIC_PROVIDER_TIMEOUT", "30")),
+                "max_retries": int(self._config.get("MUSIC_MAX_RETRIES", "3")),
+                "health_check_interval": int(self._config.get("MUSIC_HEALTH_CHECK_INTERVAL", "300")),
+                "search_all_providers": self._config.get("MUSIC_SEARCH_ALL_PROVIDERS", "true").lower() == "true",
+                "max_search_results": int(self._config.get("MUSIC_MAX_SEARCH_RESULTS", "50"))
+            }
         
         # Timeline services configuration
         elif service_name == "brain_service":
@@ -591,6 +649,7 @@ class CantinaOS:
             service_config = {
                 "chat_history_max_turns": 10
             }
+            
         
         # All services need the global event bus
         try:
@@ -603,6 +662,14 @@ class CantinaOS:
                     return None
                 self.logger.critical(f"CRITICAL DEBUG: Creating {service_name} with special handling")
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "music_source_manager":
+                # MusicSourceManagerService needs a reference to the music controller
+                music_controller = self._services.get("music_controller")
+                if not music_controller:
+                    self.logger.warning("Creating music_source_manager without music_controller reference - it will be initialized later")
+                self.logger.critical(f"CRITICAL DEBUG: Creating {service_name} with music controller injection")
+                service = service_class(self._event_bus, service_config, "music_source_manager_service", music_controller)
                 return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config

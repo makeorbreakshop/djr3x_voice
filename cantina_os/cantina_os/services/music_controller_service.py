@@ -25,6 +25,18 @@ import uuid
 import glob
 import math
 
+# Spotify integration imports
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyOAuth
+    from spotipy.exceptions import SpotifyException
+    SPOTIFY_AVAILABLE = True
+except ImportError:
+    SPOTIFY_AVAILABLE = False
+    spotipy = None
+    SpotifyOAuth = None
+    SpotifyException = None
+
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
 os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
@@ -59,6 +71,20 @@ from cantina_os.core.event_schemas import (
 #     path: str
 #     duration: Optional[float] = None
 
+class SpotifyConfig(BaseModel):
+    """Configuration for Spotify integration."""
+    enabled: bool = Field(default=False, description="Enable Spotify integration")
+    client_id: Optional[str] = Field(default=None, description="Spotify client ID")
+    client_secret: Optional[str] = Field(default=None, description="Spotify client secret")
+    redirect_uri: str = Field(default="http://localhost:8080/callback", description="OAuth redirect URI")
+    cache_directory: str = Field(default=".spotify_cache", description="Token cache directory")
+    search_limit: int = Field(default=20, description="Maximum search results")
+    scopes: List[str] = Field(default=[
+        "user-library-read",
+        "playlist-read-private", 
+        "playlist-read-collaborative"
+    ], description="Spotify OAuth scopes")
+
 class MusicControllerConfig(BaseModel):
     """Configuration for the music controller service."""
     music_dir: str = Field(default="assets/music", description="Directory containing music files")
@@ -67,6 +93,7 @@ class MusicControllerConfig(BaseModel):
     crossfade_duration_ms: int = Field(default=3000, description="Duration of crossfade between tracks in milliseconds")
     crossfade_steps: int = Field(default=50, description="Number of volume adjustment steps during crossfade")
     track_ending_threshold_sec: int = Field(default=30, description="Seconds before track end to emit TRACK_ENDING_SOON event")
+    spotify: SpotifyConfig = Field(default_factory=SpotifyConfig, description="Spotify integration configuration")
 
 class MusicControllerService(BaseService):
     """
@@ -117,6 +144,12 @@ class MusicControllerService(BaseService):
         
         # Set default command topic for auto-registration
         self._default_command_topic = EventTopics.MUSIC_COMMAND
+        
+        # Spotify integration
+        self._spotify_client: Optional[spotipy.Spotify] = None
+        self._spotify_auth: Optional[SpotifyOAuth] = None
+        self._spotify_enabled = False
+        self._last_spotify_search: Optional[List[Dict]] = None
         
         # Subscriptions will be set up during start()
         self._subscriptions = []
@@ -183,15 +216,228 @@ class MusicControllerService(BaseService):
         # All attempts failed
         self.logger.error("All VLC instance creation attempts failed. Music playback will be disabled.")
         return None
+
+    def _setup_spotify_integration(self) -> bool:
+        """
+        Setup Spotify integration if enabled and configured.
+        
+        Returns:
+            bool: True if Spotify was successfully initialized
+        """
+        if not SPOTIFY_AVAILABLE:
+            self.logger.warning("Spotify integration requested but spotipy library not available")
+            return False
+            
+        if not self._config.spotify.enabled:
+            self.logger.debug("Spotify integration disabled in configuration")
+            return False
+            
+        if not self._config.spotify.client_id or not self._config.spotify.client_secret:
+            self.logger.warning("Spotify integration enabled but missing client credentials")
+            return False
+            
+        try:
+            # Create cache directory if it doesn't exist
+            cache_dir = self._config.spotify.cache_directory
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+                
+            # Setup OAuth manager
+            self._spotify_auth = SpotifyOAuth(
+                client_id=self._config.spotify.client_id,
+                client_secret=self._config.spotify.client_secret,
+                redirect_uri=self._config.spotify.redirect_uri,
+                scope=" ".join(self._config.spotify.scopes),
+                cache_path=os.path.join(cache_dir, ".cache-spotify")
+            )
+            
+            # Try to get cached token
+            token_info = self._spotify_auth.get_cached_token()
+            if not token_info:
+                self.logger.warning("No cached Spotify token found. Manual authorization required.")
+                auth_url = self._spotify_auth.get_authorize_url()
+                self.logger.info(f"Please authorize the application at: {auth_url}")
+                return False
+                
+            # Create Spotify client
+            self._spotify_client = spotipy.Spotify(auth_manager=self._spotify_auth)
+            
+            # Test connectivity
+            try:
+                user = self._spotify_client.current_user()
+                if user and "id" in user:
+                    self.logger.info(f"Spotify integration enabled for user: {user['id']}")
+                    self._spotify_enabled = True
+                    return True
+                else:
+                    self.logger.error("Failed to connect to Spotify API")
+                    return False
+            except Exception as e:
+                self.logger.error(f"Spotify API test failed: {e}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to setup Spotify integration: {e}")
+            return False
+
+    def _ensure_spotify_auth(self) -> bool:
+        """
+        Ensure Spotify authentication is valid, refreshing if needed.
+        
+        Returns:
+            bool: True if authentication is valid
+        """
+        if not self._spotify_enabled or not self._spotify_auth or not self._spotify_client:
+            return False
+            
+        try:
+            token_info = self._spotify_auth.get_cached_token()
+            if not token_info:
+                return False
+                
+            # Refresh token if expired
+            if self._spotify_auth.is_token_expired(token_info):
+                self.logger.debug("Refreshing Spotify access token")
+                token_info = self._spotify_auth.refresh_access_token(token_info["refresh_token"])
+                if not token_info:
+                    return False
+                    
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Spotify authentication check failed: {e}")
+            return False
+
+    async def _spotify_search(self, query: str) -> List[Dict]:
+        """
+        Search Spotify for tracks matching the query.
+        
+        Args:
+            query: Search query string
+            
+        Returns:
+            List[Dict]: List of Spotify track dictionaries
+        """
+        if not self._ensure_spotify_auth():
+            self.logger.warning("Spotify authentication not available for search")
+            return []
+            
+        try:
+            results = self._spotify_client.search(
+                q=query, 
+                type='track', 
+                limit=self._config.spotify.search_limit
+            )
+            
+            if results and 'tracks' in results and 'items' in results['tracks']:
+                tracks = results['tracks']['items']
+                self._last_spotify_search = tracks  # Cache for potential playback
+                self.logger.info(f"Found {len(tracks)} Spotify tracks for query: {query}")
+                return tracks
+            else:
+                self.logger.info(f"No Spotify tracks found for query: {query}")
+                return []
+                
+        except SpotifyException as e:
+            self.logger.error(f"Spotify search failed: {e}")
+            return []
+        except Exception as e:
+            self.logger.error(f"Unexpected error during Spotify search: {e}")
+            return []
+
+    def _spotify_track_to_music_track(self, spotify_track: Dict) -> Optional[MusicTrack]:
+        """
+        Convert a Spotify track dictionary to a MusicTrack object.
+        
+        Args:
+            spotify_track: Spotify track data from API
+            
+        Returns:
+            Optional[MusicTrack]: Converted MusicTrack or None if conversion failed
+        """
+        try:
+            # Extract basic info
+            track_id = spotify_track.get('id', '')
+            title = spotify_track.get('name', 'Unknown Title')
+            
+            # Get artist info
+            artists = spotify_track.get('artists', [])
+            artist = artists[0]['name'] if artists else 'Unknown Artist'
+            
+            # Get album info
+            album_info = spotify_track.get('album', {})
+            album = album_info.get('name')
+            
+            # Get duration (convert from milliseconds to seconds)
+            duration_ms = spotify_track.get('duration_ms')
+            duration = duration_ms / 1000.0 if duration_ms else None
+            
+            # Get preview URL (30-second preview)
+            preview_url = spotify_track.get('preview_url')
+            
+            if not preview_url:
+                self.logger.warning(f"No preview URL available for Spotify track: {title}")
+                return None
+                
+            # Create MusicTrack with Spotify data
+            return MusicTrack(
+                name=f"spotify:{track_id}",  # Use spotify: prefix for identification
+                path=preview_url,  # Use preview URL as path for VLC
+                duration=duration,
+                track_id=f"spotify:{track_id}",
+                title=title,
+                artist=artist,
+                album=album,
+                genre="Spotify"  # Mark as Spotify track
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to convert Spotify track: {e}")
+            return None
+
+    def _format_spotify_search_results(self, tracks: List[Dict]) -> str:
+        """
+        Format Spotify search results for display.
+        
+        Args:
+            tracks: List of Spotify track dictionaries
+            
+        Returns:
+            str: Formatted search results string
+        """
+        if not tracks:
+            return "No Spotify tracks found."
+            
+        results = ["Spotify Search Results:"]
+        for i, track in enumerate(tracks[:10], 1):  # Show top 10 results
+            title = track.get('name', 'Unknown')
+            artists = track.get('artists', [])
+            artist = artists[0]['name'] if artists else 'Unknown Artist'
+            
+            # Get duration
+            duration_ms = track.get('duration_ms')
+            if duration_ms:
+                duration_sec = duration_ms // 1000
+                minutes = duration_sec // 60
+                seconds = duration_sec % 60
+                duration_str = f" ({minutes:02d}:{seconds:02d})"
+            else:
+                duration_str = ""
+                
+            preview_available = "🎵" if track.get('preview_url') else "❌"
+            results.append(f"  {i}. {artist} - {title}{duration_str} {preview_available}")
+            
+        return "\n".join(results)
         
     async def subscribe_to_events(self):
         """Subscribe to relevant system events."""
         # Add debugging for subscriptions
         self.logger.debug("Setting up music controller event subscriptions")
         
-        # Use proper subscription using BaseService.subscribe
-        await self.subscribe(EventTopics.MUSIC_COMMAND, self._handle_music_command)
-        self.logger.debug("Subscribed to MUSIC_COMMAND events")
+        # REMOVED: MUSIC_COMMAND subscription to fix duplicate event processing
+        # This service will now only handle direct method calls from providers
+        # await self.subscribe(EventTopics.MUSIC_COMMAND, self._handle_music_command)
+        # self.logger.debug("Subscribed to MUSIC_COMMAND events")
         
         await self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_mode_change)
         self.logger.debug("Subscribed to SYSTEM_MODE_CHANGE events")
@@ -1151,31 +1397,30 @@ class MusicControllerService(BaseService):
         # Use the actual loaded tracks instead of hardcoded list
         return [track.name for track in self.tracks.values()]
 
-    @compound_command("list music")
     @command_error_handler
     async def handle_list_music(self, payload: dict) -> None:
         """Handle 'list music' command - lists available tracks."""
         self.logger.info("Listing available music tracks")
         await self._list_tracks()
 
-    @compound_command("play music")
-    @validate_compound_command(min_args=1, required_args=["track_name"])
     @command_error_handler
     async def handle_play_music(self, payload: dict) -> None:
         """Handle 'play music <track>' command - plays specified track."""
-        args = payload.get("args", [])
-        track_query = " ".join(args)
+        # Check for track_name field first (from WebBridge), fall back to args (from CLI)
+        track_query = payload.get("track_name")
+        if not track_query:
+            args = payload.get("args", [])
+            track_query = " ".join(args)
+        
         self.logger.info(f"Playing music track: {track_query}")
         await self._smart_play_track(track_query)
 
-    @compound_command("stop music")
     @command_error_handler
     async def handle_stop_music(self, payload: dict) -> None:
         """Handle 'stop music' command - stops music playback."""
         self.logger.info("Stopping music playback")
         await self._stop_playback()
 
-    @compound_command("install music")
     @command_error_handler
     async def handle_install_music(self, payload: dict) -> None:
         """Handle 'install music [directory]' command - installs music from directory."""
@@ -1183,7 +1428,6 @@ class MusicControllerService(BaseService):
         self.logger.info(f"Installing music files from: {args}")
         await self._handle_install_music_command(args)
 
-    @compound_command("debug music")
     @command_error_handler
     async def handle_debug_music(self, payload: dict) -> None:
         """Handle 'debug music' command - shows music library debug info."""
@@ -1276,6 +1520,95 @@ class MusicControllerService(BaseService):
             return False
         except Exception as e:
             self.logger.error(f"Error in play_music: {e}")
+            return False
+    async def play_track_url(self, url: str, track_title: str = "Remote Track") -> bool:
+        """
+        Play a track directly from a URL (e.g., Spotify preview URLs).
+        
+        Args:
+            url: Direct URL to the audio file
+            track_title: Title of the track for display purposes
+            
+        Returns:
+            bool: True if playback started successfully
+        """
+        try:
+            self.logger.info(f"Playing track from URL: {url}")
+            
+            # Check if VLC instance is available
+            if not self.vlc_instance:
+                await self._initialize_vlc_instance()
+                if not self.vlc_instance:
+                    self.logger.error("VLC instance not available for URL playback")
+                    return False
+            
+            # Stop current playback if any
+            if self.player:
+                self.player.stop()
+                await self._cleanup_player(self.player)
+                self.player = None
+            
+            # Create a new media player for the URL
+            self.player = self.vlc_instance.media_player_new()
+            
+            # Create media from URL
+            media = self.vlc_instance.media_new(url)
+            self.player.set_media(media)
+            
+            # Set volume based on current state
+            volume = self.ducking_volume if self.is_ducking else self.normal_volume
+            self.player.audio_set_volume(volume)
+            
+            # Start playback
+            self.player.play()
+            
+            # Initialize timer-based progress tracking
+            self._playback_start_time = time.time()
+            self._pause_start_time = None
+            self._total_pause_duration = 0.0
+            self._last_known_position = 0.0
+            self.is_paused = False
+            
+            # Create a temporary track object for current track tracking
+            from ..models.music_models import MusicTrack
+            temp_track = MusicTrack(
+                name=track_title,
+                path=url,
+                duration=None,  # Duration will be unknown for URLs
+                file_extension=".url",
+                size_bytes=0,
+                track_id=str(uuid.uuid4())
+            )
+            self.current_track = temp_track
+            
+            # Emit playback started event
+            await self.emit(
+                EventTopics.MUSIC_PLAYBACK_STARTED, 
+                {
+                    "track_name": track_title,
+                    "source": "url"
+                }
+            )
+            
+            self.logger.info(f"Successfully started playback from URL: {track_title}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to play track from URL {url}: {e}")
+            return False
+
+    async def stop_playback(self) -> bool:
+        """
+        Stop current music playback.
+        
+        Returns:
+            bool: True if stop was successful
+        """
+        try:
+            await self._stop_playback()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error stopping playback: {e}")
             return False
         
     async def _handle_play_request(self, payload: MusicCommandPayload):

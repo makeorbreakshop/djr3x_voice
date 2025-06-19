@@ -345,7 +345,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
 
         # Register validated command handlers
         self._sio.on("voice_command", self._handle_voice_command)
-        self._sio.on("music_command", self._handle_music_command)
+        self._sio.on("music_command", self._handle_music_command_debug)
         # REMOVED dj_command - DJ commands should go through regular command system
         self._sio.on("system_command", self._handle_system_command)
         
@@ -1427,21 +1427,69 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                 room=sid,
             )
 
-    @validate_socketio_command("music_command")
-    async def _handle_music_command(self, sid, validated_command: MusicCommandSchema):
+    async def _handle_music_command_debug(self, sid, data):
+        """Debug wrapper to see raw data before validation"""
+        logger.info(f"🎵 DEBUG: Raw music command from {sid}: {data}")
+        logger.info(f"🎵 DEBUG: Data type: {type(data)}, keys: {list(data.keys()) if isinstance(data, dict) else 'not dict'}")
+        if isinstance(data, dict):
+            logger.info(f"🎵 DEBUG: action={data.get('action')}, track_name={data.get('track_name')}, track_id={data.get('track_id')}")
+        
+        # Validate the data and call the original handler with validated result
+        try:
+            from ..schemas.web_commands import validate_command_data
+            logger.info(f"🎵 DEBUG: About to validate command data...")
+            validated_result = validate_command_data("music_command", data)
+            logger.info(f"🎵 DEBUG: Validation successful! Result: {validated_result}")
+            logger.info(f"🎵 DEBUG: Validated action: {validated_result.action}")
+            logger.info(f"🎵 DEBUG: Validated track_name: {validated_result.track_name}")
+            logger.info(f"🎵 DEBUG: Validated track_id: {validated_result.track_id}")
+            
+            # Call the original handler with the validated command (not the decorator version)
+            await self._handle_music_command_core(sid, validated_result)
+            
+        except Exception as e:
+            logger.error(f"🎵 DEBUG: Validation failed with error: {e}")
+            logger.error(f"🎵 DEBUG: Error type: {type(e)}")
+            import traceback
+            logger.error(f"🎵 DEBUG: Traceback: {traceback.format_exc()}")
+            
+            # Send error response to client
+            try:
+                error_response = BaseWebResponse.error_response(
+                    message=f"Failed to validate music command: {e}",
+                    error_code="VALIDATION_ERROR"
+                )
+                await self._sio.emit("command_ack", error_response.model_dump(mode='json'), room=sid)
+            except Exception as emit_error:
+                logger.error(f"Failed to send error response: {emit_error}")
+
+    async def _handle_music_command_core(self, sid, validated_command: MusicCommandSchema):
         """Handle music commands from dashboard with validation"""
         logger.info(f"Music command from {sid}: action={validated_command.action}")
 
         try:
             # Convert to CantinaOS event payload
+            logger.critical(f"🎵 CRITICAL DEBUG: About to call validated_command.to_cantina_event()")
+            logger.critical(f"🎵 CRITICAL DEBUG: validated_command type: {type(validated_command)}")
+            logger.critical(f"🎵 CRITICAL DEBUG: validated_command.action: {validated_command.action}")
+            logger.critical(f"🎵 CRITICAL DEBUG: validated_command.track_name: {validated_command.track_name}")
+            logger.critical(f"🎵 CRITICAL DEBUG: validated_command.track_id: {validated_command.track_id}")
+            
             event_payload = validated_command.to_cantina_event()
+            logger.critical(f"🎵 CRITICAL DEBUG: to_cantina_event() returned: {event_payload}")
+            logger.critical(f"🎵 CRITICAL DEBUG: event_payload type: {type(event_payload)}")
+            logger.critical(f"🎵 CRITICAL DEBUG: event_payload keys: {list(event_payload.keys()) if isinstance(event_payload, dict) else 'not dict'}")
+            
             event_payload["sid"] = sid  # Add socket session ID
+            logger.critical(f"🎵 CRITICAL DEBUG: Final event_payload after adding sid: {event_payload}")
             
             # Emit to CantinaOS MUSIC_COMMAND event topic
+            logger.critical(f"🎵 CRITICAL DEBUG: About to emit to event bus with topic: {EventTopics.MUSIC_COMMAND}")
             self._event_bus.emit(
                 EventTopics.MUSIC_COMMAND,
                 event_payload
             )
+            logger.critical(f"🎵 CRITICAL DEBUG: Successfully emitted to event bus!")
             
             # Send success acknowledgment to client
             response = BaseWebResponse.success_response(

@@ -134,7 +134,94 @@ await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_
 - Use consistent event naming conventions across services
 - Subscribe to all variants of related events when in doubt
 
-### 1.4 Event Subscription Race Conditions
+### 1.4 Command Decorator Auto-Registration Conflicts
+
+**Symptoms:**
+- Dashboard/WebBridge commands fail with CLI validation errors
+- "Command 'X' requires N arguments. Missing: field_name"
+- Multiple services processing same MUSIC_COMMAND events
+- Event flow works but CLI handlers interfere
+
+**Root Cause Pattern:**
+Service has `@compound_command` decorators that auto-register CLI handlers for events that should be handled by other services.
+
+**Real-World Example (Music System):**
+```python
+# PROBLEM: MusicControllerService has decorators
+class MusicControllerService(BaseService):
+    @compound_command("play music")  # Auto-registers for MUSIC_COMMAND events
+    @validate_compound_command(min_args=1, required_args=["track_name"])
+    async def handle_play_music(self, payload: dict) -> None:
+        # Expects CLI args format, not WebBridge event format
+        
+# MEANWHILE: WebBridge emits structured events
+event_payload = {
+    "track_name": "Song Name",
+    "action": "play",
+    "source": "web_dashboard"
+}
+await self.emit(EventTopics.MUSIC_COMMAND, event_payload)
+
+# RESULT: Both services handle same event with different expectations
+```
+
+**Event Flow Conflict:**
+```
+WebBridge → MUSIC_COMMAND event → MusicControllerService CLI handler (fails validation)
+                                → MusicSourceManagerService (correct handler)
+```
+
+**Log Evidence:**
+```
+Registered command 'play music' to service 'MusicController' with topic 'EventTopics.MUSIC_COMMAND'
+🎵 DEBUG: Final event_payload: {'track_name': 'Song Name', 'action': 'play'}
+ERROR Command 'play music' requires 1 arguments. Missing: track_name
+```
+
+**Solution - Remove Conflicting Decorators:**
+```python
+# BEFORE (causing conflicts):
+@compound_command("play music")
+@validate_compound_command(min_args=1, required_args=["track_name"])
+async def handle_play_music(self, payload: dict) -> None:
+
+# AFTER (direct method calls only):
+@command_error_handler
+async def handle_play_music(self, payload: dict) -> None:
+    # Method available for direct calls from providers
+    # No automatic event subscription
+```
+
+**Correct Architecture Pattern:**
+```
+WebBridge → MUSIC_COMMAND event → MusicSourceManagerService → LocalMusicProvider → music_controller.handle_play_music() (direct call)
+```
+
+**Diagnostic Steps:**
+1. **Check for duplicate command registrations:**
+   ```bash
+   grep -n "Registered command.*MUSIC_COMMAND" logs/session.log
+   ```
+
+2. **Verify single event subscription:**
+   ```bash
+   # Should only see MusicSourceManagerService, not MusicControllerService
+   grep -n "subscribe.*MUSIC_COMMAND" cantina_os/services/
+   ```
+
+3. **Test event flow:**
+   ```bash
+   # Working logs show direct method calls, not CLI validation errors
+   grep -A5 -B5 "Playing music track" logs/session.log
+   ```
+
+**Prevention:**
+- Use `@compound_command` decorators only for services that should handle CLI commands directly
+- Provider services should use direct method calls, not event re-emission
+- Maintain clear separation: one service per event topic for command processing
+- Document intended event flow in service architecture
+
+### 1.5 Event Subscription Race Conditions
 
 **Symptoms:**
 - Services start successfully but miss early events
@@ -166,7 +253,7 @@ async def _setup_subscriptions(self):
     self.logger.info(f"All {len(subscription_tasks)} subscriptions established")
 ```
 
-### 1.4 Pydantic Model Event Payload Issues
+### 1.6 Pydantic Model Event Payload Issues
 
 **Symptoms:**
 - Events emitted but cause validation errors in receivers
