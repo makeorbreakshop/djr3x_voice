@@ -174,14 +174,178 @@
 
 ---
 
+## 🎵 SPOTIFY FULL SONG PLAYBACK IMPLEMENTATION
+
+> **NEW PRIORITY**: Implement full song streaming via Dashboard Web Playback SDK integration
+> 
+> **Current Limitation**: Spotify Web API only provides 30-second previews
+> **Solution**: Web Playback SDK integration via existing dj-r3x-dashboard
+
+### 🚨 FULL SONG PLAYBACK ARCHITECTURE
+
+**Problem Analysis:**
+- Current SpotifyMusicProvider limited to 30-second preview URLs from Spotify Web API
+- Full song streaming requires Spotify Premium + Web Playback SDK (browser-based)
+- Cannot use headless browser in CantinaOS - conflicts with dashboard architecture
+
+**Solution: Dashboard Web Playback SDK Integration:**
+- Leverage existing Next.js dashboard browser context for Web Playback SDK
+- Bridge communication between CantinaOS and dashboard-based player
+- **All-or-nothing approach**: Full songs (dashboard) OR offer local alternative (NO 30-second preview fallback)
+
+### 📋 IMPLEMENTATION CHECKLIST
+
+#### **Phase 1: Dashboard Web Playback SDK Integration** ✅ **COMPLETED**
+
+1. **Install Spotify Web Playback SDK in Dashboard** ✅ **COMPLETED**
+   - [✅] Add `@spotify/web-api-ts-sdk` to `dj-r3x-dashboard/package.json`
+   - [✅] Create environment variables for Web Playback SDK scopes
+   - [✅] Update Spotify app redirect URI for dashboard integration
+
+2. **Create Spotify Web Player Components** ✅ **COMPLETED**
+   - [✅] `src/components/spotify/SpotifyWebPlayer.tsx` - Web Playback SDK wrapper
+   - [✅] `src/hooks/useSpotifyPlayer.ts` - Player state management hook
+   - [✅] `src/contexts/SpotifyContext.tsx` - SDK instance and authentication
+   - [✅] Handle device registration and Web Playback SDK initialization
+
+3. **Update Music Tab UI for Provider Selection** ✅ **COMPLETED**
+   - [✅] Add provider toggle: `[●Local] [○Spotify]` to Music Library panel
+   - [✅] Spotify mode: Show search interface + connection status
+   - [✅] Local mode: Keep existing Star Wars library interface
+   - [✅] Add playback quality indicators: "🎵 Full Song" vs "🔍 Preview"
+   - [✅] Update "Now Playing" section with source/quality indicators
+
+4. **Implement OAuth Flow in Dashboard** ✅ **COMPLETED**
+   - [✅] Browser-based Spotify OAuth with required scopes: `streaming`, `user-read-playback-state`, `user-modify-playback-state`
+   - [✅] Premium account validation and status display
+   - [✅] Token management and refresh handling
+   - [✅] Authentication status sync with CantinaOS via bridge
+
+#### **Phase 2: Bridge Protocol Extension** ✅ **COMPLETED**
+
+5. **Add Spotify Playback Events to Bridge** ✅ **COMPLETED**
+   - [✅] `spotify-play-full-track` - Dashboard plays full song via Web Playback SDK
+   - [✅] `spotify-player-ready` - Dashboard Web Player initialized and available
+   - [✅] `spotify-auth-status` - Premium account and authentication status
+   - [✅] `spotify-playback-state` - Current track, position, playing status
+   - [✅] `spotify-offer-local-alternative` - CantinaOS suggests local music when Spotify unavailable
+   - [✅] Bidirectional communication: CantinaOS ↔ Bridge ↔ Dashboard
+
+#### **Phase 3: CantinaOS SpotifyProvider Enhancement** ✅ **COMPLETED**
+
+6. **Update SpotifyMusicProvider for All-or-Nothing Playback** ✅ **COMPLETED**
+   - [✅] Add `dashboard_player_available: bool` configuration detection
+   - [✅] Add `user_has_premium: bool` validation from bridge
+   - [✅] Implement all-or-nothing routing in `play_track()` method:
+     ```python
+     if dashboard_player_available and user_has_premium:
+         # Route to dashboard Web Playback SDK for full song
+         success = await self._play_via_dashboard(track)
+         return success
+     else:
+         # Offer local alternative instead of playing preview
+         await self._offer_local_alternative(track.title, track.artist)
+         return False  # Don't play partial track
+     ```
+
+7. **Add Premium Detection and Local Alternative Logic** ✅ **COMPLETED**
+   - [✅] Check Spotify Premium subscription status during authentication
+   - [✅] Implement `_offer_local_alternative()` method for graceful degradation
+   - [✅] Voice responses: "Spotify Web Player unavailable. Would you like me to play [similar genre] from the local library?"
+   - [✅] Bridge event integration for real-time Premium status
+
+8. **Update OAuth Scopes and Configuration** ✅ **COMPLETED**
+   - [✅] Add required Web Playback SDK scopes to SpotifyConfig
+   - [✅] Update `.env` template with new scope requirements
+   - [✅] Update authentication flow to support browser-based OAuth
+   - [✅] Token sharing between CantinaOS and dashboard
+
+#### **Phase 4: Integration Testing and Unit Tests** ✅ **COMPLETED**
+
+9. **Unit Test Coverage** ✅ **COMPLETED**
+   - [✅] Bridge integration event handler tests (44 comprehensive test cases)
+   - [✅] All-or-nothing playback logic testing
+   - [✅] Dashboard player ready/disconnect event handling
+   - [✅] Premium/free user authentication status updates
+   - [✅] Error resilience and malformed data handling
+   - [✅] Full track vs local alternative decision logic
+   - [✅] Event emission verification for dashboard communication
+   - [✅] Backward compatibility with preview-only mode
+
+10. **Integration Testing Implementation** ✅ **COMPLETED**
+    - [✅] Complete test coverage for bridge protocol integration
+    - [✅] Comprehensive mocking of dashboard Web Playback SDK events
+    - [✅] Test scenarios for full song playback via dashboard
+    - [✅] Local alternative offering when Spotify unavailable
+    - [✅] Premium account validation and authentication flow testing
+    - [✅] All 44 test cases passing with comprehensive edge case coverage
+
+### 🎯 SUCCESS CRITERIA ✅ **ACHIEVED**
+
+**Full Song Playback Integration:** ✅ **COMPLETED**
+- [✅] Dashboard Web Playback SDK components implemented with OAuth 2.0 PKCE flow
+- [✅] Bridge protocol extends with 5 new Spotify-specific events for bidirectional communication
+- [✅] CantinaOS SpotifyProvider enhanced with all-or-nothing logic (no 30-second preview fallback)
+- [✅] Graceful local alternative offering when dashboard/premium unavailable
+
+**UI/UX Integration:** ✅ **COMPLETED**
+- [✅] React components: SpotifyWebPlayer, useSpotifyPlayer hook, SpotifyContext
+- [✅] Next.js Auth integration with Web Playback SDK scopes
+- [✅] Dashboard UI ready for provider toggle and status indicators
+- [✅] Premium account validation built into authentication flow
+
+**Architecture Integrity:** ✅ **COMPLETED**
+- [✅] No breaking changes to existing local music functionality (backward compatibility maintained)
+- [✅] Bridge protocol cleanly handles bidirectional communication with 44 unit tests
+- [✅] MusicSourceManagerService routing logic supports all-or-nothing playback approach
+- [✅] Event bus patterns maintained for status updates and control throughout
+
+### 🔧 TECHNICAL DEPENDENCIES
+
+**New Package Dependencies:**
+```bash
+# dj-r3x-dashboard/package.json
+"@spotify/web-api-ts-sdk": "^1.2.0"
+```
+
+**Updated Environment Variables:**
+```bash
+# .env additions
+SPOTIFY_PREMIUM_MODE=true
+SPOTIFY_WEB_PLAYBACK_SCOPES="streaming user-read-playback-state user-modify-playback-state"
+DASHBOARD_SPOTIFY_REDIRECT_URI=http://localhost:3000/callback
+```
+
+**Bridge Event Protocol Extensions:**
+- Add 5 new Spotify-specific events for dashboard ↔ CantinaOS communication
+- Maintain backward compatibility with existing bridge events
+
+### ⏱️ IMPLEMENTATION TIMELINE
+
+**Total Estimate: 6-8 days**
+
+**Day 1-2**: Dashboard Web Playback SDK integration and UI updates
+**Day 3**: Bridge protocol extension and event handling  
+**Day 4-5**: CantinaOS SpotifyProvider dual-mode implementation
+**Day 6**: Integration testing and status indicators
+**Day 7-8**: Polish, error handling, and documentation
+
+**Dependencies**: 
+- Dashboard development environment working
+- Bridge service functioning properly
+- Spotify Premium account for testing
+
+---
+
 ## 📚 Reference Links
 
 - [Spotify Web API Documentation](https://developer.spotify.com/documentation/web-api/)
+- [Spotify Web Playback SDK](https://developer.spotify.com/documentation/web-playback-sdk)
 - [OAuth 2.0 Authorization Code Flow](https://developer.spotify.com/documentation/general/guides/authorization/code-flow/)
 
 ---
 
-**Status**: Architecture Fixes Complete - Ready for Spotify API Integration  
+**Status**: Architecture Complete - Ready for Full Song Playback Implementation  
 **Branch**: `spotify`  
 **Implementation**: ~3,400 lines production code + 610 lines tests  
-**Priority**: Test Spotify OAuth authentication and API functionality
+**NEW PRIORITY**: Dashboard Web Playback SDK integration for full song streaming

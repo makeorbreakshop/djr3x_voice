@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Spotify Auth</title>
+</head>
+<body>
+    <h1>Manual Spotify Auth Test</h1>
+    <button onclick="testAuth()">Test Manual Auth</button>
+    
+    <script>
+        function testAuth() {
+            const clientId = '08d11a8e416746b38273decbd60512b0';
+            const redirectUri = 'http://127.0.0.1:3000';
+            const scopes = 'streaming user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-private';
+            
+            const authUrl = `https://accounts.spotify.com/authorize?` +
+                `client_id=${clientId}&` +
+                `response_type=code&` +
+                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                `scope=${encodeURIComponent(scopes)}&` +
+                `state=test123`;
+            
+            console.log('Auth URL:', authUrl);
+            window.location.href = authUrl;
+        }
+    </script>
+</body>
+</html>

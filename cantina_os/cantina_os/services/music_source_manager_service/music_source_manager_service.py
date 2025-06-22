@@ -256,6 +256,16 @@ class MusicSourceManagerService(BaseService):
                 self.subscribe(
                     EventTopics.SPOTIFY_COMMAND, self._handle_spotify_command
                 ),
+                self.subscribe(
+                    EventTopics.SPOTIFY_OAUTH_CALLBACK, self._handle_spotify_oauth_callback
+                ),
+                # Phase 3: Spotify Web Playback SDK event subscriptions
+                self.subscribe(
+                    EventTopics.SPOTIFY_PLAYER_READY, self._handle_spotify_player_ready
+                ),
+                self.subscribe(
+                    EventTopics.SPOTIFY_AUTH_STATUS, self._handle_spotify_auth_status
+                ),
                 # Add subscription for unified search if the event exists
                 # self.subscribe(EventTopics.MUSIC_SEARCH, self._handle_music_search)
             )
@@ -318,17 +328,17 @@ class MusicSourceManagerService(BaseService):
 
                     # Initialize the provider
                     success = await provider.initialize()
+                    
+                    # Always add provider to registry (even if auth fails) so OAuth callbacks can work
+                    self._providers[provider_name] = provider
+                    self._provider_status[provider_name] = await provider.get_status()
+                    
                     if success:
-                        self._providers[provider_name] = provider
-                        self._provider_status[provider_name] = (
-                            await provider.get_status()
-                        )
                         initialization_results.append(f"{provider_name}: success")
-                        self.logger.info(
-                            f"Successfully initialized provider: {provider_name}"
-                        )
+                        self.logger.info(f"Successfully initialized provider: {provider_name}")
                     else:
                         initialization_results.append(f"{provider_name}: failed")
+                        self.logger.warning(f"Provider {provider_name} added but needs authentication")
                         self.logger.warning(
                             f"Failed to initialize provider: {provider_name}"
                         )
@@ -1139,6 +1149,114 @@ class MusicSourceManagerService(BaseService):
             await self._send_command_response(
                 f"Failed to get Spotify status: {str(e)}", is_error=True
             )
+
+    async def _handle_spotify_player_ready(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle Spotify Web Playback SDK player ready event from bridge.
+        
+        Args:
+            payload: Event payload containing player ready status
+        """
+        try:
+            is_ready = payload.get("is_ready", False)
+            self.logger.info(f"Spotify dashboard player ready status: {is_ready}")
+            
+            # Update Spotify provider if available
+            spotify_provider = self._providers.get("spotify")
+            if spotify_provider and hasattr(spotify_provider, "update_dashboard_player_status"):
+                await spotify_provider.update_dashboard_player_status(is_ready)
+                self.logger.info(f"Updated Spotify provider dashboard player status")
+            
+            # Update provider status tracking
+            await self._update_provider_status("spotify")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling Spotify player ready event: {e}")
+
+    async def _handle_spotify_auth_status(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle Spotify authentication status updates from bridge.
+        
+        Args:
+            payload: Event payload containing auth status and premium info
+        """
+        try:
+            has_premium = payload.get("has_premium", False)
+            is_authenticated = payload.get("is_authenticated", False)
+            
+            self.logger.info(f"Spotify auth status: authenticated={is_authenticated}, premium={has_premium}")
+            
+            # Update Spotify provider if available
+            spotify_provider = self._providers.get("spotify")
+            if spotify_provider and hasattr(spotify_provider, "update_premium_status"):
+                await spotify_provider.update_premium_status(has_premium)
+                self.logger.info(f"Updated Spotify provider premium status")
+            
+            # Update provider status tracking
+            await self._update_provider_status("spotify")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling Spotify auth status event: {e}")
+
+    async def _update_provider_status(self, provider_name: str) -> None:
+        """
+        Update and cache the status of a specific provider.
+        
+        Args:
+            provider_name: Name of the provider to update
+        """
+        try:
+            if provider_name in self._providers:
+                provider = self._providers[provider_name]
+                new_status = await provider.get_status()
+                self._provider_status[provider_name] = new_status
+                self.logger.debug(f"Updated status for provider {provider_name}")
+                
+                # Emit provider status update event if needed
+                await self._emit_provider_status_update()
+                
+        except Exception as e:
+            self.logger.error(f"Failed to update status for provider {provider_name}: {e}")
+
+    async def _handle_spotify_oauth_callback(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle Spotify OAuth callback from web bridge.
+        
+        Args:
+            event_name: Event topic name
+            payload: OAuth callback data containing authorization code
+        """
+        try:
+            authorization_code = payload.get("authorization_code")
+            if not authorization_code:
+                self.logger.error("OAuth callback received without authorization code")
+                return
+            
+            self.logger.info(f"Processing Spotify OAuth callback with authorization code")
+            
+            # Get Spotify provider
+            spotify_provider = self._providers.get("spotify")
+            if not spotify_provider:
+                self.logger.error("Spotify provider not found for OAuth callback")
+                return
+            
+            # Try to complete OAuth flow
+            if hasattr(spotify_provider, "_complete_oauth_flow"):
+                success = await spotify_provider._complete_oauth_flow(authorization_code)
+                if success:
+                    self.logger.info("Spotify OAuth flow completed successfully")
+                    # Update provider status
+                    await self._update_provider_status("spotify")
+                    # Emit provider change event if this becomes the active provider
+                    if not self._current_provider or self._current_provider == "local":
+                        await self._switch_provider("spotify", payload)
+                else:
+                    self.logger.error("Failed to complete Spotify OAuth flow")
+            else:
+                self.logger.error("Spotify provider does not support OAuth completion")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling Spotify OAuth callback: {e}")
 
     async def _send_command_response(
         self, message: str, is_error: bool = False

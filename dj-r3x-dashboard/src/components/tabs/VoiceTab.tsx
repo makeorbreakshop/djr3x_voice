@@ -311,26 +311,6 @@ export default function VoiceTab() {
             </div>
           </div>
 
-          {/* Audio Levels */}
-          <div className="sw-panel p-4">
-            <h3 className="text-sm font-semibold text-sw-blue-100 mb-3 sw-text-glow">
-              AUDIO LEVELS
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-sw-blue-300 mb-1">Input</label>
-                <div className="bg-sw-dark-700 rounded h-2 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-sw-green via-sw-yellow to-sw-red w-0 transition-all duration-100"></div>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-sw-blue-300 mb-1">Output</label>
-                <div className="bg-sw-dark-700 rounded h-2 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-sw-blue-500 to-sw-blue-300 w-0 transition-all duration-100"></div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Main Center - Conversation Area */}

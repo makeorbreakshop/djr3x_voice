@@ -172,6 +172,7 @@ class EventTopics(str, Enum):
     # MusicSourceManagerService events
     MUSIC_PROVIDER_CHANGED = "music.provider.changed"  # Provider switch events
     SPOTIFY_COMMAND = "music.spotify.command"  # Spotify-specific commands
+    SPOTIFY_OAUTH_CALLBACK = "music.spotify.oauth.callback"  # Spotify OAuth callback handling
     MUSIC_SOURCE_STATUS = "music.source.status"  # Source availability status
     MUSIC_LIBRARY_SEARCH = "music.library.search"  # Cross-provider search
     MUSIC_PROVIDER_HEALTH = "music.provider.health"  # Provider health updates
@@ -241,3 +242,10 @@ class EventTopics(str, Enum):
     WEB_DJ_STATUS = "web.dj.status"
     WEB_SERVICE_STATUS = "web.service.status"
     WEB_PROGRESS_UPDATE = "web.progress.update"
+
+    # Spotify Web Playback SDK Events
+    SPOTIFY_PLAYER_READY = "spotify.player.ready"  # Spotify Web Playback SDK is ready
+    SPOTIFY_AUTH_STATUS = "spotify.auth.status"  # Authentication status updates
+    SPOTIFY_PLAYBACK_STATE = "spotify.playback.state"  # Real-time playback state from SDK
+    SPOTIFY_PLAY_FULL_TRACK = "spotify.play.full.track"  # Request to play full track on Spotify
+    SPOTIFY_OFFER_LOCAL_ALTERNATIVE = "spotify.offer.local.alternative"  # Offer local alternative when Spotify unavailable

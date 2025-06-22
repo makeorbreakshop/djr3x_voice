@@ -170,3 +170,61 @@ class MusicLibrarySearchPayload(BaseModel):
     max_results: int = Field(default=20, description="Maximum number of results to return")
     search_type: str = Field(default="all", description="Type of search (track, artist, album, all)")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the search was requested")
+
+
+# Spotify Web Playback SDK Payloads
+
+class SpotifyPlayerReadyPayload(BaseModel):
+    """Payload for Spotify Web Playback SDK ready event."""
+    device_id: str = Field(..., description="Spotify Web Playback SDK device ID")
+    device_name: str = Field(..., description="Device name for the Spotify player")
+    player_ready: bool = Field(True, description="Whether the player is ready to accept commands")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the player became ready")
+
+
+class SpotifyAuthStatusPayload(BaseModel):
+    """Payload for Spotify authentication status updates."""
+    authenticated: bool = Field(..., description="Whether user is authenticated with Spotify")
+    access_token: Optional[str] = Field(None, description="Spotify access token (if available)")
+    expires_at: Optional[int] = Field(None, description="Unix timestamp when token expires")
+    user_id: Optional[str] = Field(None, description="Spotify user ID")
+    premium: Optional[bool] = Field(None, description="Whether user has Spotify Premium")
+    error: Optional[str] = Field(None, description="Error message if authentication failed")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the status was updated")
+
+
+class SpotifyPlaybackStatePayload(BaseModel):
+    """Payload for Spotify Web Playback SDK state updates."""
+    is_playing: bool = Field(..., description="Whether music is currently playing")
+    track_id: Optional[str] = Field(None, description="Spotify track ID")
+    track_name: Optional[str] = Field(None, description="Track name")
+    artist: Optional[str] = Field(None, description="Artist name")
+    album: Optional[str] = Field(None, description="Album name")
+    duration_ms: Optional[int] = Field(None, description="Track duration in milliseconds")
+    position_ms: Optional[int] = Field(None, description="Current playback position in milliseconds")
+    device_id: Optional[str] = Field(None, description="Spotify device ID")
+    volume: Optional[float] = Field(None, description="Playback volume (0.0 to 1.0)")
+    shuffle: Optional[bool] = Field(None, description="Shuffle state")
+    repeat: Optional[str] = Field(None, description="Repeat mode (off, track, context)")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the state was captured")
+
+
+class SpotifyPlayFullTrackPayload(BaseModel):
+    """Payload for requesting to play a full track on Spotify."""
+    track_id: str = Field(..., description="Spotify track ID to play")
+    device_id: Optional[str] = Field(None, description="Spotify device ID to play on")
+    position_ms: Optional[int] = Field(0, description="Position to start playback from (milliseconds)")
+    reason: str = Field(..., description="Reason for playing full track (preview_ended, user_request, etc.)")
+    fallback_enabled: bool = Field(True, description="Whether to fall back to local if Spotify fails")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the request was made")
+
+
+class SpotifyOfferLocalAlternativePayload(BaseModel):
+    """Payload for offering local alternative when Spotify is unavailable."""
+    original_spotify_track_id: Optional[str] = Field(None, description="Original Spotify track ID requested")
+    spotify_track_name: Optional[str] = Field(None, description="Name of the Spotify track")
+    spotify_artist: Optional[str] = Field(None, description="Artist of the Spotify track")
+    local_alternatives: List[Dict[str, Any]] = Field(..., description="List of local tracks that match")
+    reason: str = Field(..., description="Reason for offering alternatives (auth_failed, premium_required, network_error, etc.)")
+    auto_select: bool = Field(False, description="Whether to automatically select best match")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="When the alternatives were offered")

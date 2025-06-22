@@ -189,7 +189,10 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
         # Configure CORS
         self._app.add_middleware(
             CORSMiddleware,
-            allow_origins=["http://localhost:3000"],
+            allow_origins=[
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ],  # The address of your Next.js app
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -297,6 +300,45 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             except Exception as e:
                 logger.error(f"Error fetching music library: {e}")
                 return {"tracks": [], "error": str(e)}
+
+        @self._app.get("/callback")
+        async def spotify_oauth_callback(code: str = None, state: str = None, error: str = None):
+            """Handle Spotify OAuth callback"""
+            logger.info(f"[WebBridge] Spotify OAuth callback: code={'present' if code else 'missing'}, error={error}")
+            
+            if error:
+                logger.error(f"[WebBridge] Spotify OAuth error: {error}")
+                return {"status": "error", "message": f"OAuth authorization failed: {error}"}
+            
+            if not code:
+                logger.error("[WebBridge] No authorization code received")
+                return {"status": "error", "message": "No authorization code received"}
+            
+            # Process the OAuth callback in a background task to avoid blocking the response
+            async def process_oauth_callback():
+                try:
+                    self._event_bus.emit(
+                        EventTopics.SPOTIFY_OAUTH_CALLBACK,
+                        {
+                            "authorization_code": code,
+                            "state": state,
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "web_bridge"
+                        }
+                    )
+                    logger.info("[WebBridge] OAuth callback event emitted successfully")
+                except Exception as emit_error:
+                    logger.warning(f"[WebBridge] Failed to emit OAuth callback event: {emit_error}")
+            
+            # Start background task
+            asyncio.create_task(process_oauth_callback())
+            
+            # Return immediate response
+            logger.info("[WebBridge] Spotify OAuth callback processed successfully")
+            return {
+                "status": "success", 
+                "message": "Spotify authorization completed. Please restart CantinaOS to activate Spotify provider."
+            }
 
     def _add_socketio_handlers(self) -> None:
         """Add Socket.IO event handlers."""

@@ -25,6 +25,13 @@ from pydantic import BaseModel
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'cantina_os'))
 from cantina_os.core.event_bus import EventBus
 from cantina_os.core.event_topics import EventTopics
+from cantina_os.core.event_payloads import (
+    SpotifyPlayerReadyPayload,
+    SpotifyAuthStatusPayload, 
+    SpotifyPlaybackStatePayload,
+    SpotifyPlayFullTrackPayload,
+    SpotifyOfferLocalAlternativePayload
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +85,8 @@ throttle_limits = {
     # Medium frequency: max 30 per second
     'medium_frequency': {'max_per_second': 30, 'events': {
         EventTopics.TRANSCRIPTION_INTERIM,
-        EventTopics.LLM_RESPONSE_CHUNK
+        EventTopics.LLM_RESPONSE_CHUNK,
+        EventTopics.SPOTIFY_PLAYBACK_STATE  # Spotify player state updates can be frequent
     }},
     # Low frequency: no throttling
     'low_frequency': {'max_per_second': 0, 'events': set()}  # 0 = no limit
@@ -105,6 +113,23 @@ class DJModeRequest(BaseModel):
     action: str  # "start", "stop", "next"
     auto_transition: Optional[bool] = None
     interval: Optional[int] = None
+
+class SpotifyAuthRequest(BaseModel):
+    action: str  # "check", "login", "logout"
+    access_token: Optional[str] = None
+    expires_at: Optional[int] = None
+
+class SpotifyPlayerRequest(BaseModel):
+    action: str  # "ready", "not_ready"
+    device_id: Optional[str] = None
+    device_name: Optional[str] = None
+
+class SpotifyPlaybackRequest(BaseModel):
+    action: str  # "play", "pause", "state_update"
+    track_id: Optional[str] = None
+    device_id: Optional[str] = None
+    position_ms: Optional[int] = None
+    reason: Optional[str] = None
 
 # Socket.IO Events
 @sio.event
@@ -272,6 +297,145 @@ async def dj_command(sid, data):
             'timestamp': datetime.now().isoformat()
         })
 
+@sio.event
+async def spotify_player_ready(sid, data):
+    """Handle Spotify Web Playback SDK ready events from dashboard"""
+    logger.info(f"Spotify player ready from {sid}: {data}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAYER_READY, {
+                'device_id': data.get('device_id'),
+                'device_name': data.get('device_name', 'DJ R3X Web Player'),
+                'player_ready': True,
+                'source': 'web_dashboard',
+                'sid': sid
+            })
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify player ready to CantinaOS: {e}")
+            await sio.emit('error', {'message': f'Failed to process Spotify player ready: {e}'}, room=sid)
+    else:
+        # Fallback - acknowledge the ready state
+        await sio.emit('spotify_status', {
+            'player_ready': True,
+            'device_id': data.get('device_id'),
+            'timestamp': datetime.now().isoformat()
+        }, room=sid)
+
+@sio.event
+async def spotify_auth_status_update(sid, data):
+    """Handle Spotify authentication status updates from dashboard"""
+    logger.info(f"Spotify auth status from {sid}: {data}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_AUTH_STATUS, {
+                'authenticated': data.get('authenticated', False),
+                'access_token': data.get('access_token'),
+                'expires_at': data.get('expires_at'),
+                'user_id': data.get('user_id'),
+                'premium': data.get('premium'),
+                'error': data.get('error'),
+                'source': 'web_dashboard',
+                'sid': sid
+            })
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify auth status to CantinaOS: {e}")
+            await sio.emit('error', {'message': f'Failed to process Spotify auth status: {e}'}, room=sid)
+    else:
+        # Fallback - echo the status
+        await sio.emit('spotify_auth_status', {
+            'authenticated': data.get('authenticated', False),
+            'timestamp': datetime.now().isoformat()
+        }, room=sid)
+
+@sio.event
+async def spotify_playback_command(sid, data):
+    """Handle Spotify playback commands from dashboard"""
+    logger.info(f"Spotify playback command from {sid}: {data}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            action = data.get('action')
+            if action == 'play':
+                cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAY_FULL_TRACK, {
+                    'track_id': data.get('track_id'),
+                    'device_id': data.get('device_id'),
+                    'position_ms': data.get('position_ms', 0),
+                    'reason': data.get('reason', 'user_request'),
+                    'fallback_enabled': data.get('fallback_enabled', True),
+                    'source': 'web_dashboard',
+                    'sid': sid
+                })
+            elif action == 'state_update':
+                cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAYBACK_STATE, {
+                    'is_playing': data.get('is_playing', False),
+                    'track_id': data.get('track_id'),
+                    'track_name': data.get('track_name'),
+                    'artist': data.get('artist'),
+                    'album': data.get('album'),
+                    'duration_ms': data.get('duration_ms'),
+                    'position_ms': data.get('position_ms'),
+                    'device_id': data.get('device_id'),
+                    'volume': data.get('volume'),
+                    'shuffle': data.get('shuffle'),
+                    'repeat': data.get('repeat'),
+                    'source': 'web_dashboard',
+                    'sid': sid
+                })
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify playback command to CantinaOS: {e}")
+            await sio.emit('error', {'message': f'Failed to execute Spotify playback command: {e}'}, room=sid)
+    else:
+        # Fallback - simulate response
+        await sio.emit('spotify_playback_status', {
+            'action': data.get('action'),
+            'track_id': data.get('track_id'),
+            'success': True,
+            'timestamp': datetime.now().isoformat()
+        }, room=sid)
+
+@sio.event
+async def spotify_track_request(sid, data):
+    """Handle Spotify track play requests from dashboard"""
+    logger.info(f"Spotify track request from {sid}: {data}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAY_FULL_TRACK, {
+                'track_id': data.get('track_id'),
+                'device_id': data.get('device_id'),
+                'position_ms': data.get('position_ms', 0),
+                'reason': data.get('reason', 'user_request'),
+                'fallback_enabled': data.get('fallback_enabled', True),
+                'source': 'web_dashboard',
+                'sid': sid
+            })
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify track request to CantinaOS: {e}")
+            await sio.emit('error', {'message': f'Failed to request Spotify track: {e}'}, room=sid)
+
+@sio.event
+async def spotify_fallback_request(sid, data):
+    """Handle requests to offer local alternatives when Spotify fails"""
+    logger.info(f"Spotify fallback request from {sid}: {data}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_OFFER_LOCAL_ALTERNATIVE, {
+                'original_spotify_track_id': data.get('track_id'),
+                'spotify_track_name': data.get('track_name'),
+                'spotify_artist': data.get('artist'),
+                'local_alternatives': data.get('local_alternatives', []),
+                'reason': data.get('reason', 'manual_request'),
+                'auto_select': data.get('auto_select', False),
+                'source': 'web_dashboard',
+                'sid': sid
+            })
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify fallback request to CantinaOS: {e}")
+            await sio.emit('error', {'message': f'Failed to process Spotify fallback request: {e}'}, room=sid)
+
 # REST API Endpoints
 @app.get("/")
 async def root():
@@ -390,6 +554,110 @@ async def get_logs():
         ]
     }
 
+@app.post("/api/spotify/auth-status")
+async def spotify_auth_status_api(request: SpotifyAuthRequest):
+    """Update Spotify authentication status via REST API"""
+    logger.info(f"Spotify auth status via API: {request}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_AUTH_STATUS, {
+                'authenticated': request.action == 'login',
+                'access_token': request.access_token,
+                'expires_at': request.expires_at,
+                'source': 'api'
+            })
+            return {"status": "accepted", "action": request.action}
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify auth status to CantinaOS: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to process auth status: {e}")
+    else:
+        return {"status": "offline", "message": "CantinaOS not connected"}
+
+@app.post("/api/spotify/player-ready")
+async def spotify_player_ready_api(request: SpotifyPlayerRequest):
+    """Report Spotify Web Playback SDK ready status via REST API"""
+    logger.info(f"Spotify player ready via API: {request}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAYER_READY, {
+                'device_id': request.device_id,
+                'device_name': request.device_name or 'DJ R3X Web Player',
+                'player_ready': request.action == 'ready',
+                'source': 'api'
+            })
+            return {"status": "accepted", "device_id": request.device_id}
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify player ready to CantinaOS: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to process player ready: {e}")
+    else:
+        return {"status": "offline", "message": "CantinaOS not connected"}
+
+@app.post("/api/spotify/play-track")
+async def spotify_play_track_api(request: SpotifyPlaybackRequest):
+    """Request to play a Spotify track via REST API"""
+    logger.info(f"Spotify play track via API: {request}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_PLAY_FULL_TRACK, {
+                'track_id': request.track_id,
+                'device_id': request.device_id,
+                'position_ms': request.position_ms or 0,
+                'reason': request.reason or 'api_request',
+                'fallback_enabled': True,
+                'source': 'api'
+            })
+            return {"status": "accepted", "track_id": request.track_id}
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify play track to CantinaOS: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to play track: {e}")
+    else:
+        return {"status": "offline", "message": "CantinaOS not connected"}
+
+@app.post("/accept-user-token")
+async def accept_user_token(request: Dict[str, Any]):
+    """Accept Spotify user token from frontend OAuth flow (per SDK docs)"""
+    logger.info(f"Received Spotify user token from frontend: {request}")
+    
+    if cantina_os_event_bus and cantina_os_connected:
+        try:
+            # Forward the token data to CantinaOS for server-side API operations
+            cantina_os_event_bus.emit(EventTopics.SPOTIFY_AUTH_STATUS, {
+                'authenticated': True,
+                'access_token': request.get('access_token'),
+                'refresh_token': request.get('refresh_token'),
+                'expires_at': request.get('expires_at'),
+                'user_id': request.get('user_id'),
+                'premium': request.get('premium', False),
+                'source': 'frontend_oauth',
+                'sdk_token_data': request  # Pass full token data for server-side SDK initialization
+            })
+            
+            logger.info("Successfully forwarded Spotify token to CantinaOS")
+            return {"status": "accepted", "message": "Token received and forwarded to CantinaOS"}
+            
+        except Exception as e:
+            logger.error(f"Error forwarding Spotify token to CantinaOS: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to process token: {e}")
+    else:
+        logger.warning("CantinaOS not connected - storing token for later")
+        return {"status": "offline", "message": "CantinaOS not connected, token stored for later"}
+
+@app.get("/api/spotify/status")
+async def get_spotify_status():
+    """Get current Spotify integration status"""
+    # TODO: Retrieve actual status from CantinaOS SpotifyMusicProvider
+    return {
+        "status": "initialized",
+        "authenticated": False,
+        "player_ready": False,
+        "device_id": None,
+        "current_track": None,
+        "timestamp": datetime.now().isoformat()
+    }
+
 # Helper functions
 def get_service_status():
     """Get current service status from CantinaOS or fallback to mock data"""
@@ -427,6 +695,13 @@ async def connect_to_cantina_os():
         cantina_os_event_bus.on(EventTopics.DJ_MODE_CHANGED, handle_dj_mode_changed)
         cantina_os_event_bus.on(EventTopics.LLM_RESPONSE, handle_llm_response)
         cantina_os_event_bus.on(EventTopics.SYSTEM_ERROR, handle_system_error)
+        
+        # Subscribe to Spotify events
+        cantina_os_event_bus.on(EventTopics.SPOTIFY_PLAYER_READY, handle_spotify_player_ready)
+        cantina_os_event_bus.on(EventTopics.SPOTIFY_AUTH_STATUS, handle_spotify_auth_status)
+        cantina_os_event_bus.on(EventTopics.SPOTIFY_PLAYBACK_STATE, handle_spotify_playback_state)
+        cantina_os_event_bus.on(EventTopics.SPOTIFY_PLAY_FULL_TRACK, handle_spotify_play_full_track)
+        cantina_os_event_bus.on(EventTopics.SPOTIFY_OFFER_LOCAL_ALTERNATIVE, handle_spotify_offer_local_alternative)
         
         cantina_os_connected = True
         logger.info("Successfully connected to CantinaOS event bus")
@@ -538,6 +813,81 @@ async def broadcast_event_to_dashboard(event_topic: str, data: Dict[str, Any], e
                 await sio.emit(event_name or 'cantina_event', event_data, room=sid)
             except Exception as e:
                 logger.error(f"Error broadcasting event to client {sid}: {e}")
+
+# Spotify Event handlers for CantinaOS events
+async def handle_spotify_player_ready(data):
+    """Handle Spotify Web Playback SDK ready events from CantinaOS"""
+    await broadcast_event_to_dashboard(
+        EventTopics.SPOTIFY_PLAYER_READY,
+        {
+            'device_id': data.get('device_id'),
+            'device_name': data.get('device_name'),
+            'player_ready': data.get('player_ready', True)
+        },
+        'spotify_player_ready'
+    )
+
+async def handle_spotify_auth_status(data):
+    """Handle Spotify authentication status updates from CantinaOS"""
+    await broadcast_event_to_dashboard(
+        EventTopics.SPOTIFY_AUTH_STATUS,
+        {
+            'authenticated': data.get('authenticated', False),
+            'user_id': data.get('user_id'),
+            'premium': data.get('premium'),
+            'error': data.get('error')
+        },
+        'spotify_auth_status'
+    )
+
+async def handle_spotify_playback_state(data):
+    """Handle Spotify playback state updates from CantinaOS"""
+    await broadcast_event_to_dashboard(
+        EventTopics.SPOTIFY_PLAYBACK_STATE,
+        {
+            'is_playing': data.get('is_playing', False),
+            'track_id': data.get('track_id'),
+            'track_name': data.get('track_name'),
+            'artist': data.get('artist'),
+            'album': data.get('album'),
+            'duration_ms': data.get('duration_ms'),
+            'position_ms': data.get('position_ms'),
+            'device_id': data.get('device_id'),
+            'volume': data.get('volume'),
+            'shuffle': data.get('shuffle'),
+            'repeat': data.get('repeat')
+        },
+        'spotify_playback_state'
+    )
+
+async def handle_spotify_play_full_track(data):
+    """Handle Spotify full track play requests from CantinaOS"""
+    await broadcast_event_to_dashboard(
+        EventTopics.SPOTIFY_PLAY_FULL_TRACK,
+        {
+            'track_id': data.get('track_id'),
+            'device_id': data.get('device_id'),
+            'position_ms': data.get('position_ms', 0),
+            'reason': data.get('reason'),
+            'fallback_enabled': data.get('fallback_enabled', True)
+        },
+        'spotify_play_full_track'
+    )
+
+async def handle_spotify_offer_local_alternative(data):
+    """Handle Spotify local alternative offers from CantinaOS"""
+    await broadcast_event_to_dashboard(
+        EventTopics.SPOTIFY_OFFER_LOCAL_ALTERNATIVE,
+        {
+            'original_spotify_track_id': data.get('original_spotify_track_id'),
+            'spotify_track_name': data.get('spotify_track_name'),
+            'spotify_artist': data.get('spotify_artist'),
+            'local_alternatives': data.get('local_alternatives', []),
+            'reason': data.get('reason'),
+            'auto_select': data.get('auto_select', False)
+        },
+        'spotify_offer_local_alternative'
+    )
 
 # Event handlers for CantinaOS events
 async def handle_service_status_update(data):

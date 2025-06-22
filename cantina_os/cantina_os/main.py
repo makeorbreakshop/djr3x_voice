@@ -623,7 +623,7 @@ class CantinaOS:
                 "provider_timeout": int(self._config.get("MUSIC_PROVIDER_TIMEOUT", "30")),
                 "max_retries": int(self._config.get("MUSIC_MAX_RETRIES", "3")),
                 "health_check_interval": int(self._config.get("MUSIC_HEALTH_CHECK_INTERVAL", "300")),
-                "search_all_providers": self._config.get("MUSIC_SEARCH_ALL_PROVIDERS", "true").lower() == "true",
+                "search_all_providers": self._config.get("MUSIC_SEARCH_ALL_PROVIDERS", True),
                 "max_search_results": int(self._config.get("MUSIC_MAX_SEARCH_RESULTS", "50"))
             }
         

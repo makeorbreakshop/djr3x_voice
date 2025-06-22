@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { SocketProvider } from '@/contexts/SocketContext'
+import { SpotifyProvider } from '@/contexts/SpotifyContext'
 import Header from '@/components/Header'
 import TabNavigation from '@/components/TabNavigation'
 import GlobalActivityBar from '@/components/GlobalActivityBar'
@@ -38,7 +39,8 @@ export default function Home() {
 
   return (
     <SocketProvider>
-      <div className="min-h-screen bg-sw-dark-900 pb-16">
+      <SpotifyProvider>
+        <div className="min-h-screen bg-sw-dark-900 pb-16">
         <header className="border-b border-sw-blue-600/30 bg-sw-dark-800/50 backdrop-blur-sm">
           <div className="container mx-auto px-4 py-2">
             <div className="flex items-center justify-between">
@@ -52,8 +54,9 @@ export default function Home() {
             {renderActiveTab()}
           </div>
         </div>
-      </div>
-      <GlobalActivityBar />
+        </div>
+        <GlobalActivityBar />
+      </SpotifyProvider>
     </SocketProvider>
   )
 }

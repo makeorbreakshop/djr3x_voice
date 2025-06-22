@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSocketContext } from '../../contexts/SocketContext'
+import { useSpotifyContext } from '../../contexts/SpotifyContext'
+import { SpotifyWebPlayer } from '../spotify/SpotifyWebPlayer'
+import { SpotifySearch, SpotifySearchResult, SpotifyTrack } from '../spotify/SpotifySearch'
+import { SpotifyTrackResults } from '../spotify/SpotifyTrackResults'
 
 interface Track {
   id: string
@@ -19,8 +23,12 @@ interface MusicStatus {
   volume?: number
 }
 
+type MusicProvider = 'local' | 'spotify'
+
 export default function MusicTab() {
   const { socket } = useSocketContext()
+  const { authState } = useSpotifyContext()
+  const [currentProvider, setCurrentProvider] = useState<MusicProvider>('local')
   const [isPlaying, setIsPlaying] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null)
@@ -35,6 +43,13 @@ export default function MusicTab() {
   const [vlcBackendStatus, setVlcBackendStatus] = useState('offline')
   const [queue, setQueue] = useState<Track[]>([])
   const [ducking, setDucking] = useState(false)
+  const [spotifySearchResults, setSpotifySearchResults] = useState<SpotifySearchResult>({
+    tracks: [],
+    albums: [],
+    artists: [],
+    playlists: []
+  })
+  const [selectedSpotifyTrack, setSelectedSpotifyTrack] = useState<SpotifyTrack | null>(null)
 
   // --- REBUILT PROGRESS TRACKING SYSTEM ---
   const timerRef = useRef<NodeJS.Timeout | null>(null)
@@ -203,11 +218,29 @@ export default function MusicTab() {
       }
     }
 
+    // Spotify event handlers
+    const handleSpotifyPlayFullTrack = (data: any) => {
+      console.log('Received Spotify full track play request:', data)
+      // This event comes from CantinaOS requesting the dashboard to play a full track
+      // The SpotifyWebPlayer component should handle this automatically
+    }
+
+    const handleSpotifyOfferLocalAlternative = (data: any) => {
+      console.log('Spotify offering local alternative:', data)
+      const { requested_track, requested_artist, reason } = data
+      
+      // Show user a notification about the local alternative suggestion
+      // For now, just log it - could implement a toast notification later
+      console.log(`Spotify unavailable (${reason}). Consider adding "${requested_track}" by ${requested_artist} to your local library.`)
+    }
+
     socket.on('music_status', handleMusicStatus)
     socket.on('music_progress', handleMusicProgress)
     socket.on('music_library_updated', handleMusicLibraryUpdated)
     socket.on('music_queue', handleMusicQueue)
     socket.on('service_status_update', handleServiceStatus)
+    socket.on('spotify_play_full_track', handleSpotifyPlayFullTrack)
+    socket.on('spotify_offer_local_alternative', handleSpotifyOfferLocalAlternative)
 
     return () => {
       socket.off('music_status', handleMusicStatus)
@@ -215,6 +248,8 @@ export default function MusicTab() {
       socket.off('music_library_updated', handleMusicLibraryUpdated)
       socket.off('music_queue', handleMusicQueue)
       socket.off('service_status_update', handleServiceStatus)
+      socket.off('spotify_play_full_track', handleSpotifyPlayFullTrack)
+      socket.off('spotify_offer_local_alternative', handleSpotifyOfferLocalAlternative)
     }
   }, [socket, resetProgress, updateProgress])
 
@@ -328,6 +363,21 @@ export default function MusicTab() {
     })
   }
 
+  // Spotify-specific handlers
+  const handleSpotifySearchResults = useCallback((results: SpotifySearchResult) => {
+    setSpotifySearchResults(results)
+  }, [])
+
+  const handleSpotifyTrackSelect = useCallback((track: SpotifyTrack) => {
+    setSelectedSpotifyTrack(track)
+    console.log('Selected Spotify track:', track.name, 'by', track.artists.map(a => a.name).join(', '))
+  }, [])
+
+  const handleSpotifyAddToQueue = useCallback((track: SpotifyTrack) => {
+    console.log('Added to Spotify queue:', track.name, 'by', track.artists.map(a => a.name).join(', '))
+    // The actual queue addition is handled by the SpotifyTrackResults component
+  }, [])
+
   return (
     <div className="space-y-6">
       {/* Current Track Display */}
@@ -398,79 +448,161 @@ export default function MusicTab() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Music Library */}
         <div className="lg:col-span-2 sw-panel">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow">
-              MUSIC LIBRARY
+          {/* Provider Selection */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow mb-4">
+              MUSIC PROVIDER
             </h3>
-            <input
-              type="text"
-              placeholder="Search tracks..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="px-3 py-1 bg-sw-dark-700 border border-sw-blue-600/30 rounded text-sw-blue-100 text-sm focus:outline-none focus:border-sw-blue-500"
-            />
+            <div className="flex space-x-6">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  value="local"
+                  checked={currentProvider === 'local'}
+                  onChange={(e) => setCurrentProvider(e.target.value as MusicProvider)}
+                  className="w-4 h-4 text-sw-blue-500 bg-sw-dark-700 border-sw-blue-600 focus:ring-sw-blue-500 focus:ring-2"
+                />
+                <span className="text-sw-blue-200 font-medium">Local Library</span>
+                <div className={`w-2 h-2 rounded-full ml-2 ${
+                  musicServiceStatus === 'online' ? 'bg-green-400' : 'bg-red-400'
+                }`} />
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  value="spotify"
+                  checked={currentProvider === 'spotify'}
+                  onChange={(e) => setCurrentProvider(e.target.value as MusicProvider)}
+                  className="w-4 h-4 text-sw-blue-500 bg-sw-dark-700 border-sw-blue-600 focus:ring-sw-blue-500 focus:ring-2"
+                />
+                <span className="text-sw-blue-200 font-medium">Spotify</span>
+                <div className={`w-2 h-2 rounded-full ml-2 ${
+                  authState.isAuthenticated && authState.isPremium ? 'bg-green-400' : 
+                  authState.isAuthenticated && !authState.isPremium ? 'bg-yellow-400' :
+                  'bg-red-400'
+                }`} />
+              </label>
+            </div>
           </div>
 
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {isLoading ? (
-              <div className="text-center py-8 text-sw-blue-300/50">
-                Loading music library...
-              </div>
-            ) : filteredTracks.length === 0 ? (
-              <div className="text-center py-8 text-sw-blue-300/50">
-                {searchTerm ? 'No tracks match your search.' : 'No music tracks available.'}
-              </div>
-            ) : (
-              filteredTracks.map((track) => (
-                <div
-                  key={track.id}
-                  className={`
-                    p-3 rounded-lg border border-sw-blue-600/20
-                    transition-all duration-200 hover:bg-sw-dark-700/50 hover:border-sw-blue-500/50
-                    ${currentTrack?.title === track.title ? 'bg-sw-blue-600/20 border-sw-blue-500' : 'bg-sw-dark-700/30'}
-                  `}
-                >
-                  <div className="flex items-center justify-between">
-                    <div 
-                      className={`flex-1 cursor-pointer ${isSelectingTrack ? 'opacity-50 cursor-wait' : ''}`}
-                      onClick={() => handleTrackSelect(track)}
-                      title={isSelectingTrack ? 'Please wait...' : `Play ${track.title}`}
-                    >
-                      <h4 className="font-medium text-sw-blue-100">{track.title}</h4>
-                      <p className="text-sm text-sw-blue-300">{track.artist}</p>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <div className="text-right">
-                        <p className="text-sm text-sw-blue-300">{track.duration}</p>
-                        {currentTrack?.title === track.title && isPlaying && (
-                          <p className="text-xs text-sw-green">PLAYING</p>
-                        )}
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          // Send queue command to backend
-                          if (socket) {
-                            socket.emit('music_command', {
-                              action: 'queue',
-                              track_name: track.title,
-                              track_id: track.id
-                            })
-                          }
-                          // Also update local queue for UI feedback
-                          setQueue(prev => [...prev, track])
-                        }}
-                        className="text-sw-blue-400 hover:text-sw-blue-300 text-sm"
-                        title="Add to queue"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-sw-blue-100 sw-text-glow">
+              {currentProvider === 'local' ? 'MUSIC LIBRARY' : 'SPOTIFY PLAYER'}
+            </h3>
+            {currentProvider === 'local' && (
+              <input
+                type="text"
+                placeholder="Search tracks..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="px-3 py-1 bg-sw-dark-700 border border-sw-blue-600/30 rounded text-sw-blue-100 text-sm focus:outline-none focus:border-sw-blue-500"
+              />
             )}
           </div>
+
+          {/* Content based on selected provider */}
+          {currentProvider === 'local' ? (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {isLoading ? (
+                <div className="text-center py-8 text-sw-blue-300/50">
+                  Loading music library...
+                </div>
+              ) : filteredTracks.length === 0 ? (
+                <div className="text-center py-8 text-sw-blue-300/50">
+                  {searchTerm ? 'No tracks match your search.' : 'No music tracks available.'}
+                </div>
+              ) : (
+                filteredTracks.map((track) => (
+                  <div
+                    key={track.id}
+                    className={`
+                      p-3 rounded-lg border border-sw-blue-600/20
+                      transition-all duration-200 hover:bg-sw-dark-700/50 hover:border-sw-blue-500/50
+                      ${currentTrack?.title === track.title ? 'bg-sw-blue-600/20 border-sw-blue-500' : 'bg-sw-dark-700/30'}
+                    `}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div 
+                        className={`flex-1 cursor-pointer ${isSelectingTrack ? 'opacity-50 cursor-wait' : ''}`}
+                        onClick={() => handleTrackSelect(track)}
+                        title={isSelectingTrack ? 'Please wait...' : `Play ${track.title}`}
+                      >
+                        <h4 className="font-medium text-sw-blue-100">{track.title}</h4>
+                        <p className="text-sm text-sw-blue-300">{track.artist}</p>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <div className="text-right">
+                          <p className="text-sm text-sw-blue-300">{track.duration}</p>
+                          {currentTrack?.title === track.title && isPlaying && (
+                            <p className="text-xs text-sw-green">PLAYING</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            // Send queue command to backend
+                            if (socket) {
+                              socket.emit('music_command', {
+                                action: 'queue',
+                                track_name: track.title,
+                                track_id: track.id
+                              })
+                            }
+                            // Also update local queue for UI feedback
+                            setQueue(prev => [...prev, track])
+                          }}
+                          className="text-sw-blue-400 hover:text-sw-blue-300 text-sm"
+                          title="Add to queue"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Spotify Web Player */}
+              <div className="bg-sw-dark-700/30 border border-sw-blue-600/20 rounded-lg p-4">
+                <SpotifyWebPlayer 
+                  className="bg-transparent border-0 p-0"
+                  showAuth={true}
+                  showDeviceActivation={true}
+                />
+              </div>
+
+              {/* Enhanced Spotify Search */}
+              {authState.isAuthenticated && (
+                <div className="space-y-4">
+                  <h4 className="text-md font-semibold text-sw-blue-100 sw-text-glow">
+                    SEARCH SPOTIFY
+                  </h4>
+                  <SpotifySearch
+                    onTrackSelect={handleSpotifyTrackSelect}
+                    onSearchResults={handleSpotifySearchResults}
+                  />
+                  
+                  {/* Track Results */}
+                  {spotifySearchResults.tracks.length > 0 && (
+                    <div className="space-y-2">
+                      <h5 className="text-sm font-medium text-sw-blue-200">
+                        Search Results ({spotifySearchResults.tracks.length} tracks)
+                      </h5>
+                      <div className="max-h-64 overflow-y-auto">
+                        <SpotifyTrackResults
+                          tracks={spotifySearchResults.tracks}
+                          onTrackSelect={handleSpotifyTrackSelect}
+                          onAddToQueue={handleSpotifyAddToQueue}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Queue Management */}
@@ -514,42 +646,8 @@ export default function MusicTab() {
           </div>
         </div>
 
-        {/* Volume and Controls */}
+        {/* Audio Status */}
         <div className="space-y-6">
-          <div className="sw-panel">
-            <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
-              VOLUME
-            </h3>
-            <div className="space-y-4">
-              <div className="flex items-center space-x-3">
-                <span className="text-sm text-sw-blue-300">🔊</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
-                  className="flex-1 accent-sw-blue-500"
-                />
-                <span className="text-sm text-sw-blue-200 font-mono w-8">{volume}</span>
-              </div>
-              
-              <div className="bg-sw-dark-700 rounded-full h-2 overflow-hidden relative">
-                <div 
-                  className={`h-2 rounded-full transition-all duration-200 ${
-                    ducking ? 'bg-sw-yellow' : 'bg-sw-blue-500'
-                  }`}
-                  style={{ width: isClient ? `${volume}%` : '75%' }}
-                ></div>
-                {ducking && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-xs text-sw-dark font-bold">DUCKED</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
           <div className="sw-panel">
             <h3 className="text-lg font-semibold text-sw-blue-100 mb-4 sw-text-glow">
               AUDIO STATUS
@@ -559,6 +657,14 @@ export default function MusicTab() {
               <StatusIndicator label="VLC Backend" status={vlcBackendStatus as "online" | "offline" | "warning"} />
               <StatusIndicator label="Audio Ducking" status={isPlaying ? 'online' : 'offline'} />
               <StatusIndicator label="Crossfade" status="offline" />
+              <StatusIndicator 
+                label="Spotify Auth" 
+                status={
+                  authState.isAuthenticated && authState.isPremium ? 'online' :
+                  authState.isAuthenticated && !authState.isPremium ? 'warning' :
+                  'offline'
+                } 
+              />
             </div>
           </div>
         </div>

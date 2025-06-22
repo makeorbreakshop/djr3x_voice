@@ -20,6 +20,7 @@ Limitations:
 - Rate limiting applies (429 errors on exceeded limits)
 """
 
+import asyncio
 import os
 import time
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
@@ -82,6 +83,30 @@ class SpotifyConfig(ProviderConfig):
     preview_only: bool = Field(
         default=True,
         description="Only use 30-second previews (set to False for full playback if implementing Web Playback SDK)",
+    )
+    
+    # Phase 3: Web Playback SDK Configuration
+    dashboard_player_available: bool = Field(
+        default=False,
+        description="Whether the dashboard Web Playback SDK player is ready and available"
+    )
+    user_has_premium: bool = Field(
+        default=False,
+        description="Whether the authenticated user has Spotify Premium (required for full playback)"
+    )
+    web_playback_scopes: List[str] = Field(
+        default=[
+            "streaming",
+            "user-read-email", 
+            "user-read-private",
+            "user-modify-playback-state",
+            "user-read-playback-state"
+        ],
+        description="Additional OAuth scopes required for Web Playback SDK functionality"
+    )
+    all_or_nothing_mode: bool = Field(
+        default=True,
+        description="Enable all-or-nothing playback mode: full tracks via Web Playback SDK or graceful degradation, no partial previews"
     )
 
 
@@ -150,6 +175,27 @@ class SpotifyMusicProvider(MusicProvider):
         self._rate_limit_reset: Optional[float] = None
         self._rate_limited = False
 
+        # Phase 3: Dashboard integration state
+        self._dashboard_player_ready = False
+        self._premium_status_validated = False
+
+    async def _retry_operation(self, operation, *args, **kwargs):
+        """
+        Override base retry operation to properly handle synchronous spotipy calls.
+        
+        All spotipy library calls are synchronous and must be wrapped with
+        asyncio.to_thread to avoid blocking the event loop.
+        
+        Args:
+            operation: The synchronous spotipy function to execute
+            *args: Positional arguments for the operation
+            **kwargs: Keyword arguments for the operation
+            
+        Returns:
+            The result of the spotipy operation
+        """
+        return await asyncio.to_thread(operation, *args, **kwargs)
+
     async def initialize(self) -> bool:
         """
         Initialize the Spotify provider.
@@ -183,6 +229,9 @@ class SpotifyMusicProvider(MusicProvider):
 
             # Initialize user library cache
             await self._refresh_user_library()
+
+            # Phase 3: Setup bridge event handlers for dashboard integration
+            self._setup_bridge_event_handlers()
 
             # Mark as initialized and available
             self._mark_initialized(True)
@@ -265,15 +314,136 @@ class SpotifyMusicProvider(MusicProvider):
                 tracks=[], query=query, provider=self.name, total_results=0
             )
 
+    async def update_dashboard_player_status(self, is_ready: bool) -> None:
+        """
+        Update dashboard player availability status.
+        
+        Args:
+            is_ready: Whether the dashboard Web Playback SDK is ready
+        """
+        self._dashboard_player_ready = is_ready
+        self.config.dashboard_player_available = is_ready
+        self.logger.info(f"Dashboard player status updated: {'ready' if is_ready else 'not ready'}")
+
+    async def update_premium_status(self, has_premium: bool) -> None:
+        """
+        Update user premium status validation.
+        
+        Args:
+            has_premium: Whether the user has Spotify Premium
+        """
+        self._premium_status_validated = True
+        self.config.user_has_premium = has_premium
+        self.logger.info(f"Premium status updated: {'premium' if has_premium else 'free'}")
+
+    async def _can_play_full_track(self) -> bool:
+        """
+        Check if full track playback is possible via Web Playback SDK.
+        
+        Returns:
+            bool: True if all conditions are met for full track playback
+        """
+        if not self.config.all_or_nothing_mode:
+            return False
+            
+        return (self._dashboard_player_ready and 
+                self.config.dashboard_player_available and 
+                self.config.user_has_premium)
+
+    async def _play_via_dashboard(self, track: Track) -> bool:
+        """
+        Play a full track via the dashboard Web Playback SDK.
+        
+        Args:
+            track: Track to play
+            
+        Returns:
+            bool: True if playback request was successful
+        """
+        try:
+            self.logger.info(f"Attempting dashboard playback: {track.title} by {track.artist}")
+            
+            # Emit event to request full track playback via dashboard
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventTopics.SPOTIFY_PLAY_FULL_TRACK,
+                    {
+                        "track_id": track.track_id,
+                        "track_uri": track.metadata.get("spotify_uri"),
+                        "track_title": track.title,
+                        "track_artist": track.artist,
+                        "provider": "spotify",
+                        "playback_method": "web_playback_sdk",
+                        "timestamp": time.time()
+                    }
+                )
+                self.logger.info(f"Successfully requested full track playback via dashboard")
+                self._current_track = track
+                return True
+            else:
+                self.logger.error("Event bus not available for dashboard playback request")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to request dashboard playback: {e}")
+            return False
+
+    async def _offer_local_alternative(self, track_title: str, track_artist: str) -> None:
+        """
+        Offer local alternative when Spotify full playback is not available.
+        
+        Args:
+            track_title: Title of the requested track
+            track_artist: Artist of the requested track
+        """
+        try:
+            self.logger.info(f"Offering local alternative for: {track_title} by {track_artist}")
+            
+            # Emit event to suggest local alternative
+            if self.event_bus:
+                self.event_bus.emit(
+                    EventTopics.SPOTIFY_OFFER_LOCAL_ALTERNATIVE,
+                    {
+                        "requested_track": track_title,
+                        "requested_artist": track_artist,
+                        "reason": self._get_unavailability_reason(),
+                        "provider": "spotify",
+                        "timestamp": time.time(),
+                        "suggestion": f"Consider adding '{track_title}' by {track_artist} to your local music library for full playback."
+                    }
+                )
+                self.logger.info("Local alternative suggestion sent")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to offer local alternative: {e}")
+
+    def _get_unavailability_reason(self) -> str:
+        """
+        Get the reason why full Spotify playback is not available.
+        
+        Returns:
+            str: Human-readable reason
+        """
+        if not self.config.all_or_nothing_mode:
+            return "All-or-nothing mode disabled"
+        elif not self._dashboard_player_ready:
+            return "Dashboard player not ready"
+        elif not self.config.dashboard_player_available:
+            return "Dashboard player not available"
+        elif not self.config.user_has_premium:
+            return "Spotify Premium required"
+        else:
+            return "Unknown issue with Spotify playback"
+
     async def play_track(self, track_id: str) -> bool:
         """
-        Play a Spotify track (30-second preview) by delegating to MusicControllerService.
+        Play a Spotify track with all-or-nothing logic: full track via Web Playback SDK or graceful degradation.
 
         Args:
             track_id: Spotify track ID or URI
 
         Returns:
-            bool: True if playback started successfully
+            bool: True if playback started successfully (full track or local alternative offered)
         """
         try:
             # Get track details
@@ -282,6 +452,30 @@ class SpotifyMusicProvider(MusicProvider):
                 self.logger.error(f"Spotify track not found: {track_id}")
                 return False
 
+            # Phase 3: All-or-nothing playback logic
+            if self.config.all_or_nothing_mode:
+                self.logger.info(f"All-or-nothing mode: evaluating playback options for {track.title}")
+                
+                # Check if full track playback is possible
+                if await self._can_play_full_track():
+                    self.logger.info(f"Attempting full track playback via dashboard: {track.title}")
+                    success = await self._play_via_dashboard(track)
+                    if success:
+                        return True
+                    else:
+                        self.logger.warning(f"Dashboard playback failed, offering local alternative")
+                        await self._offer_local_alternative(track.title, track.artist)
+                        return False
+                else:
+                    # Cannot play full track - offer local alternative instead of preview
+                    reason = self._get_unavailability_reason()
+                    self.logger.info(f"Full track playback not available ({reason}), offering local alternative")
+                    await self._offer_local_alternative(track.title, track.artist)
+                    return False
+            
+            # Legacy preview-only mode (backward compatibility)
+            self.logger.info(f"Preview-only mode: attempting 30-second preview for {track.title}")
+            
             # Check if track has preview URL
             if not track.source_path:
                 self.logger.warning(
@@ -436,7 +630,7 @@ class SpotifyMusicProvider(MusicProvider):
             )
 
             # Try to get cached token
-            token_info = self._auth_manager.get_cached_token()
+            token_info = await asyncio.to_thread(self._auth_manager.get_cached_token)
 
             if not token_info:
                 # Need to perform initial authorization
@@ -462,6 +656,57 @@ class SpotifyMusicProvider(MusicProvider):
             self.logger.error(f"Failed to setup Spotify authentication: {e}")
             return False
 
+    async def _complete_oauth_flow(self, authorization_code: str) -> bool:
+        """
+        Complete the Spotify OAuth flow using the authorization code from the callback.
+        
+        Args:
+            authorization_code: Authorization code from Spotify OAuth callback
+            
+        Returns:
+            bool: True if OAuth completion was successful
+        """
+        try:
+            if not self._auth_manager:
+                self.logger.error("Auth manager not initialized for OAuth completion")
+                return False
+            
+            self.logger.info("Attempting to complete Spotify OAuth flow")
+            
+            # Use the authorization code to get token
+            token_info = await asyncio.to_thread(self._auth_manager.get_access_token, authorization_code)
+            
+            if token_info:
+                self.logger.info("Successfully obtained Spotify access token")
+                
+                # Create Spotify client with the new token
+                self._spotify_client = spotipy.Spotify(auth_manager=self._auth_manager)
+                
+                # Test the connection
+                try:
+                    user_info = await asyncio.to_thread(self._spotify_client.current_user)
+                    self.logger.info(f"Spotify OAuth completed for user: {user_info.get('display_name', 'Unknown')}")
+                    
+                    # Update authentication status
+                    self._last_auth_check = time.time()
+                    self._is_available = True
+                    
+                    # Load initial library
+                    await self._refresh_user_library()
+                    
+                    return True
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to verify Spotify connection after OAuth: {e}")
+                    return False
+            else:
+                self.logger.error("Failed to obtain access token from authorization code")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error completing Spotify OAuth flow: {e}")
+            return False
+
     async def _ensure_authenticated(self) -> bool:
         """
         Ensure Spotify authentication is valid, refreshing if needed.
@@ -479,14 +724,15 @@ class SpotifyMusicProvider(MusicProvider):
                 not self._last_auth_check or now - self._last_auth_check > 300
             ):  # 5 minutes
 
-                token_info = self._auth_manager.get_cached_token()
+                token_info = await asyncio.to_thread(self._auth_manager.get_cached_token)
                 if not token_info:
                     return False
 
                 # Refresh token if expired
-                if self._auth_manager.is_token_expired(token_info):
+                if await asyncio.to_thread(self._auth_manager.is_token_expired, token_info):
                     self.logger.debug("Refreshing Spotify access token")
-                    token_info = self._auth_manager.refresh_access_token(
+                    token_info = await asyncio.to_thread(
+                        self._auth_manager.refresh_access_token,
                         token_info["refresh_token"]
                     )
                     if not token_info:
@@ -513,7 +759,7 @@ class SpotifyMusicProvider(MusicProvider):
 
             # Simple API test - get current user
             user = await self._retry_operation(
-                lambda: self._spotify_client.current_user()
+                self._spotify_client.current_user
             )
 
             if user and "id" in user:
@@ -526,9 +772,12 @@ class SpotifyMusicProvider(MusicProvider):
             self.logger.error(f"Spotify API connectivity test failed: {e}")
             return False
 
-    async def _search_spotify(self, query: str, limit: int = 50) -> Dict[str, Any]:
+    def _search_spotify(self, query: str, limit: int = 50) -> Dict[str, Any]:
         """
         Perform search against Spotify API.
+
+        This method is intentionally synchronous as it only calls the spotipy library.
+        It will be wrapped with asyncio.to_thread by _retry_operation.
 
         Args:
             query: Search query
@@ -554,12 +803,12 @@ class SpotifyMusicProvider(MusicProvider):
 
             # Get user's playlists
             playlists = await self._retry_operation(
-                lambda: self._spotify_client.current_user_playlists(limit=50)
+                self._spotify_client.current_user_playlists, limit=50
             )
 
             # Get saved tracks
             saved_tracks = await self._retry_operation(
-                lambda: self._spotify_client.current_user_saved_tracks(limit=50)
+                self._spotify_client.current_user_saved_tracks, limit=50
             )
 
             # Convert to unified Track objects
@@ -576,15 +825,14 @@ class SpotifyMusicProvider(MusicProvider):
             # Add tracks from playlists (first 20 tracks from each playlist)
             if playlists and "items" in playlists:
                 for playlist in playlists["items"]:
+                    current_user = await asyncio.to_thread(self._spotify_client.current_user)
                     if (
-                        playlist["owner"]["id"]
-                        == self._spotify_client.current_user()["id"]
+                        playlist["owner"]["id"] == current_user["id"]
                     ):
                         # Only include owned playlists to avoid excessive API calls
                         playlist_tracks = await self._retry_operation(
-                            lambda: self._spotify_client.playlist_tracks(
-                                playlist["id"], limit=20
-                            )
+                            self._spotify_client.playlist_tracks,
+                            playlist["id"], limit=20
                         )
 
                         if playlist_tracks and "items" in playlist_tracks:
@@ -688,6 +936,88 @@ class SpotifyMusicProvider(MusicProvider):
             # Default to 60 seconds if no retry-after header
             self._rate_limit_reset = time.time() + 60
             self.logger.warning("Spotify API rate limited. Retry after 60 seconds")
+
+    def _setup_bridge_event_handlers(self) -> None:
+        """
+        Setup event handlers for bridge communication with dashboard Web Playback SDK.
+        
+        Handles bidirectional communication for:
+        - Dashboard player ready status
+        - User premium status updates 
+        - Authentication status changes
+        """
+        if not self.event_bus:
+            self.logger.warning("Event bus not available for bridge integration")
+            return
+            
+        try:
+            # Listen for dashboard player ready events
+            self.event_bus.on(EventTopics.SPOTIFY_PLAYER_READY, self._handle_player_ready)
+            
+            # Listen for authentication status updates from dashboard
+            self.event_bus.on(EventTopics.SPOTIFY_AUTH_STATUS, self._handle_auth_status_update)
+            
+            self.logger.info("Bridge event handlers setup successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to setup bridge event handlers: {e}")
+
+    async def _handle_player_ready(self, data: Dict[str, Any]) -> None:
+        """
+        Handle dashboard Web Playback SDK ready events.
+        
+        Args:
+            data: Event data with player ready status
+        """
+        try:
+            self._dashboard_player_ready = data.get('player_ready', False)
+            device_id = data.get('device_id')
+            device_name = data.get('device_name', 'DJ R3X Dashboard')
+            
+            self.logger.info(f"Dashboard player ready status updated: {self._dashboard_player_ready}")
+            
+            if self._dashboard_player_ready:
+                self.logger.info(f"Dashboard Web Playback SDK ready: {device_name} ({device_id})")
+                self.config.dashboard_player_available = True
+            else:
+                self.logger.warning("Dashboard Web Playback SDK no longer available")
+                self.config.dashboard_player_available = False
+                
+        except Exception as e:
+            self.logger.error(f"Failed to handle player ready event: {e}")
+
+    async def _handle_auth_status_update(self, data: Dict[str, Any]) -> None:
+        """
+        Handle authentication status updates from dashboard.
+        
+        Args:
+            data: Event data with authentication status
+        """
+        try:
+            is_authenticated = data.get('authenticated', False)
+            has_premium = data.get('premium', False)
+            user_id = data.get('user_id')
+            
+            self.config.user_has_premium = has_premium
+            self._premium_status_validated = True
+            
+            self.logger.info(f"Auth status updated - Authenticated: {is_authenticated}, Premium: {has_premium}")
+            
+            if user_id:
+                self.logger.info(f"User: {user_id}")
+                
+            # Update provider availability based on auth status
+            if is_authenticated and has_premium:
+                self._mark_available(True)
+                self.logger.info("Spotify provider available with full playback capabilities")
+            elif is_authenticated:
+                self._mark_available(True)
+                self.logger.warning("Spotify provider available but limited (no Premium)")
+            else:
+                self.logger.warning("Spotify provider authentication lost")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to handle auth status update: {e}")
 
     async def cleanup(self) -> None:
         """

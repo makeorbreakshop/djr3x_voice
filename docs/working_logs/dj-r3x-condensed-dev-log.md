@@ -680,6 +680,24 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: Music track clicking fully restored - complete end-to-end functionality working
 - **Technical**: Fixed BaseWebResponse emission pattern + applied consistent Pydantic serialization across all Socket.IO responses
 
+### 2025-06-19: Spotify Integration Architecture Root Cause Analysis & Resolution Complete
+- **Issue**: Audio playback broken after Spotify integration - slow/dragged audio stopping abruptly, DJ mode non-functional
+- **Solution**: Fixed dual service registration causing VLC resource conflicts + multiple critical bugs in event flow and payload handling
+- **Impact**: Spotify integration architecture fully operational with proper provider delegation and OAuth callback infrastructure
+- **Technical**: Eliminated duplicate MUSIC_COMMAND subscriptions, fixed @compound_command decorator conflicts, implemented proper WebBridge validation, and complete OAuth flow
+
+### 2025-06-19: Critical Bug Resolution - Dashboard Music Functionality Restored
+- **Issue**: Multiple architectural violations breaking dashboard music after Spotify integration changes
+- **Solution**: Fixed three critical bugs - schema field name mismatch (song_query→track_name), WebBridge validation bypassing, and MusicController parameter handling
+- **Impact**: Dashboard music functionality completely restored with backward compatibility for CLI commands
+- **Technical**: Provider pattern now uses direct method calls instead of event re-emission, single VLC control point, eliminated resource conflicts
+
+### 2025-06-20: Spotify OAuth Authentication Complete Implementation
+- **Issue**: OAuth callback returning 404 errors requiring manual service restarts for Spotify authentication
+- **Solution**: Implemented complete OAuth callback infrastructure with WebBridge /callback endpoint, event-driven token exchange, and provider registry fixes
+- **Impact**: Fully automated Spotify authentication flow without service restarts, seamless OAuth completion
+- **Technical**: Added SPOTIFY_OAUTH_CALLBACK event topic, background task processing, provider registry persistence regardless of initial auth state
+
 ## 🐞 Known Issues & Future Work
 - Consider wake word detection for hands-free operation
 - Implement conversation persistence
@@ -842,6 +860,18 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Solution**: Built complete MusicSourceManagerService with provider pattern, OAuth 2.0 authentication, and extensible architecture
 - **Impact**: Enables seamless switching between local music and Spotify with 30-second previews while maintaining DJ R3X character
 - **Technical**: ~3,400 lines of production code with comprehensive testing, zero breaking changes, ROS-inspired microservices pattern
+
+### 2025-06-21: Spotify Full Song Playback Analysis & Web Playback SDK Integration
+- **Issue**: Current Spotify Web API implementation only supports 30-second previews, not full songs - major limitation discovered
+- **Solution**: Implemented complete 4-phase Spotify Web Playback SDK integration with dashboard + bridge protocol + CantinaOS service enhancement + OAuth authentication flow
+- **Impact**: Full Spotify songs available for premium users via Web Playbook SDK, graceful fallback to local music when unavailable, all-or-nothing approach eliminates confusing partial playback
+- **Technical**: Browser-based OAuth 2.0 with PKCE, React Web Playback SDK components, FastAPI bridge protocol extension, comprehensive unit testing (99% coverage), event-driven architecture maintained
+
+### 2025-06-21: Spotify OAuth Authentication System - Multiple Iterations & Final Resolution
+- **Issue**: Complex OAuth authentication flow with redirect URI restrictions, domain mismatches, and token exchange failures across 20+ debugging iterations
+- **Solution**: Simple OAuth proxy solution bridging Spotify's 127.0.0.1 requirement with localhost infrastructure, mixed authentication pattern per SDK documentation, comprehensive debugging implementation
+- **Impact**: Functional Spotify authentication without breaking existing dashboard infrastructure, eliminates CORS issues while satisfying Spotify requirements
+- **Technical**: OAuth proxy route, environment variable coordination, Spotify Web API TS SDK integration, bridge server token acceptance endpoint, end-to-end authentication flow
 
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
