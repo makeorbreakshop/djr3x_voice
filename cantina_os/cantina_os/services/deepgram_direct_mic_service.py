@@ -99,17 +99,20 @@ class DeepgramDirectMicService(BaseService):
         }
         
         # Configure Deepgram options
+        # UPDATED 2025-10-20: Optimized settings for voice agent performance
         self._dg_options = LiveOptions(
-            model="nova-3",  # Latest model
+            model="nova-3",  # Using nova-3 (flux model requires different API endpoint)
             punctuate=True,
             language="en-US",
             encoding="linear16",
             channels=1,
             sample_rate=16000,
             interim_results=True,
-            utterance_end_ms="1000",
+            utterance_end_ms="600",  # OPTIMIZED: Reduced from 1000ms for faster turn detection (200-400ms improvement)
             vad_events=True,
-            smart_format=True
+            smart_format=True,
+            endpointing=True,  # ADDED: Automatic sentence boundary detection
+            filler_words=True  # ADDED: Better conversational flow
         )
         
         # Start metrics collection task

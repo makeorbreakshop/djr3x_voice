@@ -184,7 +184,7 @@ class CantinaOS:
         else:
             self.logger.warning("ELEVENLABS_API_KEY not found in environment")
         
-        # Get OpenAI model
+        # Get OpenAI model - UPDATED 2025-10-20: Default to GPT-4.1-mini (50% faster, 83% cheaper)
         openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         self._config["OPENAI_MODEL"] = openai_model
         

@@ -55,7 +55,7 @@ class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service."""
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X")
-    model_id: str = Field("eleven_turbo_v2", description="Model ID") # eleven_turbo_v2 or eleven_flash_v2_5
+    model_id: str = Field("eleven_flash_v2_5", description="Model ID - UPDATED 2025-10-20: Flash v2.5 (75ms latency) for conversational AI") # eleven_turbo_v2, eleven_flash_v2_5, or eleven_v3
     stability: float = Field(0.60, description="Voice stability (0.0-1.0)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.2, description="Speech speed multiplier (0.7-1.2)")
