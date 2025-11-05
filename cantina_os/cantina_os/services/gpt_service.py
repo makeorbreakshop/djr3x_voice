@@ -179,6 +179,8 @@ class GPTService(BaseService):
             
         return {
             "OPENAI_API_KEY": config.get("OPENAI_API_KEY", ""),
+            # GPT-4.1-mini: 50% faster than GPT-4o, 83% cheaper, optimized for tool calling
+            # Alternative: "gpt-4o" for 232-320ms response time (vs older models at 2-3s)
             "MODEL": config.get("GPT_MODEL", "gpt-4.1-mini"),
             "MAX_TOKENS": config.get("MAX_TOKENS", 4000),
             "MAX_MESSAGES": config.get("MAX_MESSAGES", 20),

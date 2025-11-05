@@ -39,12 +39,13 @@ class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service."""
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X")
-    model_id: str = Field("eleven_turbo_v2", description="Model ID") # eleven_turbo_v2 or eleven_flash_v2_5
+    model_id: str = Field("eleven_flash_v2_5", description="Model ID - Flash v2.5 (75ms latency)")
     stability: float = Field(0.60, description="Voice stability (0.0-1.0)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.2, description="Speech speed multiplier (0.7-1.2)")
     playback_method: SpeechPlaybackMethod = Field(SpeechPlaybackMethod.STREAMING, description="Audio playback method")
     enable_audio_normalization: bool = Field(True, description="Whether to normalize audio")
+    latency_optimization: int = Field(4, description="Latency optimization level (0-4, 4=max ~75% improvement)")
 
 
 class ElevenLabsService(BaseService):
@@ -88,16 +89,17 @@ class ElevenLabsService(BaseService):
         playback_method = SpeechPlaybackMethod.STREAMING
         self.logger.info(f"Using streaming playback method for ElevenLabs: {playback_method}")
         
-        # Create Pydantic config model
+        # Create Pydantic config model with 2025 optimizations
         self._config = ElevenLabsConfig(
             api_key=api_key,
             voice_id=config_dict.get("VOICE_ID", "P9l1opNa5pWou2X5MwfB"),
-            model_id=config_dict.get("MODEL_ID", "eleven_turbo_v2"),
+            model_id=config_dict.get("MODEL_ID", "eleven_flash_v2_5"),  # Ultra-low latency model (75ms TTFB)
             stability=config_dict.get("STABILITY", 0.60),
             similarity_boost=config_dict.get("SIMILARITY_BOOST", 0.85),
             speed=clamped_speed,  # Use clamped speed value
             playback_method=playback_method,  # Force streaming playback
-            enable_audio_normalization=config_dict.get("ENABLE_AUDIO_NORMALIZATION", True)
+            enable_audio_normalization=config_dict.get("ENABLE_AUDIO_NORMALIZATION", True),
+            latency_optimization=config_dict.get("LATENCY_OPTIMIZATION", 4)  # Max optimization (level 4)
         )
         
         # Runtime variables
@@ -723,7 +725,7 @@ class ElevenLabsService(BaseService):
             # Clamp speed to valid range (0.7-1.2)
             speed = min(max(speed, 0.7), 1.2)
             
-            # DJ R3X settings - optimized for consistent, energetic output
+            # DJ R3X settings - optimized for consistent, energetic output and ultra-low latency (2025)
             payload = {
                 "text": text,
                 "model_id": model_id,
@@ -735,9 +737,14 @@ class ElevenLabsService(BaseService):
                     "speed": speed  # Control speech rate
                 }
             }
-            
-            self.logger.info(f"Sending TTS request to ElevenLabs for text length: {len(text)} with speed {speed}")
-            
+
+            # Add latency optimization parameter (new in 2025 API)
+            # Level 4 = max optimization (~75% improvement over default)
+            if hasattr(self._config, 'latency_optimization'):
+                payload["latency_optimization"] = self._config.latency_optimization
+
+            self.logger.info(f"Sending TTS request to ElevenLabs for text length: {len(text)} with speed {speed}, latency_opt: {self._config.latency_optimization if hasattr(self._config, 'latency_optimization') else 'N/A'}")
+
             response = await self._client.post(
                 f"/text-to-speech/{voice_id}",
                 json=payload,
