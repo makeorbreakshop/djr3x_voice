@@ -19,7 +19,7 @@ import math
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
 os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
-os.environ['VLC_PLUGIN_PATH'] = ''  # Don't scan for additional plugins
+# NOTE: Do NOT set VLC_PLUGIN_PATH to empty string - it breaks VLC initialization!
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
