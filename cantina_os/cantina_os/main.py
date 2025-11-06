@@ -214,6 +214,7 @@ class CantinaOS:
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
+            "ENABLE_INTERIM_STREAMING": os.getenv("ENABLE_INTERIM_STREAMING", "true").lower() == "true",
         }
         
         # Log loaded configuration (masking API keys for security)
@@ -235,6 +236,10 @@ class CantinaOS:
             self.logger.info(f"Using ElevenLabs API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
         else:
             self.logger.warning("No ElevenLabs API key found in environment")
+
+        # Log interim streaming mode
+        mode = "ENABLED (low latency)" if self._config["ENABLE_INTERIM_STREAMING"] else "DISABLED (baseline)"
+        self.logger.info(f"Interim transcription streaming: {mode}")
         
     async def _register_commands(self, dispatcher: CommandDispatcherService) -> None:
         """Register command handlers with the dispatcher.
