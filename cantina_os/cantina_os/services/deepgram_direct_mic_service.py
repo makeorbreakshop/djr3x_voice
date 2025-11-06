@@ -91,6 +91,7 @@ class DeepgramDirectMicService(BaseService):
         }
         
         # Configure Deepgram options - Optimized for ultra-low latency (2025)
+        # NOTE: SDK 4.x compatible - endpointing/filler_words require SDK 5.x (breaking changes)
         self._dg_options = LiveOptions(
             model="nova-3",  # Latest high-performance model (sharp drop in inference latency)
             punctuate=True,
@@ -101,9 +102,7 @@ class DeepgramDirectMicService(BaseService):
             interim_results=True,
             utterance_end_ms="600",  # Reduced from 1000ms for 40% faster turn detection
             vad_events=True,
-            smart_format=True,
-            endpointing=True,  # Automatic sentence boundary detection (NEW in SDK 5.x)
-            filler_words=True  # Better conversational flow (NEW in SDK 5.x)
+            smart_format=True
         )
         
         # Start metrics collection task
