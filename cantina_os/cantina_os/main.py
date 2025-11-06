@@ -541,6 +541,9 @@ class CantinaOS:
                 service_config["OPENAI_API_KEY"] = self._config.get("OPENAI_API_KEY", "")
             if "GPT_MODEL" not in service_config:
                 service_config["GPT_MODEL"] = self._config.get("OPENAI_MODEL", "gpt-4.1-mini")
+            # Pass interim streaming config flag
+            if "ENABLE_INTERIM_STREAMING" not in service_config:
+                service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", True)
             # Disable streaming to ensure proper text and tool call handling
             service_config["STREAMING"] = False
                 
