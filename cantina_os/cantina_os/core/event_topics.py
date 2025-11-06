@@ -29,6 +29,7 @@ class EventTopics(str, Enum):
     DEBUG_COMMAND_TRACE = "debug.command.trace"  # Added back - needed by debug service
     DEBUG_PERFORMANCE = "debug.performance"  # Added back - needed by debug service
     DEBUG_STATE_TRANSITION = "debug.state.transition"  # Added back
+    LATENCY_COMMAND = "latency.command"  # Latency tracker commands (separate from DEBUG_COMMAND to avoid payload conflicts)
 
     # Input events
     AUDIO_CHUNK = "audio.chunk"

@@ -347,11 +347,18 @@ class CLIService(BaseService):
                 
                 self.logger.info("Activating microphone recording")
                 self._mic_recording_active = True
-                
+
+                # Generate a conversation ID for this voice interaction
+                conversation_id = str(uuid.uuid4())
+                self.logger.info(f"Starting voice conversation with ID: {conversation_id}")
+
                 # Start microphone recording without entering text input mode
                 # Emit voice listening started event to trigger microphone capture
-                self.logger.debug("Emitting VOICE_LISTENING_STARTED event")
-                await self.emit(EventTopics.VOICE_LISTENING_STARTED, {})
+                self.logger.debug(f"Emitting VOICE_LISTENING_STARTED event with conversation_id: {conversation_id}")
+                await self.emit(EventTopics.VOICE_LISTENING_STARTED, {
+                    "conversation_id": conversation_id,
+                    "timestamp": time.time()
+                })
                 await self._async_write_output("[Microphone recording active - type 'done' when finished speaking]")
                 return
                 

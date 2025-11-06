@@ -1,0 +1,40 @@
+# Claude Code whitelist for DJ R3X project testing commands
+
+# Python execution patterns
+./venv/bin/python:*
+python:*
+python3:*
+
+# Git commands
+git:*
+
+# Package management
+pip:*
+./venv/bin/pip:*
+
+# File operations for testing
+cat:*
+echo:*
+grep:*
+head:*
+tail:*
+ls:*
+mkdir:*
+touch:*
+rm -f /tmp/*:*
+
+# System utilities
+sleep:*
+which:*
+ps:*
+
+# Process management
+killall python:*
+killall Python:*
+
+# Testing patterns
+cd "/Users/brandoncullum/DJ-R3X Voice"*:*
+cd /tmp:*
+
+# Background job management
+jobs:*

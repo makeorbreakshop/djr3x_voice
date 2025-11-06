@@ -8,9 +8,11 @@ It handles service initialization, orchestration, and shutdown.
 import asyncio
 import logging
 import os
+import sys
 import signal
 import queue # Import the queue module
 import logging.handlers # Import logging.handlers
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pyee.asyncio import AsyncIOEventEmitter
@@ -47,6 +49,9 @@ from .services.memory_service.memory_service import MemoryService
 # Import the new debug service
 from .services.debug_service import DebugService
 
+# Import the latency tracker service
+from .services.latency_tracker_service import LatencyTrackerService
+
 # Initial logging setup
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -69,28 +74,60 @@ for handler in root_logger.handlers[:]:
 root_logger.addHandler(queue_handler)
 root_logger.setLevel(logging.DEBUG) # Set root logger level to DEBUG to capture all messages
 
+# CRITICAL: Set cantina_os logger to DEBUG BEFORE any services are created
+# This must happen early so child loggers inherit the correct level
+logging.getLogger("cantina_os").setLevel(logging.DEBUG)
+
 # Create a handler to write logs to the console (this will run in a separate thread)
-console_handler = logging.StreamHandler()
+console_handler = logging.StreamHandler(sys.stdout)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(formatter)
 console_handler.setLevel(logging.INFO) # Set console handler level (e.g., INFO)
 
-# Create a QueueListener to listen to the queue and pass records to the console handler
-log_listener = logging.handlers.QueueListener(log_queue, console_handler)
+# Create a file handler to write logs to a file (DEBUG level to capture everything)
+# Log file is in the project root with timestamp to keep history
+timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+log_file_path = f'/Users/brandoncullum/DJ-R3X Voice/logs/dj_r3x_{timestamp}.log'
+os.makedirs(os.path.dirname(log_file_path), exist_ok=True)  # Ensure logs directory exists
+file_handler = logging.FileHandler(log_file_path, mode='w')  # Create new timestamped file each run
+file_handler.setFormatter(formatter)
+file_handler.setLevel(logging.DEBUG)  # Capture ALL logs to file
+
+# Create a QueueListener to listen to the queue and pass records to both handlers
+# Use respect_handler_level=True to ensure each handler's level is respected
+log_listener = logging.handlers.QueueListener(
+    log_queue,
+    console_handler,
+    file_handler,  # Add file handler
+    respect_handler_level=True
+)
 
 # set_global_log_level will now only affect the console handler's level if called
 def set_global_log_level(level: int) -> None:
-    """Sets the global logging level for the root logger and all handlers."""
-    # root_logger = logging.getLogger()
-    # root_logger.setLevel(level)
-    # Correctly set the level of the single console handler
+    """Sets the global logging level for console output only.
+
+    File logging always captures DEBUG level for detailed diagnostics.
+    """
+    # Only set console handler level, not the root logger or cantina_os logger
+    # This allows DEBUG messages to reach the file handler while console shows INFO+
     console_handler.setLevel(level)
-    # We can optionally set levels for other specific loggers here if needed
-    logging.getLogger("cantina_os").setLevel(level)
-    logging.info(f"Global log level set to: {logging.getLevelName(level)}")
+    logging.info(f"Console log level set to: {logging.getLevelName(level)}")
 
 # Initial level setting using the new function
 set_global_log_level(logging.INFO)
+
+# Suppress verbose third-party library logging
+# These libraries log too much at DEBUG level and can cause BlockingIOError
+logging.getLogger("websockets").setLevel(logging.WARNING)
+logging.getLogger("websockets.client").setLevel(logging.WARNING)
+logging.getLogger("websockets.server").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+logging.getLogger("deepgram").setLevel(logging.INFO)
+logging.getLogger("openai").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("pynput").setLevel(logging.WARNING)
 # ----------------------------
 
 logger = logging.getLogger("cantina_os.main")
@@ -256,10 +293,15 @@ class CantinaOS:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "eye_controller", EventTopics.EYE_COMMAND)
         
-        # Debug commands
+        # Debug commands (general debug service)
         for cmd in ["debug level", "debug trace", "debug music"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "debug_service", EventTopics.DEBUG_COMMAND)
+
+        # Latency reporting commands (handled by latency_tracker service)
+        for cmd in ["debug latency", "debug latency conversation", "debug latency reset"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command(cmd, "latency_tracker", EventTopics.LATENCY_COMMAND)
         
         # Log registered commands for debugging
         commands = dispatcher.get_registered_commands()
@@ -279,6 +321,7 @@ class CantinaOS:
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
             "memory_service",  # Initialize memory service early as other services depend on it
+            "latency_tracker",  # Add latency tracker early to capture all pipeline events
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "gpt",
@@ -339,12 +382,16 @@ class CantinaOS:
                 self.logger.info(f"Stopped service: {service_name}")
             except Exception as e:
                 self.logger.error(f"Error stopping service {service_name}: {e}")
-                
-        # Stop the logging listener thread
-        log_listener.stop()
-        self.logger.info("Logging listener stopped.")
-        
+
+        # Final log message before stopping the listener
         self.logger.info("DJ R3X Voice has been shut down.")
+
+        # Flush the log queue to ensure all messages are written
+        import time
+        time.sleep(0.1)  # Give the queue time to flush
+
+        # Stop the logging listener thread (only here, not in main())
+        log_listener.stop()
         
     def _setup_signal_handlers(self) -> None:
         """Set up handlers for system signals."""
@@ -399,9 +446,11 @@ class CantinaOS:
                 "startours_ding.mp3"
             )
             
-            # Add debug event listener for TRANSCRIPTION_FINAL events
+            # Add debug event listener for TRANSCRIPTION_FINAL events (disabled to reduce logging overhead)
             async def debug_transcription_handler(payload):
-                logger.info(f"DEBUG EVENT MONITOR - Received TRANSCRIPTION_FINAL event: {str(payload)[:200]}...")
+                # Disabled: causes BlockingIOError due to excessive logging
+                # logger.info(f"DEBUG EVENT MONITOR - Received TRANSCRIPTION_FINAL event: {str(payload)[:200]}...")
+                pass
             
             self._event_bus.on(EventTopics.TRANSCRIPTION_FINAL, debug_transcription_handler)
             logger.info(f"Added debug monitor for TRANSCRIPTION_FINAL events - topic value: '{str(EventTopics.TRANSCRIPTION_FINAL)}'")
@@ -466,7 +515,8 @@ class CantinaOS:
             "timeline_executor_service": TimelineExecutorService,
             "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
-            "debug": DebugService
+            "debug": DebugService,
+            "latency_tracker": LatencyTrackerService
         }
         
         # Early return if service doesn't exist in map
@@ -588,7 +638,7 @@ class CantinaOS:
 def main() -> None:
     """Main entry point for the application."""
     cantina_os = CantinaOS()
-    
+
     try:
         asyncio.run(cantina_os.run())
     except KeyboardInterrupt:
@@ -596,9 +646,8 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         raise
-    finally:
-        # Stop the logging listener thread
-        log_listener.stop()
+    # Note: log_listener.stop() is called in _cleanup_services()
+    # to ensure all log messages are flushed before stopping
         
 if __name__ == "__main__":
     main() 

@@ -260,51 +260,31 @@ class GPTService(BaseService):
             
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
-        # Get the topic values directly from the enum for comparison
-        from ..core.event_topics import EventTopics
-        transcription_final = EventTopics.TRANSCRIPTION_FINAL
-        
-        self.logger.info("GPTService attempting to set up subscriptions.") # Log entry for method call
-        self.logger.info(f"SUBSCRIPTION DEBUG: TRANSCRIPTION_FINAL topic value: '{str(transcription_final)}', id: {id(transcription_final)}")
-        self.logger.info(f"SUBSCRIPTION DEBUG: Module name: {transcription_final.__class__.__module__}")
-        
-        # Removed redundant subscription to raw_topic_value as the enum subscription is working.
-        # asyncio.create_task(self.subscribe(
-        #     raw_topic_value,  # Use raw string value instead of enum
-        #     self._handle_transcription
-        # ))
-        
-        # Subscribe using the EventTopics enum
+        self.logger.info("GPTService setting up event subscriptions.")
+
+        # Subscribe using the EventTopics enum (automatically converted to string values)
         asyncio.create_task(self.subscribe(
-            EventTopics.TRANSCRIPTION_FINAL, 
+            EventTopics.TRANSCRIPTION_FINAL,
             self._handle_transcription
         ))
-        self.logger.info(f"GPTService: Subscription tasks created for TRANSCRIPTION_FINAL.")
-        
-        # Add subscription for CLI text-based recording
-        voice_listening_stopped_topic_value = str(EventTopics.VOICE_LISTENING_STOPPED)
-        self.logger.info(f"GPTService subscribing to VOICE_LISTENING_STOPPED, actual string: '{voice_listening_stopped_topic_value}'")
+        self.logger.info("GPTService: Subscribed to TRANSCRIPTION_FINAL.")
         asyncio.create_task(self.subscribe(
             EventTopics.VOICE_LISTENING_STOPPED,
             self._handle_voice_transcript
         ))
-        self.logger.info(f"GPTService: Subscription task created for VOICE_LISTENING_STOPPED.")
-        
-        # Add subscription for intent execution results
-        self.logger.info("GPTService subscribing to INTENT_EXECUTION_RESULT")
+        self.logger.info("GPTService: Subscribed to VOICE_LISTENING_STOPPED.")
+
         asyncio.create_task(self.subscribe(
             EventTopics.INTENT_EXECUTION_RESULT,
             self._process_intent_execution_result
         ))
-        self.logger.info("GPTService: Subscription task created for INTENT_EXECUTION_RESULT.")
-        
-        # Add subscription for DJ commentary requests
-        self.logger.info("GPTService subscribing to DJ_COMMENTARY_REQUEST")
+        self.logger.info("GPTService: Subscribed to INTENT_EXECUTION_RESULT.")
+
         asyncio.create_task(self.subscribe(
             EventTopics.DJ_COMMENTARY_REQUEST,
             self._handle_dj_commentary_request
         ))
-        self.logger.info("GPTService: Subscription task created for DJ_COMMENTARY_REQUEST.")
+        self.logger.info("GPTService: Subscribed to DJ_COMMENTARY_REQUEST.")
 
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""

@@ -1,23 +1,28 @@
 #!/bin/bash
+# DJ R3X Clean Launcher
+# Kills all old instances and starts fresh
 
-# DJ R3X Voice launcher script
-# This script launches the DJ R3X Voice program from any directory
+echo "🤖 DJ R3X Clean Launcher"
+echo "========================"
 
-# Store the actual path to the DJ-R3X Voice installation
-DJ_R3X_PATH="/Users/brandoncullum/DJ-R3X Voice"
+# Kill all existing DJ R3X processes
+echo "Killing old DJ R3X processes..."
+pkill -9 -f "cantina_os.main" 2>/dev/null
+sleep 1
 
-# Navigate to the installation directory
-cd "$DJ_R3X_PATH/cantina_os" || { echo "Error: Could not navigate to $DJ_R3X_PATH/cantina_os"; exit 1; }
-
-# Activate virtual environment if it exists
-# Note: The venv is at the project root, so we need to adjust the path
-if [ -d "../venv" ]; then
-    source ../venv/bin/activate
+# Verify they're dead
+OLD_PROCS=$(ps aux | grep "cantina_os.main" | grep -v grep | wc -l | tr -d ' ')
+if [ "$OLD_PROCS" -gt 0 ]; then
+    echo "⚠️  Warning: $OLD_PROCS processes still running, force killing..."
+    killall -9 Python 2>/dev/null
+    sleep 1
 fi
 
-# Launch the program - use the cantina_os module
-echo "Starting DJ R3X Voice..."
-python -m cantina_os.main "$@"
+echo "✅ All old processes terminated"
+echo ""
+echo "Starting DJ R3X..."
+echo "=================="
 
-# This line will only be reached when the program exits
-echo "DJ R3X Voice has been shut down."
+# Start DJ R3X
+cd "/Users/brandoncullum/DJ-R3X Voice/cantina_os"
+../venv/bin/python -m cantina_os.main

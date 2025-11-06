@@ -359,18 +359,22 @@ class ElevenLabsService(BaseService):
                         # Get a streaming response from ElevenLabs
                         self.logger.info(f"Starting streaming TTS with elevenlabs SDK for text: {text[:50]}...")
                         self.logger.info(f"Request details - Model: {model_id}, Voice: {voice_id}, Speed: {speed}")
-                        
-                        audio_stream = eleven_client.text_to_speech.convert_as_stream(
+
+                        # Use the new SDK 2.x API: client.text_to_speech.stream()
+                        # The latency_optimization parameter must be passed in the request body
+                        audio_stream = eleven_client.text_to_speech.stream(
                             text=text,
                             voice_id=voice_id,
                             model_id=model_id,
-                            voice_settings=voice_settings
+                            voice_settings=voice_settings,
+                            optimize_streaming_latency=self._config.latency_optimization,  # 0-4, 4=max optimization
+                            output_format="mp3_44100_128"  # Standard quality format
                         )
-                        
+
                         # Use the ElevenLabs stream utility to play the audio
                         # This blocks in the audio thread until playback is complete
                         self.logger.info("Starting audio playback with elevenlabs.stream")
-                        
+
                         try:
                             from elevenlabs import stream as elevenlabs_stream
                             elevenlabs_stream(audio_stream)

@@ -85,11 +85,13 @@ class BaseService:
         
         if not self._event_bus:
             raise RuntimeError("Event bus not set. Call set_event_bus() before starting the service.")
-            
+
+        self.logger.debug(f"{self.__class__.__name__} starting...")
         await self._start()
         self._is_running = True
         self._started = True
         self._status = ServiceStatus.RUNNING
+        self.logger.debug(f"{self.__class__.__name__} initialization complete")
         await self._emit_status(ServiceStatus.RUNNING, f"{self.__class__.__name__} started successfully")
 
     async def stop(self) -> None:
@@ -213,18 +215,22 @@ class BaseService:
 
     async def emit(self, event: str, payload: Any) -> None:
         """Emit an event on the event bus.
-        
+
         Args:
-            event: Event name/topic
+            event: Event name/topic (can be string or EventTopics enum)
             payload: Event payload
         """
         if not self._event_bus:
             raise RuntimeError("Event bus not set")
-        
+
+        # Convert EventTopics enum to its string value if needed
+        if isinstance(event, Enum):
+            event = event.value
+
         # Debug payload if it's going to CLI_RESPONSE
         if event == "cli_response":
             self.debug_payload(payload, prefix="emit: ")
-        
+
         # Convert Pydantic models to dictionaries if needed
         if hasattr(payload, "model_dump"):
             self.logger.debug(f"Converting Pydantic model to dict for event {event}")
@@ -232,25 +238,33 @@ class BaseService:
         elif hasattr(payload, "dict"):
             self.logger.debug(f"Converting Pydantic model to dict using .dict() for event {event}")
             payload = payload.dict()
-        
+
+        # Debug: Log event emission (truncate payload for readability)
+        payload_preview = str(payload)[:100] if payload else "None"
+        self.logger.debug(f"Emitting event '{event}' with payload: {payload_preview}...")
+
         # The emit method of pyee.AsyncIOEventEmitter returns a boolean, not a coroutine
         self._event_bus.emit(event, payload)
 
     async def subscribe(self, event: str, handler: Callable) -> None:
         """Subscribe to an event on the event bus.
-        
+
         Args:
-            event: Event name/topic to subscribe to
+            event: Event name/topic to subscribe to (can be string or EventTopics enum)
             handler: Callback function to handle the event
         """
         if not self._event_bus:
             raise RuntimeError("Event bus not set")
-            
+
+        # Convert EventTopics enum to its string value if needed
+        if isinstance(event, Enum):
+            event = event.value
+
         # Store the handler for cleanup
         if event not in self._event_handlers:
             self._event_handlers[event] = []
         self._event_handlers[event].append(handler)
-        
+
         # Add the handler to the event bus - don't await since pyee.AsyncIOEventEmitter.on is not a coroutine
         self._event_bus.on(event, handler)
         self.logger.debug(f"Subscribed to event: {event}")

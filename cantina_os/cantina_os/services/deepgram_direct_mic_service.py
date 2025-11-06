@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 import asyncio
 import time
 import os
+import uuid
 from dotenv import load_dotenv
 from deepgram import DeepgramClient, LiveOptions, LiveTranscriptionEvents, Microphone
 
@@ -78,6 +79,7 @@ class DeepgramDirectMicService(BaseService):
         self._is_listening = False
         self._current_transcription = ""
         self._start_time = None
+        self._current_conversation_id = None  # Track the current conversation ID
         
         # Thread-safe queue for audio data
         self._audio_queue = asyncio.Queue(maxsize=100)
@@ -100,9 +102,10 @@ class DeepgramDirectMicService(BaseService):
             channels=1,
             sample_rate=16000,
             interim_results=True,
-            utterance_end_ms="600",  # Reduced from 1000ms for 40% faster turn detection
+            utterance_end_ms="1000",  # Minimum allowed value per Deepgram docs (cannot be less than 1000ms)
             vad_events=True,
             smart_format=True
+            # NOTE: endpointing and filler_words require SDK 5.x (breaking changes) - currently using 4.8.1
         )
         
         # Start metrics collection task
@@ -381,17 +384,12 @@ class DeepgramDirectMicService(BaseService):
                 source="deepgram",
                 is_final=is_final,
                 confidence=confidence,
-                words=processed_words or None  # Use processed_words
+                words=processed_words or None,  # Use processed_words
+                conversation_id=self._current_conversation_id  # Include the conversation ID from the voice session
             ).model_dump()
             
             if self._logger:
                 self._logger.debug(f"Emitting {event_topic} from {source_type}: {str(payload)[:200]}...")
-                # Enhanced event topic logging for debugging
-                self._logger.info(f"EMIT DEBUG: Using event topic '{str(event_topic)}', type: {type(event_topic)}, id: {id(event_topic)}")
-                self._logger.info(f"EMIT DEBUG: EventTopics.TRANSCRIPTION_FINAL value: '{str(EventTopics.TRANSCRIPTION_FINAL)}', id: {id(EventTopics.TRANSCRIPTION_FINAL)}")
-                
-                # Log the actual string value of the event_topic
-                self._logger.debug(f"DeepgramDirectMicService emitting on actual topic string: '{str(event_topic)}'")
 
             self._event_loop.call_soon_threadsafe(
                 lambda data=payload, topic=event_topic: asyncio.create_task(
@@ -492,6 +490,11 @@ class DeepgramDirectMicService(BaseService):
 
     async def _handle_listening_started(self, event: Dict[str, Any]) -> None:
         """Handle the VOICE_LISTENING_STARTED event."""
+        # Extract and store the conversation_id from the event
+        self._current_conversation_id = event.get("conversation_id")
+        if self._logger and self._current_conversation_id:
+            self._logger.info(f"Starting voice listening with conversation_id: {self._current_conversation_id}")
+
         if not self._is_listening:
             await self._start_listening()
 
@@ -504,10 +507,17 @@ class DeepgramDirectMicService(BaseService):
         """Handle the MIC_RECORDING_START event (triggered by mouse clicks)."""
         if self._logger:
             self._logger.info("Received mouse-triggered recording start event")
-        
+
+        # Generate a conversation ID for mouse-triggered interactions
+        conversation_id = str(uuid.uuid4())
+        self._current_conversation_id = conversation_id
+
         # Emit the voice listening started event to maintain compatibility with existing flow
-        await self.emit(EventTopics.VOICE_LISTENING_STARTED, {})
-        
+        await self.emit(EventTopics.VOICE_LISTENING_STARTED, {
+            "conversation_id": conversation_id,
+            "timestamp": time.time()
+        })
+
         # Start listening directly
         if not self._is_listening:
             await self._start_listening()
