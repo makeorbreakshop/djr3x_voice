@@ -188,7 +188,11 @@ class GPTService(BaseService):
             "SYSTEM_PROMPT": system_prompt,
             "TIMEOUT": config.get("TIMEOUT", 30),  # seconds
             "RATE_LIMIT_REQUESTS": config.get("RATE_LIMIT_REQUESTS", 50),
-            "STREAMING": config.get("STREAMING", True)
+            "STREAMING": config.get("STREAMING", True),
+            # Enable interim response generation on TRANSCRIPTION_INTERIM events
+            # When True: responds to interim transcriptions for faster perceived latency
+            # When False: only processes TRANSCRIPTION_FINAL events (classic behavior)
+            "ENABLE_INTERIM_STREAMING": config.get("ENABLE_INTERIM_STREAMING", True)
         }
         
     async def _initialize(self) -> None:
@@ -268,6 +272,17 @@ class GPTService(BaseService):
             self._handle_transcription
         ))
         self.logger.info("GPTService: Subscribed to TRANSCRIPTION_FINAL.")
+
+        # Subscribe to interim transcriptions if streaming is enabled
+        if self._config["ENABLE_INTERIM_STREAMING"]:
+            asyncio.create_task(self.subscribe(
+                EventTopics.TRANSCRIPTION_INTERIM,
+                self._handle_interim_transcription
+            ))
+            self.logger.info("GPTService: Subscribed to TRANSCRIPTION_INTERIM (interim streaming enabled).")
+        else:
+            self.logger.info("GPTService: TRANSCRIPTION_INTERIM disabled (interim streaming disabled).")
+
         asyncio.create_task(self.subscribe(
             EventTopics.VOICE_LISTENING_STOPPED,
             self._handle_voice_transcript
@@ -315,18 +330,18 @@ class GPTService(BaseService):
             
     async def _handle_transcription(self, payload: Dict[str, Any]) -> None:
         """Handle transcription text from the speech recognition service.
-        
+
         Note: When using mouse clicks, this method will collect interim transcriptions
         but they won't be processed until the mouse click stop event triggers
         _handle_voice_transcript.
         """
         self.logger.debug(f"Received transcription: {str(payload)[:200]}...")
-        
+
         try:
             # We're not processing individual transcriptions when using mouse clicks
             # The final accumulated transcript will be sent via VOICE_LISTENING_STOPPED event
             self.logger.debug("Individual transcription received but not processing - waiting for mouse click stop event")
-            
+
         except Exception as e:
             error_msg = f"Error handling transcription: {str(e)}"
             self.logger.error(error_msg)
@@ -334,6 +349,68 @@ class GPTService(BaseService):
                 ServiceStatus.ERROR,
                 error_msg
             )
+
+    async def _handle_interim_transcription(self, payload: Dict[str, Any]) -> None:
+        """Handle interim transcription text for low-latency responses.
+
+        This handler processes partial transcriptions in real-time to generate draft responses
+        faster. Final responses are still processed through _handle_transcription() with FINAL events.
+
+        Draft responses are emitted as LLM_RESPONSE_TEXT_INTERIM and never persisted to memory,
+        ensuring the final response replaces the draft seamlessly.
+        """
+        try:
+            if not payload:
+                self.logger.debug("Received empty interim transcription payload")
+                return
+
+            interim_text = payload.get("text", "").strip()
+            if not interim_text:
+                self.logger.debug("Received interim transcription with empty text")
+                return
+
+            conversation_id = payload.get("conversation_id")
+
+            # Only process interim if streaming is enabled
+            if not self._config["ENABLE_INTERIM_STREAMING"]:
+                self.logger.debug("Interim transcription received but streaming disabled")
+                return
+
+            self.logger.info(f"Processing interim transcription (streaming): {interim_text[:60]}...")
+
+            # Create a temporary copy of memory without adding to it
+            # This lets us generate a draft response without persisting changes
+            draft_memory_messages = self._memory.get_messages_for_api().copy()
+
+            # Add the interim user input for draft processing
+            draft_memory_messages.append({"role": "user", "content": interim_text})
+
+            # Prepare draft API request
+            api_url = "https://api.openai.com/v1/chat/completions"
+            request_data = {
+                "model": self._config["MODEL"],
+                "messages": draft_memory_messages,
+                "temperature": self._config["TEMPERATURE"],
+                "stream": self._config["STREAMING"],
+                "max_tokens": 150  # Limit draft responses to be brief
+            }
+
+            try:
+                if self._config["STREAMING"]:
+                    draft_response = await self._stream_draft_gpt_response(api_url, request_data)
+                else:
+                    draft_response = await self._get_draft_gpt_response(api_url, request_data)
+
+                if draft_response:
+                    self.logger.info(f"Emitting interim LLM response: {draft_response[:50]}...")
+                    await self._emit_interim_llm_response(draft_response, conversation_id)
+
+            except Exception as e:
+                self.logger.debug(f"Error processing interim response: {str(e)}")
+                # Don't fail on interim processing - this is optional optimization
+
+        except Exception as e:
+            self.logger.error(f"Error handling interim transcription: {str(e)}", exc_info=True)
             
     async def _process_with_gpt(self, user_input: str) -> None:
         """Process user input with GPT model."""
@@ -714,7 +791,97 @@ class GPTService(BaseService):
             
         # Emit the event
         await self.emit(EventTopics.LLM_RESPONSE, payload)
-        
+
+    async def _emit_interim_llm_response(
+        self,
+        response_text: str,
+        conversation_id: Optional[str] = None
+    ) -> None:
+        """
+        Emit an interim LLM response event.
+
+        Draft responses are never persisted to memory - they're emitted as informational
+        updates only. The final response will replace them.
+
+        Args:
+            response_text: The draft response text
+            conversation_id: Conversation ID from transcription event
+        """
+        payload = LLMResponsePayload(
+            text=response_text,
+            tool_calls=None,
+            is_complete=False,
+            conversation_id=conversation_id
+        )
+
+        # Emit interim event - NEVER persist to memory
+        self.logger.debug(f"Emitting interim LLM response: {response_text[:40]}...")
+        await self.emit(EventTopics.LLM_RESPONSE_TEXT_INTERIM, payload)
+
+    async def _get_draft_gpt_response(self, api_url: str, request_data: Dict[str, Any]) -> str:
+        """Get a non-streaming draft response from the GPT API for interim processing."""
+        if not self._session:
+            raise RuntimeError("No active session for API request")
+
+        headers = {
+            "Authorization": f"Bearer {self._config['OPENAI_API_KEY']}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                if response.status != 200:
+                    response_text = await response.text()
+                    self.logger.debug(f"Draft API request failed with status {response.status}")
+                    return ""
+
+                response_data = await response.json()
+                message = response_data["choices"][0]["message"]
+                return message.get("content", "")
+
+        except Exception as e:
+            self.logger.debug(f"Error in _get_draft_gpt_response: {str(e)}")
+            return ""
+
+    async def _stream_draft_gpt_response(self, api_url: str, request_data: Dict[str, Any]) -> str:
+        """Stream a draft response from the GPT API for interim processing."""
+        if not self._session:
+            raise RuntimeError("No active session for API request")
+
+        headers = {
+            "Authorization": f"Bearer {self._config['OPENAI_API_KEY']}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream"
+        }
+
+        try:
+            async with self._session.post(api_url, json=request_data, headers=headers) as response:
+                if response.status != 200:
+                    response_text = await response.text()
+                    self.logger.debug(f"Draft streaming API request failed with status {response.status}")
+                    return ""
+
+                full_content = ""
+                async for line in response.content:
+                    if line:
+                        try:
+                            line = line.decode("utf-8").strip()
+                            if line.startswith("data: ") and line != "data: [DONE]":
+                                data = json.loads(line[6:])
+                                delta = data["choices"][0]["delta"]
+                                if "content" in delta:
+                                    content = delta.get("content") or ""
+                                    full_content += content
+
+                        except Exception as e:
+                            self.logger.debug(f"Error processing draft stream chunk: {str(e)}")
+
+                return full_content
+
+        except Exception as e:
+            self.logger.debug(f"Error in _stream_draft_gpt_response: {str(e)}")
+            return ""
+
     def register_tool(self, tool_schema: Dict[str, Any]) -> None:
         """Register a tool for use with the GPT model."""
         tool_name = tool_schema["function"]["name"]  # Updated to get name from function property

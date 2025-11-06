@@ -87,6 +87,7 @@ class EventTopics(str, Enum):
     LLM_RESPONSE = "llm.response"
     LLM_RESPONSE_CHUNK = "llm.response.chunk"  # Added back
     LLM_RESPONSE_TEXT = "llm.response.text"  # Added back
+    LLM_RESPONSE_TEXT_INTERIM = "llm.response.text.interim"  # Draft response from interim transcription
     LLM_SENTIMENT_ANALYZED = "llm.sentiment.analyzed"  # Added back - needed by eye_light_controller
     LLM_PROCESSING_STARTED = "llm.processing.started"  # Added back
     LLM_PROCESSING_ENDED = "llm.processing.ended"  # Added back
