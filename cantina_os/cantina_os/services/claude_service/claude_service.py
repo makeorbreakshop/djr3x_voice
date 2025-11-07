@@ -218,12 +218,12 @@ class ClaudeService(BaseService):
             self._max_requests_per_window = self._config["RATE_LIMIT_REQUESTS"]
             self._request_timestamps = []
 
-            # Pre-load personas to avoid disk I/O during API calls (OPTIMIZATION)
-            self._load_personas()
-
             # Register command functions
             self._register_command_functions()
             self.logger.info("Registered command functions for intent detection")
+
+            # Pre-load personas to avoid disk I/O during API calls (OPTIMIZATION)
+            self._load_personas()
 
             self.logger.info(
                 f"Initialized Claude service with model={self._config['MODEL']}"
