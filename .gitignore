@@ -61,7 +61,7 @@ test_vectors/
 # Log files
 *.log
 latest_run.log
-logs/
+# logs/ - REMOVED: We now commit runtime logs for debugging
 
 # Vector files and directories
 e5_vectors/
