@@ -462,6 +462,15 @@ class ClaudeService(BaseService):
 
             self.logger.info(f"Successfully received response from Claude")
 
+            # Log token usage for cost/performance tracking
+            if hasattr(response, 'usage'):
+                usage = response.usage
+                self.logger.info(f"📊 TOKEN USAGE - Input: {usage.input_tokens}, Output: {usage.output_tokens}, Total: {usage.input_tokens + usage.output_tokens}")
+                if hasattr(usage, 'cache_creation_input_tokens') and usage.cache_creation_input_tokens:
+                    self.logger.info(f"💾 CACHE CREATED: {usage.cache_creation_input_tokens} tokens")
+                if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
+                    self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
+
             # Extract content from response
             message_content = response.content[0].text if response.content else ""
 
@@ -543,6 +552,15 @@ class ClaudeService(BaseService):
 
                 # Get the final message after streaming completes
                 final_message = stream.get_final_message()
+
+                # Log token usage for cost/performance tracking
+                if hasattr(final_message, 'usage'):
+                    usage = final_message.usage
+                    self.logger.info(f"📊 TOKEN USAGE (streaming) - Input: {usage.input_tokens}, Output: {usage.output_tokens}, Total: {usage.input_tokens + usage.output_tokens}")
+                    if hasattr(usage, 'cache_creation_input_tokens') and usage.cache_creation_input_tokens:
+                        self.logger.info(f"💾 CACHE CREATED: {usage.cache_creation_input_tokens} tokens")
+                    if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
+                        self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
 
                 # Extract tool calls from final message
                 for block in final_message.content:
