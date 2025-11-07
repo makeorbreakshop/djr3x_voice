@@ -453,9 +453,44 @@ python3 -m cantina_os.main # ❌ Will use system Python, not venv
 **Environment Requirements**:
 - Virtual environment at `/Users/brandoncullum/DJ-R3X Voice/venv/`
 - All dependencies installed via `pip install -r requirements.txt`
-- API keys loaded from `.env` file in project root
+- API keys loaded from `.env` file in project root (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
 - Running from `cantina_os/` directory for correct module resolution
 - **Terminal**: Use Terminal.app, NOT Warp (Warp has known issues with macOS Accessibility permissions for mouse input via pynput)
+
+**CRITICAL: Avoid False Positives in Testing**
+
+When asked to test a service "fully", this MUST include:
+- ✅ Unit tests with mocks (verifies internal logic)
+- ✅ Integration tests (verifies service interactions)
+- ✅ **End-to-End tests with REAL API keys** (verifies actual integration works)
+
+**Do NOT claim "fully tested" if you only run unit/integration tests with mocked APIs.** This misses:
+- API authentication failures (bad/missing keys)
+- Request format mismatches (sending wrong data structure)
+- Response parsing errors (API returns different format)
+- Rate limiting, timeouts, network errors
+- Actual service behavior and latency
+
+Example of inadequate testing:
+```python
+# ❌ This doesn't test ANYTHING real
+service = ClaudeService(event_bus=MockEventBus())
+service.register_tool(mock_tool)
+assert mock_tool in service.tools  # ✓ Passes, but doesn't call Claude API
+```
+
+Example of PROPER end-to-end testing:
+```python
+# ✅ This actually verifies the service works
+import os
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+assert anthropic_key, "ANTHROPIC_API_KEY not found in .env"
+
+service = ClaudeService(event_bus=real_event_bus)
+await service.start()
+# Send real transcription → verify Claude API responds correctly
+# Send real tool calls → verify Claude executes them
+```
 
 ---
 
@@ -541,10 +576,44 @@ python3 -m cantina_os.main # ❌ Will use system Python, not venv
 - `config/`: Environment and feature configuration
 - `.env`: API keys and hardware settings
 
-### Testing
-- `cantina_os/tests/mocks/`: Mock services for testing
-- `cantina_os/tests/unit/`: Unit tests by service
-- `cantina_os/tests/integration/`: End-to-end tests
+### Testing Strategy
+
+Three tiers of testing required for complete coverage:
+
+**1. Unit Tests** (`cantina_os/tests/unit/`)
+- Test individual service logic in isolation using mocks
+- Verify internal state management, message handling, event emission
+- Use `MockEventBus`, mocked API clients, mocked hardware
+- Fast execution, no external dependencies needed
+- Example: Test SessionMemory token pruning without calling Claude API
+
+**2. Integration Tests** (`cantina_os/tests/integration/`)
+- Test services together without external APIs (e.g., service A → event → service B)
+- Use real service classes but mock external API calls
+- Verify event propagation, subscription patterns, state transitions
+- Should work without API keys
+
+**3. End-to-End Tests** (real API calls)
+- **CRITICAL**: Test against real external APIs (Anthropic, ElevenLabs, Deepgram)
+- Requires valid API keys in `.env` (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
+- Verifies actual service behavior: API connectivity, response parsing, error handling
+- Must be run before declaring "EVERYTHING is working"
+- Tests should verify:
+  - Service can connect to actual API
+  - Request formatting is correct
+  - Response parsing matches expectations
+  - Streaming works if enabled
+  - Tool calls execute with real API
+  - Error handling for actual API errors
+
+**What "fully tested" means**:
+- ✅ All unit tests pass (mocked)
+- ✅ All integration tests pass (service-to-service, mocked APIs)
+- ✅ E2E tests pass with real API keys (actual external service calls)
+
+**Common mistake to avoid**:
+- Mocking everything and claiming "EVERYTHING works" without real API validation
+- Not testing with actual API keys = missing critical integration failures
 
 ---
 
