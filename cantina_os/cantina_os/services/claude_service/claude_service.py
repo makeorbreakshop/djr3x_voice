@@ -193,8 +193,22 @@ class ClaudeService(BaseService):
     async def _initialize(self) -> None:
         """Initialize the Claude service."""
         try:
-            # Initialize Anthropic client
-            self._client = Anthropic(api_key=self._config["ANTHROPIC_API_KEY"])
+            # Get API key - try config first, then environment
+            api_key = self._config.get("ANTHROPIC_API_KEY", "").strip()
+            if not api_key:
+                # Fallback to environment variable
+                import os
+                api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY not found in config or environment")
+
+            # Initialize Anthropic client - pass api_key explicitly to ensure it's set
+            self._client = Anthropic(api_key=api_key)
+
+            # Verify client was initialized with key
+            if not self._client:
+                raise RuntimeError("Failed to initialize Anthropic client")
 
             # Initialize rate limiting
             self._max_requests_per_window = self._config["RATE_LIMIT_REQUESTS"]

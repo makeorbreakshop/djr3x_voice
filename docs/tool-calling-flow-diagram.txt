@@ -1,0 +1,484 @@
+================================================================================
+DJ R3X TOOL CALLING ARCHITECTURE - DETAILED FLOW DIAGRAM
+================================================================================
+
+1. TOOL DEFINITION & REGISTRATION PHASE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ cantina_os/llm/command_functions.py                                     │
+│                                                                         │
+│ PlayMusicParams          StopMusicParams         SetEyeColorParams     │
+│ ├─ track: str            ├─ (no params)          ├─ color: str         │
+│ └─ description           └─ description          ├─ pattern: str?      │
+│                                                   ├─ intensity: float?  │
+│                                                   └─ description       │
+└─────────────────────────────────────────────────────────────────────────┘
+                                ↓
+                    Pydantic.schema() → JSON Schema
+                                ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ create_*_function() helpers                                             │
+│                                                                         │
+│ Returns: {                                                              │
+│   "type": "function",                                                   │
+│   "function": {                                                         │
+│     "name": "play_music",                                               │
+│     "description": "...",                                               │
+│     "parameters": {...}  # JSON Schema from Pydantic                   │
+│   }                                                                     │
+│ }                                                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+                                ↓
+        AVAILABLE_FUNCTIONS = [all tool definitions]
+                                ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService.__init__()                                                   │
+│                                                                         │
+│ _register_command_functions()                                           │
+│   └─ for each function_def in get_all_function_definitions():          │
+│       └─ register_tool(function_def)                                    │
+│           ├─ self._tools[tool_name] = tool_schema                       │
+│           └─ self._tool_schemas = [all registered tools]               │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+2. REQUEST PREPARATION & TOOL INCLUSION
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService._process_with_gpt(user_input)                               │
+│                                                                         │
+│ 1. Add user message to SessionMemory                                    │
+│    └─ memory.add_message("user", user_input)                            │
+│                                                                         │
+│ 2. Prepare API request data:                                            │
+│    ├─ "model": "gpt-4.1-mini"                                           │
+│    ├─ "messages": memory.get_messages_for_api()                         │
+│    │  └─ Returns: [system, user, assistant+tool_calls, tool, ...]      │
+│    ├─ "temperature": 0.7                                                │
+│    ├─ "stream": True                                                    │
+│    ├─ "tools": self._tool_schemas  ← ALL REGISTERED TOOLS             │
+│    └─ "tool_choice": "auto"  ← LET MODEL DECIDE                        │
+│                                                                         │
+│ 3. Make API call (streaming or non-streaming)                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+3. STREAMING RESPONSE PROCESSING
+================================================================================
+
+OpenAI API Response Stream:
+  data: {"choices":[{"delta":{"content":"I'll play"}}]}
+  data: {"choices":[{"delta":{"content":" music"}}]}
+  data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"name":"play"}}]}}]}
+  data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"arguments":"{\"track"}}]}}]}
+  data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"arguments":"\":\"cantina_band"}}]}}]}
+  data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"arguments":"\""}}]}}]}
+  data: {"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"arguments":"}"}}]}}]}
+  data: [DONE]
+
+                                ↓
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService._stream_gpt_response(api_url, request_data)                 │
+│                                                                         │
+│ For each chunk in response.content:                                     │
+│   ├─ Extract delta from parsed JSON                                     │
+│   │                                                                     │
+│   ├─ IF "content" in delta:                                             │
+│   │  └─ full_content += delta["content"]                                │
+│   │  └─ emit LLM_RESPONSE_CHUNK event                                   │
+│   │                                                                     │
+│   └─ IF "tool_calls" in delta:                                          │
+│      │                                                                  │
+│      └─ For each tool_call_delta:                                       │
+│         ├─ tool_call_id = tool_call_delta["id"]                         │
+│         │                                                               │
+│         ├─ IF NOT in tool_calls_collection:                             │
+│         │  ├─ Create new entry with empty name + arguments             │
+│         │  └─ Add to incomplete_tool_calls set                          │
+│         │                                                               │
+│         ├─ Append to function["name"]                                   │
+│         ├─ Append to function["arguments"]                              │
+│         │                                                               │
+│         └─ TRY json.loads(arguments):                                    │
+│            ├─ SUCCESS → Mark complete, add to complete_tool_calls      │
+│            │           → Call _process_tool_calls() immediately        │
+│            │                                                            │
+│            └─ FAIL (JSONDecodeError):                                   │
+│               ├─ IF args end with '}':                                  │
+│               │  └─ Replace "'" with '"' and retry                      │
+│               │     ├─ SUCCESS → Process immediately                   │
+│               │     └─ FAIL → Continue streaming                       │
+│               │                                                         │
+│               └─ ELSE → Continue streaming next chunk                   │
+│                                                                         │
+│ After [DONE]:                                                           │
+│   └─ Final attempt to process any remaining incomplete_tool_calls      │
+│      └─ Log warnings for truly incomplete calls                         │
+│                                                                         │
+│ Add complete message to memory:                                         │
+│   └─ memory.add_message("assistant", full_content, tool_calls=...)     │
+│                                                                         │
+│ Emit final LLM_RESPONSE event:                                          │
+│   └─ await emit(LLM_RESPONSE, LLMResponsePayload(...))                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+4. TOOL CALL PROCESSING (Intent Detection)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService._process_tool_calls(tool_calls, response_text)              │
+│                                                                         │
+│ For each tool_call in tool_calls:                                       │
+│   ├─ Extract:                                                           │
+│   │  ├─ function_name = tool_call["function"]["name"]                  │
+│   │  └─ function_args_str = tool_call["function"]["arguments"]         │
+│   │                                                                     │
+│   ├─ Parse arguments:                                                   │
+│   │  ├─ TRY: function_args = json.loads(function_args_str)              │
+│   │  └─ CATCH JSONDecodeError: log and continue to next tool call      │
+│   │                                                                     │
+│   ├─ Validate against Pydantic:                                         │
+│   │  ├─ model_map = function_name_to_model_map()                        │
+│   │  ├─ IF function_name in model_map:                                  │
+│   │  │  ├─ param_model = model_map[function_name]                       │
+│   │  │  ├─ TRY: validated = param_model(**function_args)                │
+│   │  │  │  └─ function_args = validated.model_dump()                   │
+│   │  │  └─ CATCH ValidationError: log and continue                      │
+│   │  │                                                                  │
+│   │  └─ ELSE: log warning, use unvalidated args                         │
+│   │                                                                     │
+│   └─ Create & emit INTENT_DETECTED event:                               │
+│      └─ IntentPayload(                                                  │
+│         ├─ intent_name=function_name,  # e.g., "play_music"            │
+│         ├─ parameters=function_args,    # {"track": "cantina_band"}    │
+│         ├─ original_text=response_text, # Full LLM response            │
+│         ├─ conversation_id=...                                          │
+│         └─ confidence=None                                              │
+│      )                                                                  │
+│      └─ await emit(INTENT_DETECTED, payload)                            │
+│                                                                         │
+│ Log final statistics:                                                   │
+│   └─ "Processed X/Y tool calls successfully"                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+5. EVENT PROPAGATION
+================================================================================
+
+Event Bus broadcasts INTENT_DETECTED:
+
+┌─────────────────────────────────────────┐
+│ LLM Response Event Listeners             │
+├─────────────────────────────────────────┤
+│ • ElevenLabsService                     │
+│   └─ Listens to: LLM_RESPONSE          │
+│   └─ Action: Synthesize response text   │
+│      (plays while intent executes)      │
+└─────────────────────────────────────────┘
+        ↓
+        │ LLM_RESPONSE
+        ↓
+[Speech Synthesis & Playback Starts]
+
+┌─────────────────────────────────────────┐
+│ Intent Detection Event Listeners         │
+├─────────────────────────────────────────┤
+│ • IntentRouterService                   │
+│   └─ Listens to: INTENT_DETECTED       │
+│   └─ Action: Route & execute intent     │
+└─────────────────────────────────────────┘
+        ↓
+        │ INTENT_DETECTED
+        ↓
+
+
+6. INTENT ROUTING & EXECUTION
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ IntentRouterService._handle_intent(payload)                            │
+│                                                                         │
+│ Extract from payload:                                                   │
+│   ├─ intent_name = "play_music"                                         │
+│   ├─ parameters = {"track": "cantina_band"}                             │
+│   ├─ conversation_id = "conv-123"                                       │
+│   ├─ original_text = "I'll play some music"                             │
+│   └─ tool_call_id = "call_abc123"  (from tool_calls if present)         │
+│                                                                         │
+│ Route to handler:                                                       │
+│   ├─ IF intent_name in self._intent_handlers:                           │
+│   │  ├─ handler = self._intent_handlers[intent_name]                    │
+│   │  ├─ result = await handler(parameters, conversation_id)            │
+│   │  │                                                                  │
+│   │  └─ await self._emit_intent_execution_result(...)                   │
+│   │     └─ Emit INTENT_EXECUTION_RESULT with:                           │
+│   │        ├─ intent_name                                               │
+│   │        ├─ parameters (original)                                     │
+│   │        ├─ result (execution result dict)                            │
+│   │        ├─ success (from result["success"])                          │
+│   │        ├─ tool_call_id (preserve original)                          │
+│   │        └─ conversation_id                                           │
+│   │                                                                     │
+│   └─ ELSE: Log warning, emit failed result                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ IntentRouterService._handle_play_music_intent(parameters, conv_id)     │
+│                                                                         │
+│ 1. Extract parameter:                                                   │
+│    └─ track = parameters.get("track", "")  # "cantina_band"            │
+│                                                                         │
+│ 2. Smart track selection:                                               │
+│    └─ selected_track = await self._select_smart_track(track)            │
+│       ├─ Check if track number                                          │
+│       ├─ Check for keyword matches                                      │
+│       ├─ Default to generic "cantina_band" if no match                  │
+│       └─ Return selected_track                                          │
+│                                                                         │
+│ 3. Emit CLI_COMMAND for unified processing:                             │
+│    └─ await emit(CLI_COMMAND, {                                         │
+│       ├─ "command": "play",                                             │
+│       ├─ "subcommand": "music",                                         │
+│       ├─ "args": [selected_track],                                      │
+│       └─ "conversation_id": conv_id                                     │
+│    })                                                                   │
+│                                                                         │
+│ 4. Return result dict:                                                  │
+│    └─ {                                                                 │
+│       ├─ "success": True,                                               │
+│       ├─ "track": selected_track,                                       │
+│       ├─ "original_request": track,                                     │
+│       └─ "message": "Now playing: ..."                                  │
+│    }                                                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+
+        ↓ (Music command propagates separately)
+        ↓
+[Music Controller Service executes music playback]
+
+
+7. TOOL EXECUTION RESULT PROCESSING
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService._process_intent_execution_result(payload)                   │
+│                                                                         │
+│ Receive IntentExecutionResultPayload:                                   │
+│   ├─ intent_name = "play_music"                                         │
+│   ├─ parameters = {"track": "cantina_band"}                             │
+│   ├─ result = {"success": True, "track": "cantina_band", ...}          │
+│   ├─ success = True                                                     │
+│   ├─ tool_call_id = "call_abc123"                                       │
+│   └─ error_message = None                                               │
+│                                                                         │
+│ 1. Add tool response to conversation memory:                            │
+│    └─ response_content = json.dumps(result)                             │
+│    └─ memory.add_message(                                               │
+│       ├─ role="tool",                                                   │
+│       ├─ content=response_content,                                      │
+│       ├─ tool_call_id="call_abc123",                                    │
+│       └─ name="play_music"                                              │
+│    )                                                                    │
+│                                                                         │
+│ 2. Generate verbal feedback via second API call:                        │
+│    └─ await self._get_verbal_response_for_intent(                      │
+│       ├─ intent_name,                                                   │
+│       ├─ parameters,                                                    │
+│       ├─ result,                                                        │
+│       └─ success                                                        │
+│    )                                                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ GPTService._get_verbal_response_for_intent(...)                        │
+│                                                                         │
+│ Load verbal feedback persona (from dj_r3x-verbal-feedback-persona.txt)  │
+│                                                                         │
+│ Prepare focused API call:                                               │
+│   ├─ messages = [                                                       │
+│   │  ├─ {"role": "system", "content": verbal_feedback_persona},         │
+│   │  └─ {"role": "user", "content": intent_details_string}              │
+│   │ ]                                                                   │
+│   │                                                                     │
+│   ├─ request_data = {                                                   │
+│   │  ├─ "model": "gpt-4.1-mini",                                        │
+│   │  ├─ "messages": messages,                                           │
+│   │  ├─ "temperature": 0.7,                                             │
+│   │  ├─ "stream": False,  ← No streaming for feedback                  │
+│   │  ├─ "tool_choice": "none",  ← Force text-only, no tools            │
+│   │  └─ "tools": self._tool_schemas (or [])                             │
+│   │ }                                                                   │
+│                                                                         │
+│ POST to OpenAI API → Get verbal feedback                                │
+│                                                                         │
+│ Emit LLM_RESPONSE:                                                      │
+│   └─ await emit(LLM_RESPONSE, LLMResponsePayload(                       │
+│      ├─ text=verbal_response,  # "Great! Now playing..."               │
+│      ├─ tool_calls=None,                                                │
+│      └─ is_complete=True                                                │
+│   ))                                                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+
+        ↓ LLM_RESPONSE event
+        ↓
+┌─────────────────────────────────────────┐
+│ ElevenLabsService                       │
+│ (still listening to all LLM_RESPONSE)  │
+├─────────────────────────────────────────┤
+│ Synthesize feedback text:                │
+│ "Great! Now playing Cantina Band"       │
+│                                          │
+│ Emit SPEECH_SYNTHESIS_STARTED           │
+│ (Music controller ducks volume)          │
+│                                          │
+│ Stream audio to speakers                 │
+│                                          │
+│ Emit SPEECH_SYNTHESIS_ENDED             │
+│ (Music controller restores volume)       │
+└─────────────────────────────────────────┘
+
+
+8. CONVERSATION MEMORY STATE EVOLUTION
+================================================================================
+
+Initial state:
+  └─ [system prompt]
+
+After user speaks "play music":
+  ├─ [system prompt]
+  └─ {"role": "user", "content": "play music"}
+
+After GPT response with tool call:
+  ├─ [system prompt]
+  ├─ {"role": "user", "content": "play music"}
+  └─ {
+     "role": "assistant",
+     "content": "I'll play some music for you!",
+     "tool_calls": [{
+       "id": "call_abc123",
+       "type": "function",
+       "function": {
+         "name": "play_music",
+         "arguments": "{\"track\": \"cantina_band\"}"
+       }
+     }]
+    }
+
+After tool execution:
+  ├─ [system prompt]
+  ├─ {"role": "user", "content": "play music"}
+  ├─ {"role": "assistant", "content": "...", "tool_calls": [...]}
+  └─ {
+     "role": "tool",
+     "content": "{\"success\": true, \"track\": \"cantina_band\", ...}",
+     "tool_call_id": "call_abc123",
+     "name": "play_music"
+    }
+
+After verbal feedback generated:
+  ├─ [system prompt]
+  ├─ {"role": "user", "content": "play music"}
+  ├─ {"role": "assistant", "content": "...", "tool_calls": [...]}
+  ├─ {"role": "tool", "content": "{...}"}
+  └─ {"role": "assistant", "content": "Great! Now playing Cantina Band"}
+
+[After max_messages or token limit exceeded, oldest messages pruned]
+
+
+9. EVENT SEQUENCE DIAGRAM
+================================================================================
+
+Timeline (approximate):
+
+T+0.0s   User speaks "play music"
+         ↓
+T+0.1s   DeepgramDirectMicService → TRANSCRIPTION_FINAL
+         ↓
+T+0.2s   GPTService._handle_transcription()
+         ├─ Call OpenAI API (with tools)
+         ├─ Start streaming response
+         └─ Begin reconstructing tool calls
+
+T+1.5s   LLM finishes streaming
+         ├─ _stream_gpt_response() completes
+         ├─ Tool calls fully reconstructed
+         ├─ LLM_RESPONSE emitted
+         └─ _process_tool_calls() called
+
+T+1.6s   ElevenLabsService receives LLM_RESPONSE
+         ├─ Call ElevenLabs TTS API
+         ├─ Emit SPEECH_SYNTHESIS_STARTED
+         └─ Stream audio to speakers
+
+T+1.7s   IntentRouterService receives INTENT_DETECTED
+         ├─ _handle_play_music_intent() called
+         ├─ Smart track selection
+         ├─ CLI_COMMAND emitted
+         └─ INTENT_EXECUTION_RESULT emitted
+
+T+2.0s   GPTService receives INTENT_EXECUTION_RESULT
+         ├─ Tool response added to memory
+         └─ Call OpenAI API for verbal feedback
+
+T+2.2s   Speech synthesis of main response still playing
+         ├─ ElevenLabsService → SPEECH_SYNTHESIS_AMPLITUDE events
+         └─ Music controller adjusting volume
+
+T+3.0s   Main response finishes playing
+         ├─ ElevenLabsService → SPEECH_SYNTHESIS_ENDED
+         ├─ Music controller restores volume
+         └─ Music starts playing (or already playing)
+
+T+3.5s   GPTService receives verbal feedback from API
+         ├─ LLM_RESPONSE emitted (feedback text)
+         └─ ElevenLabsService receives it
+
+T+3.7s   ElevenLabsService synthesizes feedback
+         ├─ SPEECH_SYNTHESIS_STARTED
+         └─ Stream to speakers
+
+T+5.5s   Feedback finishes, full interaction complete
+
+
+10. ERROR HANDLING SCENARIOS
+================================================================================
+
+Scenario 1: Invalid JSON in tool arguments
+  Tool streaming: arguments = "{\"track\": \"cantina"
+  JSON parse attempt: FAIL
+  args_str ends with '}': NO
+  → Continue streaming, eventually timeout or receive [DONE]
+  → _process_tool_calls() skips malformed tool call
+  → Emit partial INTENT_EXECUTION_RESULT with error
+
+Scenario 2: Tool handler not registered
+  IntentRouterService._handle_intent()
+  → intent_name not in self._intent_handlers
+  → Log warning
+  → Emit INTENT_EXECUTION_RESULT with success=False
+  → GPTService generates error feedback
+
+Scenario 3: Tool execution throws exception
+  Handler's try/except catches exception
+  → Return {"success": False, "error": "..."}
+  → INTENT_EXECUTION_RESULT emitted with success=False
+  → GPTService generates error feedback
+
+Scenario 4: Parameter validation fails
+  ValidationError raised by Pydantic
+  → _process_tool_calls() catches and logs error
+  → Tool call skipped
+  → No INTENT_DETECTED emitted for that call
+
+Scenario 5: API rate limit exceeded
+  OpenAI API returns 429 status
+  → _stream_gpt_response() logs error
+  → _emit_status() called with ERROR status
+  → User hears error message from fallback
+
+
+================================================================================
