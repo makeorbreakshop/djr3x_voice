@@ -223,6 +223,135 @@ Initial unit test suite (31 tests) had mocks for all API calls, creating false c
 
 ---
 
+## [Continued] Critical Bug Fix: Claude Haiku 4.5 Model Configuration ✅
+
+### Issue
+ClaudeService had hardcoded wrong model default in `_load_config()`: was using `claude-3-5-sonnet-20241022` (Sonnet 3.5) instead of correct `claude-haiku-4-5-20251001`.
+
+### Root Cause
+**Config default was overriding main.py setting** - even though `main.py:558` was trying to set Haiku 4.5, the service's `_load_config()` had a hardcoded fallback to old Sonnet model ID.
+
+### Fix Applied
+1. **Fixed model ID in claude_service.py:182**
+   - Changed: `"claude-3-5-sonnet-20241022"` (wrong)
+   - To: `"claude-haiku-4-5-20251001"` (correct, per official Anthropic docs)
+
+2. **Verified API parameters are correct**
+   - Only using `temperature` (NOT both temperature + top_p) ✓ Claude 4.5 requirement
+   - Using dedicated `system` parameter ✓
+   - Tool format conversion (OpenAI → Claude native) ✓
+   - Streaming support enabled ✓
+
+3. **Committed fix**: `b46ee11 - fix: Use correct default Claude Haiku 4.5 model ID in config`
+
+### Checklist vs Anthropic Migration Docs
+✓ Single sampling parameter (temperature only, no top_p)
+✓ Dedicated system parameter (not in messages)
+✓ Claude-native tool format (not OpenAI format)
+✓ Correct model ID: `claude-haiku-4-5-20251001`
+✓ No stop_reason "refusal" handling needed (basic DJ use case)
+
+**Status**: ClaudeService configuration now fully compliant with Anthropic Claude 4.5 API requirements.
+
+---
+
+## System Prompt Optimization: Claude 4.5 Best Practices ✅
+
+### Context
+Reviewed Anthropic's official guidance (Claude 4.5 docs + "Effective Context Engineering for AI Agents" blog) to ensure DJ R3X system prompt follows current best practices for voice interaction and tool use.
+
+### Key Findings from Anthropic's Guidance
+
+**"Right Altitude" Principle**: Avoid two extremes:
+- ❌ Overly rigid hardcoded rules (brittle, inflexible)
+- ❌ Vague high-level guidance (assumes shared understanding)
+- ✅ Specific enough to guide behavior + flexible enough for strong heuristics
+
+**Best Practices**:
+1. **Use XML-structured sections** for clarity (e.g., `<role>`, `<personality>`, `<available_tools>`)
+2. **Include concrete examples** - "pictures worth a thousand words" rather than exhaustive edge case lists
+3. **Design minimal, unambiguous tool sets** - "If a human engineer can't say which tool to use, an AI can't either"
+4. **Start minimal, incrementally add** based on observed failure modes
+
+### Current System Prompt Analysis
+
+**Before (dj_r3x-persona.txt)**:
+- ✅ Good personality definition
+- ❌ Missing concrete examples (no "show don't tell")
+- ❌ No explicit tool guidance
+- ❌ Missing voice-interaction context (brevity, no ellipses)
+- ❌ Loosely organized (no XML structure)
+
+**After (Enhanced)**:
+- ✅ XML-structured sections (`<role>`, `<personality>`, `<speech_style>`, `<available_tools>`, `<behavior_guidelines>`, `<example_interactions>`)
+- ✅ Concrete examples showing expected responses (USER → YOUR_RESPONSE + tool usage)
+- ✅ Explicit tool definitions with proactive usage guidance
+- ✅ Voice-interaction specifics (keep brief, no ellipses for TTS)
+- ✅ "Right altitude" - specific guidance without over-specification
+- ✅ Clear behavior examples: "play that song" → use tool immediately, don't ask for confirmation
+
+### Improvements Made
+
+**File**: `/Users/brandoncullum/DJ-R3X Voice/cantina_os/dj_r3x-persona.txt`
+
+**Changes**:
+1. Added XML-style section tags for clarity
+2. Rewrote role definition with updated terminology
+3. Enhanced personality with context (why each trait matters)
+4. Added explicit voice-interaction context (brief responses, no ellipses for text-to-speech)
+5. Added `<available_tools>` section detailing all 3 tools with usage guidance
+6. Added `<behavior_guidelines>` with MUST/NEVER constraints
+7. Added `<example_interactions>` section with 6 diverse canonical examples:
+   - Playing music (show proactive tool use)
+   - Personal question (Star Wars reference)
+   - Ambiguous request (handling "something energetic")
+   - Personality test (jokes, possible eye color tool use)
+   - Unknown request (error handling with DJ humor)
+   - Stop command
+8. Added `<personality_notes>` emphasizing "enthusiastic but not overbearing"
+
+**Key Example Format** (following Anthropic's guidance):
+```
+USER: "Can you play Cantina Band?"
+YOUR RESPONSE: "Oh YEAH! Classic! Spinning that galactic groove for you right now!" [use play_music tool immediately]
+```
+
+This shows:
+- What the user says
+- What we want Claude to respond with
+- What tool action to take (no ambiguity)
+
+### Why This Matters for Voice Interaction
+
+1. **Brevity**: Examples enforce 1-3 sentence responses (natural voice flow)
+2. **Tool Proactivity**: Examples show Claude should use tools immediately, not ask for permission
+3. **TTS Compatibility**: Explicit "no ellipses" prevents text-to-speech parsing errors
+4. **Personality Consistency**: Concrete examples prevent tone drift across different user inputs
+5. **DJ Character**: Examples show maintained enthusiasm without being overbearing
+
+### Alignment with Anthropic Best Practices
+
+✅ **Right Altitude**: Specific enough to guide (6 examples, 3 tools clearly defined) but flexible (not exhaustive edge cases)
+✅ **Structured Organization**: XML tags improve Claude's understanding of distinct sections
+✅ **Example-Driven**: Shows expected behavior patterns instead of listing rules
+✅ **Minimal Tool Set**: 3 tools only (play_music, stop_music, set_eye_color) - no ambiguity
+✅ **Iterative Approach**: Based on observed DJ R3X interaction patterns, not theoretical edge cases
+
+### Technical Implementation
+
+- **Streaming**: Enabled (correct - Claude Haiku 4.5 default)
+- **System Parameter**: Dedicated (correct - not baked into messages)
+- **Tool Format**: Claude-native (correct - not OpenAI format)
+- **Temperature**: 0.7 (good for creative but consistent responses)
+
+### Deliverables
+
+- Updated: `dj_r3x-persona.txt` with comprehensive system prompt following Anthropic best practices
+- Documented: Rationale in this log entry
+- Benefits: Cleaner personality definition, better tool use guidance, improved voice interaction
+
+---
+
 ## 📝 Summary for Condensed Log
 ```
 ### 2025-11-07: LLM Provider Analysis & Claude Migration Planning
@@ -238,4 +367,16 @@ Initial unit test suite (31 tests) had mocks for all API calls, creating false c
 - **Migration Effort**: 3-4 hours for production-ready implementation
 - **Next Steps**: Create migration branch, update GPTService, test with DJ personas
 - **Technical Decision**: Will pursue Sonnet 4.5 as first choice due to superior latency + capability balance
+
+### 2025-11-07: System Prompt Optimization - Claude 4.5 Best Practices ✅
+- **Review**: Analyzed Anthropic's official Claude 4.5 docs + "Effective Context Engineering for AI Agents"
+- **Key Principle**: Find "right altitude" - specific enough to guide, flexible enough to be robust
+- **Improvements to dj_r3x-persona.txt**:
+  - Added XML-structured sections for clarity (`<role>`, `<personality>`, `<available_tools>`, etc.)
+  - Added 6 concrete canonical examples (follow "show don't tell" principle)
+  - Explicit tool guidance with proactive usage patterns
+  - Voice-interaction specifics (brief responses, no ellipses for text-to-speech)
+  - "Right altitude" design: 3-tool set, example-driven, no over-specification
+- **Result**: Enhanced system prompt aligned with Anthropic best practices for voice agents
+- **Streaming**: Verified enabled, system parameter correct, tool format Claude-native
 ```
