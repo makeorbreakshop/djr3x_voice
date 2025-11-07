@@ -16,7 +16,7 @@ python-vlc>=3.0.20000  # VLC media player integration for music playback
 
 # LLM Integration
 openai>=2.6.0  # UPDATED 2025-10-20: GPT-4.1 family support with improved performance
-anthropic>=0.71.0  # UPDATED 2025-10-20: Claude 3.5/3.7 Sonnet with superior tool calling (69-81% TAU-bench)
+anthropic>=0.72.0  # UPDATED 2025-11-07: Latest stable SDK (0.72.0+) with fixed Anthropic client initialization
 
 # Speech Synthesis
 elevenlabs>=2.17.0  # UPDATED 2025-10-20: Flash v2.5 model with 75ms latency, v3 with emotional range
