@@ -178,8 +178,8 @@ class ClaudeService(BaseService):
 
         return {
             "ANTHROPIC_API_KEY": config.get("ANTHROPIC_API_KEY", ""),
-            # Claude 3.5 Sonnet 4.5: 200-250ms first token (faster than GPT-4.1-mini)
-            "MODEL": config.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022"),
+            # Claude Haiku 4.5 (claude-haiku-4-5-20251001): fastest, best latency for voice interactions
+            "MODEL": config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
             "MAX_TOKENS": config.get("MAX_TOKENS", 4000),
             "MAX_MESSAGES": config.get("MAX_MESSAGES", 20),
             "TEMPERATURE": config.get("TEMPERATURE", 0.7),
