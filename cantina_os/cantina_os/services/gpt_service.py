@@ -324,13 +324,9 @@ class GPTService(BaseService):
                 return
                 
             self.logger.info(f"Processing final transcript from mouse click: {transcript}")
-            
-            # Always reset conversation state for a new voice interaction turn from mouse click.
-            # This ensures each utterance is treated as a fresh start with the LLM.
-            self.logger.info("Resetting conversation state for new voice input.")
-            await self.reset_conversation() 
 
-            # Process the transcript with the now-reset conversation state
+            # Maintain conversation context across voice interactions
+            # SessionMemory will automatically manage the sliding window (max 20 messages, 4000 tokens)
             await self._process_with_gpt(transcript)
             
         except Exception as e:

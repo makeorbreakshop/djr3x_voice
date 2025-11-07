@@ -375,8 +375,7 @@ class ElevenLabsService(BaseService):
                             voice_id=voice_id,
                             model_id=model_id,
                             voice_settings=voice_settings,
-                            optimize_streaming_latency=self._config.latency_optimization,  # 0-4, 4=max optimization
-                            output_format="mp3_44100_128"  # Standard quality format
+                            output_format="mp3_44100_128"  # Match non-streaming format to prevent sample rate mismatch
                         )
 
                         # Use the ElevenLabs stream utility to play the audio
