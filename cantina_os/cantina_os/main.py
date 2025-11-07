@@ -35,6 +35,7 @@ from .services import (
     MouseInputService,
     IntentRouterService
 )
+from .services.claude_service import ClaudeService  # Claude 3.5 Sonnet 4.5 LLM provider
 from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
 from .services.command_dispatcher_service import CommandDispatcherService
@@ -329,7 +330,7 @@ class CantinaOS:
             "latency_tracker",  # Add latency tracker early to capture all pipeline events
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
-            "gpt",
+            "claude",  # Claude 3.5 Sonnet 4.5 LLM provider (faster latency than GPT-4.1-mini)
             "intent_router",  # Add IntentRouterService to route LLM intents to hardware commands
             "brain_service",  # Add brain service to handle intents and generate plans
             "timeline_executor_service",  # Add timeline executor to handle layered plans
@@ -505,6 +506,7 @@ class CantinaOS:
         service_class_map = {
             "deepgram_direct_mic": DeepgramDirectMicService,
             "gpt": GPTService,
+            "claude": ClaudeService,  # Claude 3.5 Sonnet 4.5 LLM provider
             "elevenlabs": ElevenLabsService,
             "eye_light_controller": EyeLightControllerService,
             "cli": CLIService,
@@ -546,7 +548,19 @@ class CantinaOS:
                 service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", True)
             # Disable streaming to ensure proper text and tool call handling
             service_config["STREAMING"] = False
-                
+
+        elif service_name == "claude":
+            # Ensure Claude service has Anthropic API key
+            if "ANTHROPIC_API_KEY" not in service_config:
+                service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
+            if "CLAUDE_MODEL" not in service_config:
+                service_config["CLAUDE_MODEL"] = self._config.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+            # Pass interim streaming config flag
+            if "ENABLE_INTERIM_STREAMING" not in service_config:
+                service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", True)
+            # Enable streaming for Claude (better support than GPT)
+            service_config["STREAMING"] = True
+
         elif service_name == "elevenlabs":
             # Ensure ElevenLabs service has API key and other configuration
             if "ELEVENLABS_API_KEY" not in service_config:

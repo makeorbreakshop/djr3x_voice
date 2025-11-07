@@ -801,6 +801,39 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: DJ Mode dashboard now correctly displays generated commentary text instead of "Waiting for next commentary..."
 - **Technical**: Fixed field name extraction from data.get("text") to data.get("commentary_text") or data.get("text") fallback
 
+### 2025-11-05: Ultra-Low Latency AI Services Upgrade
+- **Issue**: System response time 1.5-2.8s felt sluggish, SDKs outdated by 6+ months
+- **Solution**: Upgraded ElevenLabs (→2.22.0 + Flash v2.5 75ms TTFB), OpenAI (→2.7.1 + GPT-4.1-mini), optimized Deepgram (Nova-3 + 600ms turn detection)
+- **Impact**: Expected 50% latency reduction → 0.77-1.35s total pipeline
+- **Technical**: ElevenLabs latency_optimization=4 (~75% improvement), utterance_end_ms 600ms (-40%), Deepgram SDK 5.x incompatibility managed with 4.8.1 stability
+
+### 2025-11-05: Deepgram SDK Compatibility Bug - HTTP 400 Bad Request
+- **Issue**: Added SDK 5.x-only parameters (endpointing, filler_words) causing HTTP 400 WebSocket rejection
+- **Solution**: Removed incompatible params, stuck with SDK 4.8.1 stable version
+- **Impact**: System fully functional with compatible configuration
+- **Technical**: SDK version compatibility critical - features don't work across versions even if syntactically valid
+
+### 2025-11-05-06: LatencyTrackerService Implementation
+- **Goal**: Track voice pipeline latency to verify ultra-low latency optimizations (target: <1.5s)
+- **Solution**: Built service following TDD (18 passing tests) subscribing to VOICE_LISTENING_STARTED → TRANSCRIPTION_FINAL → LLM_RESPONSE_TEXT → SPEECH_SYNTHESIS events
+- **Impact**: Auto-emits DEBUG_PERFORMANCE events with stage latencies (transcription/LLM/TTS) + aggregate reporting
+- **Technical**: Conversation_id tracking critical - required explicit propagation through entire pipeline for latency correlation
+
+### 2025-11-06: ElevenLabs Voice Speed/Pitch Drift - ROOT CAUSE FIXED
+- **Issue**: Voice speeds up and pitch rises on longer responses (sounds like "fast-forward")
+- **Root Cause**: Sample rate mismatch - streaming call missing `output_format="mp3_44100_128"` parameter
+- **Solution**: Added explicit output_format to streaming call matching non-streaming implementation
+- **Impact**: Voice maintains consistent speed/pitch throughout entire response
+- **Technical**: Sample rate doubling (22kHz→44kHz) causes 2x playback speed + pitch shift - classic streaming audio gotcha
+- **Commits**: 12b1a41 (voice speed fix), f18cdcf (conversation memory), 2bb145a (dev log)
+
+### 2025-11-06: Conversation Memory Implementation - ENABLED
+- **Issue**: Each voice interaction was isolated - DJ R3X had no context across exchanges
+- **Root Cause**: `reset_conversation()` called on every mouse click, wiping SessionMemory clean
+- **Solution**: Removed premature reset - SessionMemory was already perfectly implemented with buffer window (20 messages, 4000 tokens)
+- **Impact**: DJ R3X maintains natural conversation flow across multiple interactions
+- **Technical**: OpenAI Chat Completions is stateless - entire message array sent with each API call. SessionMemory class was already following industry best practices (LangChain recommended pattern), just needed to stop resetting it
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)
