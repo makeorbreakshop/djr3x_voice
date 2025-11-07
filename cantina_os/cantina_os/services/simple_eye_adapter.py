@@ -5,6 +5,15 @@ This adapter translates between the complex JSON commands used by the EyeLightCo
 and the ultra-simple single-character commands expected by the Arduino sketch.
 """
 
+"""
+SERVICE: SimpleEyeAdapter
+PURPOSE: Arduino communication adapter that translates EyeLightControllerService commands to single-character Arduino commands
+EVENTS_IN: None (used as a utility class by EyeLightControllerService)
+EVENTS_OUT: None (direct hardware communication)
+KEY_METHODS: connect, set_pattern, set_brightness, reset, get_status, _send_command
+DEPENDENCIES: Arduino hardware via serial communication, rex_eyes_v2.ino Arduino sketch
+"""
+
 import asyncio
 import logging
 import serial

@@ -1,0 +1,27 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/Users/brandoncullum/djr3x_voice"],
+      "description": "Enhanced filesystem operations for DJ R3X project"
+    },
+    "python": {
+      "command": "uvx",
+      "args": ["mcp"],
+      "description": "Python code execution for testing and analysis"
+    },
+    "github": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub operations for DJ R3X repository"
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-puppeteer"],
+      "description": "Browser automation for testing DJ R3X dashboard"
+    }
+  }
+}

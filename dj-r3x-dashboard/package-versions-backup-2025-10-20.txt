@@ -1,0 +1,24 @@
+dj-r3x-dashboard@1.0.0 /home/user/djr3x_voice/dj-r3x-dashboard
++-- UNMET DEPENDENCY @heroicons/react@^2.0.0
++-- UNMET DEPENDENCY @testing-library/jest-dom@^6.4.0
++-- UNMET DEPENDENCY @testing-library/react@^16.0.0
++-- UNMET DEPENDENCY @testing-library/user-event@^14.5.0
++-- UNMET DEPENDENCY @types/node@^20.0.0
++-- UNMET DEPENDENCY @types/react-dom@^18.3.0
++-- UNMET DEPENDENCY @types/react@^18.3.0
++-- UNMET DEPENDENCY @vitejs/plugin-react@^4.3.0
++-- UNMET DEPENDENCY @vitest/coverage-v8@^2.0.0
++-- UNMET DEPENDENCY @vitest/ui@^2.0.0
++-- UNMET DEPENDENCY autoprefixer@^10.4.0
++-- UNMET DEPENDENCY eslint-config-next@^14.2.0
++-- UNMET DEPENDENCY eslint@^8.57.0
++-- UNMET DEPENDENCY jsdom@^25.0.0
++-- UNMET DEPENDENCY next@^14.2.0
++-- UNMET DEPENDENCY postcss@^8.4.0
++-- UNMET DEPENDENCY react-dom@^18.3.0
++-- UNMET DEPENDENCY react@^18.3.0
++-- UNMET DEPENDENCY socket.io-client@^4.8.0
++-- UNMET DEPENDENCY tailwindcss@^3.4.0
++-- UNMET DEPENDENCY typescript@^5.5.0
+`-- UNMET DEPENDENCY vitest@^2.0.0
+

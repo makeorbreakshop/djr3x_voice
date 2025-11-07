@@ -6,6 +6,15 @@ It receives transcriptions from the DeepgramTranscriptionService, processes them
 and emits response events. It also manages conversation context and session memory.
 """
 
+"""
+SERVICE: GPTService
+PURPOSE: Natural language processing via OpenAI GPT models, conversation management, and tool calling for intent detection
+EVENTS_IN: TRANSCRIPTION_FINAL, VOICE_LISTENING_STOPPED, INTENT_EXECUTION_RESULT, DJ_COMMENTARY_REQUEST
+EVENTS_OUT: LLM_RESPONSE, LLM_RESPONSE_CHUNK, INTENT_DETECTED, GPT_COMMENTARY_RESPONSE, SERVICE_STATUS_UPDATE
+KEY_METHODS: _process_with_gpt, _stream_gpt_response, _get_gpt_response, _process_tool_calls, reset_conversation, register_tool
+DEPENDENCIES: OpenAI API key, persona files (dj_r3x-persona.txt, dj_r3x-verbal-feedback-persona.txt), registered tool functions
+"""
+
 import asyncio
 import logging
 import time

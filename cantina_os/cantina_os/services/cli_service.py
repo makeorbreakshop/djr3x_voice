@@ -5,6 +5,15 @@ This service provides a command-line interface for system control.
 It uses the CommandDispatcherService for routing commands to appropriate handlers.
 """
 
+"""
+SERVICE: CLIService
+PURPOSE: Command-line interface for system control with async input processing and command history
+EVENTS_IN: CLI_RESPONSE, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED
+EVENTS_OUT: CLI_COMMAND, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, SERVICE_STATUS_UPDATE, SYSTEM_SHUTDOWN
+KEY_METHODS: _process_command, _handle_response, _process_input, _handle_recording_input
+DEPENDENCIES: stdin/stdout for command line interaction, keyboard input
+"""
+
 import asyncio
 import logging
 import sys

@@ -5,6 +5,15 @@ This service manages system operation modes and mode transitions.
 It has been refactored to focus solely on mode management, removing direct CLI handling.
 """
 
+"""
+SERVICE: YodaModeManagerService
+PURPOSE: Core system mode management with state transitions, validation, and event coordination
+EVENTS_IN: SYSTEM_SET_MODE_REQUEST
+EVENTS_OUT: MODE_TRANSITION_STARTED, SYSTEM_MODE_CHANGE, MODE_TRANSITION_COMPLETE, CLI_RESPONSE, SERVICE_STATUS_UPDATE
+KEY_METHODS: set_mode, _handle_mode_request, current_mode
+DEPENDENCIES: SystemMode enum, asyncio for timing and grace periods
+"""
+
 import logging
 import asyncio
 from typing import Dict, Optional, Any

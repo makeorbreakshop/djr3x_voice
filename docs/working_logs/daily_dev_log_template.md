@@ -134,4 +134,17 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Solution**: Created centralized schema definitions with validation
 - **Impact**: More robust service integration with better error detection
 - **Technical**: Added Pydantic models and validation in event_schemas.py
+
+### 2025-06-16: Music Track Duration Display Issue - **ATTEMPTED** ❌
+- **Issue**: All tracks in dashboard showing hardcoded "3:00" duration instead of actual length
+- **Root Cause**: API endpoint `/api/music/library` not returning actual track duration metadata
+- **Analysis**: Frontend expects duration in seconds, converts to MM:SS format at line 136
+- **Attempted Solution**: Modified music library API to extract actual duration using ffprobe subprocess
+- **Changes Made**: 
+  - Updated `/api/music/library` endpoint to call ffprobe for each audio file
+  - Added fallback to 3:00 if ffprobe fails or is unavailable
+  - Enhanced music_playback_started event to include duration and start_timestamp
+- **Result**: Solution did not work - likely ffprobe not available or subprocess failing silently
+- **Next Steps**: Need to investigate why ffprobe approach failed, consider using Python audio library instead
+
 ```

@@ -5,6 +5,15 @@ This service provides centralized debugging, logging, and system observability c
 It handles asynchronous logging, command tracing, performance metrics, and state transition tracking.
 """
 
+"""
+SERVICE: DebugService
+PURPOSE: Centralized debugging, logging, and system observability with asynchronous log processing and performance monitoring
+EVENTS_IN: DEBUG_LOG, DEBUG_COMMAND, DEBUG_COMMAND_TRACE, DEBUG_PERFORMANCE, DEBUG_STATE_TRANSITION, DEBUG_CONFIG, LLM_RESPONSE
+EVENTS_OUT: DEBUG_SET_GLOBAL_LEVEL
+KEY_METHODS: handle_debug_level_command, _process_log_queue, _handle_debug_log, _handle_performance_metric, _handle_llm_response
+DEPENDENCIES: Asynchronous queue processing, file system for log files, console output
+"""
+
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List

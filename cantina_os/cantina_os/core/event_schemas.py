@@ -18,6 +18,7 @@ class TrackDataPayload(BaseModel):
     album: Optional[str] = None
     genre: Optional[str] = None
     duration: Optional[float] = None # Duration in seconds
+    filepath: Optional[str] = None # Path to the audio file
     # Add other relevant track metadata
 
 class TrackEndingSoonPayload(EventPayload):

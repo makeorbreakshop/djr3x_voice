@@ -6,6 +6,15 @@ in DJ mode transitions. It follows the audio threading standards and provides
 lookahead caching capabilities.
 """
 
+"""
+SERVICE: CachedSpeechService
+PURPOSE: Pre-rendering and caching of speech audio for precise timing control in DJ mode transitions
+EVENTS_IN: SPEECH_CACHE_REQUEST, SPEECH_CACHE_CLEANUP, SPEECH_CACHE_PLAYBACK_REQUEST, TTS_AUDIO_DATA, CLEAR_SPEECH_CACHE
+EVENTS_OUT: SPEECH_CACHE_UPDATED, SPEECH_CACHE_MISS, SPEECH_CACHE_HIT, SPEECH_CACHE_CLEARED, SPEECH_CACHE_READY, SPEECH_CACHE_ERROR, SPEECH_CACHE_PLAYBACK_STARTED, SPEECH_CACHE_PLAYBACK_COMPLETED, TTS_REQUEST
+KEY_METHODS: _cache_speech, _generate_speech_audio, _play_audio, _cleanup_expired_entries, _emit_cache_ready
+DEPENDENCIES: ElevenLabs TTS service integration, sounddevice for audio playback, numpy for audio processing
+"""
+
 import asyncio
 import logging
 import threading

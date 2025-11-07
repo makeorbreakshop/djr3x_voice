@@ -4,6 +4,227 @@
 
 CantinaOS is a robust, event-driven system architecture for DJ R3X, implementing ROS-inspired design principles for enhanced scalability, maintainability, and testability. This implementation provides a solid foundation for both current functionality and future expansion.
 
+## System Requirements and Installation
+
+### Prerequisites
+
+- **Operating System**: macOS, Linux, or Windows
+- **Python**: 3.8 or higher
+- **Hardware**: Microphone, speakers, Arduino (optional for LED eyes)
+
+### macOS Installation (Complete Setup)
+
+#### 1. Install Homebrew (if not already installed)
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Add Homebrew to PATH
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+```
+
+#### 2. Install System Dependencies
+```bash
+# Install PortAudio (required for PyAudio)
+brew install portaudio
+
+# Install VLC Media Player (for music playback)
+brew install --cask vlc
+```
+
+#### 3. Create Virtual Environment
+```bash
+# Navigate to the project directory
+cd /path/to/djr3x_voice/cantina_os
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+```
+
+#### 4. Install Python Dependencies
+```bash
+# Upgrade pip first
+pip install --upgrade pip
+
+# Install all requirements
+pip install -r requirements.txt
+
+# Update SSL certificates (fixes Deepgram connection issues)
+pip install --upgrade certifi
+```
+
+#### 5. System Permissions Setup
+
+**Grant Accessibility Permissions (Required for Voice Input)**:
+1. Open **System Settings** → **Privacy & Security** → **Accessibility**
+2. Click the **+** button or toggle to add your terminal application
+3. Add **Terminal** (or **iTerm2**, **VS Code**, etc. - whatever you're using to run the app)
+4. Restart your terminal application after granting permissions
+
+**Grant Microphone Permissions**:
+1. Open **System Settings** → **Privacy & Security** → **Microphone**
+2. Ensure your terminal application has microphone access
+3. Test microphone access if prompted
+
+#### 6. Environment Configuration
+```bash
+# Copy example environment file
+cp .env.example .env
+
+# Edit .env with your API keys and configuration
+nano .env  # or use your preferred editor
+```
+
+Required environment variables:
+```env
+# API Keys (Required)
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# Voice Configuration
+ELEVENLABS_VOICE_ID=your_voice_id_here
+GPT_MODEL=gpt-4o
+
+# Hardware Configuration (Optional)
+MOCK_LED_CONTROLLER=true  # Set to false if Arduino is connected
+ARDUINO_SERIAL_PORT=/dev/tty.usbmodem*  # Update if Arduino connected
+
+# Audio Configuration
+AUDIO_SAMPLE_RATE=16000
+AUDIO_CHANNELS=1
+AUDIO_PLAYBACK_METHOD=auto
+```
+
+### Linux Installation
+
+#### Ubuntu/Debian:
+```bash
+# Install system dependencies
+sudo apt update
+sudo apt install portaudio19-dev python3-pyaudio vlc
+
+# Install Python dependencies
+pip install -r requirements.txt
+```
+
+#### CentOS/RHEL/Fedora:
+```bash
+# Install system dependencies
+sudo dnf install portaudio-devel python3-pyaudio vlc
+
+# Install Python dependencies
+pip install -r requirements.txt
+```
+
+### Windows Installation
+
+#### Using Chocolatey:
+```powershell
+# Install Chocolatey (if not installed)
+# Run as Administrator in PowerShell
+
+# Install system dependencies
+choco install vlc python
+
+# Install Python dependencies
+pip install -r requirements.txt
+```
+
+#### Manual Installation:
+1. Download and install [VLC Media Player](https://www.videolan.org/vlc/)
+2. Install Python dependencies: `pip install -r requirements.txt`
+
+### Troubleshooting Common Issues
+
+#### PyAudio Installation Issues
+If PyAudio fails to install:
+
+**macOS**:
+```bash
+brew install portaudio
+pip install pyaudio
+```
+
+**Linux**:
+```bash
+sudo apt install portaudio19-dev  # Ubuntu/Debian
+sudo dnf install portaudio-devel  # CentOS/RHEL/Fedora
+pip install pyaudio
+```
+
+**Windows**:
+```powershell
+# Try installing from pre-compiled wheel
+pip install pipwin
+pipwin install pyaudio
+```
+
+#### SSL Certificate Issues (Deepgram Connection)
+```bash
+# Update certificates
+pip install --upgrade certifi
+python -m certifi  # Should show certificate location
+```
+
+#### VLC Duration Detection Warnings
+If you see VLC-related warnings about duration detection:
+- This is non-critical - music will still play
+- Ensure VLC is properly installed on your system
+- The warnings don't affect core functionality
+
+#### VLC Instance Creation Failed (macOS)
+If you see "VLC instance not available" or "All VLC instance creation attempts failed":
+- This typically occurs when VLC is installed via Homebrew Cask as VLC.app
+- The startup scripts automatically configure the correct VLC library paths
+- If manually running Python code, you may need to set environment variables:
+  ```bash
+  export VLC_PLUGIN_PATH="/Applications/VLC.app/Contents/MacOS/plugins"
+  export DYLD_LIBRARY_PATH="/Applications/VLC.app/Contents/MacOS/lib:$DYLD_LIBRARY_PATH"
+  ```
+- Always use the provided startup scripts (`dj-r3x` command) which handle this automatically
+
+#### Mouse/Voice Input Not Working (macOS)
+- Ensure Accessibility permissions are granted (see step 5 above)
+- Restart terminal application after granting permissions
+- Check microphone permissions in System Settings
+
+### API Keys Setup
+
+#### Deepgram API Key
+1. Go to [Deepgram Console](https://console.deepgram.com/)
+2. Create account and project
+3. Generate API key from dashboard
+
+#### OpenAI API Key
+1. Go to [OpenAI API Keys](https://platform.openai.com/api-keys)
+2. Create new API key
+3. Copy and secure the key
+
+#### ElevenLabs API Key & Voice ID
+1. Go to [ElevenLabs](https://elevenlabs.io/)
+2. Create account and get API key from profile
+3. Choose voice from [Voice Library](https://elevenlabs.io/voice-library)
+4. Copy Voice ID from the voice page URL
+
+### Testing Installation
+
+```bash
+# Run system tests
+pytest
+
+# Test basic functionality
+python -m cantina_os.main
+
+# In the CLI, test commands:
+# Type 'help' to see available commands
+# Type 'engage' to test voice input (requires accessibility permissions)
+# Type 'status' to check service status
+```
+
 ## Key Features
 
 - **Event-Driven Architecture**: All inter-service communication happens through a centralized event bus using standardized topics and payloads
@@ -117,6 +338,10 @@ Voice interaction is primarily managed through the system mode transitions and v
 - **ModeChangeSoundService**: Audio feedback for mode changes
 
 ## Setup Instructions
+
+**🔗 For complete installation instructions including system dependencies, see the [System Requirements and Installation](#system-requirements-and-installation) section above.**
+
+### Quick Start (Assumes Dependencies Installed)
 
 1. Create and activate a virtual environment:
    ```bash

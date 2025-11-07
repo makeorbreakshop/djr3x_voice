@@ -141,7 +141,7 @@ class TimelineExecutorService(BaseService):
 
     async def _stop(self) -> None:
         """Clean up tasks and subscriptions."""
-        self.logger.info(f"Stopping {self.name}")
+        self.logger.info(f"Stopping {self.service_name}")
         # Cancel all running tasks (includes layer tasks)
         for task in self._tasks:
             if not task.done():
