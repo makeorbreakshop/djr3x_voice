@@ -653,9 +653,33 @@ class ClaudeService(BaseService):
             return ""
 
     def register_tool(self, tool_schema: Dict[str, Any]) -> None:
-        """Register a tool for use with Claude model."""
-        tool_name = tool_schema["function"]["name"]
-        self._tools[tool_name] = tool_schema
+        """Register a tool for use with Claude model.
+
+        Converts OpenAI function-calling format to Claude's native tool format:
+        OpenAI format: {"type": "function", "function": {...}}
+        Claude format: {"name": ..., "description": ..., "input_schema": {...}}
+        """
+        # Extract function definition from OpenAI format
+        if "function" in tool_schema:
+            func_def = tool_schema["function"]
+            tool_name = func_def["name"]
+
+            # Convert to Claude format
+            claude_tool = {
+                "name": func_def["name"],
+                "description": func_def.get("description", ""),
+                "input_schema": func_def.get("parameters", {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                })
+            }
+        else:
+            # Already in Claude format
+            tool_name = tool_schema["name"]
+            claude_tool = tool_schema
+
+        self._tools[tool_name] = claude_tool
         self._tool_schemas = list(self._tools.values())
         self.logger.info(f"Registered tool: {tool_name}")
 

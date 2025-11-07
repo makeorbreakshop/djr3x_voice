@@ -554,7 +554,8 @@ class CantinaOS:
             if "ANTHROPIC_API_KEY" not in service_config:
                 service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
             if "CLAUDE_MODEL" not in service_config:
-                service_config["CLAUDE_MODEL"] = self._config.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+                # Use Claude Haiku 4.5 for best latency (fastest and most intelligent Haiku)
+                service_config["CLAUDE_MODEL"] = self._config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
             # Pass interim streaming config flag
             if "ENABLE_INTERIM_STREAMING" not in service_config:
                 service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", True)
