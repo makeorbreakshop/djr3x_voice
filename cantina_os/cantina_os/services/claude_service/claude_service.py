@@ -462,10 +462,11 @@ class ClaudeService(BaseService):
                     })
 
             # Add assistant message to memory
+            # NOTE: tool_calls should NOT be stored in messages sent back to Claude API
+            # Claude API only accepts role, content, and name fields in messages
             self._memory.add_message(
                 role="assistant",
-                content=message_content,
-                tool_calls=tool_calls if tool_calls else None
+                content=message_content
             )
 
             # Process tool calls if any
@@ -532,10 +533,11 @@ class ClaudeService(BaseService):
             self.logger.info(f"Processed {len(tool_calls)} tool calls")
 
             # Add complete message to memory
+            # NOTE: tool_calls should NOT be stored in messages sent back to Claude API
+            # Claude API only accepts role, content, and name fields in messages
             self._memory.add_message(
                 role="assistant",
-                content=full_content,
-                tool_calls=tool_calls if tool_calls else None
+                content=full_content
             )
 
             # Process tool calls if any
