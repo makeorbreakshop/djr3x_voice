@@ -150,6 +150,11 @@ class ClaudeService(BaseService):
         self._main_persona: Optional[str] = None
         self._verbal_feedback_persona: Optional[str] = None
 
+        # Connection pre-warming (latency optimization)
+        self._last_connection_warmup_time: float = 0
+        self._warmup_cooldown = 30  # Don't re-warm more than every 30 seconds
+        self._connection_warmed = False
+
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Load configuration from provided dict."""
         # Anthropic API key is required
@@ -308,6 +313,20 @@ class ClaudeService(BaseService):
             self._handle_dj_commentary_request
         ))
         self.logger.info("ClaudeService: Subscribed to DJ_COMMENTARY_REQUEST.")
+
+        # Subscribe to ENGAGE command for early connection pre-warming
+        asyncio.create_task(self.subscribe(
+            EventTopics.SYSTEM_MODE_CHANGED,
+            self._handle_mode_changed_for_warmup
+        ))
+        self.logger.info("ClaudeService: Subscribed to SYSTEM_MODE_CHANGED for connection pre-warming.")
+
+        # Subscribe to MIC_RECORDING_START for backup connection warmup
+        asyncio.create_task(self.subscribe(
+            EventTopics.MIC_RECORDING_START,
+            self._handle_mic_start_for_warmup
+        ))
+        self.logger.info("ClaudeService: Subscribed to MIC_RECORDING_START for connection refresh.")
 
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
@@ -1087,3 +1106,70 @@ Keep it energetic but concise.
                 )
             except Exception as emit_error:
                 self.logger.error(f"Failed to emit error response: {emit_error}")
+
+    async def _warmup_connection(self) -> None:
+        """
+        Warm up the Claude API connection by making a lightweight request.
+        This reduces latency on the next actual request by establishing the connection early.
+        """
+        current_time = time.time()
+
+        # Check cooldown - don't re-warm too frequently
+        if current_time - self._last_connection_warmup_time < self._warmup_cooldown:
+            self.logger.debug("Connection warmup skipped (cooldown period)")
+            return
+
+        try:
+            self.logger.info("🔄 Warming up Claude API connection for faster response latency")
+            self._last_connection_warmup_time = current_time
+
+            # Make a lightweight API call to establish connection
+            # Use a very simple system prompt and short message to minimize tokens
+            self._client.messages.create(
+                model=self._config["MODEL"],
+                max_tokens=10,
+                system="You are a helpful assistant.",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "hi"
+                    }
+                ],
+                temperature=0.1,
+                timeout=5  # Short timeout for warmup
+            )
+
+            self._connection_warmed = True
+            self.logger.info("✅ Claude API connection warmed up successfully")
+
+        except Exception as e:
+            # Don't fail the service if warmup fails - log but continue
+            self.logger.warning(f"Connection warmup failed (non-critical): {str(e)}")
+            self._connection_warmed = False
+
+    async def _handle_mode_changed_for_warmup(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle SYSTEM_MODE_CHANGED event to pre-warm connection when entering INTERACTIVE mode.
+        This is triggered by the 'engage' command and happens well before the user clicks to record.
+        """
+        try:
+            mode = payload.get("mode", "")
+            if mode == "INTERACTIVE":
+                self.logger.info("Mode changed to INTERACTIVE - pre-warming Claude API connection")
+                # Run warmup in background without blocking
+                asyncio.create_task(self._warmup_connection())
+        except Exception as e:
+            self.logger.error(f"Error in mode change warmup handler: {e}")
+
+    async def _handle_mic_start_for_warmup(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle MIC_RECORDING_START event to refresh connection before user finishes speaking.
+        This is a safety net in case the connection was idle or dropped.
+        By the time recording stops, connection will be fresh and ready for API call.
+        """
+        try:
+            self.logger.info("Mic recording started - refreshing Claude API connection")
+            # Run warmup in background without blocking recording
+            asyncio.create_task(self._warmup_connection())
+        except Exception as e:
+            self.logger.error(f"Error in mic start warmup handler: {e}")
