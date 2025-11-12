@@ -42,7 +42,7 @@ class ElevenLabsConfig(BaseModel):
     model_id: str = Field("eleven_flash_v2_5", description="Model ID - Flash v2.5 (75ms latency)")
     stability: float = Field(0.60, description="Voice stability (0.0-1.0)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
-    speed: float = Field(1.2, description="Speech speed multiplier (0.7-1.2)")
+    speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2)")
     playback_method: SpeechPlaybackMethod = Field(SpeechPlaybackMethod.STREAMING, description="Audio playback method")
     enable_audio_normalization: bool = Field(True, description="Whether to normalize audio")
     latency_optimization: int = Field(4, description="Latency optimization level (0-4, 4=max ~75% improvement)")
@@ -78,7 +78,7 @@ class ElevenLabsService(BaseService):
             raise ValueError("ElevenLabs API key is required. Set ELEVENLABS_API_KEY environment variable or pass in config.")
         
         # Get speed from config with clamping to ElevenLabs allowed range
-        config_speed = config_dict.get("SPEED", 1.2)
+        config_speed = config_dict.get("SPEED", 1.1)
         # Clamp speed to valid range (0.7-1.2)
         clamped_speed = min(max(config_speed, 0.7), 1.2)
         if config_speed != clamped_speed:

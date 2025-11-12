@@ -185,3 +185,56 @@ If we can get caching working (Sonnet 4.5):
 - Interim streaming disabled: -2-5 seconds
 - With proper model + caching: -2+ seconds more
 - **Target**: 3 seconds → ~1 second with Sonnet 4.5
+
+---
+
+## [INVESTIGATION] Critical Bugs Found & Fixed (10:21-10:24 Run Analysis)
+
+### Bug 1: TimelineExecutorService - Invalid `plan.layer` Reference
+**Root Cause**: Code tried to access `plan.layer` attribute on `DjTransitionPlanPayload`, but the payload doesn't have this attribute. Layer tracking was in `self._timeline_layers` dict instead.
+
+**Impact**: DJ mode crashed immediately when trying to execute transitions with "AttributeError: 'DjTransitionPlanPayload' object has no attribute 'layer'"
+
+**Fix Applied** (`c02ca2c`):
+- Line 298: Store layer mapping when plan starts: `self._timeline_layers[plan_id] = layer`
+- Line 799: Use mapping instead of attribute: `self._timeline_layers.get(plan_id) == other_layer`
+- Line 423: Clean up mapping when plan ends
+
+### Bug 2: ClaudeService - Empty Assistant Messages Causing API Rejection
+**Root Cause**: When Claude responded with ONLY tool calls and NO text content (e.g., when user says "play music"), the code added an empty string as an assistant message:
+```python
+message_content = ""  # No text returned, only tool_use blocks
+self._memory.add_message(role="assistant", content=message_content)  # Added empty message!
+```
+
+This caused Claude API to reject the message history with:
+```
+messages.5: all messages must have non-empty content except for the optional final assistant message
+```
+
+**Detected In Logs** (10:24:10):
+```
+{'role': 'assistant', 'content': ''}  ← EMPTY! Caused API to reject whole request
+{'role': 'user', 'content': 'Tool execution result for play_music: ...'}
+{'role': 'user', 'content': 'Tool execution result for set_eye_color: ...'}
+{'role': 'user', 'content': 'Hey. Can you stop playing the music?'}  ← Never processed!
+```
+
+The "stop playing the music" request never got to Claude because the API rejected the batch due to the empty message.
+
+**Impact**:
+- Tool execution worked (play_music, set_eye_color executed)
+- But next request (stop_music) was rejected by Claude API before execution
+- Music continued playing because stop command never reached the system
+
+**Fixes Applied** (3c9e588):
+1. Non-streaming response (line 494): `if message_content or not tool_calls:` - only add assistant message if there's text OR no tool calls
+2. Streaming response (line 586): Same logic - skip empty assistant messages when tool calls exist
+3. Tool result validation (lines 901-905): Ensure tool result content is never empty before adding to memory
+
+### Summary
+- **Timeline bug**: Prevents DJ mode from running at all
+- **Claude message bug**: Prevents sequential tool execution - once Claude returns tool-only response, next request gets rejected
+- **Together**: System breaks when: user → play music (works) → say stop music (fails because previous response corrupted message history)
+
+Both fixes committed and ready for testing.
