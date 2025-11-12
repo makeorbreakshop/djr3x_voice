@@ -1030,44 +1030,48 @@ class ClaudeService(BaseService):
             self.logger.info(f"Context: {context}, Next track: {next_track.title if next_track else 'None'}")
 
             # Create commentary prompt based on context and track information
-            # Note: DJ commentary always uses V3 (hardcoded in CachedSpeechService), which supports audio tags
+            # Context instructions layer on top of main persona
             if context == "transition" and current_track and next_track:
                 user_prompt = f"""
-You are transitioning from "{current_track.title}" to "{next_track.title}".
+SITUATION: You are generating DJ commentary for a track transition.
 
-Generate a brief, energetic DJ transition commentary (2-3 sentences max) that:
+TRACKS:
+- Current: "{current_track.title}"
+- Next: "{next_track.title}"
+
+INSTRUCTIONS:
+Generate a brief, energetic transition commentary (2-3 sentences max) that:
 - Acknowledges the current track ending
 - Introduces the next track with enthusiasm
-- Maintains the Star Wars cantina atmosphere
-- Sounds natural and conversational like a real DJ
+- Sounds natural and conversational
 
-AUDIO TAG INSTRUCTIONS (for ElevenLabs V3 text-to-speech):
-Add these tags in square brackets to enhance vocal delivery:
-- [excited]: Use before upbeat statements about the next track (most common)
-- [whispers]: Use for smooth transitions or connective moments (rare)
-
-Example: "[excited] Alright folks! Coming up next, we've got [track name]!"
+AUDIO TAG GUIDANCE:
+Remember to use audio tags from the persona to enhance delivery. [excited] works great for upbeat moments, [whispers] for smooth transitions.
 
 Keep it concise and punchy - this will play over a crossfade.
 """
             elif context == "intro" and current_track:
                 user_prompt = f"""
-Generate a brief, enthusiastic introduction (2-3 sentences max) for the track "{current_track.title}" by {current_track.artist}.
+SITUATION: You are generating DJ commentary to introduce a track.
 
-Make it sound like DJ R3X is introducing this track to the cantina crowd.
+TRACK:
+- Title: "{current_track.title}"
+- Artist: "{current_track.artist}"
 
-AUDIO TAG INSTRUCTIONS (for ElevenLabs V3 text-to-speech):
-Add these tags in square brackets to enhance vocal delivery:
-- [excited]: Use for upbeat, energetic moments (most intro moments)
-- [whispers]: Use for smooth, intimate moments (rare for intros)
+INSTRUCTIONS:
+Generate a brief, enthusiastic introduction (2-3 sentences max) that:
+- Introduces this track to the cantina crowd
+- Builds excitement for what's about to play
+- Sounds natural and conversational
 
-Example: "[excited] Get ready for [artist] - this is [track name]!"
+AUDIO TAG GUIDANCE:
+Remember to use audio tags from the persona to enhance delivery. [excited] works great for most intros, [whispers] for intimate moments.
 
 Keep it energetic but concise.
 """
             else:
                 # Fallback prompt
-                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X. You can use audio tags like [excited] or [whispers] in square brackets for ElevenLabs V3 text-to-speech enhancement."
+                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X. Use the audio tag guidance from the persona when appropriate."
 
             self.logger.info(f"Commentary prompt created for {context} context")
 

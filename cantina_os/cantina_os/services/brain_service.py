@@ -87,8 +87,7 @@ class BrainService(BaseService):
         self._next_track_commentary_cached = False # Flag to track if commentary for the next track is cached
         self._current_track: Optional[MusicTrack] = None
         self._next_track: Optional[MusicTrack] = None
-        self._dj_persona: str = "" # Store DJ persona text
-        self._verbal_feedback_persona: str = "" # Store verbal feedback persona text
+        self._dj_persona: str = "" # Store main DJ persona text (used for all contexts: dialogue, feedback, DJ commentary)
         
         # Get reference to MemoryService for state coordination
         # This will be set during startup once services are available
@@ -237,30 +236,26 @@ class BrainService(BaseService):
         
         persona_loaded = False
         # Try loading DJ persona from a list of common paths
+        # Load main DJ persona (used for all contexts: general dialogue, tool feedback, and DJ commentary)
+        # Context-specific instructions are layered in the code, not in separate persona files
         dj_persona_paths_to_try = [
-            self._config.dj_persona_path, # Configured path first (should be dj_r3x-transition-persona.txt)
-            "dj_r3x-transition-persona.txt", # Current directory
-            "cantina_os/dj_r3x-transition-persona.txt", # Inside cantina_os (if run from parent)
-            "../dj_r3x-transition-persona.txt", # Parent directory (if run from a subdir)
-            "dj_r3x-persona.txt", # Fallback to general persona
+            "dj_r3x-persona.txt", # Current directory
             "cantina_os/dj_r3x-persona.txt", # Inside cantina_os (if run from parent)
             "../dj_r3x-persona.txt" # Parent directory (if run from a subdir)
         ]
         for path in dj_persona_paths_to_try:
             if not path: continue
             try:
-                # Attempt to construct an absolute path if not already, or handle relative paths correctly
-                # For simplicity here, assuming paths are relative to where search happens or are absolute
                 with open(path, "r", encoding="utf-8") as f:
                     self._dj_persona = f.read()
-                self.logger.info(f"Loaded DJ persona from {path}")
+                self.logger.info(f"Loaded main DJ persona from {path}")
                 persona_loaded = True
                 break
             except FileNotFoundError:
                 self.logger.debug(f"DJ persona file not found at {path}")
             except Exception as e:
                 self.logger.error(f"Error loading DJ persona from {path}: {e}")
-                break # If other error, stop trying
+                break
 
         if not persona_loaded:
             self.logger.error(f"Failed to load DJ persona from any attempted paths. Defaulting to empty.")
@@ -269,37 +264,6 @@ class BrainService(BaseService):
                 ServiceStatus.DEGRADED,
                 f"Missing DJ persona file. Looked in: {dj_persona_paths_to_try}",
                 severity=LogLevel.ERROR
-            )
-
-        feedback_persona_loaded = False
-        verbal_feedback_paths_to_try = [
-            self._config.verbal_feedback_persona_path,
-            "dj_r3x-verbal-feedback-persona.txt",
-            "cantina_os/dj_r3x-verbal-feedback-persona.txt",
-            "../dj_r3x-verbal-feedback-persona.txt"
-        ]
-        for path in verbal_feedback_paths_to_try:
-            if not path: continue
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    self._verbal_feedback_persona = f.read()
-                self.logger.info(f"Loaded verbal feedback persona from {path}")
-                feedback_persona_loaded = True
-                break
-            except FileNotFoundError:
-                self.logger.debug(f"Verbal feedback persona file not found at {path}")
-            except Exception as e:
-                self.logger.error(f"Error loading verbal feedback persona from {path}: {e}")
-                break
-
-        if not feedback_persona_loaded:
-            self.logger.error(f"Failed to load verbal feedback persona. Defaulting to empty.")
-            self._verbal_feedback_persona = ""
-            # Optionally emit degraded status for this too
-            await self._emit_status(
-                ServiceStatus.DEGRADED,
-                f"Missing verbal feedback persona file. Looked in: {verbal_feedback_paths_to_try}",
-                severity=LogLevel.WARNING # Or ERROR if critical
             )
 
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
