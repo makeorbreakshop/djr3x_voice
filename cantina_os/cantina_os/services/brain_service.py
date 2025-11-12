@@ -56,7 +56,7 @@ from ..utils.command_decorators import compound_command, register_service_comman
 class BrainServiceConfig(BaseModel):
     """Configuration for BrainService."""
     max_recent_tracks: int = Field(default=10, description="Maximum number of recently played tracks to remember")
-    commentary_cache_interval: int = Field(default=30, description="Interval in seconds for the commentary caching loop")
+    commentary_cache_interval: int = Field(default=15, description="Interval in seconds for the commentary caching loop (reduced from 30 for better short-track handling)")
     dj_persona_path: str = Field(default="dj_r3x-transition-persona.txt", description="Path to the DJ R3X transition persona file for commentary generation.")
     verbal_feedback_persona_path: str = Field(default="dj_r3x-verbal-feedback-persona.txt", description="Path to the DJ R3X verbal feedback persona file, relative to execution dir or findable in common locations.")
     tts_voice_id: str = Field(default="YOUR_DEFAULT_VOICE_ID", description="Default voice ID for TTS caching") # Add default voice ID config
@@ -816,7 +816,7 @@ class BrainService(BaseService):
             except ValidationError as e:
                 self.logger.error(f"Validation error in TRACK_ENDING_SOON payload: {e}")
                 return
-                
+
             current_track_data = ending_soon_payload.current_track
             time_remaining = ending_soon_payload.time_remaining
 
@@ -827,17 +827,30 @@ class BrainService(BaseService):
                 self.logger.debug("DJ mode not active, ignoring TRACK_ENDING_SOON event.")
                 return
 
-            # Ensure current track state is updated based on event payload
-            if self._current_track is None or self._current_track.track_id != current_track_data.track_id:
-                self.logger.warning("BrainService current track state out of sync with TRACK_ENDING_SOON event.")
-                self._current_track = self._music_library.get(current_track_data.track_id)
-                if not self._current_track:
-                    self.logger.error(f"Current track from event not found in music library: {current_track_data.title}")
-                    return
+            # Trust the event payload's current track info - it's the source of truth
+            # Update our internal state to match reality
+            self._current_track = self._music_library.get(current_track_data.track_id)
+            if not self._current_track:
+                self.logger.error(f"Current track from event not found in music library: {current_track_data.title}")
+                return
 
-            # Check if we have a next track selected and attempt to create transition plan
-            if self._next_track:
-                self.logger.info(f"Next track '{self._next_track.title}' selected. Creating transition plan.")
+            # Also update MemoryService to ensure consistency
+            await self.emit(EventTopics.MEMORY_SET, {
+                "key": "dj_current_track",
+                "value": current_track_data.model_dump() if hasattr(current_track_data, 'model_dump') else current_track_data
+            })
+
+            # Check if we have a next track selected and commentary cached
+            if self._next_track and self._next_track_commentary_cached:
+                self.logger.info(f"Next track '{self._next_track.title}' selected with commentary cached. Creating transition plan.")
+                await self._create_and_emit_transition_plan()
+            elif self._next_track and not self._next_track_commentary_cached:
+                # We have next track but commentary not cached - try to cache it NOW
+                self.logger.warning(f"Next track '{self._next_track.title}' selected but commentary NOT cached. Attempting urgent caching.")
+                await self._request_urgent_commentary_caching()
+                # Wait briefly for caching to complete
+                await asyncio.sleep(3.0)
+                # Create transition plan (may use fallback if caching not complete)
                 await self._create_and_emit_transition_plan()
             else:
                 # No next track selected - attempt immediate selection and create simple crossfade
@@ -848,6 +861,38 @@ class BrainService(BaseService):
             self.logger.error(f"Error handling TRACK_ENDING_SOON: {e}", exc_info=True)
             # Emergency fallback - try to continue playing current track or stop gracefully
             await self._handle_transition_failure()
+
+    async def _request_urgent_commentary_caching(self) -> None:
+        """Request urgent commentary caching when TRACK_ENDING_SOON fires but commentary not ready.
+
+        This is an event-driven fallback for when the proactive caching loop didn't run in time
+        (e.g., for very short tracks).
+        """
+        if not self._next_track or not self._current_track:
+            self.logger.error("Cannot request urgent caching - missing current or next track")
+            return
+
+        self.logger.info(f"URGENT: Requesting immediate commentary caching for next track: {self._next_track.title}")
+
+        # Generate request ID
+        request_id = str(uuid.uuid4())
+        self._commentary_request_next_track[request_id] = self._next_track
+
+        # Create and emit commentary request
+        commentary_request_payload = DjCommentaryRequestPayload(
+            timestamp=time.time(),
+            context="transition",
+            current_track=TrackDataPayload(**self._current_track.model_dump()),
+            next_track=TrackDataPayload(**self._next_track.model_dump()),
+            persona=self._dj_persona,
+            request_id=request_id
+        )
+
+        self.logger.info(f"URGENT: Emitting DJ_COMMENTARY_REQUEST with request_id: {request_id}")
+        await self.emit(
+            EventTopics.DJ_COMMENTARY_REQUEST,
+            commentary_request_payload.model_dump()
+        )
 
     async def _handle_emergency_track_selection(self) -> None:
         """Handle emergency track selection when no next track is prepared."""
@@ -1019,21 +1064,44 @@ class BrainService(BaseService):
     @compound_command("dj stop")
     @command_error_handler
     async def handle_dj_stop(self, payload: dict) -> None:
-        """Handle the 'dj stop' command to deactivate DJ mode."""
+        """Handle the 'dj stop' command to deactivate DJ mode.
+
+        ARCHITECTURAL FIX: Use MemoryService as canonical state store to ensure
+        all services (especially MusicController) see DJ mode is inactive before
+        completing any in-progress crossfades.
+        """
         self.logger.info("DJ command: stop")
         if self._dj_mode_active:
-            # Stop any playing music
-            await self.emit(EventTopics.MUSIC_COMMAND, {
-                "action": "stop"
+            # STEP 1: Update MemoryService FIRST (canonical source of truth)
+            # This ensures MusicController can check DJ mode state before completing crossfade
+            self.logger.info("ARCHITECTURE FIX: Updating MemoryService with dj_mode_active=False")
+            await self.emit(EventTopics.MEMORY_SET, {
+                "key": "dj_mode_active",
+                "value": False
             })
-            
-            # Emit DJ mode deactivation event
+
+            # STEP 2: Brief pause for memory propagation (let MemoryService update)
+            await asyncio.sleep(0.05)
+
+            # STEP 3: Emit DJ_MODE_CHANGED (other services listen to this for UI updates, plan cancellation)
+            self.logger.info("Emitting DJ_MODE_CHANGED with is_active=False")
             await self.emit(EventTopics.DJ_MODE_CHANGED, DJModeChangedPayload(is_active=False).model_dump())
-            
+
+            # STEP 4: Update internal state
             self._dj_mode_active = False
             self._current_track = None
             self._next_track = None
             self._next_track_commentary_cached = False
+
+            # STEP 5: Brief pause to let plan cancellation take effect
+            await asyncio.sleep(0.1)
+
+            # STEP 6: Stop any playing music (after state is synchronized)
+            self.logger.info("Stopping music playback after DJ mode deactivation")
+            await self.emit(EventTopics.MUSIC_COMMAND, {
+                "action": "stop"
+            })
+
             await self._send_success("DJ mode deactivated")
         else:
             await self._send_success("DJ mode is not active")

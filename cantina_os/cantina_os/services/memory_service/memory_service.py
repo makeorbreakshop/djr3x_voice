@@ -12,6 +12,7 @@ import time
 import json
 import os
 from typing import Any, Callable, Dict, List, Optional
+import aiofiles
 
 from pydantic import BaseModel, ValidationError
 
@@ -89,6 +90,7 @@ class MemoryService(BaseService):
             self._state["dj_user_preferences"] = {}  # Initialize DJ user preferences
 
         self._waiters: Dict[str, List[asyncio.Event]] = {}  # For wait_for predicate functionality
+        self._state_lock = asyncio.Lock()  # Lock for concurrent access to state
 
     # ------------------------------------------------------------------
     # Helper methods
@@ -220,16 +222,17 @@ class MemoryService(BaseService):
     # ------------------------------------------------------------------
     async def set(self, key: str, value: Any) -> None:
         """Set a value in memory and emit update event."""
-        if key not in self._state:
-            self.logger.warning(f"Setting unknown key in memory: {key}")
-        
-        old_value = self._state.get(key)
-        self._state[key] = value
-        
-        # Save state after setting a value
-        self._save_state()
-        
-        # Emit memory updated event
+        async with self._state_lock:
+            if key not in self._state:
+                self.logger.warning(f"Setting unknown key in memory: {key}")
+
+            old_value = self._state.get(key)
+            self._state[key] = value
+
+            # Save state after setting a value (now async)
+            await self._save_state_async()
+
+        # Emit memory updated event (outside lock to avoid deadlock)
         await self._emit_dict(
             EventTopics.MEMORY_UPDATED,
             MemoryUpdatedPayload(
@@ -238,7 +241,7 @@ class MemoryService(BaseService):
                 old_value=old_value
             )
         )
-        
+
         # Check and notify any waiters
         self._check_waiters()
     
@@ -799,15 +802,29 @@ class MemoryService(BaseService):
         return {}
 
     def _save_state(self) -> None:
-        """Save current state to disk."""
+        """Save current state to disk (synchronous version for initialization)."""
         try:
             # Ensure data directory exists
             os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
-            
+
             # Write state to file
             with open(STATE_FILE_PATH, 'w') as f:
                 json.dump(self._state, f, indent=2)
             self.logger.debug(f"Saved state to {STATE_FILE_PATH}")
-            
+
+        except Exception as e:
+            self.logger.error(f"Error saving state to {STATE_FILE_PATH}: {e}")
+
+    async def _save_state_async(self) -> None:
+        """Save current state to disk (async version for runtime updates)."""
+        try:
+            # Ensure data directory exists
+            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
+
+            # Write state to file asynchronously
+            async with aiofiles.open(STATE_FILE_PATH, 'w') as f:
+                await f.write(json.dumps(self._state, indent=2))
+            self.logger.debug(f"Saved state to {STATE_FILE_PATH}")
+
         except Exception as e:
             self.logger.error(f"Error saving state to {STATE_FILE_PATH}: {e}") 

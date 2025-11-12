@@ -55,6 +55,10 @@ CantinaOS follows these key architectural principles:
 | YodaModeManagerService | System mode orchestration | SYSTEM_SET_MODE_REQUEST, CLI_COMMAND | SYSTEM_MODE_CHANGE, MODE_TRANSITION_STARTED, MODE_TRANSITION_COMPLETE | None | None |
 | MouseInputService | Handles mouse input | Mouse events | MIC_RECORDING_START, MIC_RECORDING_STOP | None | Mouse |
 | CLIService | Command-line interface | CLI_RESPONSE | CLI_COMMAND | None | Terminal |
+| MemoryService | Canonical state store and system-wide memory coordination | MEMORY_GET, MEMORY_SET | MEMORY_VALUE, MEMORY_UPDATED | None | None |
+| BrainService | High-level orchestration for DJ mode, track selection, and commentary caching | DJ_COMMAND, TRACK_ENDING_SOON, SPEECH_CACHE_READY, PLAN_ENDED | DJ_MODE_CHANGED, DJ_NEXT_TRACK_SELECTED, DJ_COMMENTARY_REQUEST, PLAN_READY | commentary_cache_interval, dj_persona_path | None |
+| TimelineExecutorService | Layered timeline execution for coordinated audio sequences | PLAN_READY, DJ_MODE_CHANGED | PLAN_STARTED, PLAN_ENDED, SPEECH_CACHE_PLAYBACK_REQUEST | None | None |
+| CachedSpeechService | Pre-rendered speech caching for DJ commentary | SPEECH_CACHE_REQUEST, SPEECH_CACHE_PLAYBACK_REQUEST | SPEECH_CACHE_READY, SPEECH_CACHE_PLAYBACK_STARTED, SPEECH_CACHE_PLAYBACK_COMPLETED | elevenlabs_api_key, voice_id | Audio output |
 | WebBridgeService | Web dashboard integration via FastAPI/Socket.IO with Pydantic validation | SERVICE_STATUS_UPDATE, TRANSCRIPTION_FINAL, TRANSCRIPTION_INTERIM, VOICE_LISTENING_STARTED, VOICE_LISTENING_STOPPED, VOICE_PROCESSING_COMPLETE, SPEECH_SYNTHESIS_COMPLETED, MUSIC_PLAYBACK_STARTED, MUSIC_PLAYBACK_STOPPED, MUSIC_PROGRESS, DJ_MODE_CHANGED, SYSTEM_MODE_CHANGE, DASHBOARD_LOG | SYSTEM_SET_MODE_REQUEST, MUSIC_COMMAND, DJ_COMMAND | web_port, cors_origins, validation_schemas | None |
 | LoggingService | Centralized system logging and dashboard log streaming | All system events (as log capture) | DASHBOARD_LOG | log_level, session_file_path, enable_dashboard_streaming | None |
 | DebugService | Legacy logging and diagnostics | DEBUG_LOG, Various events | None | log_level | None |
@@ -443,6 +447,91 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 - Stops all playback
 - Releases audio device
 - Saves current state
+
+### 5.6 MemoryService - Canonical State Store
+
+**Purpose**: Centralized, persistent state management for system-wide coordination
+
+**Architectural Role**:
+MemoryService acts as the **single source of truth** for critical system state that must be shared across multiple services. This prevents race conditions and ensures consistent state during complex operations like DJ mode transitions.
+
+**Key Responsibilities**:
+- Store and retrieve system state using key-value pairs
+- Emit `MEMORY_UPDATED` events when state changes
+- Respond to `MEMORY_GET` requests with `MEMORY_VALUE` events
+- Persist state to disk for recovery after restart
+
+**Critical State Keys**:
+- `dj_mode_active`: Boolean - current DJ mode status (canonical source checked during crossfades)
+- `dj_current_track`: Dict - currently playing track metadata
+- `dj_next_track`: Dict - pre-selected next track
+- `dj_track_history`: List - recently played tracks for anti-repetition
+- `dj_commentary_cache_mappings`: Dict - map request IDs to cache keys
+- `dj_commentary_cache_ready`: Dict - ready state for each cached commentary
+
+**Canonical State Pattern**:
+
+When a service needs to make decisions based on critical system state (e.g., "Should I complete this crossfade?"), it must query MemoryService rather than relying on local state:
+
+```python
+# CORRECT: Query canonical state from MemoryService
+async def _should_complete_crossfade(self) -> bool:
+    # Emit MEMORY_GET request
+    await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode_active"})
+    # Wait for MEMORY_VALUE response
+    dj_mode_active = await self._wait_for_memory_response("dj_mode_active")
+    return dj_mode_active
+
+# WRONG: Use only local state (can be stale during race conditions)
+async def _should_complete_crossfade(self) -> bool:
+    return self._dj_mode_active  # Local state may not match MemoryService!
+```
+
+**State Update Pattern**:
+
+When updating critical shared state, services must update MemoryService FIRST before emitting coordination events:
+
+```python
+# CORRECT: Update MemoryService before emitting events
+async def handle_dj_stop(self):
+    # Step 1: Update canonical state FIRST
+    await self.emit(EventTopics.MEMORY_SET, {
+        "key": "dj_mode_active",
+        "value": False
+    })
+
+    # Step 2: Wait for propagation
+    await asyncio.sleep(0.05)
+
+    # Step 3: Emit coordination events
+    await self.emit(EventTopics.DJ_MODE_CHANGED, ...)
+
+    # Step 4: Update local state
+    self._dj_mode_active = False
+
+# WRONG: Emit events before updating canonical state
+async def handle_dj_stop(self):
+    await self.emit(EventTopics.DJ_MODE_CHANGED, ...)  # Other services may query stale state!
+    await self.emit(EventTopics.MEMORY_SET, {"key": "dj_mode_active", "value": False})
+```
+
+**Race Condition Prevention**:
+
+MemoryService prevents race conditions in complex scenarios like:
+
+1. **DJ Mode Stop During Crossfade**:
+   - Without MemoryService: Crossfade completes and starts new track even after stop command
+   - With MemoryService: MusicController queries canonical state before completing crossfade
+
+2. **Concurrent Track Selection**:
+   - Without MemoryService: Multiple services might select different "next tracks"
+   - With MemoryService: Single canonical `dj_next_track` prevents conflicts
+
+**Implementation Notes**:
+- Uses async locks for thread-safe state updates
+- Stores state in JSON file for persistence
+- Emits `MEMORY_UPDATED` events for reactive updates
+- Validates state keys to prevent typos
 
 ## 6. Integration Points
 

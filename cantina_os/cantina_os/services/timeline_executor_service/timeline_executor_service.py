@@ -199,6 +199,9 @@ class TimelineExecutorService(BaseService):
         # Subscribe to MusicController crossfade complete event
         await self.subscribe(EventTopics.CROSSFADE_COMPLETE, self._handle_crossfade_complete)
 
+        # Subscribe to DJ_MODE_CHANGED to cancel plans when DJ mode stops
+        await self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
+
     # ------------------------------------------------------------------
     # Plan handling
     # ------------------------------------------------------------------
@@ -974,20 +977,28 @@ class TimelineExecutorService(BaseService):
             # Wait for crossfade completion
             self.logger.debug(f"Waiting for crossfade completion event for {event_key}")
             try:
-                # Timeout slightly longer than expected duration
-                await asyncio.wait_for(self._crossfade_complete_events[event_key].wait(), timeout=crossfade_duration + 5.0)
+                # Use a more generous timeout - crossfades can take longer than expected
+                # especially if the system is under load or if tracks need to load
+                timeout_duration = max(crossfade_duration + 10.0, 20.0)  # At least 20 seconds
+                await asyncio.wait_for(self._crossfade_complete_events[event_key].wait(), timeout=timeout_duration)
                 self.logger.debug(f"Crossfade completion event received for {event_key}")
                 return True, {"next_track_id": next_track_id, "duration": crossfade_duration, "status": "completed"}
             except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout waiting for crossfade completion event for {event_key}")
-                return False, {"next_track_id": next_track_id, "duration": crossfade_duration, "error": "Timeout waiting for crossfade completion"}
+                self.logger.warning(f"Timeout waiting for crossfade completion event for {event_key} after {timeout_duration}s")
+                # Don't fail immediately - the crossfade might still be happening
+                # Just log and continue, as music is likely still playing
+                return True, {"next_track_id": next_track_id, "duration": crossfade_duration, "warning": f"Timeout after {timeout_duration}s but continuing"}
 
         except Exception as e:
             self.logger.error(f"Error executing MusicCrossfadeStep to track {next_track_id}: {e}", exc_info=True)
             return False, {"error": str(e)}
         finally:
-            # Clean up the event
-            self._crossfade_complete_events.pop(event_key, None)
+            # Clean up the event after a delay to catch late completions
+            async def cleanup_event():
+                await asyncio.sleep(30)  # Keep event around for 30 seconds
+                self._crossfade_complete_events.pop(event_key, None)
+                self.logger.debug(f"Cleaned up crossfade event {event_key}")
+            asyncio.create_task(cleanup_event())
 
     async def _execute_music_duck_step(self, step) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Executes a MusicDuckStep to lower music volume during speech.
@@ -1132,6 +1143,50 @@ class TimelineExecutorService(BaseService):
 
          except Exception as e:
               self.logger.error(f"Error handling CROSSFADE_COMPLETE: {e}", exc_info=True)
+
+    async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
+        """Handle DJ_MODE_CHANGED events.
+
+        When DJ mode is deactivated, cancel all running DJ plans to prevent
+        music from restarting after a stop command.
+        """
+        try:
+            is_active = payload.get('is_active', False)
+            if not is_active:
+                self.logger.info("DJ mode deactivated, cancelling all DJ-related plans")
+
+                # Cancel all active plans on all layers
+                for layer_name, task in list(self._layer_tasks.items()):
+                    if task and not task.done():
+                        self.logger.info(f"Cancelling plan on layer {layer_name}")
+                        task.cancel()
+
+                # Clear the layer tasks
+                self._layer_tasks.clear()
+
+                # Clear active plans
+                for plan_id in list(self._active_plans.keys()):
+                    plan = self._active_plans[plan_id]
+                    self.logger.info(f"Removing active plan {plan_id}")
+
+                    # Emit plan ended event
+                    await self._emit_dict(
+                        EventTopics.PLAN_ENDED,
+                        PlanEndedPayload(
+                            plan_id=plan_id,
+                            layer=self._timeline_layers.get(plan_id, "unknown"),
+                            status="cancelled"  # Fixed: Use valid Pydantic literal value
+                        )
+                    )
+
+                self._active_plans.clear()
+                self._timeline_layers.clear()
+                self._paused_timelines.clear()
+
+                self.logger.info("All DJ plans cancelled due to DJ mode deactivation")
+
+        except Exception as e:
+            self.logger.error(f"Error handling DJ_MODE_CHANGED: {e}", exc_info=True)
 
     async def _execute_parallel_steps(self, step: ParallelSteps, plan_id: str) -> tuple[bool, Optional[Dict[str, Any]]]:
         """Execute multiple steps concurrently using asyncio.gather().

@@ -1109,7 +1109,7 @@ async def _start(self) -> None:
         self.subscribe(EventTopics.MEMORY_VALUE, self._handle_memory_value),
         self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
     )
-    
+
     # NOW safe to request data that requires responses
     await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode"})
 
@@ -1119,12 +1119,212 @@ async def _start(self) -> None:
     await self.emit(EventTopics.MEMORY_GET, {"key": "dj_mode"})  # Response might be missed!
 ```
 
+## 13.5 MemoryService as Canonical State Store
+
+### 13.5.1 When to Use MemoryService
+
+Use MemoryService as the canonical state store when:
+
+1. **State must be shared across multiple services**: Any state that multiple services need to read/write
+2. **Race conditions are possible**: State that changes during async operations (e.g., DJ mode during crossfades)
+3. **Consistency is critical**: State where stale data would cause incorrect behavior
+4. **Persistence is needed**: State that should survive service restarts
+
+**Examples requiring MemoryService**:
+- `dj_mode_active`: Multiple services need to know if DJ mode is active
+- `dj_next_track`: Prevents multiple services from selecting different next tracks
+- `dj_track_history`: Shared anti-repetition list across services
+
+**Examples NOT requiring MemoryService**:
+- Service-internal state (e.g., HTTP connection pools)
+- Derived state that can be recomputed (e.g., formatted track titles)
+- Temporary state within a single async operation
+
+### 13.5.2 State Update Order - Critical Pattern
+
+**ALWAYS update MemoryService BEFORE emitting coordination events**:
+
+```python
+# CORRECT: MemoryService First Pattern
+async def handle_state_change(self):
+    # Step 1: Update canonical state in MemoryService
+    await self.emit(EventTopics.MEMORY_SET, {
+        "key": "critical_state",
+        "value": new_value
+    })
+
+    # Step 2: Wait for memory propagation
+    await asyncio.sleep(0.05)
+
+    # Step 3: Emit coordination event (other services can now query correct state)
+    await self.emit(EventTopics.STATE_CHANGED, {...})
+
+    # Step 4: Update local cache
+    self._local_state = new_value
+
+# WRONG: Event Before Memory
+async def handle_state_change(self):
+    # Other services receive event and query MemoryService
+    await self.emit(EventTopics.STATE_CHANGED, {...})
+    # But MemoryService still has OLD value!
+    await self.emit(EventTopics.MEMORY_SET, {"key": "critical_state", "value": new_value})
+```
+
+**Why this order matters**:
+
+When you emit a coordination event (e.g., `DJ_MODE_CHANGED`), other services may immediately query MemoryService to verify the state. If MemoryService hasn't been updated yet, they'll get stale data.
+
+**Real-world example** (DJ Stop During Crossfade):
+
+```python
+# BrainService: DJ Stop Handler
+async def handle_dj_stop(self):
+    # Update MemoryService FIRST
+    await self.emit(EventTopics.MEMORY_SET, {"key": "dj_mode_active", "value": False})
+    await asyncio.sleep(0.05)  # Propagation
+
+    # Now emit DJ_MODE_CHANGED
+    await self.emit(EventTopics.DJ_MODE_CHANGED, {"is_active": False})
+
+# MusicController: During Crossfade Completion
+async def _complete_crossfade(self, next_track):
+    # Check canonical state before proceeding
+    if source == "dj":
+        dj_still_active = self.dj_mode_active  # Reads from local state updated by DJ_MODE_CHANGED
+        if not dj_still_active:
+            # DJ was stopped during crossfade - don't start new track!
+            self.logger.info("Crossfade cancelled - DJ mode deactivated")
+            return
+
+    # Safe to complete crossfade
+    self._start_track(next_track)
+```
+
+### 13.5.3 Querying Canonical State
+
+Services should query MemoryService when making critical decisions:
+
+```python
+# CORRECT: Query MemoryService for critical decisions
+async def _should_proceed_with_operation(self) -> bool:
+    # Emit get request
+    request_id = str(uuid.uuid4())
+    self._pending_requests[request_id] = asyncio.Future()
+
+    await self.emit(EventTopics.MEMORY_GET, {
+        "key": "dj_mode_active",
+        "request_id": request_id
+    })
+
+    # Wait for response
+    try:
+        result = await asyncio.wait_for(
+            self._pending_requests[request_id],
+            timeout=1.0
+        )
+        return result.get("value", False)
+    except asyncio.TimeoutError:
+        self.logger.error("Timeout querying MemoryService")
+        return False  # Safe default
+
+# ACCEPTABLE: Use local cache if not critical
+async def _update_ui_display(self):
+    # UI updates don't need real-time canonical state
+    display_text = f"DJ Mode: {'Active' if self._dj_mode_active else 'Inactive'}"
+    await self._update_display(display_text)
+```
+
+### 13.5.4 Common Pitfalls
+
+**Pitfall 1: Trusting Local State During Async Operations**
+
+```python
+# WRONG: Local state can become stale during async operations
+async def long_running_operation(self):
+    if self._dj_mode_active:  # Check at start
+        await asyncio.sleep(10)  # Long operation
+        # DJ mode might have been stopped during sleep!
+        await self._complete_dj_transition()  # BUG: Proceeds even if DJ stopped
+
+# CORRECT: Check canonical state at decision points
+async def long_running_operation(self):
+    if self._dj_mode_active:
+        await asyncio.sleep(10)
+        # Re-verify before proceeding
+        dj_active = await self._query_memory_service("dj_mode_active")
+        if dj_active:
+            await self._complete_dj_transition()
+        else:
+            self.logger.info("Operation cancelled - DJ mode stopped")
+```
+
+**Pitfall 2: Not Waiting for Memory Propagation**
+
+```python
+# WRONG: Emit event immediately after memory update
+await self.emit(EventTopics.MEMORY_SET, {"key": "state", "value": True})
+await self.emit(EventTopics.STATE_CHANGED, {})  # Other services query too soon!
+
+# CORRECT: Brief pause for propagation
+await self.emit(EventTopics.MEMORY_SET, {"key": "state", "value": True})
+await asyncio.sleep(0.05)  # Allow MemoryService to update
+await self.emit(EventTopics.STATE_CHANGED, {})
+```
+
+**Pitfall 3: Using MemoryService for Non-Critical State**
+
+```python
+# WRONG: Overusing MemoryService
+await self.emit(EventTopics.MEMORY_SET, {
+    "key": "ui_button_hover_state",  # Too fine-grained!
+    "value": True
+})
+
+# CORRECT: Keep service-internal state local
+self._ui_button_hover = True  # No need for MemoryService
+```
+
+### 13.5.5 Testing with MemoryService
+
+When writing tests, mock MemoryService to verify state coordination:
+
+```python
+async def test_dj_stop_during_crossfade():
+    # Setup: Mock MemoryService
+    memory_service = MockMemoryService()
+    music_controller = MusicControllerService(event_bus, memory_service)
+
+    # Start DJ mode
+    memory_service.set_state("dj_mode_active", True)
+
+    # Start crossfade
+    crossfade_task = asyncio.create_task(
+        music_controller._crossfade_to_track(next_track, source="dj")
+    )
+
+    # Stop DJ mode mid-crossfade
+    await asyncio.sleep(0.5)  # Let crossfade start
+    memory_service.set_state("dj_mode_active", False)
+    await music_controller._handle_dj_mode_changed({"is_active": False})
+
+    # Wait for crossfade to complete
+    await crossfade_task
+
+    # Verify music was stopped, not started
+    assert music_controller.current_track is None
+    assert music_controller.player is None
+```
+
 ## 14. Conclusion
 
-Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. The new Pydantic validation system provides type safety and robust error handling for web dashboard integration. These standards should be reviewed and updated as needed based on project evolution and team feedback.
+Following these architectural standards consistently will help ensure that the CantinaOS codebase remains maintainable, reliable, and scalable. The new Pydantic validation system provides type safety and robust error handling for web dashboard integration. The MemoryService canonical state pattern prevents race conditions in complex multi-service operations. These standards should be reviewed and updated as needed based on project evolution and team feedback.
 
-**Key New Requirements**:
+**Key Requirements Summary**:
 - All WebBridge services must use Pydantic validation mixins
 - Socket.IO handlers must use validation decorators
 - JSON serialization must handle datetime fields properly
-- Command validation must follow the 4-level pipeline 
+- Command validation must follow the 4-level pipeline
+- **MemoryService must be updated BEFORE emitting coordination events**
+- **Services must query MemoryService for critical state decisions during async operations**
+- **Use MemoryService for shared state that multiple services need**
+- **Always await subscriptions before emitting requests that need responses** 
