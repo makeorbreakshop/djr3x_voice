@@ -457,7 +457,7 @@ class ClaudeService(BaseService):
                 system=system_prompt_with_cache,  # Use cached system parameter
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
-                tools=self._tool_schemas if self._tool_schemas else None
+                tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
             )
 
             self.logger.info(f"Successfully received response from Claude")
@@ -537,7 +537,7 @@ class ClaudeService(BaseService):
                 system=system_prompt_with_cache,  # Use cached system parameter
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
-                tools=self._tool_schemas if self._tool_schemas else None
+                tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
             ) as stream:
                 chunk_count = 0
                 current_tool_use = None
@@ -729,6 +729,25 @@ class ClaudeService(BaseService):
         self._tools[tool_name] = claude_tool
         self._tool_schemas = list(self._tools.values())
         self.logger.info(f"Registered tool: {tool_name}")
+
+    def _get_tool_schemas_with_cache(self) -> Optional[List[Dict[str, Any]]]:
+        """Get tool schemas with cache_control on the last tool for prompt caching.
+
+        Per Anthropic docs, cache_control should only be on the LAST tool.
+        This ensures all tool definitions are cached as a single prefix.
+        """
+        if not self._tool_schemas:
+            return None
+
+        # Deep copy to avoid modifying original
+        import copy
+        tools_copy = copy.deepcopy(self._tool_schemas)
+
+        # Add cache_control to last tool only
+        if tools_copy:
+            tools_copy[-1]["cache_control"] = {"type": "ephemeral"}
+
+        return tools_copy
 
     async def reset_conversation(self) -> None:
         """Reset the conversation state with a new ID."""
