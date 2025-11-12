@@ -130,6 +130,11 @@ class ElevenLabsService(BaseService):
         
         # Track processed text to avoid duplicates
         self._processed_text_chunks: Dict[str, List[str]] = {}
+
+        # Connection pre-warming (latency optimization)
+        self._last_connection_warmup_time: float = 0
+        self._warmup_cooldown = 30  # Don't re-warm more than every 30 seconds
+        self._connection_warmed = False
     
     async def _start(self) -> None:
         """Start the service following architecture standards."""
@@ -241,7 +246,21 @@ class ElevenLabsService(BaseService):
             EventTopics.TTS_GENERATE_REQUEST,
             self._handle_tts_generate_request
         )
-        
+
+        # Subscribe to SYSTEM_MODE_CHANGED for early connection pre-warming
+        await self.subscribe(
+            EventTopics.SYSTEM_MODE_CHANGED,
+            self._handle_mode_changed_for_warmup
+        )
+        self.logger.info("ElevenLabsService: Subscribed to SYSTEM_MODE_CHANGED for connection pre-warming.")
+
+        # Subscribe to MIC_RECORDING_START for backup connection warmup
+        await self.subscribe(
+            EventTopics.MIC_RECORDING_START,
+            self._handle_mic_start_for_warmup
+        )
+        self.logger.info("ElevenLabsService: Subscribed to MIC_RECORDING_START for connection refresh.")
+
         self.logger.info("ElevenLabsService event subscriptions complete")
     
     async def _cleanup(self) -> None:
@@ -1094,4 +1113,63 @@ class ElevenLabsService(BaseService):
                     "message": f"Error emitting event: {e}",
                     "log_level": LogLevel.ERROR
                 }
-            ) 
+            )
+
+    async def _warmup_connection(self) -> None:
+        """
+        Warm up the ElevenLabs API connection by making a lightweight request.
+        This reduces latency on the next TTS request by establishing the connection early.
+        """
+        import time
+        current_time = time.time()
+
+        # Check cooldown - don't re-warm too frequently
+        if current_time - self._last_connection_warmup_time < self._warmup_cooldown:
+            self.logger.debug("ElevenLabs connection warmup skipped (cooldown period)")
+            return
+
+        try:
+            self.logger.info("🔄 Warming up ElevenLabs API connection for faster TTS latency")
+            self._last_connection_warmup_time = current_time
+
+            # Make a lightweight API call to establish connection
+            # Just fetch the list of voices - minimal data transfer
+            if self._client:
+                await self._client.get("/voices")
+                self._connection_warmed = True
+                self.logger.info("✅ ElevenLabs API connection warmed up successfully")
+            else:
+                self.logger.warning("ElevenLabs client not initialized, skipping warmup")
+                self._connection_warmed = False
+
+        except Exception as e:
+            # Don't fail the service if warmup fails - log but continue
+            self.logger.warning(f"ElevenLabs connection warmup failed (non-critical): {str(e)}")
+            self._connection_warmed = False
+
+    async def _handle_mode_changed_for_warmup(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle SYSTEM_MODE_CHANGED event to pre-warm connection when entering INTERACTIVE mode.
+        This is triggered by the 'engage' command and happens well before any TTS requests.
+        """
+        try:
+            mode = payload.get("mode", "")
+            if mode == "INTERACTIVE":
+                self.logger.info("Mode changed to INTERACTIVE - pre-warming ElevenLabs API connection")
+                # Run warmup in background without blocking
+                asyncio.create_task(self._warmup_connection())
+        except Exception as e:
+            self.logger.error(f"Error in mode change warmup handler: {e}")
+
+    async def _handle_mic_start_for_warmup(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle MIC_RECORDING_START event to refresh connection before TTS is needed.
+        This is a safety net in case the connection was idle or dropped.
+        By the time TTS is requested, connection will be fresh and ready.
+        """
+        try:
+            self.logger.info("Mic recording started - refreshing ElevenLabs API connection")
+            # Run warmup in background without blocking recording
+            asyncio.create_task(self._warmup_connection())
+        except Exception as e:
+            self.logger.error(f"Error in mic start warmup handler: {e}") 
