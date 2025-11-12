@@ -975,30 +975,36 @@ class ElevenLabsService(BaseService):
             self.logger.error(f"Error executing system command: {e}")
             raise 
 
-    async def _process_audio_for_caching(self, audio_bytes, request_id, sample_rate=None):
+    async def _process_audio_for_caching(self, audio_bytes, request_id, sample_rate=None, volume=1.0):
         """Process audio data for caching requests from CachedSpeechService.
-        
+
         Args:
             audio_bytes: Raw MP3 audio data
             request_id: The request ID for tracking
             sample_rate: Optional sample rate override
+            volume: Volume adjustment factor (1.0 = no change, 0.85 = 15% reduction)
         """
         try:
             # Convert MP3 to numpy array
             import io
             from pydub import AudioSegment
             import numpy as np
-            
+
             # Load MP3 data
             audio = AudioSegment.from_mp3(io.BytesIO(audio_bytes))
-            
+
             # Convert to numpy array
             samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
             samples = samples / (2**(audio.sample_width * 8 - 1))  # Normalize
-            
+
+            # Apply volume adjustment if specified
+            if volume != 1.0:
+                samples = samples * volume
+                self.logger.info(f"Applied volume adjustment: {volume} (reduction: {int((1.0 - volume) * 100)}%)")
+
             # Get sample rate
             final_sample_rate = sample_rate or audio.frame_rate
-            
+
             # Return the processed audio data through the event system
             await self.emit(
                 EventTopics.TTS_AUDIO_DATA,
@@ -1038,6 +1044,7 @@ class ElevenLabsService(BaseService):
                 model_id = payload.get("model_id", self._config.model_id)  # Allow override from payload
                 stability = payload.get("stability", self._config.stability)  # Allow override from payload
                 speed = payload.get("speed", self._config.speed)
+                volume = payload.get("volume", 1.0)  # Volume adjustment (1.0 = no change, 0.85 = 15% reduction)
 
                 # Validate and adjust parameters for selected model
                 adjusted_stability, adjusted_speed, warnings = ElevenLabsConfig.validate_model_compatibility(
@@ -1080,11 +1087,11 @@ class ElevenLabsService(BaseService):
                     
                     # Convert generator to bytes
                     audio_bytes = b''.join(audio_generator)
-                    
+
                     self.logger.info(f"Successfully generated speech, received {len(audio_bytes)} bytes")
-                    
-                    # Process the audio for caching
-                    await self._process_audio_for_caching(audio_bytes, request_id)
+
+                    # Process the audio for caching (with optional volume adjustment)
+                    await self._process_audio_for_caching(audio_bytes, request_id, volume=volume)
                     
                 except Exception as e:
                     self.logger.error(f"Error generating speech: {e}")

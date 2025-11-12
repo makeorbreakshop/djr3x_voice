@@ -515,6 +515,7 @@ class CachedSpeechService(BaseService):
                     "model_id": "eleven_v3",  # Use V3 for background DJ commentary (higher quality, 1.7-3.6s acceptable)
                     "stability": 0.5,         # V3 requires discrete values: 0.0 (creative), 0.5 (natural), 1.0 (robust)
                     "non_streaming": True,    # We need the whole audio data for caching
+                    "volume": 0.85,           # V3 generates hotter audio - reduce by 15% for level matching with V2.5
                     "source": "cached_speech_service"
                 }
             )
