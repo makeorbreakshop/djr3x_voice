@@ -487,13 +487,15 @@ class ClaudeService(BaseService):
                         }
                     })
 
-            # Add assistant message to memory
+            # Add assistant message to memory ONLY if there's text content
+            # If Claude only returned tool calls with no text, don't add empty message
             # NOTE: tool_calls should NOT be stored in messages sent back to Claude API
             # Claude API only accepts role, content, and name fields in messages
-            self._memory.add_message(
-                role="assistant",
-                content=message_content
-            )
+            if message_content or not tool_calls:
+                self._memory.add_message(
+                    role="assistant",
+                    content=message_content
+                )
 
             # Process tool calls if any
             if tool_calls:
@@ -577,13 +579,15 @@ class ClaudeService(BaseService):
             self.logger.info(f"Completed streaming response with {chunk_count} chunks")
             self.logger.info(f"Processed {len(tool_calls)} tool calls")
 
-            # Add complete message to memory
+            # Add complete message to memory ONLY if there's text content
+            # If Claude only returned tool calls with no text, don't add empty message
             # NOTE: tool_calls should NOT be stored in messages sent back to Claude API
             # Claude API only accepts role, content, and name fields in messages
-            self._memory.add_message(
-                role="assistant",
-                content=full_content
-            )
+            if full_content or not tool_calls:
+                self._memory.add_message(
+                    role="assistant",
+                    content=full_content
+                )
 
             # Process tool calls if any
             if tool_calls:
