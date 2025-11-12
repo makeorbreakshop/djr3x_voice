@@ -1030,6 +1030,7 @@ class ClaudeService(BaseService):
             self.logger.info(f"Context: {context}, Next track: {next_track.title if next_track else 'None'}")
 
             # Create commentary prompt based on context and track information
+            # Note: DJ commentary always uses V3 (hardcoded in CachedSpeechService), which supports audio tags
             if context == "transition" and current_track and next_track:
                 user_prompt = f"""
 You are transitioning from "{current_track.title}" to "{next_track.title}".
@@ -1040,6 +1041,13 @@ Generate a brief, energetic DJ transition commentary (2-3 sentences max) that:
 - Maintains the Star Wars cantina atmosphere
 - Sounds natural and conversational like a real DJ
 
+AUDIO TAG INSTRUCTIONS (for ElevenLabs V3 text-to-speech):
+Add these tags in square brackets to enhance vocal delivery:
+- [excited]: Use before upbeat statements about the next track (most common)
+- [whispers]: Use for smooth transitions or connective moments (rare)
+
+Example: "[excited] Alright folks! Coming up next, we've got [track name]!"
+
 Keep it concise and punchy - this will play over a crossfade.
 """
             elif context == "intro" and current_track:
@@ -1047,11 +1055,19 @@ Keep it concise and punchy - this will play over a crossfade.
 Generate a brief, enthusiastic introduction (2-3 sentences max) for the track "{current_track.title}" by {current_track.artist}.
 
 Make it sound like DJ R3X is introducing this track to the cantina crowd.
+
+AUDIO TAG INSTRUCTIONS (for ElevenLabs V3 text-to-speech):
+Add these tags in square brackets to enhance vocal delivery:
+- [excited]: Use for upbeat, energetic moments (most intro moments)
+- [whispers]: Use for smooth, intimate moments (rare for intros)
+
+Example: "[excited] Get ready for [artist] - this is [track name]!"
+
 Keep it energetic but concise.
 """
             else:
                 # Fallback prompt
-                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X."
+                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X. You can use audio tags like [excited] or [whispers] in square brackets for ElevenLabs V3 text-to-speech enhancement."
 
             self.logger.info(f"Commentary prompt created for {context} context")
 
