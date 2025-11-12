@@ -142,8 +142,12 @@ class MusicControllerService(BaseService):
         # Add DJ mode events
         await self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
         self.logger.debug("Subscribed to DJ_MODE_CHANGED events")
-        
+
         await self.subscribe(EventTopics.DJ_NEXT_TRACK, self._handle_dj_next_track)
+
+        # FIX 1: Subscribe to cached speech completion for immediate unduck
+        await self.subscribe(EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED, self._handle_cached_speech_completed)
+        self.logger.debug("Subscribed to SPEECH_CACHE_PLAYBACK_COMPLETED events")
         self.logger.debug("Subscribed to DJ_NEXT_TRACK events")
         
         self.logger.info("Music controller event subscriptions complete")
@@ -1109,6 +1113,35 @@ class MusicControllerService(BaseService):
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}")
 
+    async def _handle_cached_speech_completed(self, payload: Dict[str, Any]) -> None:
+        """FIX 1: Handle cached speech completion to immediately unduck music.
+
+        This provides instant unduck response when DJ commentary finishes,
+        rather than waiting for both speech AND crossfade to complete.
+        Event-driven pattern allows crossfade to continue independently.
+
+        Args:
+            payload: SPEECH_CACHE_PLAYBACK_COMPLETED event payload
+        """
+        try:
+            # Only unduck if we're in DJ mode and currently ducking
+            if self.dj_mode_active and self.is_ducking:
+                completion_status = payload.get('completion_status', 'completed')
+                cache_key = payload.get('cache_key', 'unknown')
+
+                if completion_status == 'completed':
+                    self.logger.info(f"FIX 1: Cached speech completed (cache_key: {cache_key}), unducking music immediately")
+
+                    # Unduck music by restoring volume
+                    if self.player:
+                        self.is_ducking = False
+                        self.player.audio_set_volume(self.normal_volume)
+                        self.logger.info(f"FIX 1: Music volume restored to {self.normal_volume}")
+                else:
+                    self.logger.warning(f"Cached speech completed with status '{completion_status}', not unducking")
+        except Exception as e:
+            self.logger.error(f"Error handling cached speech completion: {e}")
+
     async def _handle_dj_next_track(self, payload: Dict[str, Any]) -> None:
         """
         Handle DJ next track command (skip to next track)
@@ -1284,7 +1317,13 @@ class MusicControllerService(BaseService):
             # Start the next track at 0 volume
             self.secondary_player.audio_set_volume(0)
             self.secondary_player.play()
-            
+
+            # FIX 3: Set up TRACK_ENDING_SOON timer when track STARTS (during crossfade)
+            # Timer should count from when secondary player starts, not when crossfade completes
+            if self.dj_mode_active and next_track.duration:
+                await self._setup_track_end_timer(next_track.duration)
+                self.logger.debug(f"FIX 3: Timer set for next track '{next_track.title}' during crossfade start")
+
             # Perform the crossfade
             for step in range(self._config.crossfade_steps + 1):
                 if not self.is_crossfading:
@@ -1304,11 +1343,41 @@ class MusicControllerService(BaseService):
                 # Wait for the step duration
                 await asyncio.sleep(step_duration / 1000)
             
+            # CRITICAL FIX: Check if DJ mode is still active before completing crossfade
+            # This prevents music from restarting after "dj stop" command during crossfade
+            if source == "dj" and not self.dj_mode_active:
+                self.logger.info(f"Crossfade {crossfade_id} cancelled - DJ mode deactivated during crossfade")
+                # Stop both players
+                if self.player:
+                    self.player.stop()
+                    await self._cleanup_player(self.player)
+                if self.secondary_player:
+                    self.secondary_player.stop()
+                    await self._cleanup_player(self.secondary_player)
+
+                # Clear state
+                self.player = None
+                self.secondary_player = None
+                self.current_track = None
+                self.next_track = None
+                self.is_crossfading = False
+
+                # Emit cancelled crossfade event
+                await self.emit(
+                    EventTopics.CROSSFADE_COMPLETE,
+                    {
+                        "crossfade_id": crossfade_id,
+                        "status": "cancelled_dj_stop",
+                        "reason": "DJ mode deactivated"
+                    }
+                )
+                return
+
             # Clean up old player and update state
             if self.player:
                 self.player.stop()
                 await self._cleanup_player(self.player)
-            
+
             # Swap players and update track info
             self.player = self.secondary_player
             self.secondary_player = None
@@ -1327,11 +1396,11 @@ class MusicControllerService(BaseService):
             
             # Emit simple coordination event for timeline services (new track is now playing)
             await self.emit(EventTopics.TRACK_PLAYING, {})
-            
-            # Set up track end timer for the new track
-            if self.dj_mode_active and next_track.duration:
-                await self._setup_track_end_timer(next_track.duration)
-            
+
+            # FIX 3: DO NOT set timer here - already set when secondary_player started (line 1319)
+            # Removing duplicate timer setup that was causing rapid transitions
+            # Old code: if self.dj_mode_active and next_track.duration: await self._setup_track_end_timer(next_track.duration)
+
         except Exception as e:
             self.logger.error(f"Error during crossfade: {e}", exc_info=True)
             self.is_crossfading = False

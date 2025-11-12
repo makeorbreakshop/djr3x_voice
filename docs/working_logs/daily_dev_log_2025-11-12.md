@@ -459,3 +459,203 @@ because coming up next is 'Song Y' and it's about to BLOW YOUR MIND!
 - Regular dialogue unaffected
 - Audio levels consistent
 - Ready for production testing
+
+---
+
+## [BUG FIXES] DJ Mode Audio Timing & Transition Issues (16:00 - 17:30)
+
+### Issues Identified from Log Analysis (logs/dj_r3x_2025-11-12_16-06-59.log)
+
+Three critical bugs were discovered through systematic log trace analysis:
+
+#### Bug 1: Unduck Timing Delay (3-4 second gap)
+**Problem**: Music stayed ducked at 50% volume for 3-4 seconds after DJ commentary finished because ParallelSteps waited for BOTH cached speech AND crossfade to complete before unducking.
+
+**Timeline Evidence**:
+- Transition 1: Crossfade complete at 16:08:16.813, speech complete at 16:08:20.379 → 4.6s gap
+- Transition 2: Speech complete at 16:09:14.842, crossfade complete at 16:09:17.852 → 3.0s gap
+
+**Root Cause**: `asyncio.gather()` in ParallelSteps blocked on slowest operation. Music sat ducked waiting unnecessarily.
+
+**Fix Applied**: Event-driven unduck (music_controller_service.py:148-150, 1116-1138)
+- Added subscription to `SPEECH_CACHE_PLAYBACK_COMPLETED` event
+- MusicController now unducks immediately when cached speech ends
+- Crossfade continues independently (proper async coordination)
+- Follows CantinaOS event-driven architecture pattern
+
+#### Bug 2: Cached Audio Too Loud
+**Problem**: DJ commentary (cached speech) was significantly louder than regular voice responses (flash TTS).
+
+**Root Cause**: 2.5x volume boost applied to cached speech but not flash TTS, both using identical audio format (mp3_44100_128, 44.1kHz).
+
+**Fix Applied**: Volume matching (cached_speech_service.py:637-645)
+- Reduced boost from 2.5x → 1.0x (no boost)
+- Now matches ElevenLabs flash TTS playback exactly
+- Updated debug logs to reflect change
+
+**Note**: Discussed LUFS normalization as future enhancement for professional-grade loudness matching across TTS models.
+
+#### Bug 3: Rapid Song Transitions (CRITICAL)
+**Problem**: Songs were transitioning after only 17-22 seconds instead of playing full duration. System was "going to new songs really quick and playing additional cache audio."
+
+**Log Evidence**:
+```
+16:10:49.529 - Crossfade starts, timer set for 161.28s (correct)
+16:11:05.044 - Crossfade completes, timer RESET to 146.40s (BUG!)
+16:11:27.562 - TRACK_ENDING_SOON fires (only 22s after crossfade)
+```
+
+**Root Cause**: `TRACK_ENDING_SOON` timer was set TWICE:
+1. When secondary_player.play() started (correct timing from track start)
+2. **Again** when crossfade completed (overwrote first timer with wrong duration)
+
+**Impact**: Second timer used full track duration from crossfade END instead of START, causing ~15 second timing error that accumulated, triggering transitions way too early.
+
+**Fix Applied**: Single timer setup (music_controller_service.py:1316-1320, 1395-1397)
+- Added timer at line 1319 when `secondary_player.play()` starts
+- Removed duplicate timer at crossfade completion (line 1395-1397)
+- Timer now correctly counts from actual track playback start during crossfade
+
+### LUFS Normalization Research
+
+User asked about technical implementation of LUFS-based audio normalization as alternative to simple volume boost.
+
+**Key Findings**:
+- LUFS = Loudness Units relative to Full Scale (ITU-R BS.1770 standard)
+- Measures perceived loudness using K-weighting filter (models human hearing)
+- Industry standards: Spotify -14 LUFS, YouTube -13 LUFS, broadcast -23 LUFS
+- Python library: `pyloudnorm` provides BS.1770 meter implementation
+- Processing time: ~20-50ms per 10-second audio clip (negligible vs TTS generation)
+
+**Recommendation**: Implemented simple 1.0x volume fix now, LUFS normalization available as future enhancement if needed for:
+- Multiple TTS providers
+- Different ElevenLabs models (V2.5 vs V3 have different loudness)
+- Broadcast-quality audio mixing requirements
+
+### Architecture Compliance
+
+All three fixes follow CantinaOS principles:
+- ✅ Event-driven coordination (Fix 1 uses SPEECH_CACHE_PLAYBACK_COMPLETED event)
+- ✅ Service decoupling (no direct service calls)
+- ✅ Single responsibility (each service owns its domain)
+- ✅ Clear documentation (FIX N: markers in comments)
+
+### Expected Results
+1. Music unducks immediately when commentary finishes (not 3-4s later)
+2. Cached speech volume matches flash TTS
+3. Songs play full duration before transitioning (no more 17-second skips)
+
+---
+
+## [MIGRATION] DJ Commentary to Claude Haiku (17:30 - 18:00)
+
+### Issue Discovered
+DJ transition commentary was still using GPTService (OpenAI) instead of ClaudeService, meaning:
+- Regular engage mode: Claude Haiku 4.5 ✓
+- DJ commentary: GPT-4.1-mini ✗
+
+This created inconsistency in voice/personality and missed the benefits of unified model usage.
+
+### Investigation
+Found that **both** GPTService AND ClaudeService were subscribed to `DJ_COMMENTARY_REQUEST`:
+- ClaudeService already had full implementation (lines 1010-1133) using Claude best practices
+- GPTService was also subscribed (lines 307-311), causing duplicate handling
+- Only one service should handle this event
+
+### Changes Made
+
+#### 1. Removed GPTService Subscription (gpt_service.py:307-308)
+```python
+# OLD:
+asyncio.create_task(self.subscribe(
+    EventTopics.DJ_COMMENTARY_REQUEST,
+    self._handle_dj_commentary_request
+))
+
+# NEW:
+# DJ_COMMENTARY_REQUEST now handled by ClaudeService (uses Claude Haiku for consistency)
+# Removed GPTService subscription to avoid duplicate handling
+```
+
+#### 2. Deprecated GPTService Handler (gpt_service.py:1170-1174)
+Marked `_handle_dj_commentary_request()` as DEPRECATED for future cleanup.
+
+### ClaudeService Implementation (Already Existed!)
+
+**Location**: claude_service.py:1010-1133
+
+**Features**:
+- ✅ Uses Claude Haiku 4.5 (same as engage mode)
+- ✅ Claude best practices:
+  - SITUATION/INSTRUCTIONS structure
+  - Persona as system prompt, task as user message
+  - Temperature 0.8 for creative transitions
+  - Max 150 tokens for brevity
+
+- ✅ ElevenLabs V3 audio tag support:
+  ```python
+  [excited]: For upbeat, energetic moments (most common)
+  [whispers]: For smooth, intimate transitions
+  ```
+
+- ✅ Context-aware prompts:
+  - **transition**: "You are transitioning from X to Y" with current/next track info
+  - **intro**: "Generate introduction for track X by artist Y"
+
+**Example Prompt (Transition Context)**:
+```
+SITUATION: You are generating DJ commentary for a track transition.
+
+TRACKS:
+- Current: "Doshka"
+- Next: "Bright Suns"
+
+INSTRUCTIONS:
+Generate a brief, energetic transition commentary (2-3 sentences max) that:
+- Acknowledges the current track ending
+- Introduces the next track with enthusiasm
+- Sounds natural and conversational
+
+AUDIO TAG ENHANCEMENT (ElevenLabs V3):
+You can optionally use these audio tags in square brackets to enhance vocal delivery:
+- [excited]: For upbeat, energetic moments (most common in transitions)
+- [whispers]: For smooth, intimate transitions between contrasting tracks
+
+Keep it concise and punchy - this will play over a crossfade.
+```
+
+### Bug Fix: AttributeError in Fix 1
+
+**Error Found** (from logs):
+```
+ERROR - Error handling cached speech completion: 'MusicControllerService' object has no attribute '_unduck_music'
+```
+
+**Root Cause**: Fix 1 called `await self._unduck_music()` but this helper method doesn't exist.
+
+**Fix Applied** (music_controller_service.py:1135-1139):
+```python
+# OLD:
+await self._unduck_music()  # Method doesn't exist!
+
+# NEW:
+# Unduck music by restoring volume inline
+if self.player:
+    self.is_ducking = False
+    self.player.audio_set_volume(self.normal_volume)
+    self.logger.info(f"FIX 1: Music volume restored to {self.normal_volume}")
+```
+
+### Result
+🎉 **Complete consistency**: All voice responses (engage mode + DJ commentary) now use Claude Haiku 4.5
+
+### Benefits
+1. **Unified personality**: Same model = same voice across all responses
+2. **Cost optimization**: Haiku is cheapest Claude model
+3. **Speed**: Haiku is fastest for low-latency DJ commentary
+4. **Quality**: Claude's reasoning for contextual transitions
+5. **Audio tags**: Proper V3 tag support for enhanced delivery
+
+### Files Modified
+- `gpt_service.py`: Removed DJ_COMMENTARY_REQUEST subscription + deprecated handler
+- `music_controller_service.py`: Fixed AttributeError in _handle_cached_speech_completed

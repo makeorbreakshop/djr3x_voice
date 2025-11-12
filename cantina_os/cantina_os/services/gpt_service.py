@@ -304,11 +304,8 @@ class GPTService(BaseService):
         ))
         self.logger.info("GPTService: Subscribed to INTENT_EXECUTION_RESULT.")
 
-        asyncio.create_task(self.subscribe(
-            EventTopics.DJ_COMMENTARY_REQUEST,
-            self._handle_dj_commentary_request
-        ))
-        self.logger.info("GPTService: Subscribed to DJ_COMMENTARY_REQUEST.")
+        # DJ_COMMENTARY_REQUEST now handled by ClaudeService (uses Claude Haiku for consistency)
+        # Removed GPTService subscription to avoid duplicate handling
 
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
@@ -1170,7 +1167,11 @@ class GPTService(BaseService):
             await self._emit_llm_response(fallback_msg) 
 
     async def _handle_dj_commentary_request(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ commentary generation requests from BrainService."""
+        """DEPRECATED: DJ commentary now handled by ClaudeService using Claude Haiku.
+
+        This method is no longer subscribed to DJ_COMMENTARY_REQUEST events.
+        Kept for reference only. Remove in future cleanup.
+        """
         try:
             self.logger.info("Handling DJ_COMMENTARY_REQUEST")
             

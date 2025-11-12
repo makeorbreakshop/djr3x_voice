@@ -624,15 +624,31 @@ class CachedSpeechService(BaseService):
             # Define the blocking playback function to run in the executor
             def blocking_playback():
                 try:
-                    # Apply volume boost for better mixing with ducked music
-                    # Boost DJ R3X commentary by 1.8x for better presence
-                    audio_data = entry.audio_data * 1.8
-                    
+                    # DEBUG: Log audio device information
+                    try:
+                        devices = sd.query_devices()
+                        default_output = sd.query_devices(kind='output')
+                        self.logger.info(f"[AUDIO DEBUG] Playing cached speech on device: {default_output['name']}")
+                        self.logger.info(f"[AUDIO DEBUG] Device index: {default_output['index']}, Sample rate: {entry.sample_rate}")
+                        self.logger.info(f"[AUDIO DEBUG] Audio data shape: {entry.audio_data.shape}, dtype: {entry.audio_data.dtype}")
+                    except Exception as e:
+                        self.logger.warning(f"[AUDIO DEBUG] Could not query audio devices: {e}")
+
+                    # FIX 2: Match flash TTS volume (no boost)
+                    # Previously 2.5x boost caused cached speech to be too loud
+                    # Set to 1.0x to match ElevenLabsService flash TTS playback
+                    audio_data = entry.audio_data * 1.0
+
                     # Ensure we don't clip the audio (prevent values > 1.0 or < -1.0)
                     audio_data = np.clip(audio_data, -1.0, 1.0)
-                    
+
+                    self.logger.info(f"[AUDIO DEBUG] Starting playback: volume boost=1.0x (no boost), duration={entry.duration_ms}ms")
+
+                    # Play audio and wait for completion
                     sd.play(audio_data, entry.sample_rate)
                     sd.wait()  # Wait for playback to complete
+
+                    self.logger.info(f"[AUDIO DEBUG] Playback completed successfully")
                 except Exception as e:
                     # Log the error within the thread
                     self.logger.error(f"Error during blocking audio playback: {e}")
