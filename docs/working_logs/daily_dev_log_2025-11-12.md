@@ -357,3 +357,105 @@ self._connection_warmed = False  # Track warmup success
 **Commit**: `bd401a6` - "perf: Add Claude API connection pre-warming for latency optimization"
 
 This provides a 150-200ms latency improvement without requiring model changes or prompt modifications.
+
+---
+
+## [FEATURE] ElevenLabs V3 Integration & Persona Architecture Refactoring (13:00 - 14:30)
+
+### V3 Testing & Implementation Complete
+Successfully integrated ElevenLabs V3 model for DJ commentary generation with automatic parameter compatibility handling.
+
+**Commits**:
+- `60903e4` - feat: Add ElevenLabs v3 support with automatic parameter mapping
+- `280e61b` - feat: Configure CachedSpeechService to use ElevenLabs V3 for DJ commentary
+
+**Key Findings**:
+- V3 is 5.5x-9.8x slower than V2.5 (1.7-3.6s vs 300ms)
+- **Critical discovery**: V3 requires **discrete stability values** [0.0, 0.5, 1.0], NOT continuous like V2.5
+- Using V2.5's 0.60 with V3 causes: `400 Error: Invalid TTD stability value`
+- V3 produces higher quality audio (1.7x larger files)
+- Speed parameter NOT supported in V3
+
+**Implementation**:
+- Added `validate_model_compatibility()` class method for automatic parameter adjustment
+- V3 stability 0.60 → automatically maps to 0.5 (Natural mode)
+- Speed parameter conditionally excluded from V3 voice settings
+- Full backward compatibility with V2.5
+
+### Persona Architecture Refactoring (Major Improvement)
+
+**Problem Identified**:
+- Had 3 separate persona files (dj_r3x-persona.txt, transition-persona.txt, verbal-feedback-persona.txt)
+- Each was re-stating DJ R3X's core identity
+- Audio tags section was bleeding into regular dialogue
+
+**Solution Implemented**:
+- **One unified persona file**: dj_r3x-persona.txt (now the single source of truth)
+- **Context-specific instructions**: Layered in code only (ClaudeService)
+- **Proper separation of concerns**:
+  - Main persona = who DJ R3X is + general speech style
+  - User prompts = what task to do right now
+
+**Changes Made** (Commits):
+- `3fb661f` - refactor: Consolidate persona architecture from 3 files to 1
+- `9039e36` - refactor: Move audio tags out of main persona into DJ commentary context only
+- `00384a8` - fix: Restrict audio tags to DJ commentary only, improve brevity guidance
+
+**Benefits**:
+- Single source of truth (easier to maintain)
+- Audio tags only appear in DJ commentary context (not regular dialogue)
+- Regular responses stay snappy (1-3 sentences)
+- Cleaner code architecture
+
+### V3 Audio Tag Support for DJ Commentary
+
+**Audio Tags Added** (in DJ commentary prompts only):
+- `[excited]`: Energetic, upbeat delivery (most common)
+- `[whispers]`: Soft, intimate transitions (rare)
+- `[sarcastic]`: Ironic, tongue-in-cheek (very rare)
+
+**Example Tagged Commentary**:
+```
+[excited] Alright folks, we just wrapped up 'Song X'! Get ready,
+because coming up next is 'Song Y' and it's about to BLOW YOUR MIND!
+```
+
+**Tags Feature**:
+- ElevenLabs V3-only capability
+- Works best with text >250 characters
+- Stability 0.5 (Natural) makes tags most effective
+- Only mentioned in DJ commentary context prompts, NOT main persona
+
+### V3 Volume Normalization Fix
+
+**Issue Discovered**: V3 audio was significantly louder than V2.5, causing jarring level differences.
+
+**Root Cause**: V3 encodes with hotter/louder peak levels than V2.5 despite same output format (mp3_44100_128).
+
+**Solution** (Commit `dd88847`):
+- Added optional `volume` parameter to TTS_REQUEST payload
+- CachedSpeechService requests V3 with `volume: 0.85` (15% reduction)
+- ElevenLabsService applies volume adjustment in `_process_audio_for_caching()`
+- Simple numpy scalar multiplication: `samples = samples * volume`
+- Logs indicate reduction percentage for debugging
+
+**Impact**: DJ commentary (V3) now matches loudness of regular responses (V2.5)
+
+### Implementation Summary
+
+**3 Major Commits**:
+1. **Persona Consolidation** (3fb661f): 3 files → 1 file architecture
+2. **Audio Tag Separation** (9039e36): Tags moved to context-only, removed from main persona
+3. **Volume Normalization** (dd88847): V3 loudness matched to V2.5
+
+**Code Quality**:
+- ✅ All syntax validated
+- ✅ Backward compatible
+- ✅ No breaking changes
+- ✅ Fully documented in commits
+
+**Current State**:
+- V3 integrated and working for DJ commentary
+- Regular dialogue unaffected
+- Audio levels consistent
+- Ready for production testing
