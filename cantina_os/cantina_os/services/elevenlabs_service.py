@@ -1032,13 +1032,25 @@ class ElevenLabsService(BaseService):
             
             if non_streaming:
                 self.logger.info(f"Generating non-streaming audio for caching, request_id: {request_id}")
-                
-                # Get voice settings from config
-                voice_id = self._config.voice_id
-                model_id = self._config.model_id
-                speed = self._config.speed
-                
-                self.logger.info(f"Sending TTS request to ElevenLabs for text length: {len(text)} with speed {speed}")
+
+                # Get voice settings from payload or config
+                voice_id = payload.get("voice_id", self._config.voice_id)
+                model_id = payload.get("model_id", self._config.model_id)  # Allow override from payload
+                stability = payload.get("stability", self._config.stability)  # Allow override from payload
+                speed = payload.get("speed", self._config.speed)
+
+                # Validate and adjust parameters for selected model
+                adjusted_stability, adjusted_speed, warnings = ElevenLabsConfig.validate_model_compatibility(
+                    model_id=model_id,
+                    stability=stability,
+                    speed=speed
+                )
+
+                # Log any compatibility warnings
+                for warning in warnings:
+                    self.logger.warning(f"Model compatibility: {warning}")
+
+                self.logger.info(f"Sending TTS request to ElevenLabs: model={model_id}, stability={adjusted_stability}, text_length={len(text)}")
                 
                 # Make request to ElevenLabs for complete audio file using modern SDK
                 try:
@@ -1047,15 +1059,15 @@ class ElevenLabsService(BaseService):
                     
                     # Voice settings for non-streaming (same as streaming for consistency)
                     voice_settings = {
-                        "stability": self._config.stability,
+                        "stability": adjusted_stability,  # Use adjusted stability for model compatibility
                         "similarity_boost": self._config.similarity_boost,
                         "style": 0.25,
                         "use_speaker_boost": True,
                     }
 
                     # Only add speed for non-v3 models
-                    if model_id != "eleven_v3":
-                        voice_settings["speed"] = speed
+                    if model_id != "eleven_v3" and adjusted_speed is not None:
+                        voice_settings["speed"] = adjusted_speed
                     
                     # Use modern convert method instead of old generate()
                     audio_generator = eleven_client.text_to_speech.convert(

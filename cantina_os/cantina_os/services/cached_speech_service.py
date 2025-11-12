@@ -506,13 +506,15 @@ class CachedSpeechService(BaseService):
             
             await self.subscribe(EventTopics.TTS_AUDIO_DATA, handle_tts_response)
             
-            # Request TTS generation
+            # Request TTS generation using V3 for better quality in background commentary
             await self.emit(
-                EventTopics.TTS_REQUEST, 
+                EventTopics.TTS_REQUEST,
                 {
                     "text": text,
                     "request_id": request_id,
-                    "non_streaming": True,  # We need the whole audio data for caching
+                    "model_id": "eleven_v3",  # Use V3 for background DJ commentary (higher quality, 1.7-3.6s acceptable)
+                    "stability": 0.5,         # V3 requires discrete values: 0.0 (creative), 0.5 (natural), 1.0 (robust)
+                    "non_streaming": True,    # We need the whole audio data for caching
                     "source": "cached_speech_service"
                 }
             )
