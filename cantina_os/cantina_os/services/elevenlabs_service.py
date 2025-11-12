@@ -36,16 +36,50 @@ class SpeechPlaybackMethod(str, Enum):
 
 
 class ElevenLabsConfig(BaseModel):
-    """Configuration model for ElevenLabs service."""
+    """Configuration model for ElevenLabs service.
+
+    Supports multiple models:
+    - eleven_flash_v2_5: Real-time, ~75ms TTFB, continuous stability 0.0-1.0
+    - eleven_v3: Expressive, 1.7-3.6s, discrete stability [0.0, 0.5, 1.0]
+    """
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X (quick voice clone)")
-    model_id: str = Field("eleven_flash_v2_5", description="Model ID - Flash v2.5 (75ms latency)")
-    stability: float = Field(0.60, description="Voice stability (0.0-1.0)")
+    model_id: str = Field("eleven_flash_v2_5", description="Model ID - Flash v2.5 (real-time) or v3 (background)")
+    stability: float = Field(0.60, description="Voice stability - v2.5: 0.0-1.0 (continuous), v3: [0.0, 0.5, 1.0] (discrete)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
-    speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2)")
+    speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2) - NOT supported in v3")
     playback_method: SpeechPlaybackMethod = Field(SpeechPlaybackMethod.STREAMING, description="Audio playback method")
     enable_audio_normalization: bool = Field(True, description="Whether to normalize audio")
     latency_optimization: int = Field(4, description="Latency optimization level (0-4, 4=max ~75% improvement)")
+
+    @classmethod
+    def validate_model_compatibility(cls, model_id: str, stability: float, speed: float) -> tuple:
+        """Validate and adjust parameters for the selected model.
+
+        Returns: (adjusted_stability, adjusted_speed, warnings)
+        """
+        warnings = []
+        adjusted_stability = stability
+        adjusted_speed = speed
+
+        if model_id == "eleven_v3":
+            # V3 requires discrete stability values
+            if stability not in [0.0, 0.5, 1.0]:
+                # Map continuous values to nearest discrete value
+                if stability < 0.25:
+                    adjusted_stability = 0.0
+                elif stability < 0.75:
+                    adjusted_stability = 0.5
+                else:
+                    adjusted_stability = 1.0
+                warnings.append(f"V3 stability mapped from {stability} to {adjusted_stability} (discrete values required)")
+
+            # V3 doesn't support speed parameter
+            adjusted_speed = None
+            if speed != 1.0:
+                warnings.append(f"V3 doesn't support speed parameter (requested {speed}x, ignoring)")
+
+        return adjusted_stability, adjusted_speed, warnings
 
 
 class ElevenLabsService(BaseService):
@@ -89,18 +123,38 @@ class ElevenLabsService(BaseService):
         playback_method = SpeechPlaybackMethod.STREAMING
         self.logger.info(f"Using streaming playback method for ElevenLabs: {playback_method}")
         
+        # Get model_id and validate compatibility
+        model_id = config_dict.get("MODEL_ID", "eleven_flash_v2_5")
+        stability = config_dict.get("STABILITY", 0.60)
+
+        # Validate and adjust parameters for selected model
+        adjusted_stability, adjusted_speed, warnings = ElevenLabsConfig.validate_model_compatibility(
+            model_id=model_id,
+            stability=stability,
+            speed=clamped_speed
+        )
+
+        # Log any compatibility warnings
+        for warning in warnings:
+            self.logger.warning(f"Model compatibility: {warning}")
+
         # Create Pydantic config model with 2025 optimizations
         self._config = ElevenLabsConfig(
             api_key=api_key,
             voice_id=config_dict.get("VOICE_ID", "P9l1opNa5pWou2X5MwfB"),
-            model_id=config_dict.get("MODEL_ID", "eleven_flash_v2_5"),  # Ultra-low latency model (75ms TTFB)
-            stability=config_dict.get("STABILITY", 0.60),
+            model_id=model_id,
+            stability=adjusted_stability,  # Use adjusted stability (may be modified for v3)
             similarity_boost=config_dict.get("SIMILARITY_BOOST", 0.85),
-            speed=clamped_speed,  # Use clamped speed value
+            speed=adjusted_speed if adjusted_speed is not None else clamped_speed,  # None for v3
             playback_method=playback_method,  # Force streaming playback
             enable_audio_normalization=config_dict.get("ENABLE_AUDIO_NORMALIZATION", True),
             latency_optimization=config_dict.get("LATENCY_OPTIMIZATION", 4)  # Max optimization (level 4)
         )
+
+        # Store original and adjusted values for logging
+        self._model_id = model_id
+        self._original_stability = stability
+        self._adjusted_stability = adjusted_stability
         
         # Runtime variables
         self._client = None
@@ -198,13 +252,23 @@ class ElevenLabsService(BaseService):
             # Log final playback method
             self.logger.info(f"ElevenLabsService final playback method: {self._config.playback_method}")
 
-            # Log latency optimizations active
-            self.logger.info(f"ElevenLabs Latency Optimizations Active:")
-            self.logger.info(f"  - Model: {self._config.model_id} (Flash v2.5 = 75ms TTFB)")
-            self.logger.info(f"  - Latency optimization level: {self._config.latency_optimization}/4 (~75% improvement)")
-            self.logger.info(f"  - Streaming playback enabled: True (lower TTFB, no disk I/O)")
-            self.logger.info(f"  - Voice: quick clone (optimized for latency, not professional clone)")
-            self.logger.info(f"  - Speed: {self._config.speed}x (1.2 = faster speech, within limits)")
+            # Log model-specific configuration
+            if self._config.model_id == "eleven_v3":
+                self.logger.info(f"ElevenLabs V3 Configuration (Expressive, Background Generation):")
+                self.logger.info(f"  - Model: {self._config.model_id} (Expressive, 1.7-3.6s)")
+                self.logger.info(f"  - Stability: {self._config.stability} (Natural mode - [0.0=Creative, 0.5=Natural, 1.0=Robust])")
+                self.logger.info(f"  - Speed: Not supported in V3 (fixed rate)")
+                self.logger.info(f"  - Audio Tags: Enabled ([excited], [whispers], [sarcastic], etc)")
+                self.logger.info(f"  - Best for: DJ commentary pre-generation in CachedSpeechService")
+                if self._original_stability != self._adjusted_stability:
+                    self.logger.info(f"  - Note: Stability adjusted from {self._original_stability} to {self._adjusted_stability} for V3 compatibility")
+            else:
+                self.logger.info(f"ElevenLabs V2.5 Flash Configuration (Real-time, Low Latency):")
+                self.logger.info(f"  - Model: {self._config.model_id} (Flash v2.5 = 75ms TTFB)")
+                self.logger.info(f"  - Latency optimization level: {self._config.latency_optimization}/4 (~75% improvement)")
+                self.logger.info(f"  - Stability: {self._config.stability} (continuous range 0.0-1.0)")
+                self.logger.info(f"  - Speed: {self._config.speed}x (1.2 = faster speech, within limits)")
+                self.logger.info(f"  - Best for: Real-time voice responses")
 
             # Set up event subscriptions
             await self._setup_subscriptions()
@@ -374,13 +438,19 @@ class ElevenLabsService(BaseService):
                     asyncio.run_coroutine_threadsafe(emit_started(), self._event_loop)
                     
                     # Get audio stream from ElevenLabs
+                    # Build voice settings - v3 doesn't support speed parameter
                     voice_settings = {
                         "stability": stability,
                         "similarity_boost": similarity_boost,
                         "style": 0.25,
                         "use_speaker_boost": True,
-                        "speed": speed
                     }
+
+                    # Only add speed for v2.5 and other models (v3 doesn't support it)
+                    if model_id != "eleven_v3":
+                        voice_settings["speed"] = speed
+                    elif speed != 1.0:
+                        self.logger.debug(f"V3 model: speed parameter ignored (requested {speed}x, v3 uses fixed rate)")
                     
                     try:
                         # Get a streaming response from ElevenLabs
@@ -764,9 +834,12 @@ class ElevenLabsService(BaseService):
                     "similarity_boost": similarity_boost,
                     "use_speaker_boost": True,  # Ensure consistent energy levels
                     "style": 0.25,  # Add slight style emphasis for DJ personality
-                    "speed": speed  # Control speech rate
                 }
             }
+
+            # Only add speed for non-v3 models
+            if model_id != "eleven_v3":
+                payload["voice_settings"]["speed"] = speed  # Control speech rate
 
             # Add latency optimization parameter (new in 2025 API)
             # Level 4 = max optimization (~75% improvement over default)
@@ -978,8 +1051,11 @@ class ElevenLabsService(BaseService):
                         "similarity_boost": self._config.similarity_boost,
                         "style": 0.25,
                         "use_speaker_boost": True,
-                        "speed": speed
                     }
+
+                    # Only add speed for non-v3 models
+                    if model_id != "eleven_v3":
+                        voice_settings["speed"] = speed
                     
                     # Use modern convert method instead of old generate()
                     audio_generator = eleven_client.text_to_speech.convert(
