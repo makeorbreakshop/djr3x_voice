@@ -1039,8 +1039,10 @@ class GPTService(BaseService):
                     content=f"Tool execution result for {intent_name}: {response_content}"
                 )
                 
-            # Now generate a verbal response about the action
-            await self._get_verbal_response_for_intent(intent_name, parameters, result, success)
+            # Generate verbal response in background WITHOUT waiting
+            # This allows the tool to execute immediately while DJ commentary plays over it
+            asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
+            self.logger.info(f"Started background verbal response generation for {intent_name}")
                 
         except Exception as e:
             self.logger.error(f"Error processing intent execution result: {e}", exc_info=True)
