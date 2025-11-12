@@ -898,6 +898,12 @@ class ClaudeService(BaseService):
             if not success and result_payload.error_message:
                 response_content = f"Error: {result_payload.error_message}"
 
+            # Validate that response_content is not empty before adding to memory
+            # Claude API rejects messages with empty content
+            if not response_content or not response_content.strip():
+                self.logger.warning(f"Tool result content is empty for {intent_name}, using default message")
+                response_content = f"{intent_name} completed."
+
             # Add tool response as a message
             if tool_call_id:
                 self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")

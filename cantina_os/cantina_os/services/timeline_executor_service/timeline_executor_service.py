@@ -295,6 +295,7 @@ class TimelineExecutorService(BaseService):
             
             # Start the new plan
             self._active_plans[dj_plan.plan_id] = dj_plan
+            self._timeline_layers[dj_plan.plan_id] = layer  # Track which layer this plan is on
             task = asyncio.create_task(self._run_plan(dj_plan, layer))
             self._layer_tasks[layer] = task
             self._tasks.append(task)
@@ -417,8 +418,9 @@ class TimelineExecutorService(BaseService):
                 PlanEndedPayload(plan_id=plan.plan_id, layer=layer, status="failed")
             )
         finally:
-            # Clean up active plan entry
+            # Clean up active plan entry and layer tracking
             self._active_plans.pop(plan.plan_id, None)
+            self._timeline_layers.pop(plan.plan_id, None)
 
     # ------------------------------------------------------------------
     # Step execution
@@ -795,7 +797,8 @@ class TimelineExecutorService(BaseService):
                     
                     # Emit plan paused event for any active plans on this layer
                     for plan_id, plan in self._active_plans.items():
-                        if plan.layer == other_layer:
+                        # Check if plan is on this layer using the _timeline_layers mapping
+                        if self._timeline_layers.get(plan_id) == other_layer:
                             await self._emit_dict(
                                 EventTopics.PLAN_ENDED,
                                 PlanEndedPayload(
