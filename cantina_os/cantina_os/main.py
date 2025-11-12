@@ -215,7 +215,7 @@ class CantinaOS:
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
             "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
-            "ENABLE_INTERIM_STREAMING": os.getenv("ENABLE_INTERIM_STREAMING", "true").lower() == "true",
+            "ENABLE_INTERIM_STREAMING": os.getenv("ENABLE_INTERIM_STREAMING", "false").lower() == "true",
         }
         
         # Log loaded configuration (masking API keys for security)
