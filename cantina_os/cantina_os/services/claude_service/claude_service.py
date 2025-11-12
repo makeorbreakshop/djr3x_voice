@@ -1045,8 +1045,11 @@ Generate a brief, energetic transition commentary (2-3 sentences max) that:
 - Introduces the next track with enthusiasm
 - Sounds natural and conversational
 
-AUDIO TAG GUIDANCE:
-Remember to use audio tags from the persona to enhance delivery. [excited] works great for upbeat moments, [whispers] for smooth transitions.
+AUDIO TAG ENHANCEMENT (ElevenLabs V3):
+You can optionally use these audio tags in square brackets to enhance vocal delivery:
+- [excited]: For upbeat, energetic moments (most common in transitions)
+- [whispers]: For smooth, intimate transitions between contrasting tracks
+Example: "[excited] Alright folks, we just wrapped up 'Song X'! Get ready, because coming up next is 'Song Y'!"
 
 Keep it concise and punchy - this will play over a crossfade.
 """
@@ -1064,14 +1067,17 @@ Generate a brief, enthusiastic introduction (2-3 sentences max) that:
 - Builds excitement for what's about to play
 - Sounds natural and conversational
 
-AUDIO TAG GUIDANCE:
-Remember to use audio tags from the persona to enhance delivery. [excited] works great for most intros, [whispers] for intimate moments.
+AUDIO TAG ENHANCEMENT (ElevenLabs V3):
+You can optionally use these audio tags in square brackets to enhance vocal delivery:
+- [excited]: For upbeat, energetic introductions (most common)
+- [whispers]: For smooth, intimate moments (rare)
+Example: "[excited] Get ready for this banger - here's 'Song Y' by Artist X!"
 
 Keep it energetic but concise.
 """
             else:
                 # Fallback prompt
-                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X. Use the audio tag guidance from the persona when appropriate."
+                user_prompt = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X, 2-3 sentences max."
 
             self.logger.info(f"Commentary prompt created for {context} context")
 
