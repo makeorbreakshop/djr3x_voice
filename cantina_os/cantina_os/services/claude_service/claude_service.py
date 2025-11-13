@@ -927,25 +927,32 @@ class ClaudeService(BaseService):
                 self.logger.warning(f"Tool result content is empty for {intent_name}, using default message")
                 response_content = f"{intent_name} completed."
 
-            # Add tool response as a message
-            if tool_call_id:
-                self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")
-                self._memory.add_message(
-                    role="user",  # Claude uses "user" role for tool results
-                    content=response_content,
-                    name=intent_name
-                )
-            else:
-                self.logger.warning("No tool_call_id in payload, using generic tool response")
-                self._memory.add_message(
-                    role="user",
-                    content=f"Tool execution result for {intent_name}: {response_content}"
-                )
+            # Visual-only tools that shouldn't be part of conversation
+            visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern"}
 
-            # Generate verbal response in background WITHOUT waiting
-            # This allows the tool to execute immediately while DJ commentary plays over it
-            asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
-            self.logger.info(f"Started background verbal response generation for {intent_name}")
+            # Add tool response as a message (skip for visual-only tools)
+            if intent_name not in visual_only_tools:
+                if tool_call_id:
+                    self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")
+                    self._memory.add_message(
+                        role="user",  # Claude uses "user" role for tool results
+                        content=response_content,
+                        name=intent_name
+                    )
+                else:
+                    self.logger.warning("No tool_call_id in payload, using generic tool response")
+                    self._memory.add_message(
+                        role="user",
+                        content=f"Tool execution result for {intent_name}: {response_content}"
+                    )
+
+                # Generate verbal response in background WITHOUT waiting
+                # This allows the tool to execute immediately while DJ commentary plays over it
+                asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
+                self.logger.info(f"Started background verbal response generation for {intent_name}")
+            else:
+                # For visual-only tools, just log that we're skipping verbal feedback
+                self.logger.info(f"Skipping verbal feedback for visual-only tool: {intent_name}")
 
         except Exception as e:
             self.logger.error(f"Error processing intent execution result: {e}", exc_info=True)

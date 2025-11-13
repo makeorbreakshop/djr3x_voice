@@ -6,7 +6,7 @@ Each service should inherit from BaseService and implement the required lifecycl
 """
 
 from .mic_input_service import MicInputService
-from .deepgram_transcription_service import DeepgramTranscriptionService
+# from .deepgram_transcription_service import DeepgramTranscriptionService  # SDK 4.x - deprecated
 from .gpt_service import GPTService
 from .elevenlabs_service import ElevenLabsService
 from .eye_light_controller_service import EyeLightControllerService
@@ -26,7 +26,7 @@ from .memory_service.memory_service import MemoryService
 
 __all__ = [
     "MicInputService",
-    "DeepgramTranscriptionService",
+    # "DeepgramTranscriptionService",  # SDK 4.x - deprecated
     "GPTService",
     "ElevenLabsService",
     "EyeLightControllerService",

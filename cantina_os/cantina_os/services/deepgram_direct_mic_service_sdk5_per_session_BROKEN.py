@@ -1,11 +1,10 @@
 """
-DeepgramDirectMicService - SDK 5.x with persistent WebSocket connection.
+DeepgramDirectMicService - SDK 5.x with pyaudio and KeepAlive.
 
-ARCHITECTURE:
-- WebSocket opens ONCE when SYSTEM_MODE_CHANGED to INTERACTIVE (on 'engage' command)
-- KeepAlive messages sent every 5 seconds to prevent timeout
-- Microphone starts/stops on mouse clicks (WebSocket stays open)
-- WebSocket closes when leaving INTERACTIVE mode (on 'disengage' command)
+This service uses SDK 5.x with:
+- Persistent WebSocket connection (stays open across recordings)
+- Automatic KeepAlive messages every 5 seconds to prevent 10s timeout
+- Manual audio capture using pyaudio (SDK 5.x removed Microphone class)
 """
 
 import logging
@@ -31,17 +30,16 @@ from cantina_os.event_payloads import (
     ServiceStatus,
     PerformanceMetricPayload
 )
-from cantina_os.services.yoda_mode_manager_service import SystemMode
 
 
 class DeepgramDirectMicService(BaseService):
     """
-    Service that maintains a persistent Deepgram WebSocket connection.
+    Service that captures microphone audio and streams to Deepgram.
 
     SDK 5.x Features:
-    - ONE WebSocket connection per INTERACTIVE mode session
-    - KeepAlive messages prevent 10-second timeout
-    - Microphone start/stop independent of connection lifecycle
+    - Persistent WebSocket with KeepAlive (prevents 10s timeout)
+    - Manual audio capture with pyaudio
+    - Streaming transcription with interim and final results
     """
 
     def __init__(
@@ -61,17 +59,12 @@ class DeepgramDirectMicService(BaseService):
         if not self._api_key:
             raise ValueError("DEEPGRAM_API_KEY environment variable is not set")
 
-        # Deepgram persistent connection
+        # Deepgram connection (SDK 5.x per-session pattern)
         self._deepgram: Optional[DeepgramClient] = None
-        self._dg_connection = None  # This will store the context manager
-        self._dg_socket = None  # This will store the actual socket connection
-        self._connection_open = False
-        self._keepalive_task = None
 
-        # PyAudio for microphone
+        # PyAudio for manual microphone capture
         self._pyaudio: Optional[pyaudio.PyAudio] = None
-        self._audio_stream = None
-        self._audio_thread: Optional[threading.Thread] = None
+        self._audio_thread: Optional[threading.Thread] = None  # Session thread (connection + audio)
         self._audio_running = False
 
         # State tracking
@@ -79,7 +72,6 @@ class DeepgramDirectMicService(BaseService):
         self._current_transcription = ""
         self._start_time = None
         self._current_conversation_id = None
-        self._interactive_mode = False
 
         # Metrics
         self._metrics = {
@@ -92,7 +84,7 @@ class DeepgramDirectMicService(BaseService):
         # Audio parameters
         self._sample_rate = 16000
         self._channels = 1
-        self._chunk_size = 8000
+        self._chunk_size = 8000  # Send 0.5 seconds of audio at a time
 
         # Connection parameters (SDK 5.x)
         self._connection_params = {
@@ -114,41 +106,25 @@ class DeepgramDirectMicService(BaseService):
 
     async def _setup_subscriptions(self) -> None:
         """Set up event subscriptions."""
-        if self._logger:
-            self._logger.info("🔵🔵🔵 DEEPGRAM SETTING UP SUBSCRIPTIONS!")
-
-        # Mouse click events for mic start/stop
-        await self.subscribe(
+        asyncio.create_task(self.subscribe(
             EventTopics.MIC_RECORDING_START,
             self._handle_mic_recording_start
-        )
-        if self._logger:
-            self._logger.info("✅ Subscribed to MIC_RECORDING_START")
+        ))
 
-        await self.subscribe(
+        asyncio.create_task(self.subscribe(
             EventTopics.MIC_RECORDING_STOP,
             self._handle_mic_recording_stop
-        )
-        if self._logger:
-            self._logger.info("✅ Subscribed to MIC_RECORDING_STOP")
-
-        # Mode changes to open/close WebSocket
-        await self.subscribe(
-            EventTopics.SYSTEM_MODE_CHANGE,  # Note: without the 'D' at the end
-            self._handle_mode_changed
-        )
-        if self._logger:
-            self._logger.info(f"✅ Subscribed to SYSTEM_MODE_CHANGE (value: {EventTopics.SYSTEM_MODE_CHANGE})")
+        ))
 
     async def _start(self) -> None:
-        """Initialize service."""
+        """Initialize Deepgram client (connections created per recording session)."""
         try:
             self._event_loop = asyncio.get_running_loop()
 
             # Initialize PyAudio
             self._pyaudio = pyaudio.PyAudio()
 
-            # Initialize Deepgram client
+            # Initialize Deepgram client (SDK 5.x requires explicit api_key)
             self._deepgram = DeepgramClient(api_key=self._api_key)
 
             # Set up event subscriptions
@@ -159,7 +135,7 @@ class DeepgramDirectMicService(BaseService):
             self._metrics_task = asyncio.create_task(self._collect_metrics())
 
             if self._logger:
-                self._logger.info("DeepgramDirectMicService started (SDK 5.x - persistent connection mode)")
+                self._logger.info("DeepgramDirectMicService started (SDK 5.x - per-session connections)")
 
         except Exception as e:
             if self._logger:
@@ -177,8 +153,9 @@ class DeepgramDirectMicService(BaseService):
                 except asyncio.CancelledError:
                     pass
 
-            # Close persistent connection if open
-            await self._close_websocket_connection()
+            # Stop audio capture if running
+            if self._is_listening:
+                await self._stop_listening()
 
             # Clean up PyAudio
             if self._pyaudio:
@@ -192,147 +169,111 @@ class DeepgramDirectMicService(BaseService):
             if self._logger:
                 self._logger.error(f"Error stopping: {str(e)}")
 
-    async def _handle_mode_changed(self, event: Dict[str, Any]) -> None:
-        """Handle system mode changes - open/close WebSocket connection."""
-        if self._logger:
-            self._logger.info(f"🔴🔴🔴 DEEPGRAM MODE CHANGE HANDLER CALLED! Event: {event}")
 
-        new_mode = event.get("new_mode")
-
-        if self._logger:
-            self._logger.info(f"🟢 Mode changed to: {new_mode}, type: {type(new_mode)}")
-            self._logger.info(f"🟢 SystemMode.INTERACTIVE value: {SystemMode.INTERACTIVE.value}")
-
-        # Convert string to SystemMode enum if needed
-        if isinstance(new_mode, str):
-            try:
-                mode_enum = SystemMode(new_mode)
-                if self._logger:
-                    self._logger.info(f"🟢 Converted string '{new_mode}' to enum: {mode_enum}")
-            except (ValueError, AttributeError) as e:
-                if self._logger:
-                    self._logger.error(f"❌ Invalid mode value: {new_mode}, error: {e}")
-                return
-        else:
-            mode_enum = new_mode
-
-        if mode_enum == SystemMode.INTERACTIVE:
-            # Open persistent WebSocket connection
-            if self._logger:
-                self._logger.info("🚀 INTERACTIVE mode detected - opening WebSocket!")
-            self._interactive_mode = True
-            await self._open_websocket_connection()
-        else:
-            # Close WebSocket connection when leaving INTERACTIVE
-            if self._logger:
-                self._logger.info(f"🛑 Non-interactive mode ({mode_enum.name}) - closing WebSocket if open")
-            self._interactive_mode = False
-            await self._close_websocket_connection()
-
-    async def _open_websocket_connection(self) -> None:
-        """Open the persistent WebSocket connection (called on 'engage')."""
-        if self._logger:
-            self._logger.info(f"🔷🔷🔷 _open_websocket_connection called! Connection open: {self._connection_open}")
-
-        if self._connection_open:
-            if self._logger:
-                self._logger.info("⚠️ WebSocket already open, skipping")
-            return
-
+    def _deepgram_session_thread(self):
+        """
+        Run complete Deepgram connection lifecycle in a thread.
+        SDK 5.x requires 'with' statement for connection management.
+        This thread:
+        1. Opens Deepgram WebSocket connection (with statement)
+        2. Opens PyAudio stream
+        3. Captures and streams audio until _audio_running = False
+        4. Cleans up resources automatically via context manager
+        """
+        audio_stream = None
         try:
             if self._logger:
-                self._logger.info("🌐 Opening persistent Deepgram WebSocket connection...")
-                self._logger.info(f"🌐 Connection params: {self._connection_params}")
+                self._logger.info("Creating Deepgram WebSocket connection...")
+                self._logger.info(f"📋 Connection params: {self._connection_params}")
 
-            # SDK 5.x: Create connection with context manager
-            self._dg_connection = self._deepgram.listen.v1.connect(**self._connection_params)
-            self._dg_socket = self._dg_connection.__enter__()  # Store the socket connection
+            # SDK 5.x: Use context manager for proper lifecycle management
+            with self._deepgram.listen.v1.connect(**self._connection_params) as connection:
+                if self._logger:
+                    self._logger.info("✓ Deepgram WebSocket opened")
 
-            # Set up event handlers
-            self._dg_socket.on(EventType.OPEN, self._on_connection_open)
-            self._dg_socket.on(EventType.CLOSE, self._on_connection_close)
-            self._dg_socket.on(EventType.MESSAGE, self._on_transcript)
-            self._dg_socket.on(EventType.ERROR, self._on_error)
+                # Set up event handlers with debugging
+                if self._logger:
+                    self._logger.info(f"🔧 Registering event handlers: OPEN, CLOSE, MESSAGE, ERROR")
 
-            # Start listener in background thread (start_listening is blocking)
-            listener_thread = threading.Thread(
-                target=self._dg_socket.start_listening,
-                daemon=True,
-                name="DeepgramPersistentListener"
-            )
-            listener_thread.start()
+                connection.on(EventType.OPEN, self._on_connection_open)
+                connection.on(EventType.CLOSE, self._on_connection_close)
+                connection.on(EventType.MESSAGE, self._on_transcript)
+                connection.on(EventType.ERROR, self._on_error)
 
-            # Wait for connection to stabilize
-            await asyncio.sleep(0.3)
+                if self._logger:
+                    self._logger.info(f"✓ Event handlers registered")
 
-            self._connection_open = True
+                # Start listener in background (start_listening() is blocking)
+                listener_thread = threading.Thread(
+                    target=connection.start_listening,
+                    daemon=True,
+                    name="DeepgramListener"
+                )
+                listener_thread.start()
 
-            # Start KeepAlive loop
-            self._keepalive_task = asyncio.create_task(self._keepalive_loop())
+                # Wait for connection to stabilize
+                time.sleep(0.3)
 
-            if self._logger:
-                self._logger.info("✓ Persistent WebSocket connection opened with KeepAlive")
+                # Open PyAudio stream
+                if self._logger:
+                    self._logger.info("Opening microphone...")
+
+                audio_stream = self._pyaudio.open(
+                    format=pyaudio.paInt16,
+                    channels=self._channels,
+                    rate=self._sample_rate,
+                    input=True,
+                    frames_per_buffer=self._chunk_size
+                )
+
+                if self._logger:
+                    self._logger.info(f"✓ Microphone opened: format=paInt16, channels={self._channels}, rate={self._sample_rate}, chunk_size={self._chunk_size}")
+                    self._logger.info("✓ Starting audio streaming to Deepgram...")
+
+                # Capture and stream audio
+                chunks_sent = 0
+                while self._audio_running:
+                    try:
+                        # Read audio chunk
+                        data = audio_stream.read(self._chunk_size, exception_on_overflow=False)
+
+                        # Debug first chunk
+                        if chunks_sent == 0 and self._logger:
+                            self._logger.info(f"📤 First audio chunk: {len(data)} bytes, type={type(data)}")
+
+                        # Send to Deepgram
+                        connection.send_media(data)
+                        chunks_sent += 1
+
+                        if chunks_sent % 10 == 0 and self._logger:
+                            self._logger.info(f"📤 Sent {chunks_sent} audio chunks ({chunks_sent * len(data)} bytes total)")
+
+                    except OSError as e:
+                        if self._logger:
+                            self._logger.error(f"Audio read error: {e}")
+                        break
+
+                if self._logger:
+                    self._logger.info(f"✓ Audio streaming ended ({chunks_sent} chunks sent)")
 
         except Exception as e:
             if self._logger:
-                self._logger.error(f"Failed to open WebSocket connection: {e}")
+                self._logger.error(f"Deepgram session thread error: {e}")
             import traceback
             if self._logger:
                 self._logger.error(traceback.format_exc())
 
-    async def _close_websocket_connection(self) -> None:
-        """Close the persistent WebSocket connection (called on 'disengage')."""
-        if not self._connection_open:
-            return
-
-        try:
-            # Stop KeepAlive
-            if self._keepalive_task:
-                self._keepalive_task.cancel()
+        finally:
+            # Clean up audio stream
+            if audio_stream:
                 try:
-                    await self._keepalive_task
-                except asyncio.CancelledError:
+                    audio_stream.stop_stream()
+                    audio_stream.close()
+                except Exception:
                     pass
-                self._keepalive_task = None
-
-            # Stop audio if running
-            if self._audio_running:
-                await self._stop_microphone()
-
-            # Close WebSocket
-            if self._dg_connection:
-                self._dg_connection.__exit__(None, None, None)
-                self._dg_connection = None
-                self._dg_socket = None
-
-            self._connection_open = False
 
             if self._logger:
-                self._logger.info("✓ Persistent WebSocket connection closed")
-
-        except Exception as e:
-            if self._logger:
-                self._logger.error(f"Error closing WebSocket: {e}")
-
-    async def _keepalive_loop(self) -> None:
-        """Send KeepAlive messages every 5 seconds to prevent 10-second timeout."""
-        while self._connection_open:
-            try:
-                await asyncio.sleep(5)
-
-                if self._connection_open and self._dg_socket:
-                    # Send KeepAlive message to the stored socket connection
-                    control_msg = ListenV1ControlMessage(type="KeepAlive")
-                    self._dg_socket.send_control(control_msg)
-
-                    if self._logger:
-                        self._logger.info("📡 Sent KeepAlive to Deepgram")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                if self._logger:
-                    self._logger.warning(f"KeepAlive failed: {e}")
+                self._logger.info("✓ Deepgram session closed")
 
     def is_active(self) -> bool:
         """Check if actively listening."""
@@ -391,16 +332,18 @@ class DeepgramDirectMicService(BaseService):
     def _on_connection_open(self, open_event) -> None:
         """Handle WebSocket connection opening."""
         if self._logger:
-            self._logger.info("Deepgram WebSocket OPEN")
+            self._logger.info("Deepgram WebSocket opened (SDK 5.x)")
 
     def _on_connection_close(self, close_event) -> None:
         """Handle WebSocket connection closing."""
         if self._logger:
-            self._logger.warning(f"Deepgram WebSocket CLOSE: {close_event}")
-        self._connection_open = False
+            self._logger.warning("Deepgram WebSocket closed")
+        self._is_listening = False
 
     def _on_transcript(self, message_event) -> None:
         """Handle incoming transcripts."""
+        if self._logger:
+            self._logger.info(f"🔵🔵🔵 _on_transcript CALLBACK FIRED! Message type: {type(message_event)}, Message: {message_event}")
         try:
             result = message_event
 
@@ -410,7 +353,7 @@ class DeepgramDirectMicService(BaseService):
             processed_words = []
             duration = 0.0
 
-            # SDK 5.x uses ListenV1ResultsEvent
+            # SDK 5.x uses ListenV1ResultsEvent instead of LiveResultResponse
             if type(result).__name__ in ['ListenV1ResultsEvent', 'LiveResultResponse']:
                 if hasattr(result, 'channel') and result.channel and \
                    hasattr(result.channel, 'alternatives') and result.channel.alternatives:
@@ -484,14 +427,9 @@ class DeepgramDirectMicService(BaseService):
         self._metrics["errors_count"] += 1
 
     async def _handle_mic_recording_start(self, event: Dict[str, Any]) -> None:
-        """Handle recording start event - START MICROPHONE ONLY."""
+        """Handle recording start event."""
         if self._logger:
-            self._logger.info("Recording start - starting microphone (WebSocket already open)")
-
-        if not self._connection_open:
-            if self._logger:
-                self._logger.error("Cannot start recording - WebSocket not open! Use 'engage' first.")
-            return
+            self._logger.info("Recording start event received")
 
         conversation_id = str(uuid.uuid4())
         self._current_conversation_id = conversation_id
@@ -502,21 +440,26 @@ class DeepgramDirectMicService(BaseService):
         })
 
         if not self._is_listening:
-            await self._start_microphone()
+            await self._start_listening()
 
     async def _handle_mic_recording_stop(self, event: Dict[str, Any]) -> None:
-        """Handle recording stop event - STOP MICROPHONE ONLY."""
+        """Handle recording stop event."""
         if self._logger:
-            self._logger.info("Recording stop - stopping microphone (WebSocket stays open)")
+            self._logger.info("Recording stop event received")
 
         if not self._is_listening:
             return
 
         try:
-            # Stop microphone
-            await self._stop_microphone()
+            # Stop the Deepgram session thread (audio capture + connection)
+            if self._audio_running:
+                self._audio_running = False
 
-            # Short delay for final transcript
+                # Wait for thread to clean up (it handles closing audio stream and connection)
+                if self._audio_thread and self._audio_thread.is_alive():
+                    self._audio_thread.join(timeout=2)
+
+            # Short delay for final transcript to arrive
             await asyncio.sleep(0.1)
 
             transcript = self._current_transcription.strip()
@@ -532,96 +475,56 @@ class DeepgramDirectMicService(BaseService):
             if self._logger:
                 self._logger.error(f"Error stopping recording: {str(e)}")
 
-    async def _start_microphone(self) -> None:
-        """Start ONLY the microphone (WebSocket already open)."""
+    async def _start_listening(self) -> None:
+        """Start Deepgram connection and audio streaming for this recording session."""
         try:
             # Reset transcription
             self._current_transcription = ""
 
             if self._logger:
-                self._logger.info("Starting microphone audio capture...")
+                self._logger.info("Creating new Deepgram connection for this session...")
 
-            # Open PyAudio stream
-            self._audio_stream = self._pyaudio.open(
-                format=pyaudio.paInt16,
-                channels=self._channels,
-                rate=self._sample_rate,
-                input=True,
-                frames_per_buffer=self._chunk_size
-            )
-
-            # Start audio capture thread
+            # SDK 5.x: Create a fresh connection for this recording session
+            # This runs in a background thread to handle the blocking context manager
             self._audio_running = True
             self._audio_thread = threading.Thread(
-                target=self._audio_capture_loop,
+                target=self._deepgram_session_thread,
                 daemon=True,
-                name="AudioCapture"
+                name="DeepgramSession"
             )
             self._audio_thread.start()
+
+            # Wait for connection to open
+            await asyncio.sleep(0.5)
 
             self._is_listening = True
 
             if self._logger:
-                self._logger.info("✓ Microphone started")
+                self._logger.info("✓ Deepgram streaming session started (SDK 5.x per-session)")
 
         except Exception as e:
             if self._logger:
-                self._logger.error(f"Failed to start microphone: {str(e)}")
+                self._logger.error(f"Failed to start listening: {str(e)}")
+            import traceback
+            if self._logger:
+                self._logger.error(traceback.format_exc())
             raise
 
-    def _audio_capture_loop(self):
-        """Capture audio and send to Deepgram (runs in thread)."""
-        chunks_sent = 0
-        try:
-            # Use the stored socket connection, not __enter__() again
-            if not self._dg_socket:
-                if self._logger:
-                    self._logger.error("No WebSocket connection available for audio streaming")
-                return
-
-            while self._audio_running:
-                try:
-                    data = self._audio_stream.read(self._chunk_size, exception_on_overflow=False)
-                    self._dg_socket.send_media(data)
-                    chunks_sent += 1
-
-                    if chunks_sent % 10 == 0 and self._logger:
-                        self._logger.debug(f"Sent {chunks_sent} audio chunks")
-
-                except OSError as e:
-                    if self._logger:
-                        self._logger.error(f"Audio read error: {e}")
-                    break
-
-            if self._logger:
-                self._logger.info(f"✓ Audio capture ended ({chunks_sent} chunks sent)")
-
-        except Exception as e:
-            if self._logger:
-                self._logger.error(f"Audio capture error: {e}")
-
-    async def _stop_microphone(self) -> None:
-        """Stop ONLY the microphone (WebSocket stays open)."""
+    async def _stop_listening(self) -> None:
+        """Stop audio capture and close Deepgram connection."""
         try:
             if self._audio_running:
                 self._audio_running = False
 
-                # Wait for thread to finish
+                # Wait for session thread to clean up (handles audio + connection)
                 if self._audio_thread and self._audio_thread.is_alive():
                     self._audio_thread.join(timeout=2)
 
-            # Close audio stream
-            if self._audio_stream:
-                try:
-                    self._audio_stream.stop_stream()
-                    self._audio_stream.close()
-                except Exception:
-                    pass
-                self._audio_stream = None
+            self._is_listening = False
 
             if self._logger:
-                self._logger.info("✓ Microphone stopped (WebSocket still open)")
+                self._logger.info("Stopped Deepgram streaming session")
 
         except Exception as e:
             if self._logger:
-                self._logger.error(f"Error stopping microphone: {str(e)}")
+                self._logger.error(f"Error stopping listening: {str(e)}")
