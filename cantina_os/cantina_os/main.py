@@ -88,7 +88,9 @@ console_handler.setLevel(logging.INFO) # Set console handler level (e.g., INFO)
 # Create a file handler to write logs to a file (DEBUG level to capture everything)
 # Log file is in the project root with timestamp to keep history
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-log_file_path = f'/Users/brandoncullum/DJ-R3X Voice/logs/dj_r3x_{timestamp}.log'
+# Use relative path from project root instead of hardcoded absolute path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+log_file_path = os.path.join(project_root, 'logs', f'dj_r3x_{timestamp}.log')
 os.makedirs(os.path.dirname(log_file_path), exist_ok=True)  # Ensure logs directory exists
 file_handler = logging.FileHandler(log_file_path, mode='w')  # Create new timestamped file each run
 file_handler.setFormatter(formatter)
