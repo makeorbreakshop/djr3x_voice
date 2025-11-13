@@ -656,13 +656,46 @@ class BrainService(BaseService):
                 self.logger.warning(f"Received empty commentary text for request_id: {request_id}")
                 return
 
-            # Route based on context: intro uses timeline plan with speak step, transitions use caching
+            # Route based on context: both intro and transitions use caching for V3 consistency
             if context == "intro":
-                self.logger.info(f"Processing INTRO commentary via timeline plan for request_id: {request_id}")
-                
-                # Create timeline plan with speak step for proper ducking coordination
-                await self._create_initial_commentary_timeline_plan(commentary_text, request_id)
-                    
+                self.logger.info(f"Processing INTRO commentary as cached speech for request_id: {request_id}")
+
+                # Generate a cache key for intro commentary
+                cache_key = await self._get_commentary_cache_key(request_id)
+                if not cache_key:
+                    cache_key = f"commentary_intro_{request_id[:8]}"
+                    # Store the mapping using MemoryService
+                    await self._store_commentary_cache_mapping(request_id, cache_key, None)  # No next track for intro
+                    # Also store in legacy dict during transition
+                    self._commentary_cache_keys[request_id] = cache_key
+
+                # Mark cache as not ready initially using MemoryService
+                await self._set_commentary_cache_ready(cache_key, False)
+                self._cached_commentary_ready[cache_key] = False  # Legacy fallback
+
+                # Request speech caching from CachedSpeechService (will use V3)
+                try:
+                    cache_request_payload = SpeechCacheRequestPayload(
+                        timestamp=time.time(),
+                        text=commentary_text,
+                        voice_id=self._config.tts_voice_id,
+                        cache_key=cache_key,
+                        is_streaming=False,
+                        metadata={
+                            "commentary_request_id": request_id,
+                            "context": "intro",  # Mark as intro so we know to play it immediately when ready
+                        }
+                    )
+                except ValidationError as e:
+                    self.logger.error(f"Validation error creating SpeechCacheRequestPayload for intro: {e}")
+                    return
+
+                self.logger.info(f"Emitting SPEECH_CACHE_REQUEST for intro cache_key: {cache_key}")
+                await self.emit(
+                    EventTopics.SPEECH_CACHE_REQUEST,
+                    cache_request_payload.model_dump()
+                )
+
             elif context == "transition":
                 self.logger.info(f"Processing TRANSITION commentary as cached speech for request_id: {request_id}")
                 
@@ -742,12 +775,19 @@ class BrainService(BaseService):
                  self._cached_commentary_ready[cache_key] = True
                  self.logger.info(f"Marked cache_key {cache_key} as ready.")
 
-                 # Get commentary request ID from metadata
+                 # Get commentary request ID and context from metadata
                  commentary_request_id = metadata.get("commentary_request_id")
-                 
+                 context = metadata.get("context")
+
                  if commentary_request_id:
+                     # Handle INTRO commentary - play immediately when ready
+                     if context == "intro":
+                         self.logger.info(f"Intro commentary cache ready, creating playback plan for cache_key: {cache_key}")
+                         # Create a timeline plan to play the intro commentary with ducking
+                         await self._create_intro_playback_plan(cache_key, duration)
+
                      # Handle transition commentary caching readiness
-                     if commentary_request_id in self._commentary_request_next_track:
+                     elif commentary_request_id in self._commentary_request_next_track:
                          associated_next_track = self._commentary_request_next_track[commentary_request_id]
                          # Check if this cached commentary is for the CURRENTLY planned next track
                          if self._next_track and associated_next_track and associated_next_track.track_id == self._next_track.track_id:
@@ -1646,6 +1686,56 @@ class BrainService(BaseService):
             
         except Exception as e:
             self.logger.error(f"Error creating initial commentary timeline plan: {e}", exc_info=True)
+
+    async def _create_intro_playback_plan(self, cache_key: str, duration: float) -> None:
+        """Create timeline plan to play intro commentary from cache with ducking.
+
+        This creates a plan with music_duck, play_cached_speech, and music_unduck steps
+        to play the V3 cached intro commentary with proper audio ducking coordination.
+
+        Args:
+            cache_key: The cache key for the intro commentary audio
+            duration: Duration of the cached audio in seconds
+        """
+        try:
+            self.logger.info(f"Creating intro playback plan for cache_key: {cache_key}, duration: {duration:.2f}s")
+
+            # Create steps with ducking coordination (same pattern as DJ transitions)
+            duck_step = {
+                "step_type": "music_duck",
+                "duck_level": 0.5,  # Lower music to 50% for commentary
+                "fade_duration_ms": 2000  # 2 second fade for professional sound
+            }
+
+            play_cached_speech_step = {
+                "step_type": "play_cached_speech",
+                "cache_key": cache_key,
+                "duration": duration
+            }
+
+            unduck_step = {
+                "step_type": "music_unduck",
+                "fade_duration_ms": 2000  # 2 second fade back to normal volume
+            }
+
+            # Create timeline plan ID
+            plan_id = str(uuid.uuid4())
+
+            # Create PlanReadyPayload with all three steps
+            plan_ready_payload = PlanReadyPayload(
+                timestamp=time.time(),
+                plan_id=plan_id,
+                plan={
+                    "plan_id": plan_id,
+                    "steps": [duck_step, play_cached_speech_step, unduck_step]
+                }
+            )
+
+            self.logger.info(f"Emitting PLAN_READY for intro playback plan {plan_id} with ducking")
+            await self.emit(EventTopics.PLAN_READY, plan_ready_payload.model_dump())
+
+        except Exception as e:
+            self.logger.error(f"Error creating intro playback plan: {e}", exc_info=True)
 
 
 
