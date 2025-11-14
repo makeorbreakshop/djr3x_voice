@@ -95,6 +95,7 @@ class DeepgramDirectMicService(BaseService):
         self._chunk_size = 8000
 
         # Connection parameters (SDK 5.x)
+        # VAD disabled since we use mouse clicks for recording control
         self._connection_params = {
             "model": "nova-3",
             "punctuate": "true",
@@ -103,10 +104,10 @@ class DeepgramDirectMicService(BaseService):
             "channels": "1",
             "sample_rate": "16000",
             "interim_results": "true",
-            "utterance_end_ms": "1000",
-            "vad_events": "true",
+            "utterance_end_ms": "0",  # Disabled - mouse click controls end
+            "vad_events": "false",  # Disabled - no VAD needed
             "smart_format": "true",
-            "endpointing": "1000"
+            "endpointing": "0"  # Disabled - mouse click controls endpoint
         }
 
         self._metrics_task = None
