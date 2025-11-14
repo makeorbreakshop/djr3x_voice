@@ -39,12 +39,13 @@ class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service.
 
     Supports multiple models:
+    - eleven_turbo_v2_5: High-quality, ~300ms TTFB, continuous stability 0.0-1.0
     - eleven_flash_v2_5: Real-time, ~75ms TTFB, continuous stability 0.0-1.0
     - eleven_v3: Expressive, 1.7-3.6s, discrete stability [0.0, 0.5, 1.0]
     """
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X (quick voice clone)")
-    model_id: str = Field("eleven_flash_v2_5", description="Model ID - Flash v2.5 (real-time) or v3 (background)")
+    model_id: str = Field("eleven_turbo_v2_5", description="Model ID - Turbo v2.5 (balanced quality/speed), Flash v2.5 (real-time), or v3 (background)")
     stability: float = Field(0.60, description="Voice stability - v2.5: 0.0-1.0 (continuous), v3: [0.0, 0.5, 1.0] (discrete)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2) - NOT supported in v3")
