@@ -1228,19 +1228,23 @@ class MusicControllerService(BaseService):
 
     async def _handle_audio_ducking_start(self, payload: BaseEventPayload):
         """Handle audio ducking start - reduce music volume."""
-        if self._backend and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
+        if (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
             self.is_ducking = True
             # Use backend abstraction for cross-platform support (VLC/Spotify)
-            await self._backend.set_volume(self.ducking_volume)
-            self.logger.debug(f"Music ducked to volume {self.ducking_volume}")
+            backend = self.backends.get(self.active_source)
+            if backend:
+                await backend.set_volume(self.ducking_volume)
+                self.logger.debug(f"Music ducked to volume {self.ducking_volume}")
 
     async def _handle_audio_ducking_stop(self, payload: BaseEventPayload):
         """Handle audio ducking stop - restore music volume."""
-        if self._backend and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
+        if (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
             self.is_ducking = False
             # Use backend abstraction for cross-platform support (VLC/Spotify)
-            await self._backend.set_volume(self.normal_volume)
-            self.logger.debug(f"Music volume restored to {self.normal_volume}")
+            backend = self.backends.get(self.active_source)
+            if backend:
+                await backend.set_volume(self.normal_volume)
+                self.logger.debug(f"Music volume restored to {self.normal_volume}")
 
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
         """Handle DJ mode activation/deactivation."""

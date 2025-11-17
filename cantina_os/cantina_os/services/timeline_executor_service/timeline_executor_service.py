@@ -89,6 +89,7 @@ class TimelineExecutorService(BaseService):
         self._speech_end_events: Dict[str, asyncio.Event] = {}  # Events for speech completion (Legacy?)
         self._cached_speech_playback_events: Dict[str, asyncio.Event] = {} # Events for cached speech playback completion
         self._crossfade_complete_events: Dict[str, asyncio.Event] = {} # Events for music crossfade completion
+        self._speech_cache_to_event: Dict[str, str] = {}  # Maps cache_key -> event_key for wait_for_speech_end
         
         # Initialize layer events
         for layer in self._config.layer_priorities:
