@@ -27,7 +27,7 @@ class _Config(BaseModel):
     """Pydantic‑validated configuration for the memory service."""
     chat_history_max_turns: int = 10
     state_keys: List[str] = [
-        "mode", "music_playing", "current_track", 
+        "mode", "music_playing", "current_track",
         "last_intent", "chat_history",
         # DJ mode state keys
         "dj_mode_active", "dj_track_history", "dj_next_track",
@@ -35,7 +35,11 @@ class _Config(BaseModel):
         "dj_lookahead_cache",
         # DJ mode cache coordination keys
         "dj_commentary_cache_mappings", "dj_commentary_cache_ready",
-        "dj_current_track"
+        "dj_current_track",
+        # Vision / person tracking
+        "current_scene_description",  # Scene description from vision
+        "current_person_present",  # Who's currently in front of camera
+        "person_memory"  # Dict of person profiles {name: {...}}
     ]
 
 # ---------------------------------------------------------------------------
@@ -151,7 +155,14 @@ class MemoryService(BaseService):
                 self._state["dj_commentary_cache_ready"] = {}
             if self._state.get("dj_current_track") is None:
                 self._state["dj_current_track"] = None
-                
+            # Initialize vision / person tracking keys
+            if self._state.get("current_scene_description") is None:
+                self._state["current_scene_description"] = None
+            if self._state.get("current_person_present") is None:
+                self._state["current_person_present"] = None
+            if self._state.get("person_memory") is None:
+                self._state["person_memory"] = {}
+
             self.logger.debug("MemoryService: State initialized with defaults")
             
             # Save initial state
@@ -204,7 +215,10 @@ class MemoryService(BaseService):
             asyncio.create_task(self.subscribe(EventTopics.MEMORY_SET, self._handle_memory_set)),
             # Add vision scene subscriptions
             asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_CAPTURED, self._handle_vision_scene)),
-            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_UPDATED, self._handle_vision_scene))
+            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_UPDATED, self._handle_vision_scene)),
+            # Add vision person detection subscriptions
+            asyncio.create_task(self.subscribe(EventTopics.VISION_PERSON_DETECTED, self._handle_person_detected)),
+            asyncio.create_task(self.subscribe(EventTopics.VISION_PERSON_EXITED, self._handle_person_exited))
         ])
 
         # Add tasks to the service's task list for cleanup
