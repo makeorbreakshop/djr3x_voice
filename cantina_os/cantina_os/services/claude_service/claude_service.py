@@ -117,7 +117,8 @@ class ClaudeService(BaseService):
         self,
         event_bus,
         config: Optional[Dict[str, Any]] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        memory_service: Optional[Any] = None
     ):
         """Initialize the Claude service."""
         super().__init__("claude_service", event_bus, logger)
@@ -160,6 +161,9 @@ class ClaudeService(BaseService):
         self._scene_timestamp: Optional[float] = None
         self._current_person: Optional[str] = None
         self._person_confidence: Optional[float] = None
+
+        # Long-term memory service (for person profiles)
+        self._memory_service = memory_service
 
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -454,7 +458,7 @@ class ClaudeService(BaseService):
         self._request_timestamps.append(current_time)
 
         # Append vision context to user message
-        vision_context = self._build_vision_context_for_message()
+        vision_context = await self._build_vision_context_for_message()
         user_input_with_context = user_input + vision_context
 
         # Add the user's input (with vision context) as a message to memory BEFORE making the API call
@@ -675,8 +679,12 @@ class ClaudeService(BaseService):
         self._person_confidence = None
         self.logger.info(f"Person exited: {payload.get('name', 'Unknown')}")
 
-    def _build_vision_context_for_message(self) -> str:
-        """Build vision context from internal state (event-driven)."""
+    async def _build_vision_context_for_message(self) -> str:
+        """Build vision context from internal state (event-driven).
+
+        Queries MemoryService for person profile if a person is currently present.
+        Uses minimal token-efficient format for profile injection.
+        """
         import time
 
         # Check if we have any vision context
@@ -692,9 +700,23 @@ class ClaudeService(BaseService):
             if age_seconds < 60:  # Scene context valid for 60 seconds
                 context_parts.append(f"What you can see - {self._current_scene}")
 
-        # Add person if currently present
+        # Add person if currently present (with profile from MemoryService)
         if self._current_person:
-            context_parts.append(f"Speaking with: {self._current_person}")
+            # Query MemoryService for person profile if available
+            if self._memory_service:
+                try:
+                    profile = await self._memory_service.get_person_profile(self._current_person)
+                    # Use minimal token-efficient format: [Name | N visits | Xh ago]
+                    minimal_context = profile.get_minimal_context()
+                    context_parts.append(f"Speaking with: {minimal_context}")
+                    self.logger.debug(f"Injected person profile: {minimal_context}")
+                except Exception as e:
+                    self.logger.error(f"Error querying person profile: {e}")
+                    # Fallback to simple name
+                    context_parts.append(f"Speaking with: {self._current_person}")
+            else:
+                # No MemoryService available, use simple name
+                context_parts.append(f"Speaking with: {self._current_person}")
 
         # Return formatted context or empty string
         if not context_parts:

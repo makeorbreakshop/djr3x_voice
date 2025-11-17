@@ -47,6 +47,7 @@ from .services.cached_speech_service import CachedSpeechService
 from .services.brain_service import BrainService  # Use the newer, complete BrainService
 from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
 from .services.nervous_system_service.nervous_system_service import NervousSystemService
+from .services.memory_service.memory_service import MemoryService
 
 # Import the new debug service
 from .services.debug_service import DebugService
@@ -351,6 +352,7 @@ class CantinaOS:
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
             "nervous_system",  # Initialize nervous system early as other services depend on state
+            "memory_service",  # Initialize long-term memory service before ClaudeService
             "latency_tracker",  # Add latency tracker early to capture all pipeline events
             "vision",  # Add vision service early for startup scene capture
             "mouse_input",  # Keep mouse input service for click control
@@ -554,6 +556,7 @@ class CantinaOS:
             "brain_service": BrainService,
             "timeline_executor_service": TimelineExecutorService,
             "nervous_system": NervousSystemService,
+            "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
             "debug": DebugService,
             "latency_tracker": LatencyTrackerService,
@@ -674,6 +677,13 @@ class CantinaOS:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "claude":
+                # ClaudeService needs a reference to MemoryService for person profiles
+                memory_service = self._services.get("memory_service")
+                if not memory_service:
+                    self.logger.warning("MemoryService not found - ClaudeService will not have person profile access")
+                service = service_class(self._event_bus, service_config, None, memory_service)
                 return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config
