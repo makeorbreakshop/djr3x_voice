@@ -16,6 +16,9 @@ whisper==1.1.10
 deepgram-sdk>=5.0.0  # SDK 5.x - Persistent WebSocket with KeepAlive for reduced latency
 elevenlabs==2.22.0  # Updated for Flash v2.5 (75ms latency), latency optimization levels
 
+# Music services
+spotipy==2.25.1  # Spotify Connect API integration
+
 # Audio processing
 librosa==0.10.1
 soundfile==0.12.1

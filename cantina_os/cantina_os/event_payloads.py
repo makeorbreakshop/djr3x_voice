@@ -322,6 +322,14 @@ class MusicCommandPayload(BaseEventPayload):
     fade_duration: Optional[float] = Field(None, description="Fade duration in seconds")
 
 
+class MusicSourceChangedPayload(BaseEventPayload):
+    """Payload for music source change events."""
+
+    previous_source: str = Field(..., description="Previous music source (local, spotify)")
+    current_source: str = Field(..., description="Current music source (local, spotify)")
+    available_sources: List[str] = Field(default_factory=list, description="List of available sources")
+
+
 class ModeChangedPayload(BaseEventPayload):
     """Payload for mode changed events."""
 
@@ -883,3 +891,52 @@ class SpeechCacheClearedPayload(BaseEventPayload):
 
 # Note: DJCommentaryRequestPayload moved to core/event_schemas.py as DjCommentaryRequestPayload
 # for standardization as part of the event system migration
+
+
+# Vision Service Payloads
+class VisionScenePayload(BaseEventPayload):
+    """Payload for vision scene captured/updated events."""
+
+    description: str = Field(..., description="Text description of the scene")
+    confidence: Optional[float] = Field(
+        None, description="Confidence score of the vision analysis (0-1)"
+    )
+    people_count: Optional[int] = Field(
+        None, description="Number of people detected in the scene"
+    )
+    camera_index: Optional[int] = Field(
+        None, description="Camera index used for capture"
+    )
+    analysis_time_ms: Optional[float] = Field(
+        None, description="Time taken to analyze the scene in milliseconds"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional scene metadata"
+    )
+
+
+class VisionRequestPayload(BaseEventPayload):
+    """Payload for requesting vision analysis."""
+
+    query: Optional[str] = Field(
+        None, description="Specific question to answer about the scene"
+    )
+    priority: Literal["low", "normal", "high"] = Field(
+        default="normal", description="Priority of the vision request"
+    )
+    detailed: bool = Field(
+        default=False, description="Whether to request detailed analysis"
+    )
+
+
+class VisionErrorPayload(BaseEventPayload):
+    """Payload for vision error events."""
+
+    error_message: str = Field(..., description="Description of the error")
+    error_type: str = Field(..., description="Type of error (camera, api, processing)")
+    camera_index: Optional[int] = Field(
+        None, description="Camera index if relevant"
+    )
+    retry_count: int = Field(
+        default=0, description="Number of retry attempts"
+    )

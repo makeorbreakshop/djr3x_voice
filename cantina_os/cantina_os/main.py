@@ -35,6 +35,7 @@ from .services import (
     MouseInputService,
     IntentRouterService
 )
+from .services.vision_service import VisionService  # Vision service for scene understanding
 from .services.claude_service import ClaudeService  # Claude 3.5 Sonnet 4.5 LLM provider
 from .services.elevenlabs_service import SpeechPlaybackMethod
 from .services.eye_light_controller_service import EyePattern
@@ -218,6 +219,13 @@ class CantinaOS:
             "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
             "ENABLE_INTERIM_STREAMING": os.getenv("ENABLE_INTERIM_STREAMING", "false").lower() == "true",
+            # Spotify configuration
+            "ENABLE_SPOTIFY": os.getenv("ENABLE_SPOTIFY", "false"),
+            "SPOTIFY_CLIENT_ID": os.getenv("SPOTIFY_CLIENT_ID"),
+            "SPOTIFY_CLIENT_SECRET": os.getenv("SPOTIFY_CLIENT_SECRET"),
+            "SPOTIFY_REDIRECT_URI": os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888"),
+            "SPOTIFY_DEVICE_NAME": os.getenv("SPOTIFY_DEVICE_NAME"),
+            "MUSIC_DEFAULT_SOURCE": os.getenv("MUSIC_DEFAULT_SOURCE", "local"),
         }
         
         # Log loaded configuration (masking API keys for security)
@@ -330,6 +338,7 @@ class CantinaOS:
             "command_dispatcher",
             "memory_service",  # Initialize memory service early as other services depend on it
             "latency_tracker",  # Add latency tracker early to capture all pipeline events
+            "vision",  # Add vision service early for startup scene capture
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
             "claude",  # Claude 3.5 Sonnet 4.5 LLM provider (faster latency than GPT-4.1-mini)
@@ -525,7 +534,8 @@ class CantinaOS:
             "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
             "debug": DebugService,
-            "latency_tracker": LatencyTrackerService
+            "latency_tracker": LatencyTrackerService,
+            "vision": VisionService
         }
         
         # Early return if service doesn't exist in map
@@ -579,28 +589,35 @@ class CantinaOS:
                 service_config["SAMPLE_RATE"] = self._config.get("AUDIO_SAMPLE_RATE", 16000)
             if "CHANNELS" not in service_config:
                 service_config["CHANNELS"] = self._config.get("AUDIO_CHANNELS", 1)
-            
+
         elif service_name == "music_controller":
             # Configure music controller with proper music directory
             # Look in the standard audio/music folder instead
             music_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "audio", "music")
             self.logger.info(f"Configuring MusicController with music_dir: {music_dir}")
-            
+
             # Fallback to assets directory only if primary does not exist
             if not os.path.exists(music_dir):
                 fallback_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "music")
                 self.logger.info(f"Primary music directory not found, using fallback: {fallback_dir}")
                 music_dir = fallback_dir
-            
+
             # Create music directory if it doesn't exist
             os.makedirs(music_dir, exist_ok=True)
             self.logger.info(f"Ensured music directory exists: {music_dir}")
-            
-            # Set the music_dir in the config
-            if isinstance(service_config, dict):
-                service_config["music_dir"] = music_dir
-            else:
-                service_config = {"music_dir": music_dir}
+
+            # Set the music_dir in the config (preserve existing config)
+            if not isinstance(service_config, dict):
+                service_config = {}
+            service_config["music_dir"] = music_dir
+
+            # Add Spotify configuration from environment
+            service_config["enable_spotify"] = self._config.get("ENABLE_SPOTIFY", "false").lower() == "true"
+            service_config["spotify_client_id"] = self._config.get("SPOTIFY_CLIENT_ID")
+            service_config["spotify_client_secret"] = self._config.get("SPOTIFY_CLIENT_SECRET")
+            service_config["spotify_redirect_uri"] = self._config.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888")
+            service_config["spotify_device_name"] = self._config.get("SPOTIFY_DEVICE_NAME")
+            service_config["default_source"] = self._config.get("MUSIC_DEFAULT_SOURCE", "local")
         
         # Timeline services configuration
         elif service_name == "brain_service":

@@ -48,6 +48,7 @@ class EventTopics(str, Enum):
     VOICE_ERROR = "voice.error"  # Added back
     VOICE_AUDIO_RECEIVED = "voice.audio.received"  # Added back
     VOICE_AUDIO_LEVEL = "voice.audio.level"  # Added back
+    SPEAKER_IDENTIFIED = "speaker.identified"  # Emitted when a speaker is identified by voice
     VOICE_INPUT_CLEANED_UP = "voice.input.cleaned_up"  # Added back
     INTENT_DETECTED = "intent.detected"
     CLI_COMMAND = "cli.command"
@@ -131,6 +132,7 @@ class EventTopics(str, Enum):
 
     # MusicController events
     MUSIC_LIBRARY_UPDATED = "music.library.updated" # Emitted when the music library is loaded or changes
+    MUSIC_SOURCE_CHANGED = "music.source.changed"  # Emitted when switching between local/spotify sources
     TRACK_PLAYING = "track.playing"
     TRACK_PAUSED = "track.paused"
     TRACK_STOPPED = "track.stopped"
@@ -184,6 +186,13 @@ class EventTopics(str, Enum):
     # ElevenLabsService Events
     VOICE_COMMAND = "voice.command"  # Added back
     VOICE_RESPONSE = "voice.response"  # Added back
+
+    # Vision Service Events
+    VISION_STARTUP_CAPTURE = "vision.startup.capture"  # Request startup scene capture
+    VISION_SCENE_CAPTURED = "vision.scene.captured"  # Scene successfully captured and analyzed
+    VISION_SCENE_ERROR = "vision.scene.error"  # Error capturing/analyzing scene
+    VISION_ON_DEMAND_REQUEST = "vision.on_demand.request"  # Request immediate vision analysis
+    VISION_SCENE_UPDATED = "vision.scene.updated"  # New scene description available
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
