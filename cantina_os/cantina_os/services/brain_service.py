@@ -1422,7 +1422,7 @@ class BrainService(BaseService):
                     # Use the NervousSystemService cleanup method
                     memory_service = None
                     for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-                        if service_name == "memory_service":
+                        if service_name == "nervous_system":
                             memory_service = service
                             break
                     
@@ -1512,7 +1512,7 @@ class BrainService(BaseService):
         # In a more event-driven approach, this would be async with callbacks
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         
@@ -1540,7 +1540,7 @@ class BrainService(BaseService):
         # Get from NervousSystemService if available
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         
@@ -1556,7 +1556,7 @@ class BrainService(BaseService):
         # Access NervousSystemService if available
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         
