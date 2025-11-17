@@ -201,7 +201,10 @@ class MemoryService(BaseService):
             asyncio.create_task(self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_mode_change)),
             # Add memory access subscriptions
             asyncio.create_task(self.subscribe(EventTopics.MEMORY_GET, self._handle_memory_get)),
-            asyncio.create_task(self.subscribe(EventTopics.MEMORY_SET, self._handle_memory_set))
+            asyncio.create_task(self.subscribe(EventTopics.MEMORY_SET, self._handle_memory_set)),
+            # Add vision scene subscriptions
+            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_CAPTURED, self._handle_vision_scene)),
+            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_UPDATED, self._handle_vision_scene))
         ])
 
         # Add tasks to the service's task list for cleanup
@@ -568,7 +571,33 @@ class MemoryService(BaseService):
                 f"Error updating music state: {e}",
                 LogLevel.ERROR
             )
-    
+
+    async def _handle_vision_scene(self, payload: Dict[str, Any]) -> None:
+        """Handle VISION_SCENE_CAPTURED or VISION_SCENE_UPDATED events."""
+        try:
+            # Extract fields from dict payload (now that we use model_dump())
+            scene_description = payload.get("description", "")
+            metadata = payload.get("metadata", {})
+            timestamp = payload.get("timestamp", time.time())
+
+            # Store the scene description
+            await self.set("current_scene_description", scene_description)
+
+            # Store metadata if available
+            if metadata:
+                await self.set("vision_metadata", metadata)
+
+            # Store timestamp of last vision update
+            await self.set("last_vision_update", timestamp)
+
+            self.logger.info(f"Vision scene stored: {scene_description[:100]}...")
+        except Exception as e:
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error updating vision scene: {e}",
+                LogLevel.ERROR
+            )
+
     async def _handle_intent_detected(self, payload: Dict[str, Any]) -> None:
         """Handle INTENT_DETECTED event."""
         try:

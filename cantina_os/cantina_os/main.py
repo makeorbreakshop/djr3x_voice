@@ -54,6 +54,9 @@ from .services.debug_service import DebugService
 # Import the latency tracker service
 from .services.latency_tracker_service import LatencyTrackerService
 
+# Import the CLI formatter for enhanced output (using minimal version)
+from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
+
 # Initial logging setup
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -82,8 +85,17 @@ logging.getLogger("cantina_os").setLevel(logging.DEBUG)
 
 # Create a handler to write logs to the console (this will run in a separate thread)
 console_handler = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
+
+# Use the minimal CLI formatter for console output if available
+try:
+    minimal_formatter = setup_minimal_logging_formatter()
+    console_handler.setFormatter(minimal_formatter)
+except Exception as e:
+    # Fallback to standard formatter if custom formatter fails
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    print(f"Warning: Could not set up minimal formatter: {e}")
+
 console_handler.setLevel(logging.INFO) # Set console handler level (e.g., INFO)
 
 # Create a file handler to write logs to a file (DEBUG level to capture everything)
@@ -94,7 +106,9 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 log_file_path = os.path.join(project_root, 'logs', f'dj_r3x_{timestamp}.log')
 os.makedirs(os.path.dirname(log_file_path), exist_ok=True)  # Ensure logs directory exists
 file_handler = logging.FileHandler(log_file_path, mode='w')  # Create new timestamped file each run
-file_handler.setFormatter(formatter)
+# Create a plain formatter for file output (no colors needed)
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
 file_handler.setLevel(logging.DEBUG)  # Capture ALL logs to file
 
 # Create a QueueListener to listen to the queue and pass records to both handlers
@@ -454,7 +468,15 @@ class CantinaOS:
                 self.logger.error("Cannot register commands - command_dispatcher service not found")
                 
             logger.info("CantinaOS system initialized successfully")
-            
+
+            # Trigger vision startup capture after all services are ready
+            # This avoids race conditions with memory service subscriptions
+            logger.info("Triggering vision startup capture...")
+            self._event_bus.emit(EventTopics.VISION_STARTUP_CAPTURE, {})
+
+            # Give the vision service a moment to capture the scene
+            await asyncio.sleep(0.5)
+
             # Play startup sound once all services are initialized
             startup_sound_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
@@ -652,6 +674,11 @@ class CantinaOS:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "claude":
+                # ClaudeService needs a reference to memory service for vision context
+                memory_service = self._services.get("memory_service")
+                service = service_class(self._event_bus, service_config, memory_service=memory_service)
                 return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config

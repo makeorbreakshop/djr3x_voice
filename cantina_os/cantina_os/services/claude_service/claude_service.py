@@ -117,7 +117,8 @@ class ClaudeService(BaseService):
         self,
         event_bus,
         config: Optional[Dict[str, Any]] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        memory_service = None
     ):
         """Initialize the Claude service."""
         super().__init__("claude_service", event_bus, logger)
@@ -154,6 +155,10 @@ class ClaudeService(BaseService):
         self._last_connection_warmup_time: float = 0
         self._warmup_cooldown = 30  # Don't re-warm more than every 30 seconds
         self._connection_warmed = False
+
+        # Memory service reference for vision context
+        self._memory_service = memory_service
+
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Load configuration from provided dict."""
@@ -212,8 +217,13 @@ class ClaudeService(BaseService):
             if not api_key:
                 raise ValueError("ANTHROPIC_API_KEY not found in config or environment")
 
-            # Initialize Anthropic client - pass api_key explicitly to ensure it's set
-            self._client = Anthropic(api_key=api_key)
+            # Initialize Anthropic client with prompt caching enabled
+            self._client = Anthropic(
+                api_key=api_key,
+                default_headers={
+                    "anthropic-beta": "prompt-caching-2024-07-31"  # Enable prompt caching
+                }
+            )
 
             # Verify client was initialized with key
             if not self._client:
@@ -313,6 +323,7 @@ class ClaudeService(BaseService):
             self._handle_dj_commentary_request
         ))
         self.logger.info("ClaudeService: Subscribed to DJ_COMMENTARY_REQUEST.")
+
 
         # Subscribe to ENGAGE command for early connection pre-warming
         asyncio.create_task(self.subscribe(
@@ -425,9 +436,13 @@ class ClaudeService(BaseService):
 
         self._request_timestamps.append(current_time)
 
-        # Add the user's input as a message to memory BEFORE making the API call
-        self._memory.add_message("user", user_input)
-        self.logger.info(f"Added user message to memory: {user_input}")
+        # Append vision context to user message
+        vision_context = await self._build_vision_context_for_message()
+        user_input_with_context = user_input + vision_context
+
+        # Add the user's input (with vision context) as a message to memory BEFORE making the API call
+        self._memory.add_message("user", user_input_with_context)
+        self.logger.info(f"Added user message to memory: {user_input_with_context[:100]}...")
 
         # Log debug info about the messages being sent
         messages_for_api = self._memory.get_messages_for_api()
@@ -460,6 +475,7 @@ class ClaudeService(BaseService):
         self.logger.info("Making non-streaming API request to Claude")
 
         try:
+            # Use static system prompt (vision context is now in user messages)
             # OPTIMIZATION: Use prompt caching for system prompt and tools
             # This reduces latency on subsequent requests by ~100-200ms
             system_prompt_with_cache = [
@@ -473,7 +489,7 @@ class ClaudeService(BaseService):
             response = self._client.messages.create(
                 model=self._config["MODEL"],
                 max_tokens=1024,
-                system=system_prompt_with_cache,  # Use cached system parameter
+                system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
@@ -541,6 +557,7 @@ class ClaudeService(BaseService):
             full_content = ""
             tool_calls = []
 
+            # Use static system prompt (vision context is now in user messages)
             # OPTIMIZATION: Use prompt caching for system prompt and tools
             # This reduces latency on subsequent requests by ~100-200ms
             system_prompt_with_cache = [
@@ -555,7 +572,7 @@ class ClaudeService(BaseService):
             with self._client.messages.stream(
                 model=self._config["MODEL"],
                 max_tokens=1024,
-                system=system_prompt_with_cache,  # Use cached system parameter
+                system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
@@ -619,6 +636,49 @@ class ClaudeService(BaseService):
         except Exception as e:
             self.logger.error(f"Error in _stream_claude_response: {str(e)}")
             raise
+
+    async def _get_vision_context_from_memory(self) -> Dict[str, Any]:
+        """Get current vision context from MemoryService."""
+        context = {}
+
+        # If we have a direct memory service reference, use it
+        if self._memory_service and hasattr(self._memory_service, 'get'):
+            try:
+                scene_desc = self._memory_service.get("current_scene_description")
+                if scene_desc:
+                    context["scene"] = scene_desc
+                    self.logger.info(f"Retrieved vision context: {scene_desc[:100]}...")
+            except Exception as e:
+                self.logger.warning(f"Failed to get vision context from memory service: {e}")
+
+        return context
+
+    async def _build_vision_context_for_message(self) -> str:
+        """Build vision context to append to user message."""
+        # Get current context from memory
+        vision_context = await self._get_vision_context_from_memory()
+
+        # If no context available, return empty string
+        if not vision_context:
+            return ""
+
+        # Build context section to append to user message
+        context_section = "\n\n[System observation: "
+
+        if vision_context.get("scene"):
+            context_section += f"What you can see - {vision_context['scene']}"
+
+        if vision_context.get("people_present"):
+            people = vision_context["people_present"]
+            if people:
+                context_section += f" | People present: {', '.join(people)}"
+
+        context_section += "]"
+
+        # Log what context we're adding
+        self.logger.info(f"Adding vision context to message: {context_section[:100]}...")
+
+        return context_section
 
     async def _emit_llm_response(
         self,
@@ -1039,48 +1099,114 @@ class ClaudeService(BaseService):
             # Create commentary prompt based on context and track information
             # Context instructions layer on top of main persona
             if context == "transition" and current_track and next_track:
-                user_prompt = f"""
-SITUATION: You are generating DJ commentary for a track transition.
+                # Detect music source based on filepath
+                is_spotify = current_track.filepath.startswith("spotify:") if current_track.filepath else False
 
-TRACKS:
-- Current: "{current_track.title}"
-- Next: "{next_track.title}"
+                if is_spotify:
+                    # Spotify tracks - Claude knows these artists/songs!
+                    user_prompt = f"""
+SITUATION: You're DJ R3X at Oga's Cantina, transitioning between tracks. You just finished playing "{current_track.title}" by {current_track.artist}, and you're about to drop "{next_track.title}" by {next_track.artist}.
+
+YOUR MISSION:
+Generate a brief DJ transition (2-3 sentences max) that:
+1. **FINDS A CONNECTION** between the two songs - this is KEY! Look for:
+   - Similar vibes/energy levels
+   - Both artists from same era/genre
+   - Contrasting styles that create an interesting shift
+   - Thematic connections (love songs, party songs, emotional ballads, etc.)
+   - Anything creative that ties them together!
+
+2. **References the artists/songs naturally** - Don't just say titles! You can mention:
+   - The vibe/feel of the song that just played
+   - What makes the next artist/song special
+   - How the crowd is reacting
+
+3. **Stays 100% in character as DJ R3X**:
+   - Quirky former pilot droid personality
+   - Enthusiastic and slightly bumbling
+   - Uses droid/Star Wars flavor ("circuits", "hyperspace", "cantina")
+   - NEVER break character (no Earth references, no Spotify mentions)
+
+CONNECTION EXAMPLES (match this style):
+✅ "Man, that Kacey Musgraves track had us all in a GROOVE! But hold on - we're kicking it up a notch because Taylor Swift knows how to tug those heartstrings too. Here comes 'Never Grow Up'!"
+✅ "Third Eye Blind bringing that 90s energy! And you know what? We're STAYING in that era - WALK THE MOON is about to get this whole cantina moving with 'Shut Up and Dance'!"
+✅ "Whoa, Jonas Brothers had us all singing along! Alright, switching gears from party mode to something a little more magical - Dove Cameron's 'My Once Upon a Time' is coming in smooth!"
+✅ "That Ben Rector track hit DIFFERENT, didn't it? Keeping those feel-good vibes rolling - here's some Judah & the Lion to keep your spirits HIGH!"
+
+❌ AVOID: "That was '{current_track.title}'. Next is '{next_track.title}'." (Too robotic!)
+❌ AVOID: Long explanations or music theory lessons (Keep it punchy!)
+
+AUDIO TAGS (ElevenLabs V3 - use sparingly):
+- [excited]: For upbeat, high-energy transitions (most common)
+- [whispers]: For smooth transitions to slower/intimate songs
+
+Remember: FIND THE CONNECTION, keep it NATURAL, stay IN CHARACTER!
+"""
+                else:
+                    # Local cantina music - more generic/Star Wars themed
+                    user_prompt = f"""
+SITUATION: You're DJ R3X at Oga's Cantina, transitioning between classic cantina tracks. You just played "{current_track.title}" and you're about to play "{next_track.title}".
 
 INSTRUCTIONS:
-Generate a brief, energetic transition commentary (2-3 sentences max) that:
-- Acknowledges the current track ending
-- Introduces the next track with enthusiasm
-- Sounds natural and conversational
+Generate a brief, energetic DJ transition (2-3 sentences max) that:
+- Acknowledges the track that just played with enthusiasm
+- Introduces the next track
+- References the cantina atmosphere (crowd energy, dancing, drinks flowing, etc.)
+- Stays in character as a quirky droid DJ
 
-AUDIO TAG ENHANCEMENT (ElevenLabs V3):
-You can optionally use these audio tags in square brackets to enhance vocal delivery:
-- [excited]: For upbeat, energetic moments (most common in transitions)
-- [whispers]: For smooth, intimate transitions between contrasting tracks
-Example: "[excited] Alright folks, we just wrapped up 'Song X'! Get ready, because coming up next is 'Song Y'!"
+CANTINA-SPECIFIC EXAMPLES:
+✅ "That track had everyone from Coruscant to Tatooine moving! Alright folks, let's keep this cantina ROCKING - next up is '{next_track.title}'!"
+✅ "Whoa, I saw some SERIOUS dancing out there! Keeping those good vibes flowing with '{next_track.title}' - this one's a cantina favorite!"
+✅ "My circuits are BUZZING from that energy! Alright, switching frequencies - here comes '{next_track.title}'!"
 
-Keep it concise and punchy - this will play over a crossfade.
+AUDIO TAGS (optional):
+- [excited]: For upbeat moments
+- [whispers]: For smooth transitions
+
+Keep it punchy and fun!
 """
             elif context == "intro" and current_track:
-                user_prompt = f"""
-SITUATION: You are generating DJ commentary to introduce a track.
+                # Detect music source based on filepath
+                is_spotify = current_track.filepath.startswith("spotify:") if current_track.filepath else False
 
-TRACK:
-- Title: "{current_track.title}"
-- Artist: "{current_track.artist}"
+                if is_spotify:
+                    # Spotify track - Claude knows the artist!
+                    user_prompt = f"""
+SITUATION: You're DJ R3X at Oga's Cantina, introducing "{current_track.title}" by {current_track.artist}.
 
 INSTRUCTIONS:
 Generate a brief, enthusiastic introduction (2-3 sentences max) that:
-- Introduces this track to the cantina crowd
-- Builds excitement for what's about to play
-- Sounds natural and conversational
+- References something specific about this artist or song (you know their music!)
+- Builds genuine excitement for what's about to play
+- Stays in character as DJ R3X (quirky droid, enthusiastic, Star Wars flavor)
 
-AUDIO TAG ENHANCEMENT (ElevenLabs V3):
-You can optionally use these audio tags in square brackets to enhance vocal delivery:
-- [excited]: For upbeat, energetic introductions (most common)
-- [whispers]: For smooth, intimate moments (rare)
-Example: "[excited] Get ready for this banger - here's 'Song Y' by Artist X!"
+EXAMPLES (match this style):
+✅ "[excited] Alright cantina crew, you're gonna LOVE this one! Taylor Swift knows how to hit you right in the feels - here's 'Never Grow Up'!"
+✅ "Okay okay, who's ready to DANCE?! WALK THE MOON coming in HOT with 'Shut Up and Dance' - this one's IMPOSSIBLE to sit still for!"
+✅ "Bringing some SERIOUS chill vibes right now - Kacey Musgraves with 'Slow Burn'. Trust me, this one's gonna groove!"
 
-Keep it energetic but concise.
+AUDIO TAGS (optional):
+- [excited]: For upbeat, energetic songs (most common)
+- [whispers]: For intimate, slower moments
+
+Keep it punchy and fun!
+"""
+                else:
+                    # Local cantina music
+                    user_prompt = f"""
+SITUATION: You're DJ R3X introducing a classic cantina track: "{current_track.title}".
+
+INSTRUCTIONS:
+Generate a brief introduction (2-3 sentences max) that:
+- Builds excitement for this cantina classic
+- References the cantina atmosphere
+- Stays in character as a quirky droid DJ
+
+EXAMPLES:
+✅ "[excited] Alright folks, time for a cantina CLASSIC! Get ready for '{current_track.title}' - this one always gets the crowd moving!"
+✅ "Oh THIS is a good one! '{current_track.title}' coming at you - I can already see folks heading to the dance floor!"
+
+Keep it energetic!
 """
             else:
                 # Fallback prompt

@@ -332,28 +332,12 @@ class BrainService(BaseService):
 
                 self.logger.info(f"DJ mode: Instructed MusicController to play '{track_name}'")
 
-                # Generate initial commentary for the selected track
-                self.logger.info(f"Requesting initial commentary generation for track: {self._current_track.title}")
-                
-                # Generate a unique request ID for this commentary request
-                request_id = str(uuid.uuid4())
-                cache_key = f"commentary_{request_id[:8]}"  # Short cache key
-                
-                # Store the linkage between the request ID and the cache key
-                self._commentary_cache_keys[request_id] = cache_key
-                
-                # Create commentary request for the CURRENT track as an "intro"
-                intro_request = DjCommentaryRequestPayload(
-                    timestamp=time.time(),
-                    context="intro",
-                    current_track=self._create_track_data_payload(self._current_track),
-                    next_track=None,  # No next track for intro
-                    persona=self._dj_persona,
-                    request_id=request_id
-                )
-                
-                self.logger.info(f"Initial commentary requested with ID: {request_id}, cache_key: {cache_key}")
-                await self.emit(EventTopics.DJ_COMMENTARY_REQUEST, intro_request.model_dump())
+                # Generate initial commentary for the selected track asynchronously
+                # Music will start playing immediately, commentary will overlay when ready
+                self.logger.info(f"Starting async commentary generation for track: {self._current_track.title}")
+                # Store task reference for proper lifecycle management (cancelled during shutdown)
+                task = asyncio.create_task(self._generate_intro_commentary_async())
+                self._tasks.append(task)
 
                 # The commentary caching loop starts and will select the NEXT track and cache its intro/transition commentary.
                 # The loop will update self._next_track and trigger the commentary request.
@@ -385,6 +369,36 @@ class BrainService(BaseService):
 
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}", exc_info=True)
+
+    async def _generate_intro_commentary_async(self) -> None:
+        """Generate intro commentary asynchronously without blocking music playback."""
+        try:
+            if not self._current_track:
+                self.logger.warning("Cannot generate intro commentary: no current track")
+                return
+
+            # Generate a unique request ID for this commentary request
+            request_id = str(uuid.uuid4())
+            cache_key = f"commentary_{request_id[:8]}"  # Short cache key
+
+            # Store the linkage between the request ID and the cache key
+            self._commentary_cache_keys[request_id] = cache_key
+
+            # Create commentary request for the CURRENT track as an "intro"
+            intro_request = DjCommentaryRequestPayload(
+                timestamp=time.time(),
+                context="intro",
+                current_track=self._create_track_data_payload(self._current_track),
+                next_track=None,  # No next track for intro
+                persona=self._dj_persona,
+                request_id=request_id
+            )
+
+            self.logger.info(f"Async intro commentary requested with ID: {request_id}, cache_key: {cache_key}")
+            await self.emit(EventTopics.DJ_COMMENTARY_REQUEST, intro_request.model_dump())
+
+        except Exception as e:
+            self.logger.error(f"Error generating intro commentary: {e}", exc_info=True)
 
     async def _smart_track_selection(self, query: str = None) -> Optional[str]:
         """Smart track selection for both voice commands and DJ mode."""
@@ -1287,35 +1301,61 @@ class BrainService(BaseService):
             await self._create_fallback_transition_plan()
 
     async def _create_commentary_transition_steps(self, commentary_cache_key: str) -> List:
-        """Create transition steps with commentary, ducking, and crossfade."""
+        """Create transition steps with commentary, ducking, and crossfade.
+
+        Implements real DJ-style transitions:
+        1. Duck music to 50% (500ms fade)
+        2. Wait 500ms (pre-duck buffer)
+        3. Start commentary AND delayed crossfade in parallel:
+           - Commentary plays immediately
+           - Crossfade starts 3s into commentary (like real DJs)
+        4. Unduck when commentary ends (500ms fade)
+        """
         try:
             duck_step = self._create_dj_plan_step("music_duck", {
-                "duck_level": 0.5,  # Lower music to 50% for commentary - consistent with other ducking
-                "fade_duration_ms": 2000,  # Longer, professional ducking speed
-            })
-            
-            play_speech_step = self._create_dj_plan_step("play_cached_speech", {
-                "cache_key": commentary_cache_key,
-            })
-            
-            crossfade_step = self._create_dj_plan_step("music_crossfade", {
-                "next_track_id": self._next_track.track_id,
-                "crossfade_duration": self._config.crossfade_duration,
-            })
-            
-            # Create parallel step for concurrent speech and crossfade
-            parallel_step = self._create_dj_plan_step("parallel_steps", {
-                "steps": [play_speech_step, crossfade_step],
-            })
-            
-            unduck_step = self._create_dj_plan_step("music_unduck", {
-                "fade_duration_ms": 2000,  # Longer, professional unducking speed
+                "duck_level": 0.5,  # Lower music to 50% for commentary
+                "fade_duration_ms": 500,  # Fast fade for snappy DJ feel
             })
 
-            steps = [duck_step, parallel_step, unduck_step]
-            self.logger.debug(f"Created {len(steps)} commentary transition steps")
+            # Pre-duck delay to ensure volume is down before speech starts
+            preduck_delay_step = self._create_dj_plan_step("delay", {
+                "duration": 0.5,  # 500ms wait after duck completes
+            })
+
+            # Non-blocking speech: starts playback but doesn't wait for completion
+            play_speech_step = self._create_dj_plan_step("play_cached_speech", {
+                "cache_key": commentary_cache_key,
+                "wait_for_completion": False,  # Don't block - let crossfade happen during speech
+            })
+
+            # Wait for commentary to establish (3 seconds into the speech)
+            commentary_establish_delay = self._create_dj_plan_step("delay", {
+                "duration": 3.0,  # Let DJ talk for 3s before starting transition
+            })
+
+            # Crossfade to next track (8 second crossfade - happens during commentary)
+            crossfade_step = self._create_dj_plan_step("music_crossfade", {
+                "next_track_id": self._next_track.name,  # Use library key (format: "artist - title")
+                "crossfade_duration": self._config.crossfade_duration,  # 8 seconds
+            })
+
+            # Wait for speech to finish before unducking
+            wait_for_speech_step = self._create_dj_plan_step("wait_for_speech_end", {
+                "cache_key": commentary_cache_key,  # Identify which speech to wait for
+            })
+
+            unduck_step = self._create_dj_plan_step("music_unduck", {
+                "fade_duration_ms": 500,  # Fast fade back to normal
+            })
+
+            # Real DJ transition flow (single foreground layer):
+            # 1. Duck (500ms) → 2. Wait (500ms) → 3. Start commentary (non-blocking)
+            # 4. Wait 3s (let commentary establish) → 5. Start crossfade (8s, DURING commentary)
+            # 6. Wait for commentary to finish → 7. Unduck new track to 100%
+            steps = [duck_step, preduck_delay_step, play_speech_step, commentary_establish_delay, crossfade_step, wait_for_speech_step, unduck_step]
+            self.logger.debug(f"Created {len(steps)} commentary transition steps with non-blocking speech")
             return steps
-            
+
         except Exception as e:
             self.logger.error(f"Error creating commentary transition steps: {e}", exc_info=True)
             # Fallback to simple crossfade
@@ -1355,7 +1395,7 @@ class BrainService(BaseService):
         """Create simple crossfade steps without commentary."""
         try:
             crossfade_step = self._create_dj_plan_step("music_crossfade", {
-                "next_track_id": self._next_track.track_id,
+                "next_track_id": self._next_track.name,  # Use library key (format: "artist - title")
                 "crossfade_duration": self._config.crossfade_duration,
             })
             
@@ -1704,7 +1744,13 @@ class BrainService(BaseService):
             duck_step = {
                 "step_type": "music_duck",
                 "duck_level": 0.5,  # Lower music to 50% for commentary
-                "fade_duration_ms": 2000  # 2 second fade for professional sound
+                "fade_duration_ms": 500  # Fast fade for snappy transitions
+            }
+
+            # Pre-duck delay to ensure volume is down before speech starts
+            preduck_delay_step = {
+                "step_type": "delay",
+                "duration": 0.5  # 500ms wait after duck completes
             }
 
             play_cached_speech_step = {
@@ -1715,19 +1761,19 @@ class BrainService(BaseService):
 
             unduck_step = {
                 "step_type": "music_unduck",
-                "fade_duration_ms": 2000  # 2 second fade back to normal volume
+                "fade_duration_ms": 500  # Fast fade back to normal volume
             }
 
             # Create timeline plan ID
             plan_id = str(uuid.uuid4())
 
-            # Create PlanReadyPayload with all three steps
+            # Create PlanReadyPayload with duck → wait → speech → unduck
             plan_ready_payload = PlanReadyPayload(
                 timestamp=time.time(),
                 plan_id=plan_id,
                 plan={
                     "plan_id": plan_id,
-                    "steps": [duck_step, play_cached_speech_step, unduck_step]
+                    "steps": [duck_step, preduck_delay_step, play_cached_speech_step, unduck_step]
                 }
             )
 

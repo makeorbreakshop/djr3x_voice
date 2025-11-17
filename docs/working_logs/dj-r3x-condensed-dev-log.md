@@ -834,6 +834,113 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: DJ R3X maintains natural conversation flow across multiple interactions
 - **Technical**: OpenAI Chat Completions is stateless - entire message array sent with each API call. SessionMemory class was already following industry best practices (LangChain recommended pattern), just needed to stop resetting it
 
+### 2025-11-07: Claude 3.5 Sonnet Migration Complete
+- **Issue**: Evaluate switching from GPT-4.1-mini to Claude for better latency and reliability
+- **Solution**: Implemented complete ClaudeService with dedicated system parameter, streaming, 200K context window, tool use support
+- **Impact**: 50ms faster first token (150-200ms vs 250-300ms), cleaner architecture, better tool reliability
+- **Technical**: Anthropic SDK 0.72.0, prompt caching enabled, persona pre-loading at startup, interim streaming disabled by default
+
+### 2025-11-07: System Prompt Optimization - Claude Best Practices
+- **Solution**: Rewrote dj_r3x-persona.txt with XML structure, 6 concrete examples, explicit tool guidance, voice-interaction specifics
+- **Impact**: Enhanced clarity following Anthropic's "right altitude" principle - specific enough to guide, flexible enough to be robust
+- **Technical**: Example-driven prompting, 3-tool minimal set, no sandwich method needed with Claude
+
+### 2025-11-12: Critical Claude API Optimizations
+- **Issue**: 16-second response time due to interim streaming creating 4 API calls per utterance
+- **Solution**: Disabled interim streaming (1 call per utterance), added prompt caching for tools, connection pre-warming on engage/mic start
+- **Impact**: 2-5 seconds faster responses, 150-200ms saved per interaction from connection warmup
+- **Technical**: cache_control on last tool, dual-trigger pre-warming (mode change + mic start), 30s cooldown
+
+### 2025-11-12: Token Threshold Discovery - Haiku Caching Limitation
+- **Issue**: Prompt caching not working despite correct implementation
+- **Root Cause**: Claude Haiku 4.5 requires 4,096 minimum tokens for caching, system only has ~1,950 tokens
+- **Solution**: Documented limitation, caching code correct but won't activate until threshold met
+- **Impact**: System prepared for future Sonnet 4.5 switch (1,024 token threshold)
+
+### 2025-11-12: TimelineExecutor & Claude Message History Fixes
+- **Issue**: DJ mode crashed with AttributeError on plan.layer, sequential tool execution failed with empty assistant messages
+- **Solution**: Fixed timeline layer mapping storage, prevented empty assistant messages when tool-only responses
+- **Impact**: DJ mode functional, tool execution works across multiple turns
+- **Technical**: Store layer in dict instead of payload attribute, skip empty assistant messages per Claude API requirements
+
+### 2025-11-12: Tool Execution Performance - Non-blocking Verbal Feedback
+- **Issue**: 2-3 second delay before tools executed while waiting for verbal feedback generation
+- **Solution**: Changed verbal feedback to asyncio.create_task() in both ClaudeService and GPTService
+- **Impact**: Tools execute immediately, commentary plays asynchronously over already-playing music
+- **Technical**: Natural overlap: music starts now, DJ commentary in background
+
+### 2025-11-12: ElevenLabs V3 Integration for DJ Commentary
+- **Solution**: Added V3 support with automatic parameter mapping, discrete stability values [0.0, 0.5, 1.0], audio tags ([excited], [whispers])
+- **Impact**: Higher quality DJ transitions (1.7x larger files), 5.5-9.8x slower than V2.5 but cached so latency hidden
+- **Technical**: CachedSpeechService uses V3, validate_model_compatibility() for parameter conversion, 15% volume reduction to match V2.5
+
+### 2025-11-12: Persona Architecture Refactoring
+- **Solution**: Consolidated 3 persona files → 1 unified dj_r3x-persona.txt, moved audio tags to DJ commentary context only
+- **Impact**: Single source of truth, cleaner separation (persona = who R3X is, prompts = what task to do)
+- **Technical**: Audio tags only in DJ commentary prompts, regular responses stay brief (1-3 sentences)
+
+### 2025-11-12: DJ Mode Audio Timing Fixes (3 Critical Bugs)
+- **Issue**: Music stayed ducked 3-4s after commentary, cached audio too loud, songs transitioning after only 17-22s
+- **Solution**: Event-driven unduck on SPEECH_CACHE_PLAYBACK_COMPLETED, removed 2.5x volume boost, single timer setup on crossfade start
+- **Impact**: Immediate unduck when speech ends, consistent volume levels, full track duration playback
+- **Technical**: MusicController subscribes to speech completion, eliminated duplicate timer at crossfade end
+
+### 2025-11-12: DJ Commentary Unified to Claude Haiku
+- **Solution**: Removed GPTService DJ_COMMENTARY_REQUEST subscription, ClaudeService handles all LLM (engage + DJ mode)
+- **Impact**: Consistent personality across all responses, unified model usage
+- **Technical**: Claude implementation already existed with V3 audio tag support, temperature 0.8 for creative transitions
+
+### 2025-11-12-13: Deepgram SDK 5.x Migration Complete
+- **Issue**: SDK 4.x had 10-second timeout with no KeepAlive, 5-second latency on connection finish() per recording
+- **Solution**: Migrated to SDK 5.3.0 with manual pyaudio capture, KeepAlive loop every 5s, persistent WebSocket on engage
+- **Impact**: No more 10-second timeouts, 5-second latency reduction per interaction, WebSocket stays open entire session
+- **Technical**: Context manager pattern, background listener thread, manual send_control(KeepAlive), WebSocket opens on INTERACTIVE mode
+
+### 2025-11-13: SDK 5.x Transcription Pipeline Fix
+- **Issue**: Audio streaming worked but transcriptions were empty
+- **Root Cause**: Code checked for SDK 4.x type 'LiveResultResponse', SDK 5.x uses 'ListenV1ResultsEvent', early return discarded all transcripts
+- **Solution**: Updated type check to support both SDK versions: `type(result).__name__ in ['ListenV1ResultsEvent', 'LiveResultResponse']`
+- **Impact**: Full audio → transcription → LLM pipeline working end-to-end
+
+### 2025-11-13: Persistent WebSocket Architecture & Event Fixes
+- **Issue**: Mode change handler not triggering, async subscriptions incomplete, KeepAlive context manager misuse
+- **Solution**: Fixed SYSTEM_MODE_CHANGE event name, await subscriptions directly, use stored socket reference for KeepAlive
+- **Impact**: WebSocket opens on engage, stays open with KeepAlive, closes on disengage
+- **Technical**: Proper context manager usage (__enter__ once), send_control every 5s, 12-second idle test passed
+
+### 2025-11-13: Claude Visual-Only Tool Filter
+- **Solution**: Added visual_only_tools filter (set_eye_color, set_eye_pattern) to skip verbose "Tool execution result" messages
+- **Impact**: Cleaner conversation flow without LED control acknowledgments
+- **Technical**: Check intent_name against visual-only set before adding to conversation or generating verbal feedback
+
+### 2025-11-13: DJ R3X Persona - Child Interaction Improvements
+- **Issue**: Over-eager tool usage on unclear input, lacking conversational playfulness, doesn't handle transcription errors gracefully
+- **Solution**: Complete rewrite following Claude best practices - conversation priority over tools, playful engagement, chain-of-thought reasoning examples
+- **Impact**: Fewer tool misfires, more fun imaginative conversations, feels like character friend vs voice assistant
+- **Technical**: XML-structured sections, REASONING examples, "When to use" vs "When NOT to use" for each tool, interacting_with_children guidelines
+
+### 2025-11-13: DJ Mode Intro Commentary V3 Consistency
+- **Issue**: Initial DJ announcement used Flash v2.5 (lower quality), transitions used V3 (higher quality) - inconsistent UX
+- **Solution**: Route intro through SPEECH_CACHE_REQUEST → CachedSpeechService (V3) instead of TTS_GENERATE_REQUEST (Flash v2.5)
+- **Impact**: Consistent V3 quality across all DJ announcements, unified cached speech pipeline
+- **Technical**: New _create_intro_playback_plan() with 3-step sequence (duck, play_cached_speech, unduck)
+
+### 2025-11-14: Deepgram VAD Disable & Claude Prompt Caching
+- **Issue**: Deepgram VAD cutting off speech mid-sentence despite mouse-click control
+- **Solution**: Disabled VAD settings (utterance_end_ms: 0, vad_events: false, endpointing: 0), added anthropic-beta header for prompt caching
+- **Impact**: Full user control over recording, ~60% cost reduction and 30-50% latency improvement from caching (5-min TTL)
+- **Technical**: Mouse-click sole control mechanism, cache writes 1.25× cost but hits 0.1× (90% savings)
+
+### 2025-11-14: Voice Recognition Research - Deepgram Diarization
+- **Research**: Deepgram supports speaker diarization (diarize: true), returns speaker ID + confidence per word, 53% better accuracy than competitors
+- **Proposed**: Simple voice signature system using MD5 hash of first 30s speech, local JSON storage for visitor profiles
+- **Impact**: Foundation for "returning visitor" recognition without cloud services or complex ML
+
+### 2025-11-17: Vision Testing System - Face Recognition Implementation
+- **Solution**: Interactive camera selection menu, widescreen 1920x1080, dlib HOG detector (replaced Haar Cascade), optimal encoding (jittering + averaging)
+- **Impact**: 100% validation accuracy (4/4), better false positive handling, 99.38% benchmark accuracy (LFW), user-friendly camera management
+- **Technical**: list_available_cameras() scans 0-9, face_recognition.face_locations() every 3rd frame, num_jitters=10, 20 images → 1 averaged encoding
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)

@@ -270,10 +270,10 @@ class TimelineExecutorService(BaseService):
                 plan_id=plan_data['plan_id'],
                 steps=converted_steps
             )
-            
-            # Default to foreground layer for DJ plans
-            layer = "foreground"
-            
+
+            # Read layer from plan data, default to foreground
+            layer = plan_data.get('layer', 'foreground')
+
             # Check if this layer is valid
             if layer not in self._config.layer_priorities:
                 raise ValueError(f"Unknown layer: {layer}")
@@ -871,21 +871,23 @@ class TimelineExecutorService(BaseService):
         """Executes a PlayCachedSpeechStep.
 
         Requests CachedSpeechService to play a cached audio entry.
-        Waits for playback completion.
-        
+        Optionally waits for playback completion (default: True).
+
         Args:
-            step: Either PlayCachedSpeechStep model or dict with cache_key
+            step: Either PlayCachedSpeechStep model or dict with cache_key and optional wait_for_completion
         """
         # Handle both dictionary and Pydantic model formats
         if isinstance(step, dict):
             cache_key = step.get('cache_key')
+            wait_for_completion = step.get('wait_for_completion', True)  # Default: blocking
             if not cache_key:
                 self.logger.error("PlayCachedSpeechStep dict missing cache_key field")
                 return False, {"error": "Missing cache_key field"}
         else:
             cache_key = step.cache_key
-            
-        self.logger.info(f"Executing PlayCachedSpeechStep for cache_key: {cache_key}")
+            wait_for_completion = getattr(step, 'wait_for_completion', True)
+
+        self.logger.info(f"Executing PlayCachedSpeechStep for cache_key: {cache_key} (wait_for_completion={wait_for_completion})")
         # Generate a unique playback ID for this request
         playback_id = str(uuid.uuid4())
         event_key = f"cached_speech_complete_{playback_id}"
@@ -893,6 +895,10 @@ class TimelineExecutorService(BaseService):
         # Store an event that will be set when this playback completes
         self._cached_speech_playback_events[event_key] = asyncio.Event()
         self._active_speech_playbacks.add(playback_id)
+
+        # Store mapping from cache_key to event_key for wait_for_speech_end step
+        self._speech_cache_to_event[cache_key] = event_key
+
         self.logger.debug(f"Created cached speech completion event for {event_key}")
 
         try:
@@ -914,15 +920,20 @@ class TimelineExecutorService(BaseService):
                 playback_request_payload
             )
 
-            # Wait for playback completion
-            self.logger.debug(f"Waiting for cached speech playback completion event for {event_key}")
-            try:
-                await asyncio.wait_for(self._cached_speech_playback_events[event_key].wait(), timeout=self._config.speech_wait_timeout)
-                self.logger.debug(f"Cached speech playback completion event received for {event_key}")
-                return True, {"cache_key": cache_key, "playback_id": playback_id, "status": "completed"}
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout waiting for cached speech playback completion event for {event_key}")
-                return False, {"cache_key": cache_key, "playback_id": playback_id, "error": "Timeout waiting for playback completion"}
+            # Only wait if wait_for_completion is True
+            if wait_for_completion:
+                self.logger.debug(f"Waiting for cached speech playback completion event for {event_key}")
+                try:
+                    await asyncio.wait_for(self._cached_speech_playback_events[event_key].wait(), timeout=self._config.speech_wait_timeout)
+                    self.logger.debug(f"Cached speech playback completion event received for {event_key}")
+                    return True, {"cache_key": cache_key, "playback_id": playback_id, "status": "completed"}
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"Timeout waiting for cached speech playback completion event for {event_key}")
+                    return False, {"cache_key": cache_key, "playback_id": playback_id, "error": "Timeout waiting for playback completion"}
+            else:
+                # Non-blocking: return immediately after starting playback
+                self.logger.debug(f"Started non-blocking cached speech playback for {cache_key}")
+                return True, {"cache_key": cache_key, "playback_id": playback_id, "status": "started"}
 
         except Exception as e:
             self.logger.error(f"Error executing PlayCachedSpeechStep for cache_key {cache_key}: {e}", exc_info=True)

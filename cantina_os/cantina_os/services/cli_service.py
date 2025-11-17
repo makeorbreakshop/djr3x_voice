@@ -37,6 +37,13 @@ from ..event_payloads import (
     DebugCommandPayload
 )
 
+# Import the CLI formatter for enhanced output (using minimal version)
+try:
+    from ..utils.cli_formatter_minimal import cli_formatter
+    FORMATTER_AVAILABLE = True
+except ImportError:
+    FORMATTER_AVAILABLE = False
+
 class CLIService(BaseService):
     """
     Service that provides command-line interface functionality.
@@ -142,13 +149,23 @@ class CLIService(BaseService):
         # Start output processor task
         self._output_task = asyncio.create_task(self._output_processor())
         
-        # Display startup message
-        await self._async_write_output("\nDJ R3X Voice Control CLI")
-        await self._async_write_output("Type 'help' for available commands\n")
-        
+        # Display startup message with minimal formatting
+        if FORMATTER_AVAILABLE:
+            await self._async_write_output(cli_formatter.print_separator())
+            await self._async_write_output("DJ R3X Voice Control")
+            await self._async_write_output("Type 'help' for available commands")
+            await self._async_write_output(cli_formatter.print_separator() + "\n")
+        else:
+            await self._async_write_output("\nDJ R3X Voice Control")
+            await self._async_write_output("Type 'help' for available commands\n")
+
         # Explicitly display initial prompt - ensure it's on a new line and properly flushed
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
+        if FORMATTER_AVAILABLE:
+            prompt = cli_formatter.format_prompt()
+            await loop.run_in_executor(None, lambda: print(prompt, end="", flush=True))
+        else:
+            await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
         
         # Start the async input processing task
         self._input_task = asyncio.create_task(self._process_input())
@@ -240,7 +257,10 @@ class CLIService(BaseService):
                         else:
                             # Display prompt for next command - ensure it's properly flushed
                             if not self._is_recording:
-                                print("DJ-R3X> ", end="", flush=True)
+                                if FORMATTER_AVAILABLE:
+                                    print(cli_formatter.format_prompt(), end="", flush=True)
+                                else:
+                                    print("DJ-R3X> ", end="", flush=True)
                             
                     except (EOFError, KeyboardInterrupt):
                         self.logger.info("Input processing received quit signal")
@@ -275,7 +295,10 @@ class CLIService(BaseService):
                         else:
                             # Display prompt for next command - ensure it's properly flushed
                             if not self._is_recording:
-                                print("DJ-R3X> ", end="", flush=True)
+                                if FORMATTER_AVAILABLE:
+                                    print(cli_formatter.format_prompt(), end="", flush=True)
+                                else:
+                                    print("DJ-R3X> ", end="", flush=True)
                             
                     except (EOFError, KeyboardInterrupt):
                         self.logger.info("Input processing received quit signal")
@@ -408,18 +431,30 @@ class CLIService(BaseService):
         command_context = payload.get("command", "N/A") # Get command context if available
 
         self.logger.info(f"CLI received response. Error: {is_error}, Command context: '{command_context}', Message: '{message[:100]}...'") # Added INFO log
-        
-        if is_error:
-            # Format error message
-            await self._async_write_error(message)
+
+        # Use enhanced formatter if available
+        if FORMATTER_AVAILABLE:
+            formatted_message = cli_formatter.format_cli_response(
+                message, is_error, command_context if command_context != "N/A" else None
+            )
+            # Write directly with formatting already applied
+            await self._output_queue.put((formatted_message, False))
         else:
-            await self._async_write_output(message)
-            
+            if is_error:
+                # Format error message
+                await self._async_write_error(message)
+            else:
+                await self._async_write_output(message)
+
         # Display prompt again after response - make sure it's properly flushed
         if not self._is_recording and not self._mic_recording_active:
             # Use run_in_executor for potentially blocking operation
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
+            if FORMATTER_AVAILABLE:
+                prompt = cli_formatter.format_prompt()
+                await loop.run_in_executor(None, lambda: print(prompt, end="", flush=True))
+            else:
+                await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
             
         # Set service status to RUNNING
         self._status = ServiceStatus.RUNNING

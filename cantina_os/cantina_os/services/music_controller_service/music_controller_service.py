@@ -362,13 +362,23 @@ class MusicControllerService(BaseService):
         self.active_source = new_source
         self.tracks = self.libraries[new_source]  # Update tracks alias
 
-        # Emit event
+        # Emit source changed event
         payload = MusicSourceChangedPayload(
             previous_source=old_source,
             current_source=new_source,
             available_sources=list(self.backends.keys())
         )
         await self.emit(EventTopics.MUSIC_SOURCE_CHANGED, payload.model_dump())
+
+        # Emit library updated event so BrainService gets the new library for DJ mode
+        track_data = await self.get_track_list()
+        await self.emit(
+            EventTopics.MUSIC_LIBRARY_UPDATED,
+            {
+                "track_count": len(self.tracks),
+                "tracks": track_data
+            }
+        )
 
         self.logger.info(f"Switched music source: {old_source} → {new_source}")
         return True
@@ -1218,16 +1228,18 @@ class MusicControllerService(BaseService):
 
     async def _handle_audio_ducking_start(self, payload: BaseEventPayload):
         """Handle audio ducking start - reduce music volume."""
-        if self.player and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
+        if self._backend and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
             self.is_ducking = True
-            self.player.audio_set_volume(self.ducking_volume)
+            # Use backend abstraction for cross-platform support (VLC/Spotify)
+            await self._backend.set_volume(self.ducking_volume)
             self.logger.debug(f"Music ducked to volume {self.ducking_volume}")
-            
+
     async def _handle_audio_ducking_stop(self, payload: BaseEventPayload):
         """Handle audio ducking stop - restore music volume."""
-        if self.player and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
+        if self._backend and (self.current_mode == "INTERACTIVE" or self.dj_mode_active):
             self.is_ducking = False
-            self.player.audio_set_volume(self.normal_volume)
+            # Use backend abstraction for cross-platform support (VLC/Spotify)
+            await self._backend.set_volume(self.normal_volume)
             self.logger.debug(f"Music volume restored to {self.normal_volume}")
 
     async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
