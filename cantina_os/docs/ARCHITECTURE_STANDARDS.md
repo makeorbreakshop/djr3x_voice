@@ -58,10 +58,12 @@ class MyService(BaseService):
 
 ### 1.3 Event Handling
 
+#### 1.3.1 Event Subscription Pattern
+
 Always use the following pattern for event subscriptions:
 
 1. Set up subscriptions in a dedicated `_setup_subscriptions()` method
-2. Always wrap subscription calls in `asyncio.create_task()` 
+2. Always wrap subscription calls in `asyncio.create_task()`
 3. Implement one handler method per event type
 4. Use proper error handling in event handlers
 
@@ -72,11 +74,78 @@ async def _setup_subscriptions(self) -> None:
         EventTopics.EXAMPLE_TOPIC,
         self._handle_example_event
     ))
-    
+
 # Incorrect - DO NOT DO THIS
 async def _setup_subscriptions(self) -> None:
     self.subscribe(EventTopics.EXAMPLE_TOPIC, self._handle_event)  # Wrong: not awaited or wrapped
 ```
+
+#### 1.3.2 Event Communication Principles
+
+**Primary Rule**: Services communicate via **event bus by default** for loose coupling and scalability.
+
+**Exception: Synchronous State Queries**
+
+Direct service references are permitted for **read-only state queries** when:
+
+1. **Performance-critical**: Operation blocks critical path (e.g., LLM message preparation)
+2. **Synchronous context**: Caller needs immediate result within same async operation
+3. **Single dependency**: 1-to-1 relationship (not broadcast)
+4. **Read-only**: No state mutations, idempotent queries only
+
+**Approved Patterns**:
+```python
+# ✅ ALLOWED - Read-only state query (synchronous dependency)
+current_mode = self._mode_manager.current_mode  # Property access
+profile = await self._memory_service.get_person_profile(name)  # Read-only query
+
+# ❌ PROHIBITED - State mutation via direct call
+music_service.set_volume(50)  # Use AUDIO_DUCKING_START event instead
+
+# ✅ CORRECT - Event-based for mutations/actions
+event_bus.emit(EventTopics.AUDIO_DUCKING_START,
+               AudioDuckingPayload(target_volume=50).model_dump())
+```
+
+**Requirements for Direct Service References**:
+- Service passed during initialization (not lazy lookup)
+- Only read operations or idempotent queries
+- Documented as "state query service" dependency
+- Graceful fallback if service unavailable
+
+**Examples in Codebase**:
+- `ModeCommandHandlerService` → `YodaModeManagerService` (mode queries)
+- `ClaudeService` → `MemoryService` (person profile lookups)
+
+#### 1.3.3 Event Payload Standards
+
+**ALL events MUST use Pydantic payloads** for type safety and validation:
+
+```python
+# ❌ WRONG - Raw dict emission
+self._event_bus.emit(EventTopics.VISION_PERSON_DETECTED, {
+    "name": person_name,
+    "confidence": confidence
+})
+
+# ✅ CORRECT - Pydantic payload
+from cantina_os.core.event_payloads import VisionPersonDetectedPayload
+
+payload = VisionPersonDetectedPayload(
+    name=person_name,
+    confidence=confidence
+)
+self._event_bus.emit(
+    EventTopics.VISION_PERSON_DETECTED,
+    payload.model_dump()
+)
+```
+
+**Payload Requirements**:
+- Inherit from `BaseEventPayload` when possible
+- Include `timestamp`, `event_id`, `conversation_id` where applicable
+- Always emit via `payload.model_dump()` to convert to dict
+- No raw dicts unless legacy compatibility required
 
 ## 2. Error Handling
 

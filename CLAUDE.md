@@ -35,13 +35,16 @@ The new architecture implements strict service decoupling with event-only inter-
 
 **Active Services**:
 - `DeepgramDirectMicService`: Microphone → Deepgram streaming transcription
-- `GPTService`: Transcription → OpenAI LLM → Intent routing
+- `ClaudeService`: Transcription → Claude Haiku/Sonnet → Intent routing (replaces GPTService)
+- `GPTService`: Legacy OpenAI LLM (deprecated, ClaudeService preferred)
 - `ElevenLabsService`: LLM response → TTS synthesis with streaming playback
 - `EyeLightControllerService`: Arduino LED control via serial
 - `MusicControllerService`: Music playback with mode-aware behavior and ducking
 - `YodaModeManagerService`: System mode transitions (IDLE, AMBIENT, INTERACTIVE)
 - `BrainService`: High-level orchestration for DJ mode planning
-- `MemoryService`: Persistent state store for system context
+- `NervousSystemService`: Real-time operational state (sensor readings, runtime context)
+- `MemoryService`: Long-term memory (person profiles, event timeline)
+- `VisionService`: Scene understanding and continuous face recognition
 - `TimelineExecutorService`: Layered timeline execution for coordinated audio sequences
 - `CachedSpeechService`: Pre-rendered speech caching for DJ commentary
 - `CLIService`: Command-line interface
@@ -75,12 +78,19 @@ The new architecture implements strict service decoupling with event-only inter-
 
 ### Service Communication Pattern
 
+**Primary Pattern (Event-Driven)**:
 ```
-Service A → EventBus.emit(TOPIC, Payload) → 
+Service A → EventBus.emit(TOPIC, Payload) →
   → EventBus.on(TOPIC, callback) → Service B Handler
 ```
 
-Services never directly call each other—all communication flows through events.
+**Exception Pattern (Synchronous State Queries)**:
+```
+Service A → memory_service.get_person_profile(name) →
+  → Returns profile data immediately (read-only)
+```
+
+Services communicate via events by default. Direct method calls are permitted only for **read-only state queries** in performance-critical paths (see Pattern 2 in section 7).
 
 ---
 
@@ -300,16 +310,25 @@ class ExampleService(BaseService):
 
 **Startup Order** (approximate):
 1. YodaModeManagerService (system mode state)
-2. MemoryService (global state store)
-3. DeepgramDirectMicService (audio input)
-4. GPTService (LLM processing)
-5. ElevenLabsService (TTS)
-6. EyeLightControllerService (LED control)
-7. MusicControllerService (music playback)
-8. CLIService (user interface)
-9. BrainService (DJ orchestration)
-10. CachedSpeechService (DJ commentary caching)
-11. TimelineExecutorService (complex timing coordination)
+2. ModeCommandHandlerService (mode transition commands)
+3. CommandDispatcherService (command routing)
+4. NervousSystemService (real-time operational state)
+5. MemoryService (long-term memory - person profiles)
+6. LatencyTrackerService (pipeline performance monitoring)
+7. VisionService (scene understanding and face recognition)
+8. MouseInputService (click-based recording control)
+9. DeepgramDirectMicService (audio input)
+10. ClaudeService (LLM processing with Claude Haiku/Sonnet)
+11. IntentRouterService (intent classification)
+12. BrainService (DJ orchestration)
+13. TimelineExecutorService (layered plan execution)
+14. ElevenLabsService (TTS synthesis)
+15. CachedSpeechService (DJ commentary caching)
+16. ModeChangeSoundService (mode transition audio)
+17. MusicControllerService (music playback)
+18. EyeLightControllerService (LED control)
+19. DebugService (LLM logging)
+20. CLIService (user interface)
 
 **Shutdown** (reverse order with graceful cleanup)
 
@@ -331,18 +350,73 @@ User speaks → TRANSCRIPTION_FINAL (conversation_id: "abc123")
   → LED updates ignore old conversation_id events
 ```
 
-### Pattern 2: Event-Only Communication
+### Pattern 2: Event-Driven Communication (With Exceptions)
 
-**Strict Rule**: Services NEVER directly call methods on other services.
+**Primary Rule**: Services communicate via **event bus by default** for loose coupling and scalability.
 
+**Exception: Synchronous State Queries**
+
+Direct service references are permitted for **read-only state queries** when:
+
+1. **Performance-critical**: Operation blocks critical path (e.g., LLM message preparation)
+2. **Synchronous context**: Caller needs immediate result within same async operation
+3. **Single dependency**: 1-to-1 relationship (not broadcast)
+4. **Read-only**: No state mutations, idempotent queries only
+
+**Approved Patterns**:
 ```python
-# ❌ WRONG - Direct coupling
-music_service.set_volume(50)
+# ✅ ALLOWED - Read-only state query (synchronous dependency)
+current_mode = self._mode_manager.current_mode  # Property access
+profile = await self._memory_service.get_person_profile(name)  # Read-only query
+state = self._nervous_system.get(key)  # State lookup via helper
 
-# ✅ CORRECT - Event-based
-event_bus.emit(EventTopics.AUDIO_DUCKING_START, 
+# ❌ PROHIBITED - State mutation via direct call
+music_service.set_volume(50)  # Use AUDIO_DUCKING_START event instead
+
+# ✅ CORRECT - Event-based for mutations/actions
+event_bus.emit(EventTopics.AUDIO_DUCKING_START,
                AudioDuckingPayload(target_volume=50))
 ```
+
+**Requirements for Direct Service References**:
+- Service passed during initialization (not lazy lookup)
+- Only read operations or idempotent queries
+- Documented as "state query service" dependency
+- Graceful fallback if service unavailable
+
+**Examples in Codebase**:
+- `ModeCommandHandlerService` → `YodaModeManagerService` (mode queries)
+- `ClaudeService` → `MemoryService` (person profile lookups)
+
+**Event Payload Standards**:
+
+All events **MUST use Pydantic payloads** for type safety and validation:
+
+```python
+# ❌ WRONG - Raw dict emission
+self._event_bus.emit(EventTopics.VISION_PERSON_DETECTED, {
+    "name": person_name,
+    "confidence": confidence
+})
+
+# ✅ CORRECT - Pydantic payload
+from cantina_os.core.event_payloads import VisionPersonDetectedPayload
+
+payload = VisionPersonDetectedPayload(
+    name=person_name,
+    confidence=confidence
+)
+self._event_bus.emit(
+    EventTopics.VISION_PERSON_DETECTED,
+    payload.model_dump()
+)
+```
+
+**Payload Requirements**:
+- Inherit from `BaseEventPayload` when possible
+- Include `timestamp`, `event_id`, `conversation_id` where applicable
+- Always emit via `payload.model_dump()` to convert to dict
+- No raw dicts unless legacy compatibility required
 
 ### Pattern 3: Two-Step Tool Execution
 

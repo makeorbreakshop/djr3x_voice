@@ -34,6 +34,10 @@ from cantina_os.event_payloads import (
     VisionErrorPayload,
     VisionRequestPayload,
 )
+from cantina_os.core.event_payloads import (
+    VisionPersonDetectedPayload,
+    VisionPersonExitedPayload,
+)
 
 
 class VisionService(BaseService):
@@ -476,14 +480,14 @@ class VisionService(BaseService):
                 # New person detected!
                 self.logger.info(f"Person detected: {person_name} (confidence: {confidence:.2f})")
 
-                # Emit VISION_PERSON_DETECTED event
+                # Emit VISION_PERSON_DETECTED event (using Pydantic payload)
+                payload = VisionPersonDetectedPayload(
+                    name=person_name,
+                    confidence=confidence
+                )
                 self._event_bus.emit(
                     EventTopics.VISION_PERSON_DETECTED,
-                    {
-                        "name": person_name,
-                        "confidence": confidence,
-                        "timestamp": current_time
-                    }
+                    payload.model_dump()
                 )
 
                 # Update internal state
@@ -505,14 +509,14 @@ class VisionService(BaseService):
                     duration = current_time - self._person_detection_time if self._person_detection_time else 0.0
                     self.logger.info(f"Person exited: {self._current_person} (duration: {duration:.1f}s)")
 
-                    # Emit VISION_PERSON_EXITED event
+                    # Emit VISION_PERSON_EXITED event (using Pydantic payload)
+                    payload = VisionPersonExitedPayload(
+                        name=self._current_person,
+                        duration_seconds=duration
+                    )
                     self._event_bus.emit(
                         EventTopics.VISION_PERSON_EXITED,
-                        {
-                            "name": self._current_person,
-                            "duration_seconds": duration,
-                            "timestamp": current_time
-                        }
+                        payload.model_dump()
                     )
 
                     # Clear person state

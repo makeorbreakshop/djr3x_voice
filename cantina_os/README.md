@@ -407,9 +407,11 @@ The system uses a hierarchical event topic structure for communication:
    - Use ruff for linting
 
 2. **Event Handling**:
-   - All inter-service communication must use the event bus
+   - All inter-service communication must use the event bus **by default**
+   - **Exception**: Read-only state queries may use direct service references (see CLAUDE.md Pattern 2)
    - Use appropriate event topics from `event_topics.py`
-   - Use typed payloads from `event_payloads.py`
+   - **Always use Pydantic payloads** - emit via `payload.model_dump()`
+   - No raw dict emissions (violates architecture standards)
    - Handle errors gracefully and emit appropriate status events
 
 3. **Service Development**:
