@@ -131,3 +131,34 @@ class WebProgressPayload(BaseModel):
     status: str
     details: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# Vision Service Payloads
+
+class VisionSceneCapturedPayload(BaseModel):
+    """Payload for VISION_SCENE_CAPTURED event."""
+    description: str
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    confidence: Optional[float] = None
+
+
+class VisionPersonDetectedPayload(BaseModel):
+    """Payload for VISION_PERSON_DETECTED event."""
+    name: str
+    confidence: float
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class VisionPersonExitedPayload(BaseModel):
+    """Payload for VISION_PERSON_EXITED event."""
+    name: str
+    duration_seconds: float
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class VisionEngagementPayload(BaseModel):
+    """Payload for vision engagement events (STARTED/PAUSED/ENDED)."""
+    name: Optional[str] = None  # Person name if identified
+    event_type: Literal["started", "paused", "ended"]
+    duration_seconds: Optional[float] = None  # For paused/ended events
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())

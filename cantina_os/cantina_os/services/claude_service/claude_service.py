@@ -117,8 +117,7 @@ class ClaudeService(BaseService):
         self,
         event_bus,
         config: Optional[Dict[str, Any]] = None,
-        logger: Optional[logging.Logger] = None,
-        memory_service = None
+        logger: Optional[logging.Logger] = None
     ):
         """Initialize the Claude service."""
         super().__init__("claude_service", event_bus, logger)
@@ -156,8 +155,11 @@ class ClaudeService(BaseService):
         self._warmup_cooldown = 30  # Don't re-warm more than every 30 seconds
         self._connection_warmed = False
 
-        # Memory service reference for vision context
-        self._memory_service = memory_service
+        # Vision context (event-driven state management)
+        self._current_scene: Optional[str] = None
+        self._scene_timestamp: Optional[float] = None
+        self._current_person: Optional[str] = None
+        self._person_confidence: Optional[float] = None
 
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -306,6 +308,21 @@ class ClaudeService(BaseService):
         else:
             self.logger.info("ClaudeService: TRANSCRIPTION_INTERIM disabled (interim streaming disabled).")
 
+        # Subscribe to vision events (event-driven vision context)
+        asyncio.create_task(self.subscribe(
+            EventTopics.VISION_SCENE_CAPTURED,
+            self._handle_scene_captured
+        ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.VISION_PERSON_DETECTED,
+            self._handle_person_detected
+        ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.VISION_PERSON_EXITED,
+            self._handle_person_exited
+        ))
+        self.logger.info("ClaudeService: Subscribed to vision events for context awareness.")
+
         asyncio.create_task(self.subscribe(
             EventTopics.VOICE_LISTENING_STOPPED,
             self._handle_voice_transcript
@@ -437,7 +454,7 @@ class ClaudeService(BaseService):
         self._request_timestamps.append(current_time)
 
         # Append vision context to user message
-        vision_context = await self._build_vision_context_for_message()
+        vision_context = self._build_vision_context_for_message()
         user_input_with_context = user_input + vision_context
 
         # Add the user's input (with vision context) as a message to memory BEFORE making the API call
@@ -637,47 +654,54 @@ class ClaudeService(BaseService):
             self.logger.error(f"Error in _stream_claude_response: {str(e)}")
             raise
 
-    async def _get_vision_context_from_memory(self) -> Dict[str, Any]:
-        """Get current vision context from MemoryService."""
-        context = {}
+    # Vision event handlers (event-driven state management)
 
-        # If we have a direct memory service reference, use it
-        if self._memory_service and hasattr(self._memory_service, 'get'):
-            try:
-                scene_desc = self._memory_service.get("current_scene_description")
-                if scene_desc:
-                    context["scene"] = scene_desc
-                    self.logger.info(f"Retrieved vision context: {scene_desc[:100]}...")
-            except Exception as e:
-                self.logger.warning(f"Failed to get vision context from memory service: {e}")
+    async def _handle_scene_captured(self, payload: Dict[str, Any]):
+        """Handle VISION_SCENE_CAPTURED event."""
+        import time
+        self._current_scene = payload.get("description", "")
+        self._scene_timestamp = time.time()
+        self.logger.info(f"Scene updated: {self._current_scene[:100]}...")
 
-        return context
+    async def _handle_person_detected(self, payload: Dict[str, Any]):
+        """Handle VISION_PERSON_DETECTED event."""
+        self._current_person = payload.get("name", "Unknown")
+        self._person_confidence = payload.get("confidence", 0.0)
+        self.logger.info(f"Person detected: {self._current_person} (confidence: {self._person_confidence:.2f})")
 
-    async def _build_vision_context_for_message(self) -> str:
-        """Build vision context to append to user message."""
-        # Get current context from memory
-        vision_context = await self._get_vision_context_from_memory()
+    async def _handle_person_exited(self, payload: Dict[str, Any]):
+        """Handle VISION_PERSON_EXITED event."""
+        self._current_person = None
+        self._person_confidence = None
+        self.logger.info(f"Person exited: {payload.get('name', 'Unknown')}")
 
-        # If no context available, return empty string
-        if not vision_context:
+    def _build_vision_context_for_message(self) -> str:
+        """Build vision context from internal state (event-driven)."""
+        import time
+
+        # Check if we have any vision context
+        if not self._current_scene and not self._current_person:
             return ""
 
-        # Build context section to append to user message
-        context_section = "\n\n[System observation: "
+        # Build context section
+        context_parts = []
 
-        if vision_context.get("scene"):
-            context_section += f"What you can see - {vision_context['scene']}"
+        # Add scene if available and recent (within last 60 seconds)
+        if self._current_scene and self._scene_timestamp:
+            age_seconds = time.time() - self._scene_timestamp
+            if age_seconds < 60:  # Scene context valid for 60 seconds
+                context_parts.append(f"What you can see - {self._current_scene}")
 
-        if vision_context.get("people_present"):
-            people = vision_context["people_present"]
-            if people:
-                context_section += f" | People present: {', '.join(people)}"
+        # Add person if currently present
+        if self._current_person:
+            context_parts.append(f"Speaking with: {self._current_person}")
 
-        context_section += "]"
+        # Return formatted context or empty string
+        if not context_parts:
+            return ""
 
-        # Log what context we're adding
-        self.logger.info(f"Adding vision context to message: {context_section[:100]}...")
-
+        context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
+        self.logger.debug(f"Vision context: {context_section[:100]}...")
         return context_section
 
     async def _emit_llm_response(

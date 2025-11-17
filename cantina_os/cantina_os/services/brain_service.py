@@ -1255,43 +1255,37 @@ class BrainService(BaseService):
                         if commentary_cache_key:
                             break
             
-            # Create transition plan based on available commentary
+            # Create single ambient layer plan with or without commentary
             if commentary_cache_key:
-                self.logger.info(f"Creating transition plan with commentary (cache_key: {commentary_cache_key})")
+                self.logger.info(f"Creating ambient transition plan with commentary (cache_key: {commentary_cache_key})")
                 plan_steps = await self._create_commentary_transition_steps(commentary_cache_key)
             else:
-                self.logger.warning("No ready commentary found - creating crossfade-only plan")
+                self.logger.warning("No ready commentary found - creating simple crossfade plan")
                 plan_steps = await self._create_simple_crossfade_steps()
-            
-            # Validate plan steps
+
+            # Validate and emit plan (all on ambient layer)
             if not plan_steps or len(plan_steps) == 0:
                 self.logger.error("Generated plan has no steps - cannot proceed")
                 await self._create_fallback_transition_plan()
                 return
-            
-            # Create and validate the complete plan
+
             plan_id = str(uuid.uuid4())
             transition_plan = DjTransitionPlanPayload(
                 plan_id=plan_id,
                 steps=plan_steps
             )
-            
-            # Validate plan structure
+
             try:
-                # Test serialization to catch any validation issues
                 plan_dict = transition_plan.model_dump()
                 if not plan_dict.get("steps"):
                     raise ValueError("Plan serialization resulted in empty steps")
-                    
                 self.logger.info(f"Plan validation successful with {len(plan_steps)} steps")
-                
             except Exception as validation_error:
                 self.logger.error(f"Plan validation failed: {validation_error}")
                 await self._create_fallback_transition_plan()
                 return
-            
-            # Emit the validated plan
-            await self._emit_validated_plan(transition_plan)
+
+            await self._emit_validated_plan(transition_plan, layer="ambient")
             
             # Clean up used cache data using MemoryService
             await self._cleanup_used_commentary_cache(commentary_info)
@@ -1301,15 +1295,21 @@ class BrainService(BaseService):
             await self._create_fallback_transition_plan()
 
     async def _create_commentary_transition_steps(self, commentary_cache_key: str) -> List:
-        """Create transition steps with commentary, ducking, and crossfade.
+        """Create transition steps with commentary, ducking, and crossfade - ALL ON AMBIENT LAYER.
+
+        CRITICAL: All steps run on ambient layer so music keeps playing continuously.
+        Music never pauses - we just duck volume, play commentary, and crossfade.
 
         Implements real DJ-style transitions:
-        1. Duck music to 50% (500ms fade)
+        1. Duck music to 50% (500ms fade) - music still playing!
         2. Wait 500ms (pre-duck buffer)
-        3. Start commentary AND delayed crossfade in parallel:
-           - Commentary plays immediately
-           - Crossfade starts 3s into commentary (like real DJs)
-        4. Unduck when commentary ends (500ms fade)
+        3. Start commentary (non-blocking - music still playing in background)
+        4. Wait 3s (let commentary establish)
+        5. Crossfade to next track (8s, DURING commentary - music still playing!)
+        6. Wait for commentary to finish
+        7. Unduck to 100% (500ms fade)
+
+        This works because everything is on the AMBIENT layer - no pausing!
         """
         try:
             duck_step = self._create_dj_plan_step("music_duck", {
@@ -1348,12 +1348,12 @@ class BrainService(BaseService):
                 "fade_duration_ms": 500,  # Fast fade back to normal
             })
 
-            # Real DJ transition flow (single foreground layer):
+            # Real DJ transition flow (ALL ON AMBIENT LAYER - music never pauses!):
             # 1. Duck (500ms) → 2. Wait (500ms) → 3. Start commentary (non-blocking)
             # 4. Wait 3s (let commentary establish) → 5. Start crossfade (8s, DURING commentary)
             # 6. Wait for commentary to finish → 7. Unduck new track to 100%
             steps = [duck_step, preduck_delay_step, play_speech_step, commentary_establish_delay, crossfade_step, wait_for_speech_step, unduck_step]
-            self.logger.debug(f"Created {len(steps)} commentary transition steps with non-blocking speech")
+            self.logger.debug(f"Created {len(steps)} commentary transition steps (all ambient layer)")
             return steps
 
         except Exception as e:
@@ -1575,7 +1575,7 @@ class BrainService(BaseService):
                     }
         return None
 
-    async def _emit_validated_plan(self, plan: DjTransitionPlanPayload) -> None:
+    async def _emit_validated_plan(self, plan: DjTransitionPlanPayload, layer: str = "foreground") -> None:
         """Emit a validated plan with proper state management and error handling."""
         try:
             # Validate plan structure before emission
@@ -1583,7 +1583,7 @@ class BrainService(BaseService):
                 self.logger.error("Cannot emit plan with no steps")
                 await self._handle_transition_failure()
                 return
-            
+
             # Test serialization to catch validation issues
             try:
                 plan_dict = plan.model_dump()
@@ -1593,7 +1593,7 @@ class BrainService(BaseService):
                 self.logger.error(f"Plan validation failed during emission: {validation_error}")
                 await self._handle_transition_failure()
                 return
-            
+
             # Serialize steps - handle both dict and Pydantic model formats
             serialized_steps = []
             for step in plan.steps:
@@ -1603,20 +1603,21 @@ class BrainService(BaseService):
                 else:
                     # Pydantic model - needs serialization
                     serialized_steps.append(step.model_dump())
-            
-            # Create PlanReady payload with properly serialized steps
+
+            # Create PlanReady payload with properly serialized steps and layer
             plan_ready_payload = PlanReadyPayload(
                 timestamp=time.time(),
                 plan_id=plan.plan_id,
                 plan={
                     "plan_id": plan.plan_id,
+                    "layer": layer,  # Add layer specification
                     "steps": serialized_steps
                 }
             )
-            
-            self.logger.info(f"Emitting validated plan with ID: {plan.plan_id}")
+
+            self.logger.info(f"Emitting validated plan with ID: {plan.plan_id} on layer: {layer}")
             await self.emit(EventTopics.PLAN_READY, plan_ready_payload.model_dump())
-            
+
             # Update state after successful emission
             if self._next_track:
                 self._current_track = self._next_track

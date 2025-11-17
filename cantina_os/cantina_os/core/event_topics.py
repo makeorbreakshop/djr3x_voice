@@ -188,11 +188,17 @@ class EventTopics(str, Enum):
     VOICE_RESPONSE = "voice.response"  # Added back
 
     # Vision Service Events
+    # Vision events
     VISION_STARTUP_CAPTURE = "vision.startup.capture"  # Request startup scene capture
     VISION_SCENE_CAPTURED = "vision.scene.captured"  # Scene successfully captured and analyzed
     VISION_SCENE_ERROR = "vision.scene.error"  # Error capturing/analyzing scene
     VISION_ON_DEMAND_REQUEST = "vision.on_demand.request"  # Request immediate vision analysis
     VISION_SCENE_UPDATED = "vision.scene.updated"  # New scene description available
+    VISION_PERSON_DETECTED = "vision.person.detected"  # Person identified in frame
+    VISION_PERSON_EXITED = "vision.person.exited"  # Person left the frame
+    VISION_ENGAGEMENT_STARTED = "vision.engagement.started"  # Person in engagement zone
+    VISION_ENGAGEMENT_PAUSED = "vision.engagement.paused"  # Person stepped back (3-10s)
+    VISION_ENGAGEMENT_ENDED = "vision.engagement.ended"  # Person left for >10s
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"

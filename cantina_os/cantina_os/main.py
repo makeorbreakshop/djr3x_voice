@@ -675,11 +675,6 @@ class CantinaOS:
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
                 return service
-            elif service_name == "claude":
-                # ClaudeService needs a reference to memory service for vision context
-                memory_service = self._services.get("memory_service")
-                service = service_class(self._event_bus, service_config, memory_service=memory_service)
-                return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config
                 service = service_class(self._event_bus, service_config)
