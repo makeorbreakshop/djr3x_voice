@@ -334,7 +334,94 @@ class ExampleService(BaseService):
 
 ---
 
-## 7. Critical Architectural Patterns
+## 7. Architecture Analogy: The Restaurant Kitchen
+
+To understand CantinaOS's event-driven architecture, imagine a **busy restaurant kitchen**:
+
+### The Event Bus = Kitchen Communication System
+
+**Order Tickets on a Rail** (events on the bus):
+- Cooks **never talk directly** to each other (too chaotic, messages get lost)
+- Instead, they use **order tickets** and **bells** for announcements
+- When a dish is ready, ring the bell → everyone who needs to know hears it
+- This keeps everyone **loosely coupled** - you can add a pastry chef without the grill cook needing to know
+
+**Benefits:**
+- ✅ Multiple listeners (broadcast to all who care)
+- ✅ Decoupled (services don't know about each other)
+- ✅ Auditable (every action logged via events)
+- ✅ Async (don't wait for responses, keep working)
+
+### Direct Service References = Reading Gauges/Thermometers
+
+**Shared Instruments** (read-only state queries):
+- **Oven thermometer** - "What's the current temp?" (not worth announcing every second)
+- **Kitchen clock** - "What time is it?" (synchronous, immediate answer needed)
+- **Recipe book** - "What's Brandon's usual order?" (quick lookup, no side effects)
+- **Inventory clipboard** - "Do we have basil?" (glance at shared state)
+
+You wouldn't announce "THE OVEN IS 350°F!" every time you need to know - you just **glance at the gauge**.
+
+### DJ R3X Services as Kitchen Stations
+
+Each service is a **specialized cook at their own station**:
+
+**VisionService** = "Eyes" Station (Expeditor/Window)
+- Watches the dining room through the window
+- Recognizes guests: "Hey, Brandon is back!"
+- Rings bell → `VISION_PERSON_DETECTED` event
+- Everyone who cares (ClaudeService, MemoryService) hears it
+
+**ClaudeService** = "Brain" Station (Head Chef)
+- Takes orders (transcriptions from voice input)
+- Makes decisions (LLM responses, intent routing)
+- **Glances at shared resources** when building responses:
+  - Checks recipe book: `profile = await self._memory_service.get_person_profile("Brandon")`
+  - Reads kitchen clock: `current_mode = self._mode_manager.current_mode`
+  - Quick lookups while preparing the "dish" (response)
+
+**MusicControllerService** = DJ Booth (Ambiance Chef)
+- Plays background music continuously
+- **Listens for bells**: `SPEECH_SYNTHESIS_STARTED` → duck volume
+- **Listens for bells**: `SPEECH_SYNTHESIS_ENDED` → restore volume
+- Can't control speech directly - just reacts to announcements
+
+**ElevenLabsService** = Voice Station (Plating/Presentation)
+- Takes text → converts to speech (like plating a dish)
+- **Rings bells**: `SPEECH_SYNTHESIS_STARTED` (dish going out!)
+- **Rings bells**: `SPEECH_SYNTHESIS_AMPLITUDE` (play-by-play)
+- **Rings bells**: `SPEECH_SYNTHESIS_ENDED` (dish delivered!)
+
+**MemoryService** = Recipe Book / Inventory Clipboard
+- Stores person profiles, visit history, preferences
+- Anyone can **glance at it**: "What's Brandon's usual?"
+- Read-only access for quick lookups during service
+- Updates stored via events (write operations still use event bus)
+
+**YodaModeManagerService** = Kitchen Status Board / Clock
+- Shows current service period: "IDLE" (prep), "INTERACTIVE" (dinner rush), "AMBIENT" (slow time)
+- Anyone can **glance at it**: "Are we in dinner rush?"
+- Read-only property access for immediate answers
+
+### Kitchen Rules Summary
+
+1. **Default**: Use order tickets (event bus) for ALL communication
+   - Actions, mutations, broadcasts, coordination
+
+2. **Exception**: Glance at shared gauges/clipboards (direct references) for:
+   - Oven temperature → mode state (`current_mode`)
+   - Recipe book → person profiles (`get_person_profile()`)
+   - Kitchen clock → current time/state
+   - Inventory list → shared state (`nervous_system.get()`)
+
+3. **Never**: Yell commands across kitchen (direct method calls for actions)
+   - Don't call `music_service.set_volume(50)` - use `AUDIO_DUCKING_START` event
+
+**Each cook stays at their station, uses the ticket rail for communication, but can quickly glance at shared instruments when needed during prep work.**
+
+---
+
+## 8. Critical Architectural Patterns
 
 ### Pattern 1: Conversation ID Propagation
 
@@ -448,7 +535,7 @@ Higher-priority layers pause lower layers (e.g., DJ commentary pauses background
 
 ---
 
-## 8. Configuration & Environment
+## 9. Configuration & Environment
 
 ### Configuration Sources
 
@@ -468,7 +555,7 @@ Higher-priority layers pause lower layers (e.g., DJ commentary pauses background
 
 ---
 
-## 9. Testing Strategy
+## 10. Testing Strategy
 
 ### Service Isolation
 
@@ -568,7 +655,7 @@ await service.start()
 
 ---
 
-## 10. Known Architectural Decisions & Trade-offs
+## 11. Known Architectural Decisions & Trade-offs
 
 ### Decision 1: Deepgram Direct Microphone
 - **Choice**: Use Deepgram's built-in `Microphone` class instead of separate `MicInputService`
@@ -597,7 +684,7 @@ await service.start()
 
 ---
 
-## 11. Migration Notes: src/ → cantina_os/
+## 12. Migration Notes: src/ → cantina_os/
 
 ### What's Being Phased Out (`src/`)
 
@@ -626,7 +713,7 @@ await service.start()
 
 ---
 
-## 12. Key Files Reference
+## 13. Key Files Reference
 
 ### Core Architecture
 - `cantina_os/core/event_bus.py`: Event bus implementation
@@ -691,7 +778,7 @@ Three tiers of testing required for complete coverage:
 
 ---
 
-## 13. Future Architecture Considerations
+## 14. Future Architecture Considerations
 
 ### Planned Extensions
 1. **Distributed Event Bus**: Swap `pyee` for Redis Pub/Sub for multi-machine deployment
@@ -708,7 +795,7 @@ Three tiers of testing required for complete coverage:
 
 ---
 
-## 14. How to Extend the System
+## 15. How to Extend the System
 
 ### Adding a New Service
 

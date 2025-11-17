@@ -82,6 +82,8 @@ async def _setup_subscriptions(self) -> None:
 
 #### 1.3.2 Event Communication Principles
 
+> **Analogy**: Think of the event bus as a **restaurant kitchen's order ticket system**. Cooks (services) use order tickets and bells (events) for communication instead of yelling across the kitchen. However, they can still glance at shared instruments like thermometers and recipe books (direct state queries) for quick read-only information. See CLAUDE.md Section 7 for the full restaurant kitchen analogy.
+
 **Primary Rule**: Services communicate via **event bus by default** for loose coupling and scalability.
 
 **Exception: Synchronous State Queries**
