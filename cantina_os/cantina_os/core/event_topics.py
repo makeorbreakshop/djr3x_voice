@@ -125,7 +125,7 @@ class EventTopics(str, Enum):
     PLAN_ENDED = "plan.ended"
     MEMORY_UPDATED = "memory.updated"
 
-    # MemoryService events
+    # NervousSystemService events (real-time state management)
     MEMORY_GET = "memory.get"
     MEMORY_SET = "memory.set"
     MEMORY_VALUE = "memory.value"  # Response event for MEMORY_GET requests

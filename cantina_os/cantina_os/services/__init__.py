@@ -22,7 +22,7 @@ from .intent_router_service import IntentRouterService
 # Timeline services - now in the correct location
 from .brain_service import BrainService
 from .timeline_executor_service.timeline_executor_service import TimelineExecutorService
-from .memory_service.memory_service import MemoryService
+from .nervous_system_service.nervous_system_service import NervousSystemService
 
 __all__ = [
     "MicInputService",
@@ -41,5 +41,5 @@ __all__ = [
     "IntentRouterService",
     "BrainService",
     "TimelineExecutorService",
-    "MemoryService"
+    "NervousSystemService"
 ] 

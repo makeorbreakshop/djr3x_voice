@@ -46,7 +46,7 @@ from .services.cached_speech_service import CachedSpeechService
 # Import the new layered timeline services
 from .services.brain_service import BrainService  # Use the newer, complete BrainService
 from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
-from .services.memory_service.memory_service import MemoryService
+from .services.nervous_system_service.nervous_system_service import NervousSystemService
 
 # Import the new debug service
 from .services.debug_service import DebugService
@@ -350,7 +350,7 @@ class CantinaOS:
             "yoda_mode_manager",
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
-            "memory_service",  # Initialize memory service early as other services depend on it
+            "nervous_system",  # Initialize nervous system early as other services depend on state
             "latency_tracker",  # Add latency tracker early to capture all pipeline events
             "vision",  # Add vision service early for startup scene capture
             "mouse_input",  # Keep mouse input service for click control
@@ -553,7 +553,7 @@ class CantinaOS:
             # Add the new services to the map
             "brain_service": BrainService,
             "timeline_executor_service": TimelineExecutorService,
-            "memory_service": MemoryService,
+            "nervous_system": NervousSystemService,
             "cached_speech_service": CachedSpeechService,
             "debug": DebugService,
             "latency_tracker": LatencyTrackerService,
@@ -658,8 +658,8 @@ class CantinaOS:
                 "ducking_fade_ms": 500  # Updated for longer fade transitions
             }
             
-        elif service_name == "memory_service":
-            # Configure memory service
+        elif service_name == "nervous_system":
+            # Configure nervous system service
             service_config = {
                 "chat_history_max_turns": 10
             }

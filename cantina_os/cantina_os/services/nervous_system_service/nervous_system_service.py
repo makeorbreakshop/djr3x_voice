@@ -1,8 +1,9 @@
 """
-Memory Service for Cantina OS
-================================
-A service that provides working memory for DJ R3X.
-Maintains state keys, chat history, and exposes an API to access and modify this data.
+Nervous System Service for Cantina OS
+======================================
+Tracks real-time operational state for DJ R3X (the "nervous system").
+Maintains current system state, sensor data, and runtime context.
+NOT for long-term memory - this is immediate operational awareness.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from cantina_os.event_payloads import BaseEventPayload, IntentPayload
 # Configuration model
 # ---------------------------------------------------------------------------
 class _Config(BaseModel):
-    """Pydantic‑validated configuration for the memory service."""
+    """Pydantic‑validated configuration for the nervous system service."""
     chat_history_max_turns: int = 10
     state_keys: List[str] = [
         "mode", "music_playing", "current_track",
@@ -54,19 +55,20 @@ class MemoryUpdatedPayload(BaseEventPayload):
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-STATE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "memory_state.json")
+STATE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "nervous_system_state.json")
 
 # ---------------------------------------------------------------------------
 # Service Implementation
 # ---------------------------------------------------------------------------
-class MemoryService(BaseService):
-    """Working memory service for DJ R3X.
-    
-    Provides access to state variables, chat history, and emits change events.
-    Acts as a central state store for the system.
+class NervousSystemService(BaseService):
+    """Nervous system service for DJ R3X.
+
+    Tracks real-time operational state - the robot's "nervous system".
+    Provides access to current state, sensor readings, and runtime context.
+    Acts as the central real-time state store for the system.
     """
 
-    def __init__(self, event_bus, config=None, name="memory_service"):
+    def __init__(self, event_bus, config=None, name="nervous_system"):
         super().__init__(service_name=name, event_bus=event_bus)
 
         # ----- validated configuration -----
@@ -129,13 +131,13 @@ class MemoryService(BaseService):
     async def _start(self) -> None:
         """Initialize memory service and set up subscriptions."""
         try:
-            self.logger.debug("MemoryService: Starting initialization")
+            self.logger.debug("NervousSystemService: Starting initialization")
             
             self._loop = asyncio.get_running_loop()
             
             # Set up subscriptions
             await self._setup_subscriptions()
-            self.logger.debug("MemoryService: Subscriptions set up")
+            self.logger.debug("NervousSystemService: Subscriptions set up")
             
             # Initialize state with defaults for critical keys
             if self._state.get("dj_mode_active") is None:
@@ -163,13 +165,13 @@ class MemoryService(BaseService):
             if self._state.get("person_memory") is None:
                 self._state["person_memory"] = {}
 
-            self.logger.debug("MemoryService: State initialized with defaults")
+            self.logger.debug("NervousSystemService: State initialized with defaults")
             
             # Save initial state
             self._save_state()
             
             await self._emit_status(ServiceStatus.RUNNING, "Memory service started")
-            self.logger.info("MemoryService started successfully")
+            self.logger.info("NervousSystemService started successfully")
             
         except Exception as e:
             error_msg = f"Failed to start MemoryService: {e}"
@@ -199,7 +201,7 @@ class MemoryService(BaseService):
     # ------------------------------------------------------------------
     async def _setup_subscriptions(self) -> None:
         """Register event-handlers for memory updates."""
-        self.logger.debug("MemoryService: Setting up subscriptions...")
+        self.logger.debug("NervousSystemService: Setting up subscriptions...")
 
         # Create tasks for all subscriptions
         subscription_tasks = []
@@ -224,14 +226,14 @@ class MemoryService(BaseService):
         # Add tasks to the service's task list for cleanup
         self._tasks.extend(subscription_tasks)
         
-        self.logger.debug("MemoryService: All subscription tasks created")
+        self.logger.debug("NervousSystemService: All subscription tasks created")
 
         # Wait for all subscriptions to complete
         try:
             await asyncio.gather(*subscription_tasks)
-            self.logger.debug("MemoryService: All subscriptions completed successfully")
+            self.logger.debug("NervousSystemService: All subscriptions completed successfully")
         except Exception as e:
-            self.logger.error(f"MemoryService: Error during subscription setup: {e}")
+            self.logger.error(f"NervousSystemService: Error during subscription setup: {e}")
             raise  # Re-raise to ensure service startup fails if subscriptions fail
 
     # ------------------------------------------------------------------
