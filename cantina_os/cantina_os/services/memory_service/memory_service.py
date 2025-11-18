@@ -8,8 +8,19 @@ Memory Tiers:
 - Person Profiles: Structured data about individuals (visit counts, preferences, notes)
 - Event Timeline: Searchable history of interactions (JSONL format)
 
-Person profiles are stored as JSON files in the memory_data/profiles/ directory.
-Event timeline is stored as JSONL in memory_data/events.jsonl.
+Features:
+- Person profile storage and automatic visit tracking from vision events
+- Event timeline logging for all key system events:
+  * Conversations (transcriptions, LLM responses, intents)
+  * Person arrivals/departures (vision events)
+  * Music playback (track changes)
+  * System mode transitions
+- Conversation history reconstruction for context injection
+- Query/filter events by type, person, conversation ID, timestamp
+
+Storage:
+- Person profiles: memory_data/profiles/{name}.json
+- Event timeline: memory_data/events.jsonl (append-only JSONL)
 """
 
 import asyncio
@@ -62,6 +73,16 @@ class PersonProfile(BaseModel):
         return f"[{self.name} | {self.visit_count} visits | {self.get_time_since_last_seen()}]"
 
 
+class TimelineEvent(BaseModel):
+    """Model for an event in the timeline log."""
+    timestamp: float = Field(default_factory=time.time)
+    event_type: str
+    event_data: Dict[str, Any] = Field(default_factory=dict)
+    person: Optional[str] = None
+    conversation_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class MemoryService(BaseService):
     """
     Long-term memory service for DJ R3X.
@@ -73,7 +94,9 @@ class MemoryService(BaseService):
     - Person profile storage (JSON files)
     - Automatic visit tracking from vision events
     - Token-efficient context injection
-    - Event timeline logging (future)
+    - Event timeline logging (conversations, music, system events)
+    - Conversation history reconstruction
+    - Searchable event queries
     """
 
     def __init__(self, event_bus, config: Optional[Dict[str, Any]] = None, name="memory_service"):
@@ -153,7 +176,35 @@ class MemoryService(BaseService):
             self._handle_person_exited
         ))
 
-        self.logger.info("MemoryService: Subscribed to vision events")
+        # Subscribe to conversation events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.TRANSCRIPTION_FINAL,
+            self._handle_transcription_final
+        ))
+
+        asyncio.create_task(self.subscribe(
+            EventTopics.LLM_RESPONSE_TEXT,
+            self._handle_llm_response
+        ))
+
+        asyncio.create_task(self.subscribe(
+            EventTopics.INTENT_EXECUTION_RESULT,
+            self._handle_intent_execution
+        ))
+
+        # Subscribe to music events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.TRACK_PLAYING,
+            self._handle_track_playing
+        ))
+
+        # Subscribe to system events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.SYSTEM_MODE_CHANGED,
+            self._handle_system_mode_change
+        ))
+
+        self.logger.info("MemoryService: Subscribed to vision, conversation, music, and system events")
 
     async def _handle_person_detected(self, payload: Dict[str, Any]) -> None:
         """Handle VISION_PERSON_DETECTED event - update visit count and timestamp."""
@@ -313,3 +364,218 @@ class MemoryService(BaseService):
     def get_all_profiles(self) -> List[PersonProfile]:
         """Get all person profiles from cache."""
         return list(self._profile_cache.values())
+
+    # ========================================================================
+    # Event Timeline Logging
+    # ========================================================================
+
+    async def log_event(
+        self,
+        event_type: str,
+        event_data: Dict[str, Any],
+        person: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Log an event to the timeline.
+
+        Args:
+            event_type: Event topic/type (e.g., "TRANSCRIPTION_FINAL")
+            event_data: Event payload data
+            person: Associated person (if applicable)
+            conversation_id: Conversation ID (if applicable)
+            metadata: Additional metadata
+        """
+        try:
+            event = TimelineEvent(
+                event_type=event_type,
+                event_data=event_data,
+                person=person,
+                conversation_id=conversation_id,
+                metadata=metadata or {}
+            )
+
+            # Append to JSONL file
+            with open(self._events_file, 'a') as f:
+                f.write(json.dumps(event.model_dump()) + '\n')
+
+            self.logger.debug(f"Logged event: {event_type}")
+
+        except Exception as e:
+            self.logger.error(f"Error logging event {event_type}: {e}", exc_info=True)
+
+    async def get_recent_events(
+        self,
+        limit: int = 50,
+        event_type: Optional[str] = None,
+        person: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        since_timestamp: Optional[float] = None
+    ) -> List[TimelineEvent]:
+        """
+        Query recent events from the timeline.
+
+        Args:
+            limit: Maximum number of events to return
+            event_type: Filter by event type
+            person: Filter by person
+            conversation_id: Filter by conversation ID
+            since_timestamp: Only events after this timestamp
+
+        Returns:
+            List of timeline events (most recent first)
+        """
+        try:
+            if not self._events_file.exists():
+                return []
+
+            events = []
+
+            # Read JSONL file in reverse order for efficiency
+            with open(self._events_file, 'r') as f:
+                lines = f.readlines()
+
+            # Parse in reverse (most recent first)
+            for line in reversed(lines):
+                if len(events) >= limit:
+                    break
+
+                try:
+                    event_data = json.loads(line.strip())
+                    event = TimelineEvent(**event_data)
+
+                    # Apply filters
+                    if since_timestamp and event.timestamp < since_timestamp:
+                        continue
+                    if event_type and event.event_type != event_type:
+                        continue
+                    if person and event.person != person:
+                        continue
+                    if conversation_id and event.conversation_id != conversation_id:
+                        continue
+
+                    events.append(event)
+
+                except Exception as e:
+                    self.logger.error(f"Error parsing event line: {e}")
+                    continue
+
+            return events
+
+        except Exception as e:
+            self.logger.error(f"Error querying events: {e}", exc_info=True)
+            return []
+
+    async def get_conversation_history(
+        self,
+        person: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent conversation history (transcriptions and responses).
+
+        Returns a simplified conversation log for context injection.
+
+        Args:
+            person: Filter by person (optional)
+            limit: Maximum number of turns to return
+
+        Returns:
+            List of conversation turns: [{"user": "...", "assistant": "...", "timestamp": ...}]
+        """
+        try:
+            # Get transcription and LLM response events
+            transcriptions = await self.get_recent_events(
+                limit=limit * 2,  # Get more to account for interleaving
+                event_type=EventTopics.TRANSCRIPTION_FINAL.value,
+                person=person
+            )
+
+            responses = await self.get_recent_events(
+                limit=limit * 2,
+                event_type=EventTopics.LLM_RESPONSE_TEXT.value,
+                person=person
+            )
+
+            # Combine and sort by timestamp
+            all_events = transcriptions + responses
+            all_events.sort(key=lambda e: e.timestamp)
+
+            # Build conversation turns
+            conversation = []
+            current_turn = {}
+
+            for event in all_events:
+                if event.event_type == EventTopics.TRANSCRIPTION_FINAL.value:
+                    # Start new turn
+                    if current_turn:
+                        conversation.append(current_turn)
+                    current_turn = {
+                        "user": event.event_data.get("text", ""),
+                        "timestamp": event.timestamp,
+                        "conversation_id": event.conversation_id
+                    }
+                elif event.event_type == EventTopics.LLM_RESPONSE_TEXT.value:
+                    # Add assistant response to current turn
+                    if current_turn:
+                        current_turn["assistant"] = event.event_data.get("text", "")
+                        conversation.append(current_turn)
+                        current_turn = {}
+
+            # Add any incomplete turn
+            if current_turn:
+                conversation.append(current_turn)
+
+            # Return most recent N turns
+            return conversation[-limit:] if len(conversation) > limit else conversation
+
+        except Exception as e:
+            self.logger.error(f"Error building conversation history: {e}", exc_info=True)
+            return []
+
+    # ========================================================================
+    # Event Handlers for Timeline Logging
+    # ========================================================================
+
+    async def _handle_transcription_final(self, payload: Dict[str, Any]) -> None:
+        """Log user speech to timeline."""
+        await self.log_event(
+            event_type=EventTopics.TRANSCRIPTION_FINAL.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+    async def _handle_llm_response(self, payload: Dict[str, Any]) -> None:
+        """Log LLM responses to timeline."""
+        await self.log_event(
+            event_type=EventTopics.LLM_RESPONSE_TEXT.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+    async def _handle_intent_execution(self, payload: Dict[str, Any]) -> None:
+        """Log intent executions to timeline."""
+        await self.log_event(
+            event_type=EventTopics.INTENT_EXECUTION_RESULT.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+    async def _handle_track_playing(self, payload: Dict[str, Any]) -> None:
+        """Log music track changes to timeline."""
+        await self.log_event(
+            event_type=EventTopics.TRACK_PLAYING.value,
+            event_data=payload,
+            person=self._current_person
+        )
+
+    async def _handle_system_mode_change(self, payload: Dict[str, Any]) -> None:
+        """Log system mode changes to timeline."""
+        await self.log_event(
+            event_type=EventTopics.SYSTEM_MODE_CHANGED.value,
+            event_data=payload
+        )
