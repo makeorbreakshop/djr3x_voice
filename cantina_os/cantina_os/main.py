@@ -46,6 +46,7 @@ from .services.cached_speech_service import CachedSpeechService
 # Import the new layered timeline services
 from .services.brain_service import BrainService  # Use the newer, complete BrainService
 from .services.timeline_executor_service.timeline_executor_service import TimelineExecutorService
+from .services.nervous_system_service.nervous_system_service import NervousSystemService
 from .services.memory_service.memory_service import MemoryService
 
 # Import the new debug service
@@ -350,7 +351,8 @@ class CantinaOS:
             "yoda_mode_manager",
             "mode_command_handler",  # Add mode command handler after mode manager
             "command_dispatcher",
-            "memory_service",  # Initialize memory service early as other services depend on it
+            "nervous_system",  # Initialize nervous system early as other services depend on state
+            "memory_service",  # Initialize long-term memory service before ClaudeService
             "latency_tracker",  # Add latency tracker early to capture all pipeline events
             "vision",  # Add vision service early for startup scene capture
             "mouse_input",  # Keep mouse input service for click control
@@ -553,6 +555,7 @@ class CantinaOS:
             # Add the new services to the map
             "brain_service": BrainService,
             "timeline_executor_service": TimelineExecutorService,
+            "nervous_system": NervousSystemService,
             "memory_service": MemoryService,
             "cached_speech_service": CachedSpeechService,
             "debug": DebugService,
@@ -612,6 +615,15 @@ class CantinaOS:
             if "CHANNELS" not in service_config:
                 service_config["CHANNELS"] = self._config.get("AUDIO_CHANNELS", 1)
 
+        elif service_name == "memory_service":
+            # Configure memory service with Anthropic API key for summarization
+            if "ANTHROPIC_API_KEY" not in service_config:
+                service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
+            if "enable_summarization" not in service_config:
+                service_config["enable_summarization"] = True
+            if "memory_data_dir" not in service_config:
+                service_config["memory_data_dir"] = "memory_data"
+
         elif service_name == "music_controller":
             # Configure music controller with proper music directory
             # Look in the standard audio/music folder instead
@@ -658,8 +670,8 @@ class CantinaOS:
                 "ducking_fade_ms": 500  # Updated for longer fade transitions
             }
             
-        elif service_name == "memory_service":
-            # Configure memory service
+        elif service_name == "nervous_system":
+            # Configure nervous system service
             service_config = {
                 "chat_history_max_turns": 10
             }
@@ -681,6 +693,13 @@ class CantinaOS:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "claude":
+                # ClaudeService needs a reference to MemoryService for person profiles
+                memory_service = self._services.get("memory_service")
+                if not memory_service:
+                    self.logger.warning("MemoryService not found - ClaudeService will not have person profile access")
+                service = service_class(self._event_bus, service_config, None, memory_service)
                 return service
             else:
                 # All other services share the same initialization pattern: event_bus first, then config

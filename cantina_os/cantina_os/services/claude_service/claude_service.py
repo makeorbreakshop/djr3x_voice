@@ -117,7 +117,8 @@ class ClaudeService(BaseService):
         self,
         event_bus,
         config: Optional[Dict[str, Any]] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        memory_service: Optional[Any] = None
     ):
         """Initialize the Claude service."""
         super().__init__("claude_service", event_bus, logger)
@@ -160,6 +161,12 @@ class ClaudeService(BaseService):
         self._scene_timestamp: Optional[float] = None
         self._current_person: Optional[str] = None
         self._person_confidence: Optional[float] = None
+
+        # Long-term memory service (for person profiles)
+        self._memory_service = memory_service
+
+        # Cached conversation history (loaded once when person detected)
+        self._loaded_conversation_history: Optional[str] = None
 
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -454,7 +461,7 @@ class ClaudeService(BaseService):
         self._request_timestamps.append(current_time)
 
         # Append vision context to user message
-        vision_context = self._build_vision_context_for_message()
+        vision_context = await self._build_vision_context_for_message()
         user_input_with_context = user_input + vision_context
 
         # Add the user's input (with vision context) as a message to memory BEFORE making the API call
@@ -664,19 +671,34 @@ class ClaudeService(BaseService):
         self.logger.info(f"Scene updated: {self._current_scene[:100]}...")
 
     async def _handle_person_detected(self, payload: Dict[str, Any]):
-        """Handle VISION_PERSON_DETECTED event."""
+        """Handle VISION_PERSON_DETECTED event.
+
+        Loads conversation history once when person is detected and caches it
+        for the duration of their visit.
+        """
         self._current_person = payload.get("name", "Unknown")
         self._person_confidence = payload.get("confidence", 0.0)
         self.logger.info(f"Person detected: {self._current_person} (confidence: {self._person_confidence:.2f})")
 
+        # Load conversation history ONCE when person is detected
+        self._loaded_conversation_history = await self._load_conversation_history_for_person()
+
     async def _handle_person_exited(self, payload: Dict[str, Any]):
-        """Handle VISION_PERSON_EXITED event."""
+        """Handle VISION_PERSON_EXITED event.
+
+        Clears cached conversation history when person leaves.
+        """
         self._current_person = None
         self._person_confidence = None
+        self._loaded_conversation_history = None  # Clear cached history
         self.logger.info(f"Person exited: {payload.get('name', 'Unknown')}")
 
-    def _build_vision_context_for_message(self) -> str:
-        """Build vision context from internal state (event-driven)."""
+    async def _build_vision_context_for_message(self) -> str:
+        """Build vision context from internal state (event-driven).
+
+        Queries MemoryService for person profile and conversation history if a person is currently present.
+        Uses minimal token-efficient format for profile injection.
+        """
         import time
 
         # Check if we have any vision context
@@ -692,17 +714,95 @@ class ClaudeService(BaseService):
             if age_seconds < 60:  # Scene context valid for 60 seconds
                 context_parts.append(f"What you can see - {self._current_scene}")
 
-        # Add person if currently present
+        # Add person if currently present (with profile + summary from MemoryService)
+        person_summary = None
         if self._current_person:
-            context_parts.append(f"Speaking with: {self._current_person}")
+            # Query MemoryService for person profile if available
+            if self._memory_service:
+                try:
+                    profile = await self._memory_service.get_person_profile(self._current_person)
+                    # Use minimal token-efficient format: [Name | N visits | Xh ago]
+                    minimal_context = profile.get_minimal_context()
+                    context_parts.append(f"Speaking with: {minimal_context}")
+                    self.logger.debug(f"Injected person profile: {minimal_context}")
 
-        # Return formatted context or empty string
-        if not context_parts:
+                    # Extract conversation summary if available
+                    person_summary = profile.metadata.get("conversation_summary")
+                    if person_summary:
+                        self.logger.debug(f"Loaded conversation summary for {self._current_person}: {person_summary[:50]}...")
+                except Exception as e:
+                    self.logger.error(f"Error querying person profile: {e}")
+                    # Fallback to simple name
+                    context_parts.append(f"Speaking with: {self._current_person}")
+            else:
+                # No MemoryService available, use simple name
+                context_parts.append(f"Speaking with: {self._current_person}")
+
+        # Combine all context
+        context_section = ""
+        if context_parts:
+            context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
+
+        # Add conversation summary (long-term memory)
+        if person_summary:
+            context_section += f"\n\n[Long-term memory: {person_summary}]"
+
+        # Add cached conversation history (recent turns, loaded once when person detected)
+        if self._loaded_conversation_history:
+            context_section += self._loaded_conversation_history
+
+        if context_section:
+            self.logger.debug(f"Full context: {context_section[:150]}...")
+
+        return context_section
+
+    async def _load_conversation_history_for_person(self) -> str:
+        """Load conversation history from MemoryService timeline when person detected.
+
+        Called ONCE when VISION_PERSON_DETECTED is received. The result is cached
+        and reused for all messages during that person's visit.
+
+        Loads recent conversation turns with the current person and formats them
+        for token-efficient injection into the system prompt.
+        """
+        # Only load history if we have a person and MemoryService
+        if not self._current_person or not self._memory_service:
             return ""
 
-        context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
-        self.logger.debug(f"Vision context: {context_section[:100]}...")
-        return context_section
+        try:
+            # Get recent conversation history (last 5 turns)
+            history = await self._memory_service.get_conversation_history(
+                person=self._current_person,
+                limit=5
+            )
+
+            if not history:
+                self.logger.debug(f"No conversation history found for {self._current_person}")
+                return ""
+
+            # Format history for injection
+            history_lines = []
+            for turn in history:
+                user_msg = turn.get("user", "")
+                assistant_msg = turn.get("assistant", "")
+
+                if user_msg:
+                    history_lines.append(f"  User: {user_msg}")
+                if assistant_msg:
+                    history_lines.append(f"  You: {assistant_msg}")
+
+            if not history_lines:
+                return ""
+
+            history_text = "\n".join(history_lines)
+            context = f"\n\n[Recent conversation history with {self._current_person}:\n{history_text}\n]"
+
+            self.logger.info(f"Injected {len(history)} conversation turns for {self._current_person}")
+            return context
+
+        except Exception as e:
+            self.logger.error(f"Error loading conversation history: {e}", exc_info=True)
+            return ""
 
     async def _emit_llm_response(
         self,

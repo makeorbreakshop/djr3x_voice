@@ -109,7 +109,7 @@ class MinimalCLIFormatter:
             "eye_light_controller_service": "led",
             "brain_service": "brain",
             "timeline_executor_service": "timeline",
-            "memory_service": "memory",
+            "nervous_system": "memory",
             "cached_speech_service": "cache",
             "cli_service": "cli",
             "yoda_mode_manager_service": "mode",

@@ -226,7 +226,7 @@ class CLIFormatter:
             "eye_light_controller": "LED",
             "brain_service": "BRAIN",
             "timeline_executor": "TIMELINE",
-            "memory_service": "MEMORY",
+            "nervous_system": "MEMORY",
             "cached_speech": "CACHE",
             "cli_service": "CLI",
             "yoda_mode_manager": "MODE",
@@ -469,7 +469,7 @@ def demo():
         ("brain_service", "INFO", "DJ mode activated, selecting next track"),
         ("timeline_executor", "INFO", "Executing timeline step 1/4: Duck audio"),
         ("cached_speech", "INFO", "Commentary cached for track: \"Blue Train\""),
-        ("memory_service", "DEBUG", "State updated: dj_mode_active=true"),
+        ("nervous_system", "DEBUG", "State updated: dj_mode_active=true"),
         ("cli_service", "WARNING", "Command not recognized: 'plya music'"),
         ("music_controller", "ERROR", "Failed to load track: file not found"),
     ]

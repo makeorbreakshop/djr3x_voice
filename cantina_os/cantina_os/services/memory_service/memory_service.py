@@ -1,859 +1,757 @@
 """
-Memory Service for Cantina OS
-================================
-A service that provides working memory for DJ R3X.
-Maintains state keys, chat history, and exposes an API to access and modify this data.
+Memory Service - Long-term memory for DJ R3X
+
+This service manages long-term memory storage for person profiles and event history.
+It is distinct from NervousSystemService which handles real-time operational state.
+
+Memory Tiers:
+- Person Profiles: Structured data about individuals (visit counts, preferences, notes)
+- Event Timeline: Searchable history of interactions (JSONL format)
+
+Features:
+- Person profile storage and automatic visit tracking from vision events
+- Event timeline logging for all key system events:
+  * Conversations (transcriptions, LLM responses, intents)
+  * Person arrivals/departures (vision events)
+  * Music playback (track changes)
+  * System mode transitions
+- Conversation history reconstruction for context injection
+- Query/filter events by type, person, conversation ID, timestamp
+
+Storage:
+- Person profiles: memory_data/profiles/{name}.json
+- Event timeline: memory_data/events.jsonl (append-only JSONL)
 """
 
-from __future__ import annotations
-
 import asyncio
-import time
+import logging
 import json
 import os
-from typing import Any, Callable, Dict, List, Optional
-import aiofiles
+import time
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from pydantic import BaseModel, Field
 
-from pydantic import BaseModel, ValidationError
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None  # Graceful degradation if not installed
 
-from cantina_os.bus import EventTopics, LogLevel, ServiceStatus
-from cantina_os.base_service import BaseService
-from cantina_os.event_payloads import BaseEventPayload, IntentPayload
+from ...base_service import BaseService
+from ...core.event_topics import EventTopics
 
-# ---------------------------------------------------------------------------
-# Configuration model
-# ---------------------------------------------------------------------------
-class _Config(BaseModel):
-    """Pydantic‑validated configuration for the memory service."""
-    chat_history_max_turns: int = 10
-    state_keys: List[str] = [
-        "mode", "music_playing", "current_track", 
-        "last_intent", "chat_history",
-        # DJ mode state keys
-        "dj_mode_active", "dj_track_history", "dj_next_track",
-        "dj_transition_style", "dj_user_preferences",
-        "dj_lookahead_cache",
-        # DJ mode cache coordination keys
-        "dj_commentary_cache_mappings", "dj_commentary_cache_ready",
-        "dj_current_track"
-    ]
 
-# ---------------------------------------------------------------------------
-# Memory Update Payload
-# ---------------------------------------------------------------------------
-class MemoryUpdatedPayload(BaseEventPayload):
-    """Schema for MEMORY_UPDATED event."""
-    key: str
-    new_value: Any
-    old_value: Optional[Any] = None
+class PersonProfile(BaseModel):
+    """Model for a person's profile in long-term memory."""
+    name: str
+    visit_count: int = 0
+    first_seen: float = Field(default_factory=time.time)  # Unix timestamp
+    last_seen: float = Field(default_factory=time.time)  # Unix timestamp
+    total_interaction_time_seconds: float = 0.0
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+    notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-STATE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "memory_state.json")
+    def get_time_since_last_seen(self) -> str:
+        """Get human-readable time since last seen."""
+        seconds_ago = time.time() - self.last_seen
 
-# ---------------------------------------------------------------------------
-# Service Implementation
-# ---------------------------------------------------------------------------
+        if seconds_ago < 60:
+            return "just now"
+        elif seconds_ago < 3600:
+            minutes = int(seconds_ago / 60)
+            return f"{minutes}m ago"
+        elif seconds_ago < 86400:
+            hours = int(seconds_ago / 3600)
+            return f"{hours}h ago"
+        else:
+            days = int(seconds_ago / 86400)
+            return f"{days}d ago"
+
+    def get_minimal_context(self) -> str:
+        """Get minimal context string for token-efficient injection.
+
+        Format: [Name | N visits | Xh ago]
+        Example: [Brandon | 47 visits | 2h ago]
+        """
+        return f"[{self.name} | {self.visit_count} visits | {self.get_time_since_last_seen()}]"
+
+
+class TimelineEvent(BaseModel):
+    """Model for an event in the timeline log."""
+    timestamp: float = Field(default_factory=time.time)
+    event_type: str
+    event_data: Dict[str, Any] = Field(default_factory=dict)
+    person: Optional[str] = None
+    conversation_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class MemoryService(BaseService):
-    """Working memory service for DJ R3X.
-    
-    Provides access to state variables, chat history, and emits change events.
-    Acts as a central state store for the system.
+    """
+    Long-term memory service for DJ R3X.
+
+    Manages person profiles and event history. Distinct from NervousSystemService
+    which handles real-time operational state.
+
+    Features:
+    - Person profile storage (JSON files)
+    - Automatic visit tracking from vision events
+    - Token-efficient context injection
+    - Event timeline logging (conversations, music, system events)
+    - Conversation history reconstruction
+    - Searchable event queries
     """
 
-    def __init__(self, event_bus, config=None, name="memory_service"):
+    def __init__(self, event_bus, config: Optional[Dict[str, Any]] = None, name="memory_service"):
         super().__init__(service_name=name, event_bus=event_bus)
 
-        # ----- validated configuration -----
-        self._config = _Config(**(config or {}))
+        self._config = config or {}
 
-        # ----- bookkeeping -----
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._tasks: List[asyncio.Task] = []
-        
-        # ----- memory state -----
-        # Load state from file, initialize defaults for missing keys
-        loaded_state = self._load_state()
-        self._state: Dict[str, Any] = {key: loaded_state.get(key, None) for key in self._config.state_keys}
+        # Storage paths
+        self._memory_data_dir = Path(self._config.get("memory_data_dir", "memory_data"))
+        self._profiles_dir = self._memory_data_dir / "profiles"
+        self._events_file = self._memory_data_dir / "events.jsonl"
 
-        # Ensure specific initial values if not loaded (e.g., empty lists/dicts)
-        if self._state.get("chat_history") is None:
-             self._state["chat_history"] = []  # Initialize chat history as empty list
-        if self._state.get("music_playing") is None:
-            self._state["music_playing"] = False  # Initialize music playing state
-        if self._state.get("dj_mode_active") is None:
-            self._state["dj_mode_active"] = False  # Initialize DJ mode state
-        if self._state.get("dj_track_history") is None:
-            self._state["dj_track_history"] = []  # Initialize DJ track history
-        if self._state.get("dj_user_preferences") is None:
-            self._state["dj_user_preferences"] = {}  # Initialize DJ user preferences
+        # In-memory profile cache (for faster lookups)
+        self._profile_cache: Dict[str, PersonProfile] = {}
 
-        self._waiters: Dict[str, List[asyncio.Event]] = {}  # For wait_for predicate functionality
-        self._state_lock = asyncio.Lock()  # Lock for concurrent access to state
+        # Current person tracking (for calculating interaction time)
+        self._current_person: Optional[str] = None
+        self._person_arrival_time: Optional[float] = None
 
-    # ------------------------------------------------------------------
-    # Helper methods
-    # ------------------------------------------------------------------
-    async def _emit_dict(self, topic: EventTopics, payload: Any) -> None:
-        """Emit a Pydantic model or dict as a dictionary to the event bus.
-        
-        Args:
-            topic: Event topic
-            payload: Pydantic model or dict to emit
-        """
-        try:
-            # Convert Pydantic model to dict using model_dump() method
-            if hasattr(payload, "model_dump"):
-                payload_dict = payload.model_dump()
+        # Track whether current person needs summary (conversation happened but not summarized)
+        self._person_needs_summary: bool = False
+
+        # Anthropic client for conversation summarization
+        self._anthropic_client: Optional[Anthropic] = None
+        self._summarization_enabled = self._config.get("enable_summarization", True)
+
+        if self._summarization_enabled and Anthropic:
+            api_key = self._config.get("ANTHROPIC_API_KEY")
+            if api_key:
+                self._anthropic_client = Anthropic(api_key=api_key)
+                self.logger.info("Anthropic client initialized for conversation summarization")
             else:
-                # Fallback for old pydantic versions or dict inputs
-                payload_dict = payload if isinstance(payload, dict) else payload.dict()
-                
-            await self.emit(topic, payload_dict)
-        except Exception as e:
-            self.logger.error(f"Error emitting event on topic {topic}: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error emitting event: {e}",
-                LogLevel.ERROR
-            )
+                self.logger.warning("ANTHROPIC_API_KEY not found - conversation summarization disabled")
+                self._summarization_enabled = False
+        elif self._summarization_enabled and not Anthropic:
+            self.logger.warning("anthropic package not installed - conversation summarization disabled")
+            self._summarization_enabled = False
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-    async def _start(self) -> None:
-        """Initialize memory service and set up subscriptions."""
+    async def _initialize(self) -> None:
+        """Initialize the memory service."""
         try:
-            self.logger.debug("MemoryService: Starting initialization")
-            
-            self._loop = asyncio.get_running_loop()
-            
-            # Set up subscriptions
-            await self._setup_subscriptions()
-            self.logger.debug("MemoryService: Subscriptions set up")
-            
-            # Initialize state with defaults for critical keys
-            if self._state.get("dj_mode_active") is None:
-                self._state["dj_mode_active"] = False
-            if self._state.get("dj_track_history") is None:
-                self._state["dj_track_history"] = []
-            if self._state.get("dj_next_track") is None:
-                self._state["dj_next_track"] = None
-            if self._state.get("chat_history") is None:
-                self._state["chat_history"] = []
-            if self._state.get("music_playing") is None:
-                self._state["music_playing"] = False
-            # Initialize DJ mode cache coordination keys
-            if self._state.get("dj_commentary_cache_mappings") is None:
-                self._state["dj_commentary_cache_mappings"] = {}
-            if self._state.get("dj_commentary_cache_ready") is None:
-                self._state["dj_commentary_cache_ready"] = {}
-            if self._state.get("dj_current_track") is None:
-                self._state["dj_current_track"] = None
-                
-            self.logger.debug("MemoryService: State initialized with defaults")
-            
-            # Save initial state
-            self._save_state()
-            
-            await self._emit_status(ServiceStatus.RUNNING, "Memory service started")
-            self.logger.info("MemoryService started successfully")
-            
+            # Create storage directories if they don't exist
+            self._profiles_dir.mkdir(parents=True, exist_ok=True)
+            self._memory_data_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load existing profiles into cache
+            await self._load_profiles_into_cache()
+
+            self.logger.info(f"Memory service initialized with {len(self._profile_cache)} cached profiles")
+            self.logger.info(f"Profiles directory: {self._profiles_dir}")
+
+            # Catchup: Summarize any conversations that weren't summarized
+            if self._summarization_enabled:
+                await self._catchup_unsummarized_conversations()
+
         except Exception as e:
-            error_msg = f"Failed to start MemoryService: {e}"
-            self.logger.error(error_msg)
-            await self._emit_status(ServiceStatus.ERROR, error_msg)
+            self.logger.error(f"Failed to initialize memory service: {str(e)}")
             raise
 
-    async def _stop(self) -> None:
-        """Clean up tasks and subscriptions and save state."""
-        # Save state before stopping
-        self._save_state()
+    async def _start(self) -> None:
+        """Start the memory service."""
+        self.logger.info("MemoryService _start method called")
 
-        for task in self._tasks:
-            if not task.done():
-                task.cancel()
-                
-        # Wait for tasks to complete with timeout
-        if self._tasks:
-            await asyncio.wait(self._tasks, timeout=5.0)
-            
-        self._tasks.clear()
+        try:
+            # Initialize resources
+            await self._initialize()
 
-        await self._emit_status(ServiceStatus.STOPPED, "Memory service stopped")
+            # Set up event subscriptions
+            await self._setup_subscriptions()
 
-    # ------------------------------------------------------------------
-    # Subscription setup
-    # ------------------------------------------------------------------
+            self.logger.info("MemoryService started successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to start memory service: {str(e)}")
+            raise
+
+    async def _cleanup(self) -> None:
+        """Clean up memory service resources."""
+        try:
+            # Save any pending profile updates
+            await self._save_all_profiles()
+
+            self.logger.info("Cleaned up memory service resources")
+
+        except Exception as e:
+            self.logger.error(f"Error cleaning up memory service resources: {str(e)}")
+
     async def _setup_subscriptions(self) -> None:
-        """Register event-handlers for memory updates."""
-        self.logger.debug("MemoryService: Setting up subscriptions...")
+        """Set up event subscriptions."""
+        self.logger.info("MemoryService setting up event subscriptions")
 
-        # Create tasks for all subscriptions
-        subscription_tasks = []
+        # Subscribe to vision events for automatic profile updates
+        asyncio.create_task(self.subscribe(
+            EventTopics.VISION_PERSON_DETECTED,
+            self._handle_person_detected
+        ))
 
-        # Subscribe to essential music state events
-        subscription_tasks.extend([
-            asyncio.create_task(self.subscribe(EventTopics.TRACK_PLAYING, self._handle_music_started)),
-            asyncio.create_task(self.subscribe(EventTopics.TRACK_STOPPED, self._handle_music_stopped)),
-            asyncio.create_task(self.subscribe(EventTopics.INTENT_DETECTED, self._handle_intent_detected)),
-            asyncio.create_task(self.subscribe(EventTopics.SYSTEM_MODE_CHANGE, self._handle_mode_change)),
-            # Add memory access subscriptions
-            asyncio.create_task(self.subscribe(EventTopics.MEMORY_GET, self._handle_memory_get)),
-            asyncio.create_task(self.subscribe(EventTopics.MEMORY_SET, self._handle_memory_set)),
-            # Add vision scene subscriptions
-            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_CAPTURED, self._handle_vision_scene)),
-            asyncio.create_task(self.subscribe(EventTopics.VISION_SCENE_UPDATED, self._handle_vision_scene))
-        ])
+        asyncio.create_task(self.subscribe(
+            EventTopics.VISION_PERSON_EXITED,
+            self._handle_person_exited
+        ))
 
-        # Add tasks to the service's task list for cleanup
-        self._tasks.extend(subscription_tasks)
-        
-        self.logger.debug("MemoryService: All subscription tasks created")
+        # Subscribe to conversation events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.TRANSCRIPTION_FINAL,
+            self._handle_transcription_final
+        ))
 
-        # Wait for all subscriptions to complete
+        asyncio.create_task(self.subscribe(
+            EventTopics.LLM_RESPONSE_TEXT,
+            self._handle_llm_response
+        ))
+
+        asyncio.create_task(self.subscribe(
+            EventTopics.INTENT_EXECUTION_RESULT,
+            self._handle_intent_execution
+        ))
+
+        # Subscribe to music events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.TRACK_PLAYING,
+            self._handle_track_playing
+        ))
+
+        # Subscribe to system events for timeline logging
+        asyncio.create_task(self.subscribe(
+            EventTopics.SYSTEM_MODE_CHANGED,
+            self._handle_system_mode_change
+        ))
+
+        self.logger.info("MemoryService: Subscribed to vision, conversation, music, and system events")
+
+    async def _handle_person_detected(self, payload: Dict[str, Any]) -> None:
+        """Handle VISION_PERSON_DETECTED event - update visit count and timestamp."""
         try:
-            await asyncio.gather(*subscription_tasks)
-            self.logger.debug("MemoryService: All subscriptions completed successfully")
+            person_name = payload.get("name", "Unknown")
+            confidence = payload.get("confidence", 0.0)
+
+            if person_name == "Unknown":
+                self.logger.debug("Ignoring person detection for Unknown person")
+                return
+
+            self.logger.info(f"Person detected: {person_name} (confidence: {confidence:.2f})")
+
+            # Get or create profile
+            profile = await self.get_person_profile(person_name)
+
+            # Track arrival time for interaction duration calculation
+            self._current_person = person_name
+            self._person_arrival_time = time.time()
+
+            # Update visit tracking ONLY if this is a new visit
+            # (not if we just saw them a few seconds ago)
+            time_since_last = time.time() - profile.last_seen
+            if time_since_last > 300:  # 5 minutes threshold for "new visit"
+                profile.visit_count += 1
+                self.logger.info(f"New visit recorded for {person_name} (total: {profile.visit_count})")
+            else:
+                self.logger.debug(f"Same visit continued for {person_name}")
+
+            # Update last_seen timestamp
+            profile.last_seen = time.time()
+
+            # Save updated profile
+            await self._save_profile(profile)
+
         except Exception as e:
-            self.logger.error(f"MemoryService: Error during subscription setup: {e}")
-            raise  # Re-raise to ensure service startup fails if subscriptions fail
+            self.logger.error(f"Error handling person detected: {e}", exc_info=True)
 
-    # ------------------------------------------------------------------
-    # Memory API methods
-    # ------------------------------------------------------------------
-    async def set(self, key: str, value: Any) -> None:
-        """Set a value in memory and emit update event."""
-        async with self._state_lock:
-            if key not in self._state:
-                self.logger.warning(f"Setting unknown key in memory: {key}")
+    async def _handle_person_exited(self, payload: Dict[str, Any]) -> None:
+        """Handle VISION_PERSON_EXITED event - calculate interaction duration and generate summary."""
+        try:
+            person_name = payload.get("name", "Unknown")
 
-            old_value = self._state.get(key)
-            self._state[key] = value
+            if person_name == "Unknown":
+                return
 
-            # Save state after setting a value (now async)
-            await self._save_state_async()
+            self.logger.info(f"Person exited: {person_name}")
 
-        # Emit memory updated event (outside lock to avoid deadlock)
-        await self._emit_dict(
-            EventTopics.MEMORY_UPDATED,
-            MemoryUpdatedPayload(
-                key=key,
-                new_value=value,
-                old_value=old_value
+            # Calculate interaction duration if we were tracking this person
+            if self._current_person == person_name and self._person_arrival_time:
+                interaction_duration = time.time() - self._person_arrival_time
+
+                # Update profile with interaction time
+                profile = await self.get_person_profile(person_name)
+                profile.total_interaction_time_seconds += interaction_duration
+
+                await self._save_profile(profile)
+
+                self.logger.info(f"Recorded {interaction_duration:.1f}s interaction for {person_name}")
+
+                # Generate conversation summary if person had a conversation
+                if self._person_needs_summary:
+                    await self._update_person_summary(person_name)
+                    self._person_needs_summary = False
+
+            # Clear tracking
+            if self._current_person == person_name:
+                self._current_person = None
+                self._person_arrival_time = None
+                self._person_needs_summary = False
+
+        except Exception as e:
+            self.logger.error(f"Error handling person exited: {e}", exc_info=True)
+
+    async def get_person_profile(self, person_name: str) -> PersonProfile:
+        """
+        Get a person's profile from memory.
+
+        Returns existing profile or creates a new one if not found.
+        This method is used by ClaudeService for context injection.
+        """
+        # Check cache first
+        if person_name in self._profile_cache:
+            return self._profile_cache[person_name]
+
+        # Try loading from disk
+        profile_path = self._profiles_dir / f"{person_name}.json"
+
+        if profile_path.exists():
+            try:
+                with open(profile_path, 'r') as f:
+                    profile_data = json.load(f)
+                profile = PersonProfile(**profile_data)
+                self._profile_cache[person_name] = profile
+                self.logger.info(f"Loaded profile for {person_name} from disk")
+                return profile
+            except Exception as e:
+                self.logger.error(f"Error loading profile for {person_name}: {e}")
+
+        # Create new profile if not found
+        self.logger.info(f"Creating new profile for {person_name}")
+        profile = PersonProfile(name=person_name)
+        self._profile_cache[person_name] = profile
+        await self._save_profile(profile)
+
+        return profile
+
+    async def _save_profile(self, profile: PersonProfile) -> None:
+        """Save a person's profile to disk."""
+        try:
+            profile_path = self._profiles_dir / f"{profile.name}.json"
+
+            with open(profile_path, 'w') as f:
+                json.dump(profile.model_dump(), f, indent=2)
+
+            # Update cache
+            self._profile_cache[profile.name] = profile
+
+            self.logger.debug(f"Saved profile for {profile.name}")
+
+        except Exception as e:
+            self.logger.error(f"Error saving profile for {profile.name}: {e}")
+
+    async def _save_all_profiles(self) -> None:
+        """Save all cached profiles to disk."""
+        for profile in self._profile_cache.values():
+            await self._save_profile(profile)
+
+    async def _load_profiles_into_cache(self) -> None:
+        """Load all existing profiles into memory cache."""
+        try:
+            if not self._profiles_dir.exists():
+                return
+
+            for profile_file in self._profiles_dir.glob("*.json"):
+                try:
+                    with open(profile_file, 'r') as f:
+                        profile_data = json.load(f)
+                    profile = PersonProfile(**profile_data)
+                    self._profile_cache[profile.name] = profile
+                except Exception as e:
+                    self.logger.error(f"Error loading profile from {profile_file}: {e}")
+
+            self.logger.info(f"Loaded {len(self._profile_cache)} profiles into cache")
+
+        except Exception as e:
+            self.logger.error(f"Error loading profiles into cache: {e}")
+
+    async def update_person_note(self, person_name: str, note: str) -> None:
+        """Add a note to a person's profile."""
+        profile = await self.get_person_profile(person_name)
+        profile.notes.append(note)
+        await self._save_profile(profile)
+        self.logger.info(f"Added note to {person_name}'s profile")
+
+    async def update_person_preference(self, person_name: str, key: str, value: Any) -> None:
+        """Update a preference in a person's profile."""
+        profile = await self.get_person_profile(person_name)
+        profile.preferences[key] = value
+        await self._save_profile(profile)
+        self.logger.info(f"Updated preference '{key}' for {person_name}")
+
+    def get_all_profiles(self) -> List[PersonProfile]:
+        """Get all person profiles from cache."""
+        return list(self._profile_cache.values())
+
+    # ========================================================================
+    # Event Timeline Logging
+    # ========================================================================
+
+    async def log_event(
+        self,
+        event_type: str,
+        event_data: Dict[str, Any],
+        person: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Log an event to the timeline.
+
+        Args:
+            event_type: Event topic/type (e.g., "TRANSCRIPTION_FINAL")
+            event_data: Event payload data
+            person: Associated person (if applicable)
+            conversation_id: Conversation ID (if applicable)
+            metadata: Additional metadata
+        """
+        try:
+            event = TimelineEvent(
+                event_type=event_type,
+                event_data=event_data,
+                person=person,
+                conversation_id=conversation_id,
+                metadata=metadata or {}
             )
-        )
 
-        # Check and notify any waiters
-        self._check_waiters()
-    
-    def get(self, key: str, default=None) -> Any:
-        """Get a value from memory."""
-        return self._state.get(key, default)
-    
-    async def append_chat(self, message: Dict[str, Any]) -> None:
-        """Add a message to chat history, pruning if necessary."""
-        chat_history = self._state["chat_history"]
-        chat_history.append(message)
-        
-        # Prune if exceeds max turns
-        while len(chat_history) > self._config.chat_history_max_turns:
-            chat_history.pop(0)
-        
-        # Emit memory updated
-        await self._emit_dict(
-            EventTopics.MEMORY_UPDATED,
-            MemoryUpdatedPayload(
-                key="chat_history",
-                new_value=chat_history
+            # Append to JSONL file
+            with open(self._events_file, 'a') as f:
+                f.write(json.dumps(event.model_dump()) + '\n')
+
+            self.logger.debug(f"Logged event: {event_type}")
+
+        except Exception as e:
+            self.logger.error(f"Error logging event {event_type}: {e}", exc_info=True)
+
+    async def get_recent_events(
+        self,
+        limit: int = 50,
+        event_type: Optional[str] = None,
+        person: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        since_timestamp: Optional[float] = None
+    ) -> List[TimelineEvent]:
+        """
+        Query recent events from the timeline.
+
+        Args:
+            limit: Maximum number of events to return
+            event_type: Filter by event type
+            person: Filter by person
+            conversation_id: Filter by conversation ID
+            since_timestamp: Only events after this timestamp
+
+        Returns:
+            List of timeline events (most recent first)
+        """
+        try:
+            if not self._events_file.exists():
+                return []
+
+            events = []
+
+            # Read JSONL file in reverse order for efficiency
+            with open(self._events_file, 'r') as f:
+                lines = f.readlines()
+
+            # Parse in reverse (most recent first)
+            for line in reversed(lines):
+                if len(events) >= limit:
+                    break
+
+                try:
+                    event_data = json.loads(line.strip())
+                    event = TimelineEvent(**event_data)
+
+                    # Apply filters
+                    if since_timestamp and event.timestamp < since_timestamp:
+                        continue
+                    if event_type and event.event_type != event_type:
+                        continue
+                    if person and event.person != person:
+                        continue
+                    if conversation_id and event.conversation_id != conversation_id:
+                        continue
+
+                    events.append(event)
+
+                except Exception as e:
+                    self.logger.error(f"Error parsing event line: {e}")
+                    continue
+
+            return events
+
+        except Exception as e:
+            self.logger.error(f"Error querying events: {e}", exc_info=True)
+            return []
+
+    async def get_conversation_history(
+        self,
+        person: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent conversation history (transcriptions and responses).
+
+        Returns a simplified conversation log for context injection.
+
+        Args:
+            person: Filter by person (optional)
+            limit: Maximum number of turns to return
+
+        Returns:
+            List of conversation turns: [{"user": "...", "assistant": "...", "timestamp": ...}]
+        """
+        try:
+            # Get transcription and LLM response events
+            transcriptions = await self.get_recent_events(
+                limit=limit * 2,  # Get more to account for interleaving
+                event_type=EventTopics.TRANSCRIPTION_FINAL.value,
+                person=person
             )
-        )
-        
-        # Check and notify any waiters
-        self._check_waiters()
-    
-    def get_recent_track_history(self, count: int = 10) -> List[str]:
-        """Get the most recent tracks from the DJ track history.
-        
-        Args:
-            count: The number of recent tracks to retrieve.
-            
-        Returns:
-            A list of recent track names.
-        """
-        history = self._state.get("dj_track_history", [])
-        return history[-count:] if history else []
 
-    async def set_user_preference(self, key: str, value: Any) -> None:
-        """Set a specific DJ user preference.
-        
-        Args:
-            key: The key for the user preference.
-            value: The value to set for the preference.
-        """
-        preferences = self._state.get("dj_user_preferences", {})
-        preferences[key] = value
-        await self.set("dj_user_preferences", preferences)
-        self.logger.debug(f"DJ user preference set: {key} = {value}")
+            responses = await self.get_recent_events(
+                limit=limit * 2,
+                event_type=EventTopics.LLM_RESPONSE_TEXT.value,
+                person=person
+            )
 
-    def get_user_preference(self, key: str, default: Any = None) -> Any:
-        """Get a specific DJ user preference.
-        
-        Args:
-            key: The key for the user preference.
-            default: The default value to return if the preference is not found.
-            
-        Returns:
-            The value of the user preference, or the default if not found.
-        """
-        preferences = self._state.get("dj_user_preferences", {})
-        return preferences.get(key, default)
+            # Combine and sort by timestamp
+            all_events = transcriptions + responses
+            all_events.sort(key=lambda e: e.timestamp)
 
-    async def set_lookahead_cache_state(self, track_id: str, state: str, details: Optional[Dict[str, Any]] = None) -> None:
-        """Set the state of the lookahead speech cache for a specific track.
-        
-        Args:
-            track_id: The identifier of the track the cache is for.
-            state: The state of the cache (e.g., "pending", "ready", "failed", "cleared").
-            details: Optional dictionary with additional details about the cache state.
-        """
-        cache_state = {
-            "track_id": track_id,
-            "state": state,
-            "details": details,
-            "timestamp": time.time()
-        }
-        await self.set("dj_lookahead_cache", cache_state)
-        self.logger.debug(f"DJ lookahead cache state updated: {cache_state}")
+            # Build conversation turns
+            conversation = []
+            current_turn = {}
 
-    def get_lookahead_cache_state(self) -> Optional[Dict[str, Any]]:
-        """Get the current state of the lookahead speech cache.
-        
-        Returns:
-            A dictionary representing the cache state, or None if not set.
-        """
-        return self.get("dj_lookahead_cache", None)
-
-    async def clear_lookahead_cache_state(self) -> None:
-        """Clear the lookahead speech cache state.
-        """
-        await self.set("dj_lookahead_cache", None)
-        self.logger.debug("DJ lookahead cache state cleared.")
-
-    # =================== DJ MODE CACHE STATE TRACKING ===================
-    # Phase 1: Enhanced cache state management for DJ mode coordination
-    
-    async def set_commentary_cache_mapping(self, request_id: str, cache_key: str, next_track: Optional[Dict[str, Any]] = None) -> None:
-        """Store a mapping between commentary request_id and cache_key.
-        
-        Args:
-            request_id: The unique request ID for the commentary
-            cache_key: The cache key where the commentary audio is stored
-            next_track: Optional track data this commentary is for
-        """
-        cache_mappings = self.get("dj_commentary_cache_mappings", {})
-        cache_mappings[request_id] = {
-            "cache_key": cache_key,
-            "next_track": next_track,
-            "timestamp": time.time()
-        }
-        await self.set("dj_commentary_cache_mappings", cache_mappings)
-        self.logger.debug(f"Stored commentary cache mapping: {request_id} -> {cache_key}")
-
-    def get_commentary_cache_key(self, request_id: str) -> Optional[str]:
-        """Get the cache_key for a given commentary request_id.
-        
-        Args:
-            request_id: The commentary request ID
-            
-        Returns:
-            The cache_key if found, None otherwise
-        """
-        cache_mappings = self.get("dj_commentary_cache_mappings", {})
-        mapping = cache_mappings.get(request_id, {})
-        return mapping.get("cache_key")
-
-    def get_commentary_cache_mapping(self, request_id: str) -> Optional[Dict[str, Any]]:
-        """Get the full cache mapping for a given commentary request_id.
-        
-        Args:
-            request_id: The commentary request ID
-            
-        Returns:
-            The mapping dict if found, None otherwise
-        """
-        cache_mappings = self.get("dj_commentary_cache_mappings", {})
-        return cache_mappings.get(request_id)
-
-    async def set_commentary_cache_ready(self, cache_key: str, is_ready: bool = True, duration: Optional[float] = None) -> None:
-        """Mark a commentary cache as ready or not ready.
-        
-        Args:
-            cache_key: The cache key
-            is_ready: Whether the cache is ready
-            duration: Optional duration of the cached audio
-        """
-        cache_ready_states = self.get("dj_commentary_cache_ready", {})
-        cache_ready_states[cache_key] = {
-            "ready": is_ready,
-            "duration": duration,
-            "timestamp": time.time()
-        }
-        await self.set("dj_commentary_cache_ready", cache_ready_states)
-        self.logger.debug(f"Set commentary cache ready state: {cache_key} = {is_ready}")
-
-    def is_commentary_cache_ready(self, cache_key: str) -> bool:
-        """Check if a commentary cache is ready.
-        
-        Args:
-            cache_key: The cache key to check
-            
-        Returns:
-            True if ready, False otherwise
-        """
-        cache_ready_states = self.get("dj_commentary_cache_ready", {})
-        cache_state = cache_ready_states.get(cache_key, {})
-        return cache_state.get("ready", False)
-
-    def get_ready_commentary_for_track(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get ready commentary cache info for a specific track.
-        
-        Args:
-            track_id: The track ID to find commentary for
-            
-        Returns:
-            Dict with cache_key and metadata if found, None otherwise
-        """
-        cache_mappings = self.get("dj_commentary_cache_mappings", {})
-        cache_ready_states = self.get("dj_commentary_cache_ready", {})
-        
-        for request_id, mapping in cache_mappings.items():
-            next_track = mapping.get("next_track", {})
-            if next_track and next_track.get("track_id") == track_id:
-                cache_key = mapping.get("cache_key")
-                if cache_key and self.is_commentary_cache_ready(cache_key):
-                    return {
-                        "request_id": request_id,
-                        "cache_key": cache_key,
-                        "mapping": mapping,
-                        "cache_state": cache_ready_states.get(cache_key, {})
+            for event in all_events:
+                if event.event_type == EventTopics.TRANSCRIPTION_FINAL.value:
+                    # Start new turn
+                    if current_turn:
+                        conversation.append(current_turn)
+                    current_turn = {
+                        "user": event.event_data.get("text", ""),
+                        "timestamp": event.timestamp,
+                        "conversation_id": event.conversation_id
                     }
-        return None
+                elif event.event_type == EventTopics.LLM_RESPONSE_TEXT.value:
+                    # Add assistant response to current turn
+                    if current_turn:
+                        current_turn["assistant"] = event.event_data.get("text", "")
+                        conversation.append(current_turn)
+                        current_turn = {}
 
-    async def cleanup_commentary_cache_mapping(self, request_id: str) -> None:
-        """Remove a commentary cache mapping and its ready state.
-        
-        Args:
-            request_id: The request ID to clean up
-        """
-        cache_mappings = self.get("dj_commentary_cache_mappings", {})
-        cache_ready_states = self.get("dj_commentary_cache_ready", {})
-        
-        if request_id in cache_mappings:
-            mapping = cache_mappings[request_id]
-            cache_key = mapping.get("cache_key")
-            
-            # Remove mapping
-            del cache_mappings[request_id]
-            await self.set("dj_commentary_cache_mappings", cache_mappings)
-            
-            # Remove ready state
-            if cache_key and cache_key in cache_ready_states:
-                del cache_ready_states[cache_key]
-                await self.set("dj_commentary_cache_ready", cache_ready_states)
-                
-            self.logger.debug(f"Cleaned up commentary cache mapping for request_id: {request_id}")
+            # Add any incomplete turn
+            if current_turn:
+                conversation.append(current_turn)
 
-    async def set_dj_current_track(self, track: Optional[Dict[str, Any]]) -> None:
-        """Set the currently playing track in DJ mode.
-        
-        Args:
-            track: Track data dict or None
-        """
-        await self.set("dj_current_track", track)
-        if track:
-            self.logger.debug(f"Set DJ current track: {track.get('title', 'Unknown')}")
+            # Return most recent N turns
+            return conversation[-limit:] if len(conversation) > limit else conversation
 
-    async def set_dj_next_track(self, track: Optional[Dict[str, Any]]) -> None:
-        """Set the next track to be played in DJ mode.
-        
-        Args:
-            track: Track data dict or None
-        """
-        await self.set("dj_next_track", track)
-        if track:
-            self.logger.debug(f"Set DJ next track: {track.get('title', 'Unknown')}")
+        except Exception as e:
+            self.logger.error(f"Error building conversation history: {e}", exc_info=True)
+            return []
 
-    async def add_to_dj_history(self, track: Dict[str, Any]) -> None:
-        """Add a track to the DJ mode play history.
-        
-        Args:
-            track: Track data dict
-        """
-        history = self.get("dj_track_history", [])
-        # Avoid duplicates in recent history
-        if not history or history[-1].get("track_id") != track.get("track_id"):
-            history.append({
-                "track_id": track.get("track_id"),
-                "title": track.get("title"),
-                "artist": track.get("artist"),
-                "played_at": time.time()
-            })
-            # Keep history reasonable size
-            if len(history) > 50:
-                history = history[-50:]
-            await self.set("dj_track_history", history)
-            self.logger.debug(f"Added to DJ history: {track.get('title', 'Unknown')}")
+    # ========================================================================
+    # Event Handlers for Timeline Logging
+    # ========================================================================
 
-    async def wait_for(self, predicate: Callable[[Dict[str, Any]], bool], timeout: Optional[float] = None) -> bool:
-        """Wait until a predicate function on state returns True.
-        
-        Args:
-            predicate: A function that takes the state dict and returns True when condition is met
-            timeout: Optional timeout in seconds
-            
-        Returns:
-            True if predicate was satisfied, False if timeout occurred
+    async def _handle_transcription_final(self, payload: Dict[str, Any]) -> None:
+        """Log user speech to timeline and mark that conversation is happening."""
+        await self.log_event(
+            event_type=EventTopics.TRANSCRIPTION_FINAL.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+        # Mark that a conversation is happening (needs summary when person exits)
+        if self._current_person:
+            self._person_needs_summary = True
+
+    async def _handle_llm_response(self, payload: Dict[str, Any]) -> None:
+        """Log LLM responses to timeline."""
+        await self.log_event(
+            event_type=EventTopics.LLM_RESPONSE_TEXT.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+    async def _handle_intent_execution(self, payload: Dict[str, Any]) -> None:
+        """Log intent executions to timeline."""
+        await self.log_event(
+            event_type=EventTopics.INTENT_EXECUTION_RESULT.value,
+            event_data=payload,
+            person=self._current_person,
+            conversation_id=payload.get("conversation_id")
+        )
+
+    async def _handle_track_playing(self, payload: Dict[str, Any]) -> None:
+        """Log music track changes to timeline."""
+        await self.log_event(
+            event_type=EventTopics.TRACK_PLAYING.value,
+            event_data=payload,
+            person=self._current_person
+        )
+
+    async def _handle_system_mode_change(self, payload: Dict[str, Any]) -> None:
+        """Log system mode changes to timeline and trigger summary when leaving INTERACTIVE mode."""
+        await self.log_event(
+            event_type=EventTopics.SYSTEM_MODE_CHANGED.value,
+            event_data=payload
+        )
+
+        # If transitioning OUT of INTERACTIVE mode and we have a person with conversation, summarize
+        old_mode = payload.get("old_mode")
+        if old_mode == "INTERACTIVE" and self._current_person and self._person_needs_summary:
+            self.logger.info(f"Exiting INTERACTIVE mode with {self._current_person}, generating summary...")
+            await self._update_person_summary(self._current_person)
+            self._person_needs_summary = False
+
+    # ========================================================================
+    # Conversation Summarization
+    # ========================================================================
+
+    async def _update_person_summary(self, person_name: str) -> None:
+        """Generate or update rolling conversation summary for a person.
+
+        Uses Claude Haiku to create a concise 2-3 sentence summary of the person's
+        conversation history, incorporating both existing summary and new conversations.
         """
-        # Check if predicate is already satisfied
-        if predicate(self._state):
-            return True
-            
-        # Create a waiter event
-        waiter_id = str(time.time())
-        event = asyncio.Event()
-        
-        # Store it in waiters
-        if waiter_id not in self._waiters:
-            self._waiters[waiter_id] = []
-        self._waiters[waiter_id].append(event)
-        
+        if not self._summarization_enabled or not self._anthropic_client:
+            self.logger.debug(f"Summarization disabled, skipping summary for {person_name}")
+            return
+
         try:
-            # Wait for the event with optional timeout
-            if timeout is not None:
-                return await asyncio.wait_for(event.wait(), timeout)
+            # Get recent conversation turns (last 20 to capture current session)
+            recent_turns = await self.get_conversation_history(
+                person=person_name,
+                limit=20
+            )
+
+            if not recent_turns or len(recent_turns) < 2:
+                self.logger.debug(f"Not enough conversation turns to summarize for {person_name}")
+                return
+
+            # Get existing summary from profile
+            profile = await self.get_person_profile(person_name)
+            existing_summary = profile.metadata.get("conversation_summary", "")
+
+            # Format recent conversation
+            recent_text = "\n".join([
+                f"User: {turn.get('user', '')}\nAssistant: {turn.get('assistant', '')}"
+                for turn in recent_turns
+                if turn.get('user') or turn.get('assistant')
+            ])
+
+            # Build prompt to update summary
+            if existing_summary:
+                prompt = f"""You are maintaining a memory summary for DJ R3X's interactions with {person_name}.
+
+EXISTING SUMMARY:
+{existing_summary}
+
+NEW CONVERSATION (just now):
+{recent_text}
+
+Update the summary to include new information from this conversation. Keep it concise (2-3 sentences).
+Focus on:
+- Music preferences and requests
+- Conversation patterns and interests
+- Any new topics or preferences
+- Remove outdated information if necessary
+
+UPDATED SUMMARY:"""
             else:
-                await event.wait()
-                return True
-        except asyncio.TimeoutError:
-            return False
-        finally:
-            # Clean up
-            if waiter_id in self._waiters:
-                self._waiters[waiter_id].remove(event)
-                if not self._waiters[waiter_id]:
-                    del self._waiters[waiter_id]
+                prompt = f"""You are creating a memory summary for DJ R3X's first interaction with {person_name}.
 
-    # ------------------------------------------------------------------
-    # Event handlers
-    # ------------------------------------------------------------------
-    async def _handle_music_started(self, payload: Dict[str, Any]) -> None:
-        """Handle TRACK_PLAYING event."""
-        try:
-            await self.set("music_playing", True)
-            if "track_metadata" in payload:
-                await self.set("current_track", payload["track_metadata"])
+CONVERSATION:
+{recent_text}
+
+Create a concise 2-3 sentence summary. Focus on:
+- Music preferences and requests
+- Topics discussed
+- Any notable patterns
+
+SUMMARY:"""
+
+            # Call Claude Haiku API for summarization
+            response = self._anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001",  # Fast and cheap for summaries
+                max_tokens=150,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            new_summary = response.content[0].text.strip()
+
+            # Store updated summary in profile metadata
+            profile.metadata["conversation_summary"] = new_summary
+            profile.metadata["summary_updated_at"] = time.time()
+            profile.metadata["summary_visit_count"] = profile.metadata.get("summary_visit_count", 0) + 1
+
+            await self._save_profile(profile)
+
+            self.logger.info(f"✨ Updated conversation summary for {person_name} (visit #{profile.visit_count})")
+            self.logger.debug(f"Summary: {new_summary[:100]}...")
+
         except Exception as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating music state: {e}",
-                LogLevel.ERROR
-            )
+            self.logger.error(f"Error updating conversation summary for {person_name}: {e}", exc_info=True)
 
-    async def _handle_music_stopped(self, payload: Dict[str, Any]) -> None:
-        """Handle TRACK_STOPPED event."""
+    async def _catchup_unsummarized_conversations(self) -> None:
+        """Startup catchup: Generate summaries for conversations that weren't summarized.
+
+        Checks each person's profile to see if they have recent conversation events
+        but no summary or an outdated summary. Generates summaries for these cases.
+        """
+        if not self._summarization_enabled or not self._anthropic_client:
+            self.logger.info("Summarization disabled, skipping startup catchup")
+            return
+
+        self.logger.info("Checking for unsummarized conversations...")
+
         try:
-            await self.set("music_playing", False)
-        except Exception as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating music state: {e}",
-                LogLevel.ERROR
-            )
+            catchup_count = 0
 
-    async def _handle_vision_scene(self, payload: Dict[str, Any]) -> None:
-        """Handle VISION_SCENE_CAPTURED or VISION_SCENE_UPDATED events."""
-        try:
-            # Extract fields from dict payload (now that we use model_dump())
-            scene_description = payload.get("description", "")
-            metadata = payload.get("metadata", {})
-            timestamp = payload.get("timestamp", time.time())
+            for profile in self._profile_cache.values():
+                # Check if person has recent activity but no/old summary
+                last_seen = profile.last_seen
+                summary_updated = profile.metadata.get("summary_updated_at", 0)
 
-            # Store the scene description
-            await self.set("current_scene_description", scene_description)
+                # If person visited after last summary (or never summarized), check for conversations
+                if last_seen > summary_updated:
+                    # Get conversation history for this person
+                    history = await self.get_conversation_history(
+                        person=profile.name,
+                        limit=20
+                    )
 
-            # Store metadata if available
-            if metadata:
-                await self.set("vision_metadata", metadata)
+                    if history and len(history) >= 2:
+                        # Found unsummarized conversation, generate summary
+                        self.logger.info(f"Found unsummarized conversation for {profile.name}, catching up...")
+                        await self._update_person_summary(profile.name)
+                        catchup_count += 1
 
-            # Store timestamp of last vision update
-            await self.set("last_vision_update", timestamp)
-
-            self.logger.info(f"Vision scene stored: {scene_description[:100]}...")
-        except Exception as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating vision scene: {e}",
-                LogLevel.ERROR
-            )
-
-    async def _handle_intent_detected(self, payload: Dict[str, Any]) -> None:
-        """Handle INTENT_DETECTED event."""
-        try:
-            intent_payload = IntentPayload(**payload)
-            await self.set("last_intent", {
-                "name": intent_payload.intent_name,
-                "parameters": intent_payload.parameters,
-                "original_text": intent_payload.original_text
-            })
-            
-            # Add to chat history
-            await self.append_chat({
-                "role": "user",
-                "content": intent_payload.original_text
-            })
-        except ValidationError as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Invalid intent payload: {e}",
-                LogLevel.ERROR
-            )
-        except Exception as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error handling intent: {e}",
-                LogLevel.ERROR
-            )
-
-    async def _handle_mode_change(self, payload: Dict[str, Any]) -> None:
-        """Handle SYSTEM_MODE_CHANGE events."""
-        try:
-            if "new_mode" in payload:
-                await self.set("mode", payload["new_mode"])
-        except Exception as e:
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating mode state: {e}",
-                LogLevel.ERROR
-            )
-            
-    async def _handle_dj_mode_changed(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ_MODE_CHANGED event."""
-        self.logger.debug(f"Received DJ_MODE_CHANGED event with payload: {payload}")
-        try:
-            # Handle direct mode change payload with dj_mode_active flag
-            if isinstance(payload, dict) and "dj_mode_active" in payload:
-                # Update DJ mode state
-                is_active = payload["dj_mode_active"]
-                await self.set("dj_mode_active", is_active)
-                
-                self.logger.info(f"DJ Mode state updated: {is_active}")
-                
-                # If mode is deactivated, clear other DJ state
-                if not is_active:
-                    await self.set("dj_next_track", None)
-                    await self.set("dj_track_history", [])
-                    await self.set("dj_transition_style", None)
-            
-            # Handle CLI command payload format (e.g., from "dj start" command)
-            elif isinstance(payload, dict) and "command" in payload and payload["command"] == "dj":
-                # Extract action from args or use default "start"
-                args = payload.get("args", [])
-                action = args[0] if args else "start"
-                
-                # Set state based on action
-                is_active = (action == "start")
-                await self.set("dj_mode_active", is_active)
-                self.logger.info(f"DJ Mode state updated via CLI: {is_active}")
-                
-                # Clear other DJ state if mode is deactivated
-                if not is_active:
-                    await self.set("dj_next_track", None)
-                    await self.set("dj_track_history", [])
-                    await self.set("dj_transition_style", None)
+            if catchup_count > 0:
+                self.logger.info(f"✨ Catchup complete: Generated {catchup_count} conversation summaries")
             else:
-                # Log unexpected payload structure
-                self.logger.error(f"Invalid or unexpected payload structure for DJ_MODE_CHANGED: {payload}")
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    f"Invalid or unexpected payload structure for DJ_MODE_CHANGED: {payload}",
-                    LogLevel.ERROR
-                )
-                
-        except Exception as e:
-            self.logger.error(f"Error handling DJ mode change: {e}. Payload: {payload}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating DJ mode state: {e}",
-                LogLevel.ERROR
-            )
-
-    async def _handle_dj_track_queued(self, payload: Dict[str, Any]) -> None:
-        """Handle DJ_TRACK_QUEUED event."""
-        try:
-            if isinstance(payload, dict) and "track_name" in payload:
-                # Save queued track
-                track_name = payload["track_name"]
-                await self.set("dj_next_track", track_name)
-                
-                # Update track history
-                history = self.get("dj_track_history", [])
-                if not history:
-                    history = []
-                    
-                # Add to track history if not already in recent history 
-                if track_name not in history[-5:] if history else []:
-                    history.append(track_name)
-                    # Keep history at a reasonable size
-                    if len(history) > 20:
-                        history = history[-20:]
-                    await self.set("dj_track_history", history)
-                
-                self.logger.info(f"Queued track for DJ mode: {track_name}")
-            else:
-                self.logger.error(f"Invalid payload for DJ_TRACK_QUEUED: {payload}")
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    f"Invalid payload for DJ_TRACK_QUEUED: {payload}",
-                    LogLevel.ERROR
-                )
-                
-        except Exception as e:
-            self.logger.error(f"Error handling DJ track queued: {e}")
-            await self._emit_status(
-                ServiceStatus.ERROR,
-                f"Error updating DJ track queue: {e}",
-                LogLevel.ERROR
-            )
-
-    # ------------------------------------------------------------------
-    # Helper methods
-    # ------------------------------------------------------------------
-    def _check_waiters(self) -> None:
-        """Check all waiting predicates and set events as needed."""
-        for waiter_id, events in list(self._waiters.items()):
-            for event in events:
-                if not event.is_set():
-                    event.set()
-
-    # ------------------------------------------------------------------
-    # Direct memory access handlers
-    # ------------------------------------------------------------------
-    async def _handle_memory_get(self, payload: Dict[str, Any]) -> None:
-        """Handle memory get requests."""
-        try:
-            if not isinstance(payload, dict):
-                self.logger.warning(f"Invalid memory get payload type: {type(payload)}")
-                return
-                
-            key = payload.get("key")
-            callback_topic = payload.get("callback_topic")
-            
-            if key is None or callback_topic is None:
-                self.logger.warning("Memory get payload missing key or callback_topic")
-                return
-                
-            self.logger.debug(f"Handling memory get request for key: {key}")
-            
-            # Get value from state, defaulting to None if not found
-            value = self._state.get(key)
-            
-            # Emit value back on callback topic
-            await self._emit_dict(
-                callback_topic,
-                {
-                    "key": key,
-                    "value": value
-                }
-            )
-            self.logger.debug(f"Emitted memory value for key {key}: {value}")
-            
-        except Exception as e:
-            self.logger.error(f"Error handling memory get request: {e}")
-
-    async def _handle_memory_set(self, payload: Dict[str, Any]) -> None:
-        """Handle memory set requests."""
-        try:
-            if not isinstance(payload, dict):
-                self.logger.warning(f"Invalid memory set payload type: {type(payload)}")
-                return
-                
-            key = payload.get("key")
-            value = payload.get("value")
-            
-            if key is None:
-                self.logger.warning("Memory set payload missing key")
-                return
-                
-            self.logger.debug(f"Setting memory key {key} to value: {value}")
-            
-            # Store old value for event
-            old_value = self._state.get(key)
-            
-            # Update state
-            self._state[key] = value
-            
-            # Save state to disk
-            self._save_state()
-            
-            # Emit memory updated event
-            await self._emit_dict(
-                EventTopics.MEMORY_UPDATED,
-                {
-                    "key": key,
-                    "old_value": old_value,
-                    "new_value": value
-                }
-            )
-            self.logger.debug(f"Memory key {key} updated and saved")
-            
-        except Exception as e:
-            self.logger.error(f"Error handling memory set request: {e}")
-
-    def _load_state(self) -> Dict[str, Any]:
-        """Load state from disk, creating if not exists."""
-        try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
-            
-            # Try to load existing state
-            if os.path.exists(STATE_FILE_PATH):
-                with open(STATE_FILE_PATH, 'r') as f:
-                    state = json.load(f)
-                self.logger.debug(f"Loaded state from {STATE_FILE_PATH}")
-                return state
-                
-        except Exception as e:
-            self.logger.warning(f"Error loading state from {STATE_FILE_PATH}: {e}")
-            
-        # Return empty dict if file doesn't exist or load fails
-        return {}
-
-    def _save_state(self) -> None:
-        """Save current state to disk (synchronous version for initialization)."""
-        try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
-
-            # Write state to file
-            with open(STATE_FILE_PATH, 'w') as f:
-                json.dump(self._state, f, indent=2)
-            self.logger.debug(f"Saved state to {STATE_FILE_PATH}")
+                self.logger.info("No unsummarized conversations found")
 
         except Exception as e:
-            self.logger.error(f"Error saving state to {STATE_FILE_PATH}: {e}")
-
-    async def _save_state_async(self) -> None:
-        """Save current state to disk (async version for runtime updates)."""
-        try:
-            # Ensure data directory exists
-            os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
-
-            # Write state to file asynchronously
-            async with aiofiles.open(STATE_FILE_PATH, 'w') as f:
-                await f.write(json.dumps(self._state, indent=2))
-            self.logger.debug(f"Saved state to {STATE_FILE_PATH}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving state to {STATE_FILE_PATH}: {e}") 
+            self.logger.error(f"Error during summarization catchup: {e}", exc_info=True)

@@ -12,7 +12,7 @@ PURPOSE: Central orchestration service for DJ mode, track selection, commentary 
 EVENTS_IN: DJ_COMMAND, DJ_MODE_CHANGED, DJ_NEXT_TRACK, MUSIC_LIBRARY_UPDATED, GPT_COMMENTARY_RESPONSE, TRACK_ENDING_SOON, SPEECH_CACHE_READY, SPEECH_CACHE_ERROR, PLAN_ENDED
 EVENTS_OUT: DJ_MODE_START, DJ_MODE_STOP, DJ_MODE_CHANGED, MUSIC_COMMAND, DJ_COMMENTARY_REQUEST, PLAN_READY, CLI_RESPONSE, MEMORY_SET, SPEECH_CACHE_REQUEST
 KEY_METHODS: handle_dj_start, handle_dj_stop, handle_dj_next, handle_dj_queue, _smart_track_selection, _create_and_emit_transition_plan, _commentary_caching_loop
-DEPENDENCIES: Music library, MemoryService coordination, persona files (dj_r3x-transition-persona.txt, dj_r3x-verbal-feedback-persona.txt)
+DEPENDENCIES: Music library, NervousSystemService coordination, persona files (dj_r3x-transition-persona.txt, dj_r3x-verbal-feedback-persona.txt)
 """
 
 import asyncio
@@ -89,11 +89,11 @@ class BrainService(BaseService):
         self._next_track: Optional[MusicTrack] = None
         self._dj_persona: str = "" # Store main DJ persona text (used for all contexts: dialogue, feedback, DJ commentary)
         
-        # Get reference to MemoryService for state coordination
+        # Get reference to NervousSystemService for state coordination
         # This will be set during startup once services are available
         self._memory_service = None
         
-        # Deprecated: These internal cache tracking dictionaries are being replaced by MemoryService
+        # Deprecated: These internal cache tracking dictionaries are being replaced by NervousSystemService
         # TODO: Remove these completely once refactor is complete
         # Dictionary to map commentary request IDs to speech cache keys.
         # Used to track which cache key corresponds to which commentary request.
@@ -293,7 +293,7 @@ class BrainService(BaseService):
                      await self.emit(EventTopics.DJ_MODE_STOP, DJModeChangedPayload(is_active=False).model_dump())
                      return
 
-                # Store track in MemoryService as single source of truth
+                # Store track in NervousSystemService as single source of truth
                 await self.emit(EventTopics.MEMORY_SET, {
                     "key": "current_track", 
                     "value": self._current_track.model_dump()
@@ -304,7 +304,7 @@ class BrainService(BaseService):
                 if len(self._recently_played_tracks) > self._config.max_recent_tracks:
                     self._recently_played_tracks.pop(0)
 
-                # Update MemoryService with track history
+                # Update NervousSystemService with track history
                 await self.emit(EventTopics.MEMORY_SET, {
                     "key": "dj_track_history",
                     "value": self._recently_played_tracks.copy()
@@ -678,12 +678,12 @@ class BrainService(BaseService):
                 cache_key = await self._get_commentary_cache_key(request_id)
                 if not cache_key:
                     cache_key = f"commentary_intro_{request_id[:8]}"
-                    # Store the mapping using MemoryService
+                    # Store the mapping using NervousSystemService
                     await self._store_commentary_cache_mapping(request_id, cache_key, None)  # No next track for intro
                     # Also store in legacy dict during transition
                     self._commentary_cache_keys[request_id] = cache_key
 
-                # Mark cache as not ready initially using MemoryService
+                # Mark cache as not ready initially using NervousSystemService
                 await self._set_commentary_cache_ready(cache_key, False)
                 self._cached_commentary_ready[cache_key] = False  # Legacy fallback
 
@@ -717,14 +717,14 @@ class BrainService(BaseService):
                 cache_key = await self._get_commentary_cache_key(request_id)
                 if not cache_key:
                     cache_key = f"commentary_{request_id}"
-                    # Store the mapping using MemoryService
+                    # Store the mapping using NervousSystemService
                     next_track_for_mapping = self._commentary_request_next_track.get(request_id)
                     await self._store_commentary_cache_mapping(request_id, cache_key, next_track_for_mapping)
                     
                     # Also store in legacy dict during transition
                     self._commentary_cache_keys[request_id] = cache_key # Store mapping
                 
-                # Mark cache as not ready initially using MemoryService
+                # Mark cache as not ready initially using NervousSystemService
                 await self._set_commentary_cache_ready(cache_key, False)
                 self._cached_commentary_ready[cache_key] = False  # Legacy fallback
 
@@ -781,7 +781,7 @@ class BrainService(BaseService):
 
             self.logger.info(f"Speech cache ready for cache_key: {cache_key} (Duration: {duration:.2f}s)")
 
-            # Mark the cache entry as ready using MemoryService
+            # Mark the cache entry as ready using NervousSystemService
             await self._set_commentary_cache_ready(cache_key, True, duration)
             
             # Legacy fallback during transition
@@ -888,7 +888,7 @@ class BrainService(BaseService):
                 self.logger.error(f"Current track from event not found in music library: {current_track_data.title}")
                 return
 
-            # Also update MemoryService to ensure consistency
+            # Also update NervousSystemService to ensure consistency
             await self.emit(EventTopics.MEMORY_SET, {
                 "key": "dj_current_track",
                 "value": current_track_data.model_dump() if hasattr(current_track_data, 'model_dump') else current_track_data
@@ -1120,21 +1120,21 @@ class BrainService(BaseService):
     async def handle_dj_stop(self, payload: dict) -> None:
         """Handle the 'dj stop' command to deactivate DJ mode.
 
-        ARCHITECTURAL FIX: Use MemoryService as canonical state store to ensure
+        ARCHITECTURAL FIX: Use NervousSystemService as canonical state store to ensure
         all services (especially MusicController) see DJ mode is inactive before
         completing any in-progress crossfades.
         """
         self.logger.info("DJ command: stop")
         if self._dj_mode_active:
-            # STEP 1: Update MemoryService FIRST (canonical source of truth)
+            # STEP 1: Update NervousSystemService FIRST (canonical source of truth)
             # This ensures MusicController can check DJ mode state before completing crossfade
-            self.logger.info("ARCHITECTURE FIX: Updating MemoryService with dj_mode_active=False")
+            self.logger.info("ARCHITECTURE FIX: Updating NervousSystemService with dj_mode_active=False")
             await self.emit(EventTopics.MEMORY_SET, {
                 "key": "dj_mode_active",
                 "value": False
             })
 
-            # STEP 2: Brief pause for memory propagation (let MemoryService update)
+            # STEP 2: Brief pause for memory propagation (let NervousSystemService update)
             await asyncio.sleep(0.05)
 
             # STEP 3: Emit DJ_MODE_CHANGED (other services listen to this for UI updates, plan cancellation)
@@ -1232,13 +1232,13 @@ class BrainService(BaseService):
         commentary_info = None
         
         try:
-            # Find ready commentary cache key using MemoryService first
+            # Find ready commentary cache key using NervousSystemService first
             commentary_info = await self._get_ready_commentary_for_track(self._next_track.track_id)
             commentary_cache_key = commentary_info.get("cache_key") if commentary_info else None
             
             # Fallback to legacy method during transition period
             if not commentary_cache_key:
-                self.logger.debug("MemoryService lookup failed, trying legacy method")
+                self.logger.debug("NervousSystemService lookup failed, trying legacy method")
                 for cache_key, is_ready in self._cached_commentary_ready.items():
                     if is_ready:
                         # Check if this cache key is for our next track
@@ -1287,7 +1287,7 @@ class BrainService(BaseService):
 
             await self._emit_validated_plan(transition_plan, layer="ambient")
             
-            # Clean up used cache data using MemoryService
+            # Clean up used cache data using NervousSystemService
             await self._cleanup_used_commentary_cache(commentary_info)
             
         except Exception as e:
@@ -1408,7 +1408,7 @@ class BrainService(BaseService):
             return []
 
     async def _cleanup_used_commentary_cache(self, commentary_info: Optional[Dict[str, Any]]) -> None:
-        """Clean up used commentary cache data from both MemoryService and legacy storage."""
+        """Clean up used commentary cache data from both NervousSystemService and legacy storage."""
         if not commentary_info:
             return
             
@@ -1417,21 +1417,21 @@ class BrainService(BaseService):
             request_id = commentary_info.get("request_id")
             
             if request_id:
-                # Clean up via MemoryService
+                # Clean up via NervousSystemService
                 try:
-                    # Use the MemoryService cleanup method
+                    # Use the NervousSystemService cleanup method
                     memory_service = None
                     for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-                        if service_name == "memory_service":
+                        if service_name == "nervous_system":
                             memory_service = service
                             break
                     
                     if memory_service:
                         await memory_service.cleanup_commentary_cache_mapping(request_id)
-                        self.logger.debug(f"Cleaned up commentary cache via MemoryService for request_id: {request_id}")
+                        self.logger.debug(f"Cleaned up commentary cache via NervousSystemService for request_id: {request_id}")
                     
                 except Exception as cleanup_error:
-                    self.logger.warning(f"MemoryService cleanup failed: {cleanup_error}")
+                    self.logger.warning(f"NervousSystemService cleanup failed: {cleanup_error}")
                 
                 # Also clean up legacy dicts during transition period
                 if request_id in self._commentary_cache_keys:
@@ -1481,10 +1481,10 @@ class BrainService(BaseService):
         )
 
     # =================== MEMORY SERVICE INTEGRATION ===================
-    # Phase 2: Replace internal cache tracking with MemoryService coordination
+    # Phase 2: Replace internal cache tracking with NervousSystemService coordination
     
     async def _store_commentary_cache_mapping(self, request_id: str, cache_key: str, next_track: Optional[MusicTrack] = None) -> None:
-        """Store commentary cache mapping in MemoryService."""
+        """Store commentary cache mapping in NervousSystemService."""
         track_data = None
         if next_track:
             track_data = {
@@ -1504,15 +1504,15 @@ class BrainService(BaseService):
                 "timestamp": time.time()
             }
         })
-        self.logger.debug(f"Stored commentary cache mapping via MemoryService: {request_id} -> {cache_key}")
+        self.logger.debug(f"Stored commentary cache mapping via NervousSystemService: {request_id} -> {cache_key}")
 
     async def _get_commentary_cache_key(self, request_id: str) -> Optional[str]:
-        """Get commentary cache key from MemoryService."""
+        """Get commentary cache key from NervousSystemService."""
         # For simplicity, we'll use the current state direct access
         # In a more event-driven approach, this would be async with callbacks
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         
@@ -1524,7 +1524,7 @@ class BrainService(BaseService):
         return self._commentary_cache_keys.get(request_id)
 
     async def _set_commentary_cache_ready(self, cache_key: str, is_ready: bool = True, duration: Optional[float] = None) -> None:
-        """Mark commentary cache as ready in MemoryService."""
+        """Mark commentary cache as ready in NervousSystemService."""
         await self.emit(EventTopics.MEMORY_SET, {
             "key": f"commentary_cache_ready_{cache_key}",
             "value": {
@@ -1533,14 +1533,14 @@ class BrainService(BaseService):
                 "timestamp": time.time()
             }
         })
-        self.logger.debug(f"Set commentary cache ready via MemoryService: {cache_key} = {is_ready}")
+        self.logger.debug(f"Set commentary cache ready via NervousSystemService: {cache_key} = {is_ready}")
 
     async def _is_commentary_cache_ready(self, cache_key: str) -> bool:
-        """Check if commentary cache is ready via MemoryService."""
-        # Get from MemoryService if available
+        """Check if commentary cache is ready via NervousSystemService."""
+        # Get from NervousSystemService if available
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         
@@ -1552,11 +1552,11 @@ class BrainService(BaseService):
         return self._cached_commentary_ready.get(cache_key, False)
 
     async def _get_ready_commentary_for_track(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get ready commentary cache info for a specific track via MemoryService."""
-        # Access MemoryService if available
+        """Get ready commentary cache info for a specific track via NervousSystemService."""
+        # Access NervousSystemService if available
         memory_service = None
         for service_name, service in self._event_bus._services.items() if hasattr(self._event_bus, '_services') else []:
-            if service_name == "memory_service":
+            if service_name == "nervous_system":
                 memory_service = service
                 break
         

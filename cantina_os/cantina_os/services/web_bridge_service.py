@@ -450,7 +450,7 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
             "logging_service": {"status": "offline", "uptime": "0:00:00"},
             "yoda_mode_manager": {"status": "offline", "uptime": "0:00:00"},
             "mode_command_handler": {"status": "offline", "uptime": "0:00:00"},
-            "memory_service": {"status": "offline", "uptime": "0:00:00"},
+            "nervous_system": {"status": "offline", "uptime": "0:00:00"},
             "mouse_input": {"status": "offline", "uptime": "0:00:00"},
             "deepgram_direct_mic": {"status": "offline", "uptime": "0:00:00"},
             "gpt_service": {"status": "offline", "uptime": "0:00:00"},
