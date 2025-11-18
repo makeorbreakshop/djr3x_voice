@@ -614,6 +614,55 @@ class NervousSystemService(BaseService):
                 LogLevel.ERROR
             )
 
+    async def _handle_person_detected(self, payload: Dict[str, Any]) -> None:
+        """Handle VISION_PERSON_DETECTED event."""
+        try:
+            # Extract person information from payload
+            person_name = payload.get("person_name", "Unknown")
+            confidence = payload.get("confidence", 0.0)
+            timestamp = payload.get("timestamp", time.time())
+
+            # Store current person present
+            await self.set("current_person_present", person_name)
+            await self.set("last_person_detection_time", timestamp)
+            await self.set("last_person_confidence", confidence)
+
+            self.logger.info(f"Person detected: {person_name} (confidence: {confidence:.2f})")
+
+            # Update person memory with last seen time
+            person_memory = self._state.get("person_memory", {})
+            if person_name not in person_memory:
+                person_memory[person_name] = {}
+            person_memory[person_name]["last_seen"] = timestamp
+            person_memory[person_name]["confidence"] = confidence
+            await self.set("person_memory", person_memory)
+
+        except Exception as e:
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error handling person detected: {e}",
+                LogLevel.ERROR
+            )
+
+    async def _handle_person_exited(self, payload: Dict[str, Any]) -> None:
+        """Handle VISION_PERSON_EXITED event."""
+        try:
+            person_name = payload.get("person_name", "Unknown")
+            timestamp = payload.get("timestamp", time.time())
+
+            # Clear current person present
+            await self.set("current_person_present", None)
+            await self.set("last_person_exit_time", timestamp)
+
+            self.logger.info(f"Person exited: {person_name}")
+
+        except Exception as e:
+            await self._emit_status(
+                ServiceStatus.ERROR,
+                f"Error handling person exited: {e}",
+                LogLevel.ERROR
+            )
+
     async def _handle_intent_detected(self, payload: Dict[str, Any]) -> None:
         """Handle INTENT_DETECTED event."""
         try:

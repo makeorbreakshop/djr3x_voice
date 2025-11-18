@@ -1,10 +1,8 @@
 """
 Vision Service for CantinaOS
 
-Provides vision capabilities:
-- Scene understanding via Claude Haiku vision
-- Continuous face recognition for person identification
-- Real-time person tracking with event emissions
+Captures and analyzes visual scenes using Claude Haiku's vision capabilities.
+Runs a single scene capture during startup to provide initial environmental context.
 """
 
 import asyncio
@@ -13,7 +11,6 @@ import io
 import json
 import logging
 import os
-import pickle
 import subprocess
 import time
 from typing import Optional, List, Dict
@@ -23,22 +20,12 @@ import numpy as np
 from anthropic import Anthropic
 from PIL import Image
 
-try:
-    import face_recognition
-    FACE_RECOGNITION_AVAILABLE = True
-except ImportError:
-    FACE_RECOGNITION_AVAILABLE = False
-
 from cantina_os.base_service import BaseService
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     VisionScenePayload,
     VisionErrorPayload,
     VisionRequestPayload,
-)
-from cantina_os.core.event_payloads import (
-    VisionPersonDetectedPayload,
-    VisionPersonExitedPayload,
 )
 
 
@@ -71,44 +58,9 @@ class VisionService(BaseService):
         # Model to use (Haiku 4.5 is fast and cheap for vision)
         self.model = "claude-haiku-4-5-20251001"
 
-        # Continuous monitoring configuration
-        self.enable_continuous_monitoring = self.config.get("enable_continuous_monitoring", True)
-        self.monitoring_fps = self.config.get("monitoring_fps", 5)  # 5 FPS = every 5th frame at 30fps camera
-        self.face_confidence_threshold = self.config.get("face_confidence_threshold", 0.6)
-
-        # Face recognition state
-        self.known_face_encodings: Dict[str, np.ndarray] = {}
-        self.face_encodings_path = self.config.get("face_encodings_path", "vision_data/face_encodings.pkl")
-        self._load_face_encodings()
-
         # State
         self.camera = None
         self.startup_scene_captured = False
-        self._monitoring_task: Optional[asyncio.Task] = None
-        self._monitoring_running = False
-
-        # Person tracking state (for event emission on changes only)
-        self._current_person: Optional[str] = None
-        self._current_person_confidence: float = 0.0
-        self._person_detection_time: Optional[float] = None
-        self._no_person_frames = 0  # Frames with no face detected
-        self._person_exit_threshold = 10  # Frames before emitting PERSON_EXITED (2 seconds at 5 FPS)
-
-    def _load_face_encodings(self):
-        """Load trained face encodings from disk."""
-        if not FACE_RECOGNITION_AVAILABLE:
-            self.logger.warning("face_recognition library not available, person detection disabled")
-            return
-
-        try:
-            if os.path.exists(self.face_encodings_path):
-                with open(self.face_encodings_path, 'rb') as f:
-                    self.known_face_encodings = pickle.load(f)
-                self.logger.info(f"Loaded face encodings for {len(self.known_face_encodings)} people: {list(self.known_face_encodings.keys())}")
-            else:
-                self.logger.warning(f"No face encodings found at {self.face_encodings_path}, person recognition disabled")
-        except Exception as e:
-            self.logger.error(f"Failed to load face encodings: {e}")
 
     def _get_camera_names(self) -> Dict[int, str]:
         """
@@ -217,31 +169,11 @@ class VisionService(BaseService):
         # Subscribe to startup scene capture request (triggered after all services are ready)
         self._event_bus.on(EventTopics.VISION_STARTUP_CAPTURE, self._handle_startup_capture_request)
 
-        # Start continuous monitoring if enabled
-        if self.enable_continuous_monitoring and FACE_RECOGNITION_AVAILABLE and self.known_face_encodings:
-            self.logger.info("Starting continuous vision monitoring for person detection")
-            self._monitoring_running = True
-            self._monitoring_task = asyncio.create_task(self._continuous_monitoring_loop())
-        else:
-            if not self.enable_continuous_monitoring:
-                self.logger.info("Continuous monitoring disabled in config")
-            elif not FACE_RECOGNITION_AVAILABLE:
-                self.logger.warning("Continuous monitoring disabled: face_recognition not available")
-            elif not self.known_face_encodings:
-                self.logger.warning("Continuous monitoring disabled: no face encodings loaded")
+        # Subscribe to vision window open requests
+        self._event_bus.on(EventTopics.VISION_WINDOW_OPEN, self._handle_vision_window_open)
 
     async def _stop(self):
         """Stop the vision service and release camera."""
-        # Stop continuous monitoring
-        if self._monitoring_task:
-            self._monitoring_running = False
-            self._monitoring_task.cancel()
-            try:
-                await self._monitoring_task
-            except asyncio.CancelledError:
-                pass
-            self._monitoring_task = None
-
         if self.camera:
             self.camera.release()
             self.camera = None
@@ -442,6 +374,68 @@ class VisionService(BaseService):
             self.logger.error(f"Failed to handle vision request: {e}")
             await self._emit_error(str(e), "processing")
 
+    async def _handle_vision_window_open(self, payload: dict) -> None:
+        """
+        Handle request to open vision detection window.
+
+        This launches the test_vision.py script in a detached subprocess.
+        Follows architecture standards by handling via VisionService instead of CommandDispatcher.
+
+        Args:
+            payload: Dict containing camera_id and mode
+        """
+        import sys
+        from pathlib import Path
+        import tempfile
+
+        try:
+            camera_id = payload.get("camera_id", 0)
+            mode = payload.get("mode", "combined")
+
+            # Get path to test_vision.py script
+            # Path: cantina_os/cantina_os/services/vision_service.py
+            # Target: cantina_os/test_vision.py
+            script_path = Path(__file__).parent.parent.parent / "test_vision.py"
+
+            if not script_path.exists():
+                error_msg = f"Vision test script not found at: {script_path}"
+                self.logger.error(error_msg)
+                self._event_bus.emit(EventTopics.VISION_WINDOW_ERROR, {"error": error_msg})
+                return
+
+            # Get the Python executable from the venv
+            venv_python = Path(__file__).parent.parent.parent.parent / "venv" / "bin" / "python"
+
+            if not venv_python.exists():
+                # Fallback to system Python if venv not found
+                venv_python = sys.executable
+
+            # Launch the script in background (non-blocking)
+            # Log errors to a temp file for debugging
+            error_log = tempfile.mktemp(suffix=".log", prefix="vision_")
+
+            with open(error_log, 'w') as err_file:
+                subprocess.Popen(
+                    [str(venv_python), str(script_path), "--mode", mode, "--camera", str(camera_id)],
+                    stdout=err_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True  # Detach from parent process
+                )
+
+            self.logger.info(f"Vision window launched successfully (mode={mode}, camera={camera_id}, log={error_log})")
+
+            # Emit success event
+            self._event_bus.emit(EventTopics.VISION_WINDOW_OPENED, {
+                "camera_id": camera_id,
+                "mode": mode,
+                "log_file": error_log
+            })
+
+        except Exception as e:
+            error_msg = f"Failed to launch vision window: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            self._event_bus.emit(EventTopics.VISION_WINDOW_ERROR, {"error": error_msg})
+
     async def _emit_error(self, error_message: str, error_type: str):
         """Emit a vision error event."""
         error_payload = VisionErrorPayload(
@@ -453,178 +447,3 @@ class VisionService(BaseService):
             EventTopics.VISION_SCENE_ERROR,
             error_payload.model_dump()
         )
-
-    async def _continuous_monitoring_loop(self):
-        """
-        Continuous vision monitoring loop for person detection.
-
-        Runs at configured FPS (default 5 FPS) to detect known people.
-        Emits VISION_PERSON_DETECTED when a new person appears.
-        Emits VISION_PERSON_EXITED when a person leaves for >2 seconds.
-        """
-        self.logger.info("Continuous vision monitoring loop started")
-
-        try:
-            # Open camera for continuous monitoring
-            self.camera = cv2.VideoCapture(self.camera_index)
-            if not self.camera.isOpened():
-                self.logger.error(f"Failed to open camera {self.camera_index} for monitoring")
-                return
-
-            # Set camera resolution
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_height)
-
-            # Wait for camera to stabilize
-            await asyncio.sleep(0.5)
-
-            frame_delay = 1.0 / self.monitoring_fps  # Sleep time between frames
-
-            while self._monitoring_running:
-                try:
-                    # Capture frame
-                    ret, frame = await asyncio.to_thread(self.camera.read)
-                    if not ret or frame is None:
-                        self.logger.warning("Failed to capture frame, retrying...")
-                        await asyncio.sleep(frame_delay)
-                        continue
-
-                    # Recognize faces in frame (runs in thread to avoid blocking)
-                    person_name, confidence = await asyncio.to_thread(self._recognize_face, frame)
-
-                    # Handle person detection state changes
-                    await self._handle_person_detection(person_name, confidence)
-
-                    # Sleep to maintain target FPS
-                    await asyncio.sleep(frame_delay)
-
-                except Exception as e:
-                    self.logger.error(f"Error in monitoring loop iteration: {e}")
-                    await asyncio.sleep(frame_delay)
-
-        except Exception as e:
-            self.logger.error(f"Fatal error in continuous monitoring loop: {e}")
-        finally:
-            if self.camera:
-                self.camera.release()
-                self.camera = None
-            self.logger.info("Continuous vision monitoring loop stopped")
-
-    def _recognize_face(self, frame: np.ndarray) -> tuple[Optional[str], float]:
-        """
-        Recognize known faces in a frame using face_recognition library.
-
-        Args:
-            frame: OpenCV frame (BGR format)
-
-        Returns:
-            Tuple of (person_name, confidence) or (None, 0.0) if no face detected
-        """
-        if not FACE_RECOGNITION_AVAILABLE or not self.known_face_encodings:
-            return None, 0.0
-
-        try:
-            # Convert BGR to RGB (face_recognition uses RGB)
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Detect face locations (using HOG - faster than CNN)
-            face_locations = face_recognition.face_locations(rgb_frame, model="hog")
-
-            if not face_locations:
-                return None, 0.0
-
-            # Get face encodings for detected faces
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-
-            if not face_encodings:
-                return None, 0.0
-
-            # Use the first detected face (assuming single person in frame)
-            face_encoding = face_encodings[0]
-
-            # Compare against all known faces
-            best_match_name = None
-            best_match_distance = 1.0  # Lower is better, 0.6 is typical threshold
-
-            for name, known_encoding in self.known_face_encodings.items():
-                # Compute face distance (lower = more similar)
-                distance = face_recognition.face_distance([known_encoding], face_encoding)[0]
-
-                if distance < best_match_distance:
-                    best_match_distance = distance
-                    best_match_name = name
-
-            # Convert distance to confidence (1.0 - distance)
-            # Only return match if distance is below threshold
-            if best_match_distance < (1.0 - self.face_confidence_threshold):
-                confidence = 1.0 - best_match_distance
-                return best_match_name, confidence
-            else:
-                return None, 0.0
-
-        except Exception as e:
-            self.logger.error(f"Error recognizing face: {e}")
-            return None, 0.0
-
-    async def _handle_person_detection(self, person_name: Optional[str], confidence: float):
-        """
-        Handle person detection state changes and emit appropriate events.
-
-        Only emits events when state CHANGES (new person appears or exits).
-        Uses hysteresis to prevent flickering (person must be gone for N frames before exit event).
-        """
-        current_time = time.time()
-
-        if person_name:
-            # Face detected
-            self._no_person_frames = 0  # Reset exit counter
-
-            # Check if this is a NEW person or confidence changed significantly
-            if person_name != self._current_person:
-                # New person detected!
-                self.logger.info(f"Person detected: {person_name} (confidence: {confidence:.2f})")
-
-                # Emit VISION_PERSON_DETECTED event (using Pydantic payload)
-                payload = VisionPersonDetectedPayload(
-                    name=person_name,
-                    confidence=confidence
-                )
-                self._event_bus.emit(
-                    EventTopics.VISION_PERSON_DETECTED,
-                    payload.model_dump()
-                )
-
-                # Update internal state
-                self._current_person = person_name
-                self._current_person_confidence = confidence
-                self._person_detection_time = current_time
-            else:
-                # Same person, just update confidence if significantly different
-                if abs(confidence - self._current_person_confidence) > 0.1:
-                    self._current_person_confidence = confidence
-        else:
-            # No face detected
-            if self._current_person:
-                # Person was present before
-                self._no_person_frames += 1
-
-                # Emit exit event only after threshold frames (prevent flicker)
-                if self._no_person_frames >= self._person_exit_threshold:
-                    duration = current_time - self._person_detection_time if self._person_detection_time else 0.0
-                    self.logger.info(f"Person exited: {self._current_person} (duration: {duration:.1f}s)")
-
-                    # Emit VISION_PERSON_EXITED event (using Pydantic payload)
-                    payload = VisionPersonExitedPayload(
-                        name=self._current_person,
-                        duration_seconds=duration
-                    )
-                    self._event_bus.emit(
-                        EventTopics.VISION_PERSON_EXITED,
-                        payload.model_dump()
-                    )
-
-                    # Clear person state
-                    self._current_person = None
-                    self._current_person_confidence = 0.0
-                    self._person_detection_time = None
-                    self._no_person_frames = 0
