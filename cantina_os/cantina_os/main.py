@@ -228,6 +228,7 @@ class CantinaOS:
         self._config = {
             "DEEPGRAM_API_KEY": os.getenv("DEEPGRAM_API_KEY", ""),
             "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -471,13 +472,8 @@ class CantinaOS:
                 
             logger.info("CantinaOS system initialized successfully")
 
-            # Trigger vision startup capture after all services are ready
-            # This avoids race conditions with memory service subscriptions
-            logger.info("Triggering vision startup capture...")
-            self._event_bus.emit(EventTopics.VISION_STARTUP_CAPTURE, {})
-
-            # Give the vision service a moment to capture the scene
-            await asyncio.sleep(0.5)
+            # Note: Vision startup scene capture now handled automatically
+            # by VisionService unified monitoring loop (first frame trigger)
 
             # Play startup sound once all services are initialized
             startup_sound_path = os.path.join(
