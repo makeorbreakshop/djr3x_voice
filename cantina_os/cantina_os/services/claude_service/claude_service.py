@@ -165,6 +165,9 @@ class ClaudeService(BaseService):
         # Long-term memory service (for person profiles)
         self._memory_service = memory_service
 
+        # Cached conversation history (loaded once when person detected)
+        self._loaded_conversation_history: Optional[str] = None
+
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Load configuration from provided dict."""
@@ -668,15 +671,26 @@ class ClaudeService(BaseService):
         self.logger.info(f"Scene updated: {self._current_scene[:100]}...")
 
     async def _handle_person_detected(self, payload: Dict[str, Any]):
-        """Handle VISION_PERSON_DETECTED event."""
+        """Handle VISION_PERSON_DETECTED event.
+
+        Loads conversation history once when person is detected and caches it
+        for the duration of their visit.
+        """
         self._current_person = payload.get("name", "Unknown")
         self._person_confidence = payload.get("confidence", 0.0)
         self.logger.info(f"Person detected: {self._current_person} (confidence: {self._person_confidence:.2f})")
 
+        # Load conversation history ONCE when person is detected
+        self._loaded_conversation_history = await self._load_conversation_history_for_person()
+
     async def _handle_person_exited(self, payload: Dict[str, Any]):
-        """Handle VISION_PERSON_EXITED event."""
+        """Handle VISION_PERSON_EXITED event.
+
+        Clears cached conversation history when person leaves.
+        """
         self._current_person = None
         self._person_confidence = None
+        self._loaded_conversation_history = None  # Clear cached history
         self.logger.info(f"Person exited: {payload.get('name', 'Unknown')}")
 
     async def _build_vision_context_for_message(self) -> str:
@@ -718,24 +732,25 @@ class ClaudeService(BaseService):
                 # No MemoryService available, use simple name
                 context_parts.append(f"Speaking with: {self._current_person}")
 
-        # Build conversation history context
-        conversation_history_context = await self._build_conversation_history_context()
-
         # Combine all context
         context_section = ""
         if context_parts:
             context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
 
-        if conversation_history_context:
-            context_section += conversation_history_context
+        # Add cached conversation history (loaded once when person detected)
+        if self._loaded_conversation_history:
+            context_section += self._loaded_conversation_history
 
         if context_section:
             self.logger.debug(f"Full context: {context_section[:150]}...")
 
         return context_section
 
-    async def _build_conversation_history_context(self) -> str:
-        """Build conversation history context from MemoryService timeline.
+    async def _load_conversation_history_for_person(self) -> str:
+        """Load conversation history from MemoryService timeline when person detected.
+
+        Called ONCE when VISION_PERSON_DETECTED is received. The result is cached
+        and reused for all messages during that person's visit.
 
         Loads recent conversation turns with the current person and formats them
         for token-efficient injection into the system prompt.
