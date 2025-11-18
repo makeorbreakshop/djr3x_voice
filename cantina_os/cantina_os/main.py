@@ -663,7 +663,14 @@ class CantinaOS:
             service_config = {
                 "chat_history_max_turns": 10
             }
-        
+
+        elif service_name == "vision":
+            # Configure vision service
+            # Only set camera_index if explicitly configured (otherwise auto-detect)
+            service_config = {}
+            if "VISION_CAMERA_INDEX" in self._config:
+                service_config["camera_index"] = int(self._config.get("VISION_CAMERA_INDEX"))
+
         # All services need the global event bus
         try:
             # Special handling for services that need other service references

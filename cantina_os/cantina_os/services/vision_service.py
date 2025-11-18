@@ -8,10 +8,12 @@ Runs a single scene capture during startup to provide initial environmental cont
 import asyncio
 import base64
 import io
+import json
 import logging
 import os
+import subprocess
 import time
-from typing import Optional
+from typing import Optional, List, Dict
 
 import cv2
 import numpy as np
@@ -42,10 +44,8 @@ class VisionService(BaseService):
         super().__init__(service_name="vision", event_bus=event_bus)
         self.config = config or {}
 
-        # Camera configuration
-        self.camera_index = self.config.get("camera_index", 0)
-        self.capture_width = self.config.get("capture_width", 640)
-        self.capture_height = self.config.get("capture_height", 480)
+        # Camera configuration - auto-detect best camera (skip Continuity Camera)
+        self.camera_index = self._find_best_camera(self.config.get("camera_index"))
 
         # Claude configuration
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -56,11 +56,103 @@ class VisionService(BaseService):
             self.vision_client = Anthropic(api_key=api_key)
 
         # Model to use (Haiku 4.5 is fast and cheap for vision)
-        self.model = self.config.get("model", "claude-haiku-4-5-20251001")
+        self.model = "claude-haiku-4-5-20251001"
 
         # State
         self.camera = None
         self.startup_scene_captured = False
+
+    def _get_camera_names(self) -> Dict[int, str]:
+        """
+        Get camera names from macOS system_profiler.
+        Returns dict mapping OpenCV camera index to actual camera name.
+        """
+        cameras = {}
+
+        try:
+            # Get camera info as JSON
+            result = subprocess.run(
+                ['system_profiler', 'SPCameraDataType', '-json'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            data = json.loads(result.stdout)
+            camera_list = data.get('SPCameraDataType', [])
+
+            # Map system cameras to OpenCV indices
+            # Test each OpenCV camera to match by resolution/properties
+            opencv_cameras = {}
+            for idx in range(6):
+                try:
+                    camera = cv2.VideoCapture(idx)
+                    if camera.isOpened():
+                        width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        opencv_cameras[idx] = (width, height)
+                        camera.release()
+                except:
+                    pass
+
+            # Match cameras by typical resolutions
+            # FaceTime HD is usually 1280x720, iPhone/Continuity is 1920x1080
+            for idx, (width, height) in opencv_cameras.items():
+                matched = False
+                for cam_info in camera_list:
+                    cam_name = cam_info.get('_name', '')
+
+                    # Match FaceTime HD to 1280x720
+                    if 'FaceTime' in cam_name and width == 1280 and height == 720:
+                        cameras[idx] = cam_name
+                        matched = True
+                        break
+                    # Match iPhone to 1920x1080
+                    elif 'iPhone' in cam_name and width == 1920 and height == 1080:
+                        cameras[idx] = cam_name
+                        matched = True
+                        break
+
+                if not matched:
+                    # Use generic name with resolution
+                    cameras[idx] = f"Camera {idx} ({width}x{height})"
+
+        except Exception as e:
+            self.logger.debug(f"Could not get camera names from system_profiler: {e}")
+
+        return cameras
+
+    def _find_best_camera(self, preferred_index: Optional[int] = None) -> int:
+        """
+        Find the best available camera, avoiding Continuity Cameras (iPhones).
+
+        Strategy:
+        1. If preferred_index is provided, use it
+        2. Otherwise, get camera names and pick first non-iPhone camera
+        3. Fallback to index 0 if nothing found
+        """
+        if preferred_index is not None:
+            self.logger.info(f"Using preferred camera index: {preferred_index}")
+            return preferred_index
+
+        # Get camera names to identify iPhones/Continuity cameras
+        camera_names = self._get_camera_names()
+        self.logger.info(f"Detected cameras: {camera_names}")
+
+        # Pick the first camera that is NOT an iPhone
+        for idx, camera_name in camera_names.items():
+            # Skip iPhone cameras
+            if 'iPhone' in camera_name:
+                self.logger.info(f"Skipping camera {idx}: {camera_name}")
+                continue
+
+            # Use this camera
+            self.logger.info(f"Selected camera {idx}: {camera_name}")
+            return idx
+
+        # Fallback to 0
+        self.logger.warning("No suitable camera found in names, defaulting to index 0")
+        return 0
 
     async def _start(self):
         """Start the vision service and subscribe to events."""
@@ -91,30 +183,42 @@ class VisionService(BaseService):
 
     async def _capture_startup_scene(self):
         """Capture and analyze the initial scene during startup."""
-        self.logger.info("Capturing startup scene...")
+        self.logger.info(f"Capturing startup scene from camera index {self.camera_index}...")
 
         try:
-            # Initialize camera
+            # Initialize camera (using auto-detected best camera)
+            self.logger.debug(f"Opening camera {self.camera_index}...")
             self.camera = cv2.VideoCapture(self.camera_index)
             if not self.camera.isOpened():
                 raise Exception(f"Failed to open camera {self.camera_index}")
 
-            # Set camera resolution
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_height)
+            self.logger.debug(f"Camera {self.camera_index} opened successfully")
+
+            # Get camera properties
+            width = int(self.camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(self.camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = self.camera.get(cv2.CAP_PROP_FPS)
+            self.logger.info(f"Camera properties: {width}x{height} @ {fps} FPS")
 
             # Wait a moment for camera to stabilize
+            self.logger.debug("Waiting for camera to stabilize...")
             await asyncio.sleep(0.5)
 
             # Capture a few frames (camera often needs warmup)
-            for _ in range(5):
+            self.logger.debug("Warming up camera with test captures...")
+            for i in range(5):
                 ret, frame = self.camera.read()
                 if not ret:
-                    raise Exception("Failed to capture frame")
+                    raise Exception(f"Failed to capture frame {i+1}/5")
+                if frame is not None:
+                    brightness = frame.mean()
+                    self.logger.debug(f"Frame {i+1}/5: {frame.shape}, brightness={brightness:.2f}")
                 await asyncio.sleep(0.1)
 
             # Use the last frame for analysis
             if frame is not None:
+                final_brightness = frame.mean()
+                self.logger.info(f"Final frame captured: {frame.shape}, brightness={final_brightness:.2f}")
                 # Analyze the scene
                 description = await self._analyze_scene(frame,
                     "Describe what you see in this scene. Focus on the environment, any people present, and notable objects. Keep it concise (under 100 words).")

@@ -25,6 +25,11 @@ soundfile>=0.12.1  # Audio file reading/writing for sounddevice
 # Hardware Control
 pyserial>=3.5  # Serial communication for Arduino/LED control
 
+# Vision Processing
+opencv-python>=4.8.0  # Computer vision and image processing
+mediapipe>=0.10.14  # ML solutions for gesture, pose, face detection
+Pillow>=10.0.0  # Image manipulation and PIL support
+
 # Web Dashboard
 fastapi>=0.104.1  # Web API framework for dashboard bridge
 uvicorn>=0.24.0   # ASGI server for FastAPI
@@ -36,6 +41,9 @@ pytest-asyncio>=0.21.1
 pytest-cov>=4.1.0
 aioresponses>=0.7.4  # For mocking async HTTP responses in tests
 psutil>=5.9.0  # For resource monitoring in tests
+
+# CLI Enhancement
+colorama>=0.4.6  # Cross-platform colored terminal output
 
 # Development Tools
 black>=23.11.0  # Code formatting
