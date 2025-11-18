@@ -682,7 +682,7 @@ class ClaudeService(BaseService):
     async def _build_vision_context_for_message(self) -> str:
         """Build vision context from internal state (event-driven).
 
-        Queries MemoryService for person profile if a person is currently present.
+        Queries MemoryService for person profile and conversation history if a person is currently present.
         Uses minimal token-efficient format for profile injection.
         """
         import time
@@ -718,13 +718,66 @@ class ClaudeService(BaseService):
                 # No MemoryService available, use simple name
                 context_parts.append(f"Speaking with: {self._current_person}")
 
-        # Return formatted context or empty string
-        if not context_parts:
+        # Build conversation history context
+        conversation_history_context = await self._build_conversation_history_context()
+
+        # Combine all context
+        context_section = ""
+        if context_parts:
+            context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
+
+        if conversation_history_context:
+            context_section += conversation_history_context
+
+        if context_section:
+            self.logger.debug(f"Full context: {context_section[:150]}...")
+
+        return context_section
+
+    async def _build_conversation_history_context(self) -> str:
+        """Build conversation history context from MemoryService timeline.
+
+        Loads recent conversation turns with the current person and formats them
+        for token-efficient injection into the system prompt.
+        """
+        # Only load history if we have a person and MemoryService
+        if not self._current_person or not self._memory_service:
             return ""
 
-        context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
-        self.logger.debug(f"Vision context: {context_section[:100]}...")
-        return context_section
+        try:
+            # Get recent conversation history (last 5 turns)
+            history = await self._memory_service.get_conversation_history(
+                person=self._current_person,
+                limit=5
+            )
+
+            if not history:
+                self.logger.debug(f"No conversation history found for {self._current_person}")
+                return ""
+
+            # Format history for injection
+            history_lines = []
+            for turn in history:
+                user_msg = turn.get("user", "")
+                assistant_msg = turn.get("assistant", "")
+
+                if user_msg:
+                    history_lines.append(f"  User: {user_msg}")
+                if assistant_msg:
+                    history_lines.append(f"  You: {assistant_msg}")
+
+            if not history_lines:
+                return ""
+
+            history_text = "\n".join(history_lines)
+            context = f"\n\n[Recent conversation history with {self._current_person}:\n{history_text}\n]"
+
+            self.logger.info(f"Injected {len(history)} conversation turns for {self._current_person}")
+            return context
+
+        except Exception as e:
+            self.logger.error(f"Error loading conversation history: {e}", exc_info=True)
+            return ""
 
     async def _emit_llm_response(
         self,
