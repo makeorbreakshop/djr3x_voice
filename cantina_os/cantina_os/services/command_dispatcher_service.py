@@ -310,7 +310,12 @@ class CommandDispatcherService(BaseService):
                 self.logger.info(f"Routing command '{command}' to service '{service_name}' on topic '{topic}'")
                 await self.emit(topic, cmd_payload)
                 return
-                
+
+            # Handle built-in vision command (launches external test window)
+            if command == "vision":
+                await self._handle_vision_command()
+                return
+
             # Unknown command
             self.logger.warning(f"Unknown command: '{raw_input}'")
             
@@ -561,13 +566,37 @@ class CommandDispatcherService(BaseService):
             self.logger.error(f"Error handling status request: {e}", exc_info=True)
             await self._send_error(f"Error generating status: {str(e)}")
 
+    async def _handle_vision_command(self) -> None:
+        """
+        Handle the 'vision' command - requests VisionService to open detection window.
+
+        Emits VISION_WINDOW_OPEN event that VisionService handles.
+        This follows the event-driven architecture pattern.
+        """
+        try:
+            # Emit event to VisionService (event-driven pattern)
+            await self.emit(EventTopics.VISION_WINDOW_OPEN, {
+                "camera_id": 0,  # Default camera
+                "mode": "combined"  # Combined vision pipeline
+            })
+
+            await self._send_success("Opening vision window...")
+            await self._send_success("The window will show all detection models.")
+            await self._send_success("Press 'q' in the vision window to close it.")
+
+            self.logger.info("Vision window open request emitted to VisionService")
+
+        except Exception as e:
+            self.logger.error(f"Error requesting vision window: {e}", exc_info=True)
+            await self._send_error(f"Failed to request vision window: {str(e)}")
+
     async def _handle_service_command(self, payload: Dict[str, Any], topic: str = None) -> None:
         """
         Handle service-specific commands (monitoring/logging function)
-        
+
         This method provides consistent logging for all service commands
         without interfering with their actual processing.
-        
+
         Args:
             payload: The command payload
             topic: The event topic (injected by pyee)

@@ -123,6 +123,10 @@ class CLIService(BaseService):
         self._is_recording = False
         self._recording_text = ""
         self._mic_recording_active = False
+
+        # Voice interaction display state
+        self._last_interim_text = ""
+        self._current_conversation_id = None
         
     @property
     def event_bus(self):
@@ -132,13 +136,20 @@ class CLIService(BaseService):
     async def _start(self) -> None:
         """Initialize the service."""
         self.logger.info("Starting CLI service")
-        
+
         # Subscribe to response events
         await self.subscribe(EventTopics.CLI_RESPONSE, self._handle_response)
-        
+
         # Subscribe to voice events to track recording state
         await self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
         await self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_stopped)
+
+        # Subscribe to transcription events for voice feedback
+        await self.subscribe(EventTopics.TRANSCRIPTION_INTERIM, self._handle_transcription_interim)
+        await self.subscribe(EventTopics.TRANSCRIPTION_FINAL, self._handle_transcription_final)
+
+        # Subscribe to LLM response events for assistant feedback
+        await self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response)
         
         # Start input loop
         self._running = True
@@ -510,12 +521,79 @@ class CLIService(BaseService):
     async def _handle_voice_listening_stopped(self, payload: Dict[str, Any]) -> None:
         """
         Handle voice listening stopped event.
-        
+
         Args:
             payload: Event payload (not used)
         """
         self.logger.debug("Received VOICE_LISTENING_STOPPED event")
         self._mic_recording_active = False
+
+    async def _handle_transcription_interim(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle interim transcription events - show partial recognition.
+
+        Args:
+            payload: Event payload with 'text' field
+        """
+        text = payload.get("text", "")
+        conversation_id = payload.get("conversation_id")
+
+        # Only show if we're in an active voice conversation
+        if not self._mic_recording_active:
+            return
+
+        # Track conversation ID
+        if conversation_id:
+            self._current_conversation_id = conversation_id
+
+        # Format interim transcription with visual indicator
+        if text and text != self._last_interim_text:
+            self._last_interim_text = text
+            # Clear previous line and show interim (use \r to overwrite)
+            interim_display = f"\r🎤 You: {text}..."
+            # Write directly without newline so it can be overwritten
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: print(interim_display, end="", flush=True))
+
+    async def _handle_transcription_final(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle final transcription events - show confirmed recognition.
+
+        Args:
+            payload: Event payload with 'text' field
+        """
+        text = payload.get("text", "")
+        conversation_id = payload.get("conversation_id")
+
+        # Only show if we're in an active voice conversation
+        if not self._mic_recording_active and conversation_id != self._current_conversation_id:
+            return
+
+        if text:
+            # Clear interim line and show final with checkmark
+            final_display = f"\r🎤 You: \"{text}\""
+            await self._async_write_output(final_display)
+            self._last_interim_text = ""
+
+    async def _handle_llm_response(self, payload: Dict[str, Any]) -> None:
+        """
+        Handle LLM response events - show assistant's response.
+
+        Args:
+            payload: Event payload with 'text' field (from LLMResponsePayload)
+        """
+        response_text = payload.get("text", "")
+        conversation_id = payload.get("conversation_id")
+
+        # Only show if it matches our current conversation
+        if conversation_id != self._current_conversation_id:
+            return
+
+        if response_text:
+            # Format as assistant response with robot emoji
+            assistant_display = f"🤖 R3X: \"{response_text}\""
+            await self._async_write_output(assistant_display)
+            await self._async_write_output("")  # Blank line for spacing
 
     async def _async_write_output(self, message: str) -> None:
         """Non-blocking output function that respects asyncio principles.

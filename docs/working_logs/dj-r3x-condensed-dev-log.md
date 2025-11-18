@@ -941,6 +941,46 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Impact**: 100% validation accuracy (4/4), better false positive handling, 99.38% benchmark accuracy (LFW), user-friendly camera management
 - **Technical**: list_available_cameras() scans 0-9, face_recognition.face_locations() every 3rd frame, num_jitters=10, 20 images → 1 averaged encoding
 
+### 2025-11-17: MediaPipe Vision Pipeline - Complete Unified Stack
+- **Solution**: Replaced YOLO11n with MediaPipe EfficientDet-Lite0, switched to pose-only landmarker (removed Holistic 468-point face mesh), optimized frame scheduling
+- **Impact**: Unified MediaPipe stack (gestures + pose + objects + face detection), 11.3 FPS with all components, 2.1 FPS improvement over YOLO
+- **Technical**: All MediaPipe models CPU-optimized together, BlazeFace face detection (2.4ms vs 47ms dlib), frame scheduling (gestures:every frame, pose/objects:every 2, face ID:every 5)
+
+### 2025-11-17: Vision Performance Optimization - GPU Delegate Issues
+- **Issue**: M1 GPU acceleration causing crashes with int8 quantized models, gesture flickering from every-2-frame processing
+- **Solution**: Disabled GPU delegate for stability, implemented result caching for smooth gesture display, reduced gesture frequency to every 5 frames
+- **Impact**: System stable at 14-16 FPS (camera hardware limited to 29 FPS), no flickering, optimal performance given constraints
+- **Technical**: Removed delegate=python.BaseOptions.Delegate.GPU, added last_gesture_results cache, 6 Hz gesture processing still responsive
+
+### 2025-11-17: Spotify Connect Integration - Full TDD Implementation
+- **Solution**: Complete backend abstraction (LocalMusicBackend + SpotifyMusicBackend), OAuth 2.0 authentication, device auto-discovery, playlist loading (185 tracks)
+- **Impact**: Millions of songs available via Spotify Connect, zero breaking changes to local VLC functionality, 14/14 tests passing
+- **Technical**: MusicBackend abstract class, spotipy 2.25.1, event-driven source switching (MUSIC_SOURCE_CHANGED), backend.set_volume() for cross-platform ducking
+
+### 2025-11-17: Vision Event-Driven Architecture Refactor
+- **Issue**: ClaudeService had direct MemoryService reference violating "Services NEVER directly call methods on other services" rule
+- **Solution**: Replaced direct coupling with event-based vision state management, added 10 new vision event topics, internal state tracking in ClaudeService
+- **Impact**: True pub/sub architecture restored, vision context injected into user messages (not system prompt) for prompt caching compatibility
+- **Technical**: VISION_SCENE_CAPTURED/PERSON_DETECTED/PERSON_EXITED events, self._current_scene internal state, vision context appended to messages
+
+### 2025-11-17: DJ Mode Layer Architecture Fix - Single Ambient Layer
+- **Issue**: DJ transitions used two layers (foreground + ambient), foreground paused ambient (the music!), can't crossfade paused music
+- **Solution**: All DJ transition steps now on single ambient layer - music plays continuously, duck just lowers volume
+- **Impact**: Proper DJ transitions with music never pausing, crossfading works correctly, architecture matches intended design
+- **Technical**: Removed _create_and_emit_layered_transition(), unified to _create_commentary_transition_steps(), all steps on ambient layer
+
+### 2025-11-17: CLI Output Formatting Enhancement
+- **Issue**: Console output hard to read with dense logs and no visual separation
+- **Solution**: Created minimal formatter following CLI best practices - 4 colors max (red/yellow/green/dim), NO_COLOR support, no icons by default
+- **Impact**: Clean readable output, accessibility compliant, metadata de-emphasized (dimmed timestamps/service names)
+- **Technical**: cli_formatter_minimal.py with colorama, format: "HH:MM:SS service LEVEL message", 8-char abbreviated service names
+
+### 2025-11-17: Critical AttributeError Fixes - Backend Initialization
+- **Issue**: MusicControllerService AttributeError '_backend' and TimelineExecutorService AttributeError '_speech_cache_to_event' preventing DJ mode
+- **Solution**: Fixed ducking to use self.backends.get(self.active_source) for multi-backend support, added missing _speech_cache_to_event dict initialization
+- **Impact**: Both local VLC and Spotify backends work correctly for audio ducking, timeline speech tracking functions properly
+- **Technical**: Changed from self._backend (non-existent) to self.backends[self.active_source], added self._speech_cache_to_event: Dict[str, str] = {}
+
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
 - [Service Template](./service_template.py)

@@ -199,6 +199,10 @@ class EventTopics(str, Enum):
     VISION_ENGAGEMENT_STARTED = "vision.engagement.started"  # Person in engagement zone
     VISION_ENGAGEMENT_PAUSED = "vision.engagement.paused"  # Person stepped back (3-10s)
     VISION_ENGAGEMENT_ENDED = "vision.engagement.ended"  # Person left for >10s
+    VISION_WINDOW_OPEN = "vision.window.open"  # Request to open vision detection window
+    VISION_WINDOW_OPENED = "vision.window.opened"  # Vision window successfully opened
+    VISION_WINDOW_CLOSED = "vision.window.closed"  # Vision window closed
+    VISION_WINDOW_ERROR = "vision.window.error"  # Error opening vision window
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
