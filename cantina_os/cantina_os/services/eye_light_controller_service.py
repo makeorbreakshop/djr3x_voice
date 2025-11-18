@@ -162,10 +162,26 @@ class EyeCliCommandPayload(BaseModel):
 class EyeLightControllerService(BaseService):
     """
     Service to control the LED patterns for DJ R3X's eyes.
-    
+
     This service manages communication with an Arduino over serial connection
     to control LED patterns and animations based on the robot's state and mood.
     """
+
+    # RGB Color mappings for different modes and sentiments
+    MODE_COLORS = {
+        "IDLE": (255, 200, 50),        # Warm yellow/gold (DJ R3X default look)
+        "AMBIENT": (128, 0, 255),      # Purple (will cycle in animation)
+        "INTERACTIVE": (0, 255, 255),  # Cyan (alert, ready)
+        "SLEEPING": (255, 68, 0),      # Dim orange
+    }
+
+    SENTIMENT_COLORS = {
+        "positive": (0, 255, 0),       # Green
+        "negative": (65, 105, 225),    # Royal blue
+        "angry": (255, 0, 0),          # Red
+        "surprised": (255, 255, 0),    # Yellow
+        "neutral": (255, 255, 255),    # White
+    }
 
     def __init__(
         self,
@@ -738,7 +754,7 @@ class EyeLightControllerService(BaseService):
     async def _handle_sentiment(self, event_payload: Union[BaseEventPayload, SentimentPayload]) -> None:
         """
         Handle sentiment analysis results.
-        
+
         Args:
             event_payload: The payload containing sentiment information.
         """
@@ -749,22 +765,30 @@ class EyeLightControllerService(BaseService):
             except (ValidationError, AttributeError) as e:
                 self.logger.error(f"Invalid event payload type: {type(event_payload)}, {str(e)}")
                 return
-        
-        # Map sentiment to eye pattern
+
+        # Map sentiment to eye pattern and color
         if event_payload.label == "positive":
             pattern = EyePattern.HAPPY
+            color = self.SENTIMENT_COLORS["positive"]
         elif event_payload.label == "negative":
             pattern = EyePattern.SAD
+            color = self.SENTIMENT_COLORS["negative"]
         elif event_payload.label == "angry":
             pattern = EyePattern.ANGRY
+            color = self.SENTIMENT_COLORS["angry"]
         elif event_payload.label == "surprised":
             pattern = EyePattern.SURPRISED
+            color = self.SENTIMENT_COLORS["surprised"]
         else:
             # Default to speaking pattern if sentiment is neutral or unknown
             return
-        
+
         # Only change the pattern if we're not in a critical state (like listening or processing)
         if self.current_pattern not in [EyePattern.LISTENING, EyePattern.THINKING]:
+            # Set color first, then pattern
+            if self.adapter and hasattr(self.adapter, 'set_color'):
+                await self.adapter.set_color(*color)
+
             await self.set_pattern(pattern=pattern, duration=2.0)
             # After the emotion display, return to current activity pattern
             if self.current_pattern == EyePattern.SPEAKING:
@@ -1052,7 +1076,7 @@ class EyeLightControllerService(BaseService):
     async def _handle_mode_change(self, event_payload: Union[BaseEventPayload, SystemModeChangePayload]) -> None:
         """
         Handle system mode change events.
-        
+
         Args:
             event_payload: The event payload containing mode information.
         """
@@ -1065,44 +1089,76 @@ class EyeLightControllerService(BaseService):
             else:
                 self.logger.warning(f"Invalid mode change payload format: {type(event_payload)}")
                 return
-                
+
             if not new_mode:
                 self.logger.warning(f"Invalid mode change payload: {event_payload}")
                 return
-                
+
             # Store the current system mode
             self._current_system_mode = new_mode
-            
-            self.logger.info(f"System mode changed to: {new_mode}, updating eye pattern")
-            
-            # Map system modes to eye patterns
+
+            self.logger.info(f"System mode changed to: {new_mode}, updating eye pattern and color")
+
+            # Map system modes to eye patterns and colors
             if new_mode == "IDLE":
-                # Normal idle pattern
+                # Normal idle pattern with warm yellow/gold
+                color = self.MODE_COLORS["IDLE"]
+                self.logger.info(f"🎨 DEBUG: IDLE mode - attempting to set color to {color}")
+                self.logger.info(f"🔍 DEBUG: self.adapter = {self.adapter}")
+                self.logger.info(f"🔍 DEBUG: has set_color method? {hasattr(self.adapter, 'set_color') if self.adapter else 'adapter is None'}")
+                if self.adapter and hasattr(self.adapter, 'set_color'):
+                    self.logger.info(f"🎨 Calling set_color({color[0]}, {color[1]}, {color[2]})")
+                    result = await self.adapter.set_color(*color)
+                    self.logger.info(f"✅ set_color returned: {result}")
+                else:
+                    self.logger.warning(f"⚠️ Skipping set_color - adapter check failed")
                 await self.set_pattern(EyePattern.IDLE)
-                
+
             elif new_mode == "AMBIENT":
-                # Ambient/party mode - use happy pattern
-                await self.set_pattern(EyePattern.HAPPY)
-                
+                # Ambient/party mode - use purple/engaged pattern (will cycle colors in animation)
+                color = self.MODE_COLORS["AMBIENT"]
+                if self.adapter and hasattr(self.adapter, 'set_color'):
+                    await self.adapter.set_color(*color)
+                await self.set_pattern(EyePattern.ENGAGED)
+
             elif new_mode == "INTERACTIVE":
-                # Voice interactive mode - start with engaged pattern
+                # Voice interactive mode - cyan color with engaged pattern
                 # This pattern indicates DJ R3X is ready for interaction
                 # but not yet actively listening
+                color = self.MODE_COLORS["INTERACTIVE"]
+                self.logger.info(f"🎨 DEBUG: INTERACTIVE mode - attempting to set color to {color}")
+                self.logger.info(f"🔍 DEBUG: self.adapter = {self.adapter}")
+                self.logger.info(f"🔍 DEBUG: has set_color method? {hasattr(self.adapter, 'set_color') if self.adapter else 'adapter is None'}")
+                if self.adapter and hasattr(self.adapter, 'set_color'):
+                    self.logger.info(f"🎨 Calling set_color({color[0]}, {color[1]}, {color[2]})")
+                    result = await self.adapter.set_color(*color)
+                    self.logger.info(f"✅ set_color returned: {result}")
+                else:
+                    self.logger.warning(f"⚠️ Skipping set_color - adapter check failed")
                 await self.set_pattern(EyePattern.ENGAGED)
-                
+
             elif new_mode == "SLEEPING":
-                # If we implement a sleeping mode, use idle pattern at low brightness
+                # Sleeping mode - dim orange at low brightness
+                color = self.MODE_COLORS["SLEEPING"]
+                if self.adapter and hasattr(self.adapter, 'set_color'):
+                    await self.adapter.set_color(*color)
                 await self.set_brightness(0.3)
                 await self.set_pattern(EyePattern.IDLE)
-                
+
             else:
-                # Unknown mode, use idle pattern
+                # Unknown mode, use idle pattern with warm white
                 self.logger.warning(f"Unknown mode: {new_mode}, using default IDLE pattern")
+                color = self.MODE_COLORS["IDLE"]
+                if self.adapter and hasattr(self.adapter, 'set_color'):
+                    await self.adapter.set_color(*color)
                 await self.set_pattern(EyePattern.IDLE)
-                
+
         except Exception as e:
             self.logger.error(f"Error handling mode change: {e}")
-            # Fallback to idle pattern
+            # Fallback to idle pattern with warm white
+            color = self.MODE_COLORS["IDLE"]
+            if self.adapter and hasattr(self.adapter, 'set_color'):
+                await self.adapter.set_color(*color)
             await self.set_pattern(EyePattern.IDLE)
             
     def _is_in_interactive_mode(self) -> bool:

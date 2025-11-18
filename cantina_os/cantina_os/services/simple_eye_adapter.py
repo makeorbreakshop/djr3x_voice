@@ -254,32 +254,32 @@ class SimpleEyeAdapter:
                 
     async def _send_command(self, command: str) -> bool:
         """
-        Send a single-character command to the Arduino.
-        
+        Send a command to the Arduino (single or multi-character).
+
         Args:
-            command: Single-character command string
-            
+            command: Command string (can be single char like 'I' or multi-char like 'CFF0000')
+
         Returns:
             True if command successful, False otherwise
         """
         if not self.connected or not self.serial_conn:
             self.logger.error("Cannot send command: Not connected to Arduino")
             return False
-            
+
         try:
-            # Ensure we're sending a single character
-            if len(command) != 1:
-                self.logger.warning(f"Command '{command}' is not a single character, using only the first character")
-                command = command[0]
+            # Multi-character commands are now supported (color, brightness)
+            # Just log a debug message for awareness
+            if len(command) > 1:
+                self.logger.debug(f"Sending multi-character command: '{command}'")
             
             # Special case for 'Z' status command - might not be implemented in all Arduino sketches
             is_status_command = command == 'Z'
             
             # Send command with newline character (Arduino typically expects \n termination)
             command_str = command + '\n'
-            self.logger.debug(f"Sending command: '{command}' with newline")
+            self.logger.info(f"📤 Sending to Arduino: '{command}' (with newline)")
             bytes_written = self.serial_conn.write(command_str.encode('utf-8'))
-            self.logger.debug(f"Wrote {bytes_written} bytes to serial port")
+            self.logger.info(f"📤 Wrote {bytes_written} bytes to serial port")
             self.serial_conn.flush()
             
             # Clear any existing input before waiting for response
@@ -288,20 +288,20 @@ class SimpleEyeAdapter:
             # Wait for response with timeout
             start_time = time.time()
             response = ""
-            
-            self.logger.debug(f"Waiting for response with timeout of {self.timeout}s")
+
+            self.logger.info(f"⏳ Waiting for Arduino response (timeout: {self.timeout}s)")
             while (time.time() - start_time) < self.timeout:
                 if self.serial_conn.in_waiting > 0:
                     bytes_available = self.serial_conn.in_waiting
-                    self.logger.debug(f"Reading {bytes_available} available bytes")
+                    self.logger.info(f"📥 Arduino has {bytes_available} bytes available")
                     try:
                         char = self.serial_conn.read(1).decode('utf-8')
                         response += char
-                        self.logger.debug(f"Received character: '{char}', current response: '{response}'")
-                        
+                        self.logger.info(f"📥 Received: '{char}' → Full response so far: '{response}'")
+
                         # Check for success/error
                         if '+' in response:
-                            self.logger.debug("Command successful")
+                            self.logger.info(f"✅ Arduino responded with SUCCESS: '{response}'")
                             return True
                         elif '-' in response:
                             # Don't immediately fail - log a warning instead
@@ -434,17 +434,42 @@ class SimpleEyeAdapter:
     async def set_brightness(self, brightness: float) -> bool:
         """
         Set the LED brightness.
-        
+
         Args:
             brightness: Brightness level (0.0-1.0)
-            
+
         Returns:
             True if successful, False otherwise
         """
-        # Convert 0.0-1.0 range to 0-9 range
-        level = min(9, max(0, int(brightness * 9)))
-        command = str(level)
+        # Convert 0.0-1.0 range to 0-255 range for WS2812B
+        level = min(255, max(0, int(brightness * 255)))
+        command = f'B{level:03d}'  # Format: B000 to B255 (newline added by _send_command)
+        self.logger.debug(f"Setting brightness to {brightness:.2f} (level {level}) - command: {command}")
         return await self._send_command(command)
+
+    async def set_color(self, r: int, g: int, b: int) -> bool:
+        """
+        Set the RGB color for the LEDs.
+
+        Args:
+            r: Red value (0-255)
+            g: Green value (0-255)
+            b: Blue value (0-255)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Ensure values are in valid range
+        r = min(255, max(0, r))
+        g = min(255, max(0, g))
+        b = min(255, max(0, b))
+
+        # Format color command: CRRGGBB (hex format, newline added by _send_command)
+        command = f'C{r:02X}{g:02X}{b:02X}'
+        self.logger.info(f"🎨 SimpleEyeAdapter.set_color() called: RGB({r}, {g}, {b}) → command: '{command}'")
+        result = await self._send_command(command)
+        self.logger.info(f"🎨 SimpleEyeAdapter.set_color() result: {result}")
+        return result
         
     async def reset(self) -> bool:
         """
