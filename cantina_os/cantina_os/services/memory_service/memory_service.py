@@ -33,6 +33,11 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None  # Graceful degradation if not installed
+
 from ...base_service import BaseService
 from ...core.event_topics import EventTopics
 
@@ -116,6 +121,25 @@ class MemoryService(BaseService):
         self._current_person: Optional[str] = None
         self._person_arrival_time: Optional[float] = None
 
+        # Track whether current person needs summary (conversation happened but not summarized)
+        self._person_needs_summary: bool = False
+
+        # Anthropic client for conversation summarization
+        self._anthropic_client: Optional[Anthropic] = None
+        self._summarization_enabled = self._config.get("enable_summarization", True)
+
+        if self._summarization_enabled and Anthropic:
+            api_key = self._config.get("ANTHROPIC_API_KEY")
+            if api_key:
+                self._anthropic_client = Anthropic(api_key=api_key)
+                self.logger.info("Anthropic client initialized for conversation summarization")
+            else:
+                self.logger.warning("ANTHROPIC_API_KEY not found - conversation summarization disabled")
+                self._summarization_enabled = False
+        elif self._summarization_enabled and not Anthropic:
+            self.logger.warning("anthropic package not installed - conversation summarization disabled")
+            self._summarization_enabled = False
+
     async def _initialize(self) -> None:
         """Initialize the memory service."""
         try:
@@ -128,6 +152,10 @@ class MemoryService(BaseService):
 
             self.logger.info(f"Memory service initialized with {len(self._profile_cache)} cached profiles")
             self.logger.info(f"Profiles directory: {self._profiles_dir}")
+
+            # Catchup: Summarize any conversations that weren't summarized
+            if self._summarization_enabled:
+                await self._catchup_unsummarized_conversations()
 
         except Exception as e:
             self.logger.error(f"Failed to initialize memory service: {str(e)}")
@@ -244,7 +272,7 @@ class MemoryService(BaseService):
             self.logger.error(f"Error handling person detected: {e}", exc_info=True)
 
     async def _handle_person_exited(self, payload: Dict[str, Any]) -> None:
-        """Handle VISION_PERSON_EXITED event - calculate interaction duration."""
+        """Handle VISION_PERSON_EXITED event - calculate interaction duration and generate summary."""
         try:
             person_name = payload.get("name", "Unknown")
 
@@ -265,10 +293,16 @@ class MemoryService(BaseService):
 
                 self.logger.info(f"Recorded {interaction_duration:.1f}s interaction for {person_name}")
 
+                # Generate conversation summary if person had a conversation
+                if self._person_needs_summary:
+                    await self._update_person_summary(person_name)
+                    self._person_needs_summary = False
+
             # Clear tracking
             if self._current_person == person_name:
                 self._current_person = None
                 self._person_arrival_time = None
+                self._person_needs_summary = False
 
         except Exception as e:
             self.logger.error(f"Error handling person exited: {e}", exc_info=True)
@@ -539,13 +573,17 @@ class MemoryService(BaseService):
     # ========================================================================
 
     async def _handle_transcription_final(self, payload: Dict[str, Any]) -> None:
-        """Log user speech to timeline."""
+        """Log user speech to timeline and mark that conversation is happening."""
         await self.log_event(
             event_type=EventTopics.TRANSCRIPTION_FINAL.value,
             event_data=payload,
             person=self._current_person,
             conversation_id=payload.get("conversation_id")
         )
+
+        # Mark that a conversation is happening (needs summary when person exits)
+        if self._current_person:
+            self._person_needs_summary = True
 
     async def _handle_llm_response(self, payload: Dict[str, Any]) -> None:
         """Log LLM responses to timeline."""
@@ -574,8 +612,146 @@ class MemoryService(BaseService):
         )
 
     async def _handle_system_mode_change(self, payload: Dict[str, Any]) -> None:
-        """Log system mode changes to timeline."""
+        """Log system mode changes to timeline and trigger summary when leaving INTERACTIVE mode."""
         await self.log_event(
             event_type=EventTopics.SYSTEM_MODE_CHANGED.value,
             event_data=payload
         )
+
+        # If transitioning OUT of INTERACTIVE mode and we have a person with conversation, summarize
+        old_mode = payload.get("old_mode")
+        if old_mode == "INTERACTIVE" and self._current_person and self._person_needs_summary:
+            self.logger.info(f"Exiting INTERACTIVE mode with {self._current_person}, generating summary...")
+            await self._update_person_summary(self._current_person)
+            self._person_needs_summary = False
+
+    # ========================================================================
+    # Conversation Summarization
+    # ========================================================================
+
+    async def _update_person_summary(self, person_name: str) -> None:
+        """Generate or update rolling conversation summary for a person.
+
+        Uses Claude Haiku to create a concise 2-3 sentence summary of the person's
+        conversation history, incorporating both existing summary and new conversations.
+        """
+        if not self._summarization_enabled or not self._anthropic_client:
+            self.logger.debug(f"Summarization disabled, skipping summary for {person_name}")
+            return
+
+        try:
+            # Get recent conversation turns (last 20 to capture current session)
+            recent_turns = await self.get_conversation_history(
+                person=person_name,
+                limit=20
+            )
+
+            if not recent_turns or len(recent_turns) < 2:
+                self.logger.debug(f"Not enough conversation turns to summarize for {person_name}")
+                return
+
+            # Get existing summary from profile
+            profile = await self.get_person_profile(person_name)
+            existing_summary = profile.metadata.get("conversation_summary", "")
+
+            # Format recent conversation
+            recent_text = "\n".join([
+                f"User: {turn.get('user', '')}\nAssistant: {turn.get('assistant', '')}"
+                for turn in recent_turns
+                if turn.get('user') or turn.get('assistant')
+            ])
+
+            # Build prompt to update summary
+            if existing_summary:
+                prompt = f"""You are maintaining a memory summary for DJ R3X's interactions with {person_name}.
+
+EXISTING SUMMARY:
+{existing_summary}
+
+NEW CONVERSATION (just now):
+{recent_text}
+
+Update the summary to include new information from this conversation. Keep it concise (2-3 sentences).
+Focus on:
+- Music preferences and requests
+- Conversation patterns and interests
+- Any new topics or preferences
+- Remove outdated information if necessary
+
+UPDATED SUMMARY:"""
+            else:
+                prompt = f"""You are creating a memory summary for DJ R3X's first interaction with {person_name}.
+
+CONVERSATION:
+{recent_text}
+
+Create a concise 2-3 sentence summary. Focus on:
+- Music preferences and requests
+- Topics discussed
+- Any notable patterns
+
+SUMMARY:"""
+
+            # Call Claude Haiku API for summarization
+            response = self._anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001",  # Fast and cheap for summaries
+                max_tokens=150,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            new_summary = response.content[0].text.strip()
+
+            # Store updated summary in profile metadata
+            profile.metadata["conversation_summary"] = new_summary
+            profile.metadata["summary_updated_at"] = time.time()
+            profile.metadata["summary_visit_count"] = profile.metadata.get("summary_visit_count", 0) + 1
+
+            await self._save_profile(profile)
+
+            self.logger.info(f"✨ Updated conversation summary for {person_name} (visit #{profile.visit_count})")
+            self.logger.debug(f"Summary: {new_summary[:100]}...")
+
+        except Exception as e:
+            self.logger.error(f"Error updating conversation summary for {person_name}: {e}", exc_info=True)
+
+    async def _catchup_unsummarized_conversations(self) -> None:
+        """Startup catchup: Generate summaries for conversations that weren't summarized.
+
+        Checks each person's profile to see if they have recent conversation events
+        but no summary or an outdated summary. Generates summaries for these cases.
+        """
+        if not self._summarization_enabled or not self._anthropic_client:
+            self.logger.info("Summarization disabled, skipping startup catchup")
+            return
+
+        self.logger.info("Checking for unsummarized conversations...")
+
+        try:
+            catchup_count = 0
+
+            for profile in self._profile_cache.values():
+                # Check if person has recent activity but no/old summary
+                last_seen = profile.last_seen
+                summary_updated = profile.metadata.get("summary_updated_at", 0)
+
+                # If person visited after last summary (or never summarized), check for conversations
+                if last_seen > summary_updated:
+                    # Get conversation history for this person
+                    history = await self.get_conversation_history(
+                        person=profile.name,
+                        limit=20
+                    )
+
+                    if history and len(history) >= 2:
+                        # Found unsummarized conversation, generate summary
+                        self.logger.info(f"Found unsummarized conversation for {profile.name}, catching up...")
+                        await self._update_person_summary(profile.name)
+                        catchup_count += 1
+
+            if catchup_count > 0:
+                self.logger.info(f"✨ Catchup complete: Generated {catchup_count} conversation summaries")
+            else:
+                self.logger.info("No unsummarized conversations found")
+
+        except Exception as e:
+            self.logger.error(f"Error during summarization catchup: {e}", exc_info=True)

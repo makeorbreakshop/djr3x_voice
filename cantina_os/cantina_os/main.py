@@ -615,6 +615,15 @@ class CantinaOS:
             if "CHANNELS" not in service_config:
                 service_config["CHANNELS"] = self._config.get("AUDIO_CHANNELS", 1)
 
+        elif service_name == "memory_service":
+            # Configure memory service with Anthropic API key for summarization
+            if "ANTHROPIC_API_KEY" not in service_config:
+                service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
+            if "enable_summarization" not in service_config:
+                service_config["enable_summarization"] = True
+            if "memory_data_dir" not in service_config:
+                service_config["memory_data_dir"] = "memory_data"
+
         elif service_name == "music_controller":
             # Configure music controller with proper music directory
             # Look in the standard audio/music folder instead

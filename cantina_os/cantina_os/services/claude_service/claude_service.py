@@ -714,7 +714,8 @@ class ClaudeService(BaseService):
             if age_seconds < 60:  # Scene context valid for 60 seconds
                 context_parts.append(f"What you can see - {self._current_scene}")
 
-        # Add person if currently present (with profile from MemoryService)
+        # Add person if currently present (with profile + summary from MemoryService)
+        person_summary = None
         if self._current_person:
             # Query MemoryService for person profile if available
             if self._memory_service:
@@ -724,6 +725,11 @@ class ClaudeService(BaseService):
                     minimal_context = profile.get_minimal_context()
                     context_parts.append(f"Speaking with: {minimal_context}")
                     self.logger.debug(f"Injected person profile: {minimal_context}")
+
+                    # Extract conversation summary if available
+                    person_summary = profile.metadata.get("conversation_summary")
+                    if person_summary:
+                        self.logger.debug(f"Loaded conversation summary for {self._current_person}: {person_summary[:50]}...")
                 except Exception as e:
                     self.logger.error(f"Error querying person profile: {e}")
                     # Fallback to simple name
@@ -737,7 +743,11 @@ class ClaudeService(BaseService):
         if context_parts:
             context_section = "\n\n[System observation: " + " | ".join(context_parts) + "]"
 
-        # Add cached conversation history (loaded once when person detected)
+        # Add conversation summary (long-term memory)
+        if person_summary:
+            context_section += f"\n\n[Long-term memory: {person_summary}]"
+
+        # Add cached conversation history (recent turns, loaded once when person detected)
         if self._loaded_conversation_history:
             context_section += self._loaded_conversation_history
 
