@@ -498,10 +498,14 @@ class ElevenLabsService(BaseService):
 
                                     # Calculate RMS amplitude
                                     rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
-                                    # Boost amplitude by 3x for more dramatic mouth movement (ElevenLabs PCM is quiet)
-                                    # Most values are 0.0-0.3, boost them to 0.0-0.9 range
-                                    AMPLITUDE_BOOST = 3.0
-                                    normalized_amplitude = min(1.0, (rms / MAX_AMPLITUDE) * AMPLITUDE_BOOST)
+                                    # Boost amplitude by 8x for VERY dramatic mouth movement
+                                    # ElevenLabs outputs at -24 LUFS (6% of max), we want 50-100% mouth opening
+                                    # Raw values are 0.02-0.07, boost them to 0.16-0.56 range for visible animation
+                                    AMPLITUDE_BOOST = 8.0
+                                    # Also add a floor to ensure minimum mouth movement even on quiet sounds
+                                    MIN_AMPLITUDE = 0.15  # Always at least 15% open when speaking
+                                    boosted = (rms / MAX_AMPLITUDE) * AMPLITUDE_BOOST
+                                    normalized_amplitude = min(1.0, max(MIN_AMPLITUDE, boosted) if boosted > 0.01 else 0)
 
                                     # Emit amplitude event (thread-safe)
                                     payload_dict = {

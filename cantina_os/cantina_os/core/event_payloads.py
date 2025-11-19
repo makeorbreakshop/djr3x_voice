@@ -162,3 +162,12 @@ class VisionEngagementPayload(BaseModel):
     event_type: Literal["started", "paused", "ended"]
     duration_seconds: Optional[float] = None  # For paused/ended events
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class SpeechAmplitudePayload(BaseModel):
+    """Payload for real-time speech amplitude during TTS playback."""
+    conversation_id: str = Field(..., description="Conversation ID for tracking")
+    amplitude: float = Field(..., description="Normalized RMS amplitude (0.0-1.0)")
+    timestamp_offset: float = Field(..., description="Offset from speech start in seconds")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    event_id: str = Field(default_factory=lambda: f"amp_{datetime.now().timestamp()}")

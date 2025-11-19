@@ -1,0 +1,80 @@
+{
+  "name": "Brandon",
+  "visit_count": 13,
+  "first_seen": 1763481057.5385568,
+  "last_seen": 1763587883.068539,
+  "total_interaction_time_seconds": 12016.416714429855,
+  "personality_traits": [
+    "Casual and friendly tone ('Hey. What's up?')",
+    "Problem-solving oriented and methodical (testing systems one by one)",
+    "Casual, friendly communication style ('Hey', 'Yo', 'What is up')",
+    "Direct and practical problem-solver approach"
+  ],
+  "music_preferences": {},
+  "conversation_style": {},
+  "notable_facts": [
+    "Brandon is actively working on maintaining/fixing DJ R3X's systems",
+    "He's troubleshooting specific hardware: eye LEDs, voice/mouth mechanisms, lighting systems",
+    "Brandon appears to be technical/hands-on with the robot",
+    "Brandon is involved in maintaining/troubleshooting R3X's systems",
+    "Has made 12 visits total - this is an established relationship",
+    "Working with eye light systems that have recurring technical issues"
+  ],
+  "recent_visits": [
+    {
+      "visit_number": 10,
+      "date": "2025-11-19",
+      "duration_seconds": 18.718929052352905,
+      "summary": "Brandon made a very brief visit (18 seconds) focused on troubleshooting DJ R3X's visual and audio systems. He was testing whether the eyes and voice/mouth functionality were working properly.",
+      "memorable_moments": [
+        "Brandon mentioned eyes only seem to interact when receiving transcripts",
+        "Brandon provided lights that DJ R3X can 'talk through'",
+        "Brandon tested voice functionality, noting it doesn't seem to be working",
+        "Called DJ R3X by multiple name variations: 'DJ Rick', 'DJ Rex', 'DJ Ricks'",
+        "Very brief interaction - lasted only 18 seconds"
+      ],
+      "music_played": [],
+      "topics_discussed": [
+        "DJ R3X eye functionality",
+        "Voice/audio system troubleshooting",
+        "Lighting/LED systems",
+        "Transcript interaction mechanics"
+      ],
+      "mood": "Focused and methodical; troubleshooting mode rather than casual hangout"
+    },
+    {
+      "visit_number": 12,
+      "date": "2025-11-19",
+      "duration_seconds": 87.89923095703125,
+      "summary": "Brief troubleshooting visit where Brandon tested DJ R3X's functionality, particularly focusing on mouth and eye responsiveness. Expressed frustration with recurring technical timeouts related to eye light systems.",
+      "memorable_moments": [
+        "Brandon called R3X 'DJ Ricks' initially",
+        "Noted that R3X's eyes 'didn't change at all, so that's great'",
+        "Repetitive 'Yo. Yo. Yo. Yo. Yo.' testing sequence",
+        "Expressed concern about consistent timing out issues with eye light equipment",
+        "Asked 'Why does our stuff seem to keep timing out?'"
+      ],
+      "music_played": [],
+      "topics_discussed": [
+        "R3X mouth functionality",
+        "R3X eye responsiveness and lighting",
+        "Technical troubleshooting and system timeouts"
+      ],
+      "mood": "Focused and slightly frustrated; conducting technical diagnostics with patience"
+    }
+  ],
+  "relationship_progression": "stranger",
+  "preferences": {},
+  "notes": [],
+  "metadata": {
+    "conversation_summary": "UPDATED SUMMARY:\nVisit #13 - Brandon continuing to test DJ R3X's hardware functionality. Testing mouth/voice output and eye LED responsiveness. Brandon troubleshooting timing issues with the eye light system, noting inconsistent performance. Focused on identifying which features are operational versus experiencing technical difficulties.",
+    "summary_updated_at": 1763587267.002303,
+    "summary_visit_count": 8,
+    "follow_up_opportunities": [
+      "Check on whether eye light timing out issues were resolved",
+      "Ask what specifically was being tested with mouth and eye systems",
+      "Inquire about the nature of the eye light equipment failures"
+    ],
+    "last_summary_update": 1763586275.436367
+  }
+}

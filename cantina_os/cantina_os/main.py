@@ -475,7 +475,12 @@ class CantinaOS:
             # Note: Vision startup scene capture now handled automatically
             # by VisionService unified monitoring loop (first frame trigger)
 
-            # Play startup sound once all services are initialized
+            # Wait a bit for async services to fully connect (Arduino, camera, etc)
+            # This ensures the startup sound plays when everything is truly ready
+            logger.info("Waiting for hardware connections to stabilize...")
+            await asyncio.sleep(3.0)  # Give Arduino and camera time to fully initialize
+
+            # Play startup sound once all services are initialized AND hardware is ready
             startup_sound_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
                 "audio", 

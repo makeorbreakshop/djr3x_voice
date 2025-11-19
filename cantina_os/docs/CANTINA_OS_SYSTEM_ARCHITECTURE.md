@@ -172,6 +172,7 @@ Each service is a **specialized cook at their own station**:
 | LLM_RESPONSE_CHUNK | GPTService | DebugService | LLMResponsePayload | Streaming GPT chunk |
 | SPEECH_GENERATION_REQUEST | ElevenLabsService | ElevenLabsService | SpeechGenerationRequestPayload | Request TTS generation |
 | SPEECH_SYNTHESIS_STARTED | ElevenLabsService | EyeLightControllerService, MusicControllerService | BaseEventPayload | TTS playback starting |
+| SPEECH_SYNTHESIS_AMPLITUDE | ElevenLabsService | EyeLightControllerService | SpeechAmplitudePayload | Real-time audio amplitude for visual sync |
 | SPEECH_SYNTHESIS_ENDED | ElevenLabsService | EyeLightControllerService, MusicControllerService | BaseEventPayload | TTS playback completed |
 
 ### 3.3 Hardware Control Events
@@ -457,20 +458,28 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 - Audio playback settings
 
 **Key Methods**:
-- `_generate_speech()`: Sends text to ElevenLabs API
-- `_play_audio()`: Handles audio playback
-- `_handle_llm_response()`: Processes incoming text
-- `_emit_amplitude()`: Reports speech amplitude
+- `_audio_worker_loop()`: Dedicated thread for streaming audio from ElevenLabs
+- `_handle_llm_response()`: Processes incoming text and queues for synthesis
+- `_emit_amplitude()`: Reports real-time speech amplitude for LED visualization
+- Custom streaming implementation with RMS amplitude calculation
+
+**Audio Amplitude Streaming**:
+- Calculates RMS amplitude from audio chunks during playback
+- Emits `SPEECH_SYNTHESIS_AMPLITUDE` events at 10-20Hz
+- Enables real-time visual feedback (eye pupil pulsing, future mouth LEDs)
+- Uses PCM format (Pro tier) or MP3 with decoding (all tiers)
 
 **Error Handling**:
 - API error detection and reporting
-- Cached audio fallbacks
+- Graceful fallback from PCM to MP3 format
 - Generation timeout protection
+- Thread-safe error propagation
 
 **Thread Management**:
-- Separate threads for audio playback
-- Asynchronous API communication
-- Background amplitude monitoring
+- Dedicated audio worker thread for non-blocking playback
+- Queue-based communication between async and sync contexts
+- Thread-safe event emission via `asyncio.run_coroutine_threadsafe()`
+- Single-direction data flow (audio thread → event loop)
 
 **Resource Cleanup**:
 - Stops audio playback
@@ -479,26 +488,45 @@ Previous CLI-direct paths have been deprecated in favor of this unified approach
 
 ### 5.4 EyeLightControllerService
 
+**Base Class**: Inherits from `RealtimeService` with 60Hz control loop
+
 **Initialization Requirements**:
 - Serial port configuration
 - Arduino connection parameters
 - Pattern definitions
+- Control loop rate (default 60Hz)
+
+**Architecture Pattern**:
+- **Event Handlers**: Set target state variables (`_target_pattern`, `_target_color`, `_target_brightness`, `_amplitude_modulation`)
+- **Control Loop**: Executes hardware commands at 60Hz by comparing target vs current state
+- **State Tracking**: Maintains `_current_*` variables to avoid spamming Arduino with duplicate commands
 
 **Key Methods**:
-- `set_pattern()`: Sets LED pattern on hardware
-- `set_brightness()`: Controls LED brightness
-- `_handle_eye_command()`: Processes eye commands
+- `_control_update()`: Called 60x/sec, sends commands only when state changes
+- `_send_pattern_to_arduino()`: Helper to send pattern commands via serial
+- `_send_color_to_arduino()`: Helper to send color commands via serial
+- `_send_brightness_to_arduino()`: Helper to send brightness commands via serial
+- `_handle_amplitude()`: Updates amplitude modulation for real-time pupil pulsing
+- `_handle_eye_command()`: Processes eye commands (sets target state)
 - `_auto_detect_arduino()`: Finds hardware connection
+
+**Real-Time Amplitude Visualization**:
+- Subscribes to `SPEECH_SYNTHESIS_AMPLITUDE` events from ElevenLabsService
+- Updates `_amplitude_modulation` (0.0-1.0) based on audio RMS amplitude
+- Control loop applies modulation to brightness every frame (±30% variation)
+- Smooth exponential moving average (EMA) prevents jitter
+- Only active during SPEAKING pattern
 
 **Error Handling**:
 - Connection retry mechanism
 - Mock mode fallback if hardware unavailable
 - Command timeout protection
+- Control loop error handling (doesn't crash service)
 
 **Thread Management**:
+- 60Hz background control loop task (managed by RealtimeService)
 - Async serial communication
-- Background pattern scheduling
-- Pattern duration timers
+- Performance monitoring (loop overruns, max execution time)
 
 **Resource Cleanup**:
 - Resets LED hardware to default state

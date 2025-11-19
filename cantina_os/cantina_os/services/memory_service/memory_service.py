@@ -42,6 +42,18 @@ from ...base_service import BaseService
 from ...core.event_topics import EventTopics
 
 
+class VisitSummary(BaseModel):
+    """Model for a single visit's episodic memory."""
+    visit_number: int
+    date: str
+    duration_seconds: float
+    summary: str = ""
+    memorable_moments: List[str] = Field(default_factory=list)
+    music_played: List[str] = Field(default_factory=list)
+    topics_discussed: List[str] = Field(default_factory=list)
+    mood: str = ""
+
+
 class PersonProfile(BaseModel):
     """Model for a person's profile in long-term memory."""
     name: str
@@ -49,6 +61,33 @@ class PersonProfile(BaseModel):
     first_seen: float = Field(default_factory=time.time)  # Unix timestamp
     last_seen: float = Field(default_factory=time.time)  # Unix timestamp
     total_interaction_time_seconds: float = 0.0
+
+    # === SEMANTIC MEMORY (Long-term patterns) ===
+    personality_traits: List[str] = Field(default_factory=list)
+    music_preferences: Dict[str, Any] = Field(default_factory=dict)
+    # {
+    #   "favorite_genres": ["rock", "electronic"],
+    #   "favorite_artists": ["Queen"],
+    #   "mood_preferences": "energetic upbeat",
+    #   "requests": ["Cantina Band - 3x", "Space Jam - 1x"]
+    # }
+    conversation_style: Dict[str, Any] = Field(default_factory=dict)
+    # {
+    #   "preferred_tone": "casual and quick",
+    #   "topics_of_interest": ["robotics", "music production"],
+    #   "humor_style": "sarcastic"
+    # }
+    notable_facts: List[str] = Field(default_factory=list)
+    # ["Works on audio projects", "Wears Atlanta United gear", ...]
+
+    # === EPISODIC MEMORY (Recent visits) ===
+    recent_visits: List[VisitSummary] = Field(default_factory=list)
+    # Keep last 5 visits for callbacks and continuity
+
+    relationship_progression: str = "stranger"
+    # stranger → acquaintance → friend → regular
+
+    # === LEGACY FIELDS (backward compatibility) ===
     preferences: Dict[str, Any] = Field(default_factory=dict)
     notes: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -76,6 +115,13 @@ class PersonProfile(BaseModel):
         Example: [Brandon | 47 visits | 2h ago]
         """
         return f"[{self.name} | {self.visit_count} visits | {self.get_time_since_last_seen()}]"
+
+    def add_visit(self, visit: VisitSummary, max_visits: int = 5) -> None:
+        """Add a visit to recent_visits, keeping only the most recent N."""
+        self.recent_visits.append(visit)
+        # Keep only last N visits
+        if len(self.recent_visits) > max_visits:
+            self.recent_visits = self.recent_visits[-max_visits:]
 
 
 class TimelineEvent(BaseModel):
@@ -272,7 +318,11 @@ class MemoryService(BaseService):
             self.logger.error(f"Error handling person detected: {e}", exc_info=True)
 
     async def _handle_person_exited(self, payload: Dict[str, Any]) -> None:
-        """Handle VISION_PERSON_EXITED event - calculate interaction duration and generate summary."""
+        """Handle VISION_PERSON_EXITED event - calculate interaction duration and generate summary.
+
+        CRITICAL: Uses atomic profile update to prevent data loss during shutdown.
+        All profile modifications happen before the single save operation.
+        """
         try:
             person_name = payload.get("name", "Unknown")
 
@@ -285,18 +335,23 @@ class MemoryService(BaseService):
             if self._current_person == person_name and self._person_arrival_time:
                 interaction_duration = time.time() - self._person_arrival_time
 
-                # Update profile with interaction time
+                # Get profile (will be modified and saved ONCE at end)
                 profile = await self.get_person_profile(person_name)
-                profile.total_interaction_time_seconds += interaction_duration
 
-                await self._save_profile(profile)
+                # Update interaction time
+                profile.total_interaction_time_seconds += interaction_duration
 
                 self.logger.info(f"Recorded {interaction_duration:.1f}s interaction for {person_name}")
 
                 # Generate conversation summary if person had a conversation
+                # CRITICAL: This modifies the profile IN-PLACE without saving
                 if self._person_needs_summary:
-                    await self._update_person_summary(person_name)
+                    await self._generate_visit_summary(profile, interaction_duration)
                     self._person_needs_summary = False
+
+                # ATOMIC SAVE: Single save with all updates (interaction time + summary)
+                await self._save_profile(profile)
+                self.logger.debug(f"Profile saved atomically for {person_name}")
 
             # Clear tracking
             if self._current_person == person_name:
@@ -714,6 +769,180 @@ SUMMARY:"""
         except Exception as e:
             self.logger.error(f"Error updating conversation summary for {person_name}: {e}", exc_info=True)
 
+    async def _generate_visit_summary(self, profile: PersonProfile, interaction_duration: float) -> None:
+        """Generate episodic visit summary with structured extraction.
+
+        This method modifies the profile IN-PLACE without saving (caller handles save).
+        Extracts structured memories: notable facts, music preferences, personality traits.
+
+        Args:
+            profile: PersonProfile to update (modified in-place)
+            interaction_duration: Duration of this visit in seconds
+        """
+        if not self._summarization_enabled or not self._anthropic_client:
+            self.logger.debug(f"Summarization disabled, skipping visit summary for {profile.name}")
+            return
+
+        try:
+            # Get recent conversation turns for this visit
+            recent_turns = await self.get_conversation_history(
+                person=profile.name,
+                limit=20
+            )
+
+            if not recent_turns or len(recent_turns) < 1:
+                self.logger.debug(f"No conversation to summarize for {profile.name}")
+                return
+
+            # Format conversation transcript
+            conversation_text = "\n".join([
+                f"User: {turn.get('user', '')}\nAssistant: {turn.get('assistant', '')}"
+                for turn in recent_turns
+                if turn.get('user') or turn.get('assistant')
+            ])
+
+            # Get music tracks played (if any)
+            music_events = await self.get_recent_events(
+                limit=10,
+                event_type=EventTopics.TRACK_PLAYING.value,
+                person=profile.name
+            )
+            music_played = [
+                event.event_data.get("track_name", "Unknown")
+                for event in music_events
+            ]
+
+            # Build structured extraction prompt
+            visit_date = datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d")
+
+            prompt = f"""You are DJ R3X's memory system. {profile.name} just left after visit #{profile.visit_count}.
+
+CONVERSATION TRANSCRIPT:
+{conversation_text}
+
+VISIT CONTEXT:
+- Duration: {int(interaction_duration)}s ({int(interaction_duration/60)}min)
+- Music played: {music_played if music_played else ['No music']}
+- Total lifetime visits: {profile.visit_count}
+
+Extract structured episodic memories in JSON format:
+
+{{
+  "visit_summary": "1-2 sentence overview of what happened this visit",
+  "memorable_moments": [
+    "Specific funny, notable, or important things that happened",
+    "Direct quotes worth remembering",
+    "Corrections or preferences they stated",
+    "Projects or topics they mentioned"
+  ],
+  "notable_facts": [
+    "New facts learned about them (job, hobbies, projects, location)",
+    "Physical observations (clothing, equipment, surroundings)",
+    "Context clues about their life"
+  ],
+  "personality_observations": [
+    "Communication style (formal/casual/humorous/direct)",
+    "Patience level and preferences (verbose vs concise)",
+    "Topics that engage them",
+    "Humor style if evident"
+  ],
+  "music_preferences": {{
+    "requests": ["specific tracks they asked for"],
+    "positive_reactions": ["genres/artists they liked"],
+    "negative_reactions": ["anything they disliked"]
+  }},
+  "topics_discussed": ["topic1", "topic2", "topic3"],
+  "mood": "brief description of their mood/vibe",
+  "follow_up_opportunities": [
+    "Things to ask about next time",
+    "Ongoing projects they mentioned",
+    "Promises or commitments R3X made"
+  ]
+}}
+
+CRITICAL: Return ONLY valid JSON, no markdown, no explanation, no code blocks."""
+
+            # Call Claude Haiku for extraction
+            response = self._anthropic_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            raw_response = response.content[0].text.strip()
+
+            # Remove markdown code blocks if present
+            if raw_response.startswith("```"):
+                raw_response = raw_response.split("```")[1]
+                if raw_response.startswith("json"):
+                    raw_response = raw_response[4:]
+                raw_response = raw_response.strip()
+
+            # Parse JSON response
+            visit_data = json.loads(raw_response)
+
+            # Create VisitSummary episodic memory
+            visit_summary = VisitSummary(
+                visit_number=profile.visit_count,
+                date=visit_date,
+                duration_seconds=interaction_duration,
+                summary=visit_data.get("visit_summary", ""),
+                memorable_moments=visit_data.get("memorable_moments", [])[:5],  # Keep top 5
+                music_played=music_played[:5],  # Keep top 5 tracks
+                topics_discussed=visit_data.get("topics_discussed", [])[:5],
+                mood=visit_data.get("mood", "")
+            )
+
+            # Add visit to profile's episodic memory
+            profile.add_visit(visit_summary, max_visits=5)
+
+            # Update semantic memory (long-term patterns)
+            # Append new notable facts (dedupe later if needed)
+            new_facts = visit_data.get("notable_facts", [])[:3]  # Top 3 new facts
+            for fact in new_facts:
+                if fact and fact not in profile.notable_facts:
+                    profile.notable_facts.append(fact)
+            # Keep last 10 facts
+            profile.notable_facts = profile.notable_facts[-10:]
+
+            # Update personality traits
+            new_traits = visit_data.get("personality_observations", [])[:2]
+            for trait in new_traits:
+                if trait and trait not in profile.personality_traits:
+                    profile.personality_traits.append(trait)
+            # Keep last 5 traits
+            profile.personality_traits = profile.personality_traits[-5:]
+
+            # Update music preferences
+            music_prefs = visit_data.get("music_preferences", {})
+            if "requests" in music_prefs and music_prefs["requests"]:
+                current_requests = profile.music_preferences.get("requests", [])
+                current_requests.extend(music_prefs["requests"][:3])
+                profile.music_preferences["requests"] = current_requests[-10:]  # Keep last 10
+
+            if "positive_reactions" in music_prefs and music_prefs["positive_reactions"]:
+                fav_list = profile.music_preferences.get("favorite_genres", [])
+                fav_list.extend(music_prefs["positive_reactions"])
+                profile.music_preferences["favorite_genres"] = list(set(fav_list))[-5:]
+
+            # Store follow-up opportunities in metadata for easy access
+            profile.metadata["follow_up_opportunities"] = visit_data.get("follow_up_opportunities", [])[:3]
+            profile.metadata["last_summary_update"] = time.time()
+
+            self.logger.info(f"✨ Generated episodic visit summary for {profile.name} (visit #{profile.visit_count})")
+            self.logger.debug(f"Summary: {visit_summary.summary}")
+            self.logger.debug(f"Memorable moments: {len(visit_summary.memorable_moments)}")
+            self.logger.debug(f"Notable facts extracted: {len(new_facts)}")
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse visit summary JSON for {profile.name}: {e}")
+            self.logger.debug(f"Raw response: {raw_response}")
+            # Fall back to simple summary in metadata
+            profile.metadata["conversation_summary"] = f"Visit #{profile.visit_count} - {int(interaction_duration/60)}min interaction"
+
+        except Exception as e:
+            self.logger.error(f"Error generating visit summary for {profile.name}: {e}", exc_info=True)
+
     async def _catchup_unsummarized_conversations(self) -> None:
         """Startup catchup: Generate summaries for conversations that weren't summarized.
 
@@ -755,3 +984,39 @@ SUMMARY:"""
 
         except Exception as e:
             self.logger.error(f"Error during summarization catchup: {e}", exc_info=True)
+
+    async def _stop(self) -> None:
+        """Shutdown hook - save any pending summaries before exit.
+
+        CRITICAL: Prevents data loss when system shuts down while person is still present.
+        """
+        try:
+            # If person is still present and has unsaved conversation, save it NOW
+            if self._current_person and self._person_needs_summary and self._person_arrival_time:
+                self.logger.warning(f"Shutdown detected with unsaved summary for {self._current_person}, saving now...")
+
+                # Calculate final interaction duration
+                interaction_duration = time.time() - self._person_arrival_time
+
+                # Get profile
+                profile = await self.get_person_profile(self._current_person)
+
+                # Update interaction time
+                profile.total_interaction_time_seconds += interaction_duration
+
+                # Generate summary (in-place modification)
+                await self._generate_visit_summary(profile, interaction_duration)
+
+                # Atomic save
+                await self._save_profile(profile)
+
+                self.logger.info(f"✅ Saved pending summary for {self._current_person} during shutdown")
+
+            # Force flush all cached profiles to disk (in case of any other changes)
+            for profile_name, profile in self._profile_cache.items():
+                await self._save_profile(profile)
+
+            self.logger.info("MemoryService shutdown complete, all profiles saved")
+
+        except Exception as e:
+            self.logger.error(f"Error during MemoryService shutdown: {e}", exc_info=True)

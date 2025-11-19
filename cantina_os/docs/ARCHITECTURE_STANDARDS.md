@@ -8,22 +8,38 @@ This document outlines the architectural standards that all developers must foll
 
 All CantinaOS services must:
 
-1. Inherit from `BaseService` or `StandardService`
+1. Inherit from `BaseService`, `StandardService`, or `RealtimeService`
+   - Use `BaseService` for minimal services with custom lifecycle management
+   - Use `StandardService` for standard event-driven services
+   - Use `RealtimeService` for hardware control requiring high-frequency updates (60Hz+)
 2. Override `_start()` and `_stop()` methods, not `start()` or `stop()`
 3. Implement proper error handling and resource cleanup
 4. Use event-based communication through the event bus
 
 ```python
-# Correct pattern
+# Correct pattern - Standard Service
 class MyService(StandardService):
     async def _start(self) -> None:
         # Service-specific initialization
         await self._setup_subscriptions()
-        
+
     async def _stop(self) -> None:
         # Service-specific cleanup
         pass
-        
+
+# Correct pattern - Realtime Service (for hardware control)
+class HardwareService(RealtimeService):
+    def __init__(self, event_bus, config, logger=None):
+        super().__init__(event_bus, config, logger, loop_rate_hz=60)
+        self._target_state = None
+        self._current_state = None
+
+    async def _control_update(self) -> None:
+        # Called 60x/sec - implement hardware updates here
+        if self._target_state != self._current_state:
+            await self._send_to_hardware(self._target_state)
+            self._current_state = self._target_state
+
 # Incorrect pattern - DO NOT DO THIS
 class MyService(BaseService):
     async def start(self) -> None:  # Wrong: overriding start() directly
@@ -943,6 +959,133 @@ def _audio_callback(self, indata, frames, time, status):
     future2 = asyncio.run_coroutine_threadsafe(self._process2(indata), self._event_loop)
     future3 = asyncio.run_coroutine_threadsafe(self._process3(indata), self._event_loop)
 ```
+
+### 10.6 RealtimeService Control Loop Pattern
+
+For hardware control requiring precise timing (60Hz or higher), use the `RealtimeService` base class which provides a built-in high-frequency control loop.
+
+**Key Features:**
+- Background control loop running at configurable Hz (default 60Hz)
+- Separates high-level event handlers (set target state) from low-frequency execution (send hardware commands)
+- Automatic performance monitoring (loop overruns, max execution time)
+- Graceful lifecycle management (starts with service, stops on shutdown)
+
+**Architecture Pattern:**
+
+The RealtimeService pattern implements a **two-tier architecture**:
+1. **Event Handlers** (async, event-driven): Set target state variables quickly without blocking
+2. **Control Loop** (60Hz background task): Executes hardware commands at precise intervals
+
+```python
+class HardwareControlService(RealtimeService):
+    def __init__(self, event_bus, config, logger=None):
+        # Initialize with desired loop rate
+        super().__init__(
+            service_name="hardware_control",
+            event_bus=event_bus,
+            loop_rate_hz=60  # 60 updates per second
+        )
+
+        # Target state (set by event handlers)
+        self._target_position = 0
+        self._target_brightness = 128
+        self._amplitude_modulation = 0.0
+
+        # Current hardware state (what hardware actually has)
+        self._current_position = None
+        self._current_brightness = None
+
+    async def _start(self) -> None:
+        """Service initialization - subscribe to events."""
+        await self.subscribe(EventTopics.POSITION_COMMAND, self._handle_position)
+        await self.subscribe(EventTopics.AMPLITUDE_UPDATE, self._handle_amplitude)
+        # Control loop starts automatically via RealtimeService
+
+    async def _handle_position(self, payload: dict):
+        """Event handler - just sets target state (fast, non-blocking)."""
+        self._target_position = payload["position"]
+        # Control loop will execute within 16ms (at 60Hz)
+
+    async def _handle_amplitude(self, payload: dict):
+        """Event handler - updates modulation for real-time effects."""
+        self._amplitude_modulation = payload["amplitude"]
+        # Control loop applies modulation on next update
+
+    async def _control_update(self) -> None:
+        """
+        Called 60 times per second - executes hardware commands.
+
+        This method should:
+        1. Compare target state to current hardware state
+        2. Send commands only when state changes (avoid spam)
+        3. Update current state tracking
+        4. Keep execution time under frame budget (16.67ms @ 60Hz)
+        """
+        try:
+            # Check if position changed
+            if self._target_position != self._current_position:
+                await self._send_position_to_hardware(self._target_position)
+                self._current_position = self._target_position
+
+            # Apply amplitude modulation to brightness
+            final_brightness = self._target_brightness
+            if self._amplitude_modulation > 0:
+                modulation_factor = 1.0 + (self._amplitude_modulation * 0.3)
+                final_brightness = int(self._target_brightness * modulation_factor)
+                final_brightness = max(0, min(255, final_brightness))
+
+            # Check if brightness changed
+            if final_brightness != self._current_brightness:
+                await self._send_brightness_to_hardware(final_brightness)
+                self._current_brightness = final_brightness
+
+        except Exception as e:
+            # Don't let control loop crash the service
+            self.logger.error(f"Error in control loop: {e}")
+```
+
+**When to Use RealtimeService:**
+
+Use this pattern when:
+- ✅ Hardware requires high-frequency updates (LED animations, motor control)
+- ✅ Need smooth transitions (fading, interpolation)
+- ✅ Real-time feedback needed (audio amplitude → visual effects)
+- ✅ Response time must be <16ms (60Hz) or <10ms (100Hz)
+- ✅ State changes should not block event handlers
+
+Do NOT use for:
+- ❌ Services that only respond to occasional events
+- ❌ Network I/O or API calls (use regular async patterns)
+- ❌ Long-running operations (use background tasks)
+
+**Performance Monitoring:**
+
+RealtimeService automatically tracks performance:
+- Detects loop overruns (when execution exceeds frame budget)
+- Logs warnings every 100th overrun to avoid spam
+- Reports total overruns and max execution time on shutdown
+
+```
+# Example log output
+EyeLightControllerService control loop started at 60Hz
+Control loop overrun: 18.35ms (target: 16.67ms) [1 total overruns]
+Control loop had 1 overruns (max execution time: 18.35ms)
+```
+
+**Best Practices:**
+
+1. **Keep `_control_update()` fast**: Target <50% of frame budget (e.g., <8ms @ 60Hz)
+2. **Only send commands on state changes**: Avoid spamming hardware with duplicate commands
+3. **Handle errors gracefully**: Don't let control loop crash the service
+4. **Use state tracking**: Compare `_target_*` vs `_current_*` to detect changes
+5. **Apply modulation in control loop**: Real-time effects should be calculated each frame
+
+**Example Use Cases:**
+
+- **EyeLightControllerService**: LED pattern/color/brightness control with amplitude pulsing
+- **Motor control**: Smooth servo positioning with interpolation
+- **Audio visualization**: LED bars responding to audio amplitude at 60Hz
+- **Sensor polling**: High-frequency sensor reading with threshold detection
 
 ## 11. I/O and Logging
 

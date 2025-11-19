@@ -53,6 +53,7 @@ class EyePattern(str, Enum):
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
+    FLASH = "flash"  # Green confirmation flash with auto-return
     HAPPY = "happy"
     SAD = "sad"
     ANGRY = "angry"
@@ -174,7 +175,7 @@ class EyeLightControllerService(RealtimeService):
 
     # RGB Color mappings for different modes and sentiments
     MODE_COLORS = {
-        "IDLE": (255, 200, 50),        # Warm yellow/gold (DJ R3X default look)
+        "IDLE": (255, 60, 0),          # Deep orange-red (matches Arduino default)
         "AMBIENT": (128, 0, 255),      # Purple (will cycle in animation)
         "INTERACTIVE": (0, 255, 255),  # Cyan (alert, ready)
         "SLEEPING": (255, 68, 0),      # Dim orange
@@ -229,6 +230,10 @@ class EyeLightControllerService(RealtimeService):
         self._current_color = None
         self._current_brightness = None
 
+        # Mouth amplitude throttling (to prevent 60Hz spam to Arduino)
+        self._last_mouth_command_time = 0.0
+        self.MOUTH_UPDATE_INTERVAL = 0.05  # 20Hz max (50ms between commands)
+
         # Serial configuration
         self.serial_port = serial_port
         self.baud_rate = baud_rate
@@ -281,17 +286,17 @@ class EyeLightControllerService(RealtimeService):
         await self.subscribe(EventTopics.LED_COMMAND, self._handle_eye_command)
         await self.subscribe(EventTopics.LLM_SENTIMENT_ANALYZED, self._handle_sentiment)
         await self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_speech_started)
+        await self.subscribe(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, self._handle_amplitude)
         await self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_speech_ended)
         await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_started)
         await self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_speech_ended)
-        await self.subscribe(EventTopics.TRANSCRIPTION_FINAL, self._handle_listening_ended)
-        await self.subscribe(EventTopics.TRANSCRIPTION_INTERIM, self._handle_listening_active)
-        
-        # Add handlers for text-based recording mode
+
+        # LISTENING/THINKING triggers - use recording state, NOT transcript events
+        # This ensures eyes show LISTENING immediately when user clicks, even during pauses
         await self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_listening_started)
         await self.subscribe(EventTopics.VOICE_LISTENING_STOPPED, self._handle_voice_listening_ended)
         await self.subscribe(EventTopics.VOICE_PROCESSING_STARTED, self._handle_voice_processing_started)
-        
+
         # Add handler for mouse recording events for more immediate response
         await self.subscribe(EventTopics.MOUSE_RECORDING_STOPPED, self._handle_mouse_recording_stopped)
         
@@ -374,13 +379,15 @@ class EyeLightControllerService(RealtimeService):
                 initial_pattern_set = False
                 for attempt in range(3):  # Try up to 3 times
                     try:
-                        # Add a short delay to ensure Arduino is ready
-                        await asyncio.sleep(0.5)
+                        # Small delay between attempts
+                        # Arduino ready signal is now handled in SimpleEyeAdapter
+                        if attempt > 0:
+                            await asyncio.sleep(0.5)
 
                         # Set IDLE color first, then pattern
                         self.logger.info(f"Setting initial IDLE color and pattern (attempt {attempt+1}/3)")
 
-                        idle_color = self.MODE_COLORS["IDLE"]  # (255, 200, 50) - warm yellow
+                        idle_color = self.MODE_COLORS["IDLE"]  # (255, 60, 0) - deep orange-red
                         if self.adapter and hasattr(self.adapter, 'set_color'):
                             self.logger.info(f"Setting initial color to RGB{idle_color}")
                             await self.adapter.set_color(*idle_color)
@@ -478,13 +485,8 @@ class EyeLightControllerService(RealtimeService):
             self._control_loop_started_logged = True
 
         try:
-            # Check if pattern changed
-            if self._target_pattern != self._current_pattern:
-                self.logger.info(
-                    f"Control loop: Pattern changed {self._current_pattern} -> {self._target_pattern}"
-                )
-                await self._send_pattern_to_arduino(self._target_pattern)
-                self._current_pattern = self._target_pattern
+            # CRITICAL: Send color BEFORE pattern!
+            # Arduino uses currentColor when executing patterns, so color must be set first
 
             # Check if color changed
             if self._target_color != self._current_color:
@@ -493,6 +495,14 @@ class EyeLightControllerService(RealtimeService):
                 )
                 await self._send_color_to_arduino(self._target_color)
                 self._current_color = self._target_color
+
+            # Check if pattern changed
+            if self._target_pattern != self._current_pattern:
+                self.logger.info(
+                    f"Control loop: Pattern changed {self._current_pattern} -> {self._target_pattern}"
+                )
+                await self._send_pattern_to_arduino(self._target_pattern)
+                self._current_pattern = self._target_pattern
 
             # Calculate final brightness (base + amplitude modulation for future)
             final_brightness = self._target_brightness
@@ -933,32 +943,64 @@ class EyeLightControllerService(RealtimeService):
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Speech ended, setting target pattern to IDLE")
-            self._target_pattern = EyePattern.IDLE
-    
-    async def _handle_listening_active(self, event_payload: BaseEventPayload) -> None:
+            self.logger.info("Speech ended, triggering green confirmation flash")
+            # Reset amplitude modulation
+            self._amplitude_modulation = 0.0
+            # Explicitly close mouth when speech ends
+            if self.adapter:
+                await self.adapter.set_mouth_amplitude(0)
+                self.logger.debug("Sent M000 to close mouth after speech")
+            # Trigger flash pattern (will auto-return to IDLE in Arduino)
+            self._target_pattern = EyePattern.FLASH
+
+    async def _handle_amplitude(self, event_payload: dict) -> None:
         """
-        Handle active listening events.
+        Handle real-time audio amplitude events during speech synthesis.
+
+        Updates amplitude modulation for pupil brightness pulsing AND mouth opening.
+        Uses exponential moving average (EMA) for smooth transitions.
 
         Args:
-            event_payload: The event payload.
+            event_payload: Dict containing amplitude (0.0-1.0) and timestamp_offset
         """
-        # Only change pattern if in interactive mode
-        if self._is_in_interactive_mode() and self._target_pattern != EyePattern.LISTENING:
-            self.logger.info("Listening active, setting target pattern to LISTENING")
-            self._target_pattern = EyePattern.LISTENING
+        try:
+            from cantina_os.core.event_payloads import SpeechAmplitudePayload
 
-    async def _handle_listening_ended(self, event_payload: BaseEventPayload) -> None:
-        """
-        Handle end of listening events.
+            # Validate payload
+            payload = SpeechAmplitudePayload.model_validate(event_payload)
 
-        Args:
-            event_payload: The event payload.
-        """
-        # Only change pattern if in interactive mode
-        if self._is_in_interactive_mode():
-            self.logger.info("Audio transcription complete, setting target pattern to THINKING")
-            self._target_pattern = EyePattern.THINKING
+            # Only apply amplitude modulation during SPEAKING pattern
+            if self._target_pattern == EyePattern.SPEAKING:
+                # Apply exponential moving average for smoothing
+                # Alpha = 0.3 means 30% new value, 70% old value (smooth but responsive)
+                alpha = 0.3
+                new_amplitude = payload.amplitude
+                self._amplitude_modulation = (
+                    alpha * new_amplitude + (1 - alpha) * self._amplitude_modulation
+                )
+
+                # Send mouth amplitude command (throttled to 20Hz to avoid Arduino spam)
+                now = time.time()
+                if now - self._last_mouth_command_time >= self.MOUTH_UPDATE_INTERVAL:
+                    # Scale amplitude (0.0-1.0) to mouth level (0-255)
+                    mouth_level = int(self._amplitude_modulation * 255)
+                    if self.adapter:
+                        await self.adapter.set_mouth_amplitude(mouth_level)
+                    self._last_mouth_command_time = now
+
+                    # Log occasionally for debugging (every 10th event to avoid spam)
+                    if not hasattr(self, '_amplitude_log_counter'):
+                        self._amplitude_log_counter = 0
+                    self._amplitude_log_counter += 1
+                    if self._amplitude_log_counter % 10 == 0:
+                        self.logger.debug(
+                            f"Amplitude: {self._amplitude_modulation:.3f}, Mouth: {mouth_level}"
+                        )
+
+        except Exception as e:
+            # Don't crash the service if amplitude handling fails
+            self.logger.error(f"Error handling amplitude event: {e}")
+
 
     async def _handle_voice_listening_started(self, event_payload: BaseEventPayload) -> None:
         """Handle voice listening started events (text recording mode)."""

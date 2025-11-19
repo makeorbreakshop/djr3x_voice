@@ -30,6 +30,7 @@ class EyePattern(str, Enum):
     LISTENING = "listening"
     THINKING = "thinking"
     SPEAKING = "speaking"
+    FLASH = "flash"  # Green confirmation flash with auto-return
     HAPPY = "happy"
     SAD = "sad"
     ANGRY = "angry"
@@ -54,6 +55,7 @@ class SimpleEyeAdapter:
         EyePattern.LISTENING: 'L',  # Listening pattern
         EyePattern.THINKING: 'T',   # Thinking pattern
         EyePattern.SPEAKING: 'S',   # Speaking pattern
+        EyePattern.FLASH: 'F',      # Green confirmation flash with auto-return
         EyePattern.HAPPY: 'H',      # Happy pattern
         EyePattern.SAD: 'D',        # Sad pattern (D for Down)
         EyePattern.ANGRY: 'A',      # Angry pattern
@@ -116,11 +118,32 @@ class SimpleEyeAdapter:
             self.serial_conn.reset_input_buffer()
             self.serial_conn.reset_output_buffer()
             
-            # Wait for Arduino to reset (common when serial connection established)
-            self.logger.debug("Waiting for Arduino initialization (3 seconds)")
-            await asyncio.sleep(3.0)  # Increased from 2s to 3s
-            
-            # Clear buffers again after waiting
+            # Wait for Arduino's ready signal ('+' sent after setup() completes)
+            # With wake-up animation disabled, this should be quick (~1-2 seconds)
+            self.logger.info("Waiting for Arduino ready signal...")
+            start_time = time.time()
+            max_wait = 5.0  # Maximum 5 seconds to wait for ready signal (wake-up disabled)
+
+            ready_received = False
+            while (time.time() - start_time) < max_wait:
+                if self.serial_conn.in_waiting > 0:
+                    try:
+                        data = self.serial_conn.read(self.serial_conn.in_waiting)
+                        response = data.decode('utf-8', errors='replace')
+                        self.logger.debug(f"Arduino startup message: '{response.strip()}'")
+                        if '+' in response:
+                            self.logger.info("✅ Arduino ready signal received!")
+                            ready_received = True
+                            break
+                    except Exception as e:
+                        self.logger.warning(f"Error reading startup message: {e}")
+                await asyncio.sleep(0.1)  # Check every 100ms
+
+            if not ready_received:
+                self.logger.warning("⚠️ Arduino ready signal not received, will attempt test commands...")
+
+            # Clear buffers before sending commands
+            await asyncio.sleep(0.1)
             self.serial_conn.reset_input_buffer()
             self.serial_conn.reset_output_buffer()
             
@@ -431,20 +454,26 @@ class SimpleEyeAdapter:
             self.logger.error(f"Error setting pattern {pattern}: {e}")
             return False
         
-    async def set_brightness(self, brightness: float) -> bool:
+    async def set_brightness(self, brightness) -> bool:
         """
         Set the LED brightness.
 
         Args:
-            brightness: Brightness level (0.0-1.0)
+            brightness: Brightness level (0.0-1.0 float OR 0-255 int)
 
         Returns:
             True if successful, False otherwise
         """
-        # Convert 0.0-1.0 range to 0-255 range for WS2812B
-        level = min(255, max(0, int(brightness * 255)))
+        # Handle both formats: float (0.0-1.0) or int (0-255)
+        if isinstance(brightness, float) and brightness <= 1.0:
+            # Float format (0.0-1.0) - convert to 0-255 range
+            level = min(255, max(0, int(brightness * 255)))
+        else:
+            # Int format (0-255) - use directly
+            level = min(255, max(0, int(brightness)))
+
         command = f'B{level:03d}'  # Format: B000 to B255 (newline added by _send_command)
-        self.logger.debug(f"Setting brightness to {brightness:.2f} (level {level}) - command: {command}")
+        self.logger.debug(f"Setting brightness to {brightness} (level {level}) - command: {command}")
         return await self._send_command(command)
 
     async def set_color(self, r: int, g: int, b: int) -> bool:
@@ -471,15 +500,30 @@ class SimpleEyeAdapter:
         self.logger.info(f"🎨 SimpleEyeAdapter.set_color() result: {result}")
         return result
         
+    async def set_mouth_amplitude(self, amplitude: int) -> bool:
+        """
+        Set mouth opening amplitude (0-255).
+
+        Args:
+            amplitude: Mouth opening level (0=closed/dim, 255=fully open/bright)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Clamp to 0-255
+        level = min(255, max(0, int(amplitude)))
+        command = f"M{level:03d}"  # Format: M000 to M255
+        return await self._send_command(command)
+
     async def reset(self) -> bool:
         """
         Reset the eyes to default state.
-        
+
         Returns:
             True if successful, False otherwise
         """
         return await self._send_command('R')
-        
+
     async def get_status(self) -> dict:
         """
         Get the current status of the Arduino and eye patterns.
