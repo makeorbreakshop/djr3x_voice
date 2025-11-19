@@ -349,7 +349,7 @@ class BaseService:
             }
         )
 
-    async def debug_state_transition(self, from_state: str, to_state: str, 
+    async def debug_state_transition(self, from_state: str, to_state: str,
                                    details: Optional[Dict[str, Any]] = None) -> None:
         """Report a state transition for debugging."""
         await self.emit(
@@ -360,4 +360,194 @@ class BaseService:
                 "to_state": to_state,
                 "details": details
             }
-        ) 
+        )
+
+
+class RealtimeService(BaseService):
+    """
+    Base class for services requiring real-time control loops.
+
+    Extends BaseService with a built-in control loop that runs at a specified frequency
+    (default 60Hz). This is designed for hardware control where smooth execution at high
+    frequencies is required (LED animations, servo control, audio synchronization, etc.).
+
+    Architecture Pattern:
+    - Event handlers SET STATE (high-level decisions)
+    - Control loop EXECUTES STATE (smooth hardware updates)
+
+    Example Use Cases:
+    - LED brightness pulsing with speech amplitude (60fps)
+    - Servo position interpolation (100Hz)
+    - Beat-synchronized animations
+
+    Usage:
+        class MyHardwareService(RealtimeService):
+            def __init__(self, event_bus):
+                super().__init__("my_service", event_bus, loop_rate_hz=60)
+                self._target_position = 0
+
+            async def _on_start(self):
+                await self.subscribe(EventTopics.COMMAND, self._handle_command)
+
+            async def _handle_command(self, payload):
+                # Event handler - just sets state
+                self._target_position = payload["position"]
+
+            async def _control_update(self):
+                # Called 60x/sec - executes smooth movement
+                await self._send_position_to_hardware(self._target_position)
+    """
+
+    def __init__(self, service_name: str, event_bus, loop_rate_hz: int = 60):
+        """
+        Initialize the realtime service.
+
+        Args:
+            service_name: Name of the service
+            event_bus: Event bus instance
+            loop_rate_hz: Control loop frequency in Hz (default: 60)
+        """
+        super().__init__(service_name, event_bus)
+        self._loop_rate_hz = loop_rate_hz
+        self._loop_task: Optional[asyncio.Task] = None
+        self._loop_running = False
+        self._loop_iteration = 0
+
+        # Performance tracking
+        self._loop_overruns = 0
+        self._max_loop_time = 0.0
+
+    async def start(self) -> None:
+        """Start the service and its control loop."""
+        if self._is_running:
+            return
+
+        # Start base service first
+        await super().start()
+
+        # Start control loop
+        self._loop_running = True
+        self._loop_task = asyncio.create_task(self._run_control_loop())
+        self.logger.info(
+            f"{self.__class__.__name__} control loop started at {self._loop_rate_hz}Hz"
+        )
+
+    async def stop(self) -> None:
+        """Stop the control loop and service."""
+        # Stop control loop first
+        self._loop_running = False
+        if self._loop_task:
+            self._loop_task.cancel()
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                pass
+            self._loop_task = None
+
+        # Log performance stats
+        if self._loop_overruns > 0:
+            self.logger.warning(
+                f"Control loop had {self._loop_overruns} overruns "
+                f"(max execution time: {self._max_loop_time*1000:.2f}ms)"
+            )
+
+        # Stop base service
+        await super().stop()
+
+    async def _run_control_loop(self) -> None:
+        """
+        Main control loop that runs at specified Hz.
+
+        Calls _control_update() every frame and maintains precise timing.
+        Tracks performance metrics to detect loop overruns.
+        """
+        import time
+
+        interval = 1.0 / self._loop_rate_hz
+        interval_ms = interval * 1000
+
+        self.logger.debug(
+            f"Control loop running: target={self._loop_rate_hz}Hz "
+            f"(interval={interval_ms:.2f}ms)"
+        )
+
+        while self._loop_running:
+            loop_start = time.time()
+
+            try:
+                # Call subclass implementation
+                await self._control_update()
+
+                # Track iteration count
+                self._loop_iteration += 1
+
+                # Performance monitoring
+                loop_time = time.time() - loop_start
+                self._max_loop_time = max(self._max_loop_time, loop_time)
+
+                # Detect overruns (loop took longer than interval)
+                if loop_time > interval:
+                    self._loop_overruns += 1
+                    if self._loop_overruns % 100 == 1:  # Log every 100th overrun
+                        self.logger.warning(
+                            f"Control loop overrun: {loop_time*1000:.2f}ms "
+                            f"(target: {interval_ms:.2f}ms) "
+                            f"[{self._loop_overruns} total overruns]"
+                        )
+
+            except asyncio.CancelledError:
+                # Loop cancelled during shutdown
+                break
+            except Exception as e:
+                self.logger.error(f"Error in control loop iteration {self._loop_iteration}: {e}")
+                # Continue running despite errors
+
+            # Sleep to maintain loop rate
+            elapsed = time.time() - loop_start
+            sleep_time = max(0, interval - elapsed)
+
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+
+    async def _control_update(self) -> None:
+        """
+        Control loop update called every frame.
+
+        Override this method in your subclass to implement real-time control logic.
+        This method should:
+        - Read current state set by event handlers
+        - Perform calculations (interpolation, filtering, etc.)
+        - Send commands to hardware
+
+        Example:
+            async def _control_update(self):
+                # Read state (set by event handlers)
+                target_brightness = self._target_brightness
+
+                # Calculate output (with smoothing)
+                current = self._smooth_brightness(target_brightness)
+
+                # Send to hardware
+                await self._arduino.write_brightness(current)
+
+        Note: Keep this method fast! It runs 60+ times per second.
+        Avoid blocking operations, heavy computation, or slow I/O.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _control_update()"
+        )
+
+    @property
+    def loop_rate_hz(self) -> int:
+        """Get the control loop frequency in Hz."""
+        return self._loop_rate_hz
+
+    @property
+    def loop_iteration(self) -> int:
+        """Get the current loop iteration count."""
+        return self._loop_iteration
+
+    @property
+    def loop_overruns(self) -> int:
+        """Get the number of loop overruns (when execution exceeded interval)."""
+        return self._loop_overruns

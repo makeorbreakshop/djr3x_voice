@@ -29,7 +29,7 @@ CRGB leds[NUM_LEDS];
 // Current state
 char currentPattern = 'I';  // Default to IDLE
 int currentBrightness = DEFAULT_BRIGHTNESS;
-CRGB currentColor = CRGB(255, 228, 181);  // Warm white default
+CRGB currentColor = CRGB(255, 200, 50);  // Warm yellow/gold default (matches Python IDLE color)
 unsigned long lastUpdate = 0;
 int animationStep = 0;
 
@@ -56,34 +56,36 @@ void setup() {
 }
 
 void loop() {
-  // Process serial commands
-  if (Serial.available() > 0) {
+  // Process ALL available serial commands (drain the buffer completely)
+  while (Serial.available() > 0) {
     char inChar = (char)Serial.read();
 
     // Ignore newlines and carriage returns when not reading a command
     if (!readingCommand && (inChar == '\n' || inChar == '\r')) {
-      return;
+      continue;  // Keep reading more characters
     }
 
     // Start of color command
-    if (inChar == 'C') {
+    if (inChar == 'C' && !readingCommand) {
       commandBuffer = "C";
       readingCommand = true;
-      return;
+      continue;  // Keep reading more characters
     }
 
     // Start of brightness command
-    if (inChar == 'B') {
+    if (inChar == 'B' && !readingCommand) {
       commandBuffer = "B";
       readingCommand = true;
-      return;
+      continue;  // Keep reading more characters
     }
 
     // Building a multi-character command
     if (readingCommand) {
       if (inChar == '\n' || inChar == '\r') {
         // Command complete, process it
-        processMultiCharCommand(commandBuffer);
+        if (commandBuffer.length() > 1) {  // Avoid processing empty buffers
+          processMultiCharCommand(commandBuffer);
+        }
         commandBuffer = "";
         readingCommand = false;
       } else {
@@ -102,7 +104,7 @@ void loop() {
           readingCommand = false;
         }
       }
-      return;
+      continue;  // Keep reading more characters
     }
 
     // Single-character command (pattern, brightness 0-9, reset)
@@ -484,8 +486,15 @@ void updateEyeAnimation() {
 void setColor(int r, int g, int b) {
   currentColor = CRGB(r, g, b);
 
-  // Update display with new color (keep current pattern)
-  setPattern(currentPattern);
+  // Immediately update LEDs with new color (keeping current pattern state)
+  // Note: We don't call setPattern() here because it resets animation state
+  // Python will send pattern command after color if needed
+  if (currentPattern == 'I' || currentPattern == 'E' || currentPattern == 'H' ||
+      currentPattern == 'D' || currentPattern == 'S' || currentPattern == 'L') {
+    // For patterns that use currentColor, update the display
+    fillEyes(currentColor);
+    FastLED.show();
+  }
 }
 
 void setBrightness(int brightness) {
@@ -498,7 +507,7 @@ void setBrightness(int brightness) {
 void resetEyes() {
   FastLED.setBrightness(DEFAULT_BRIGHTNESS);
   currentBrightness = DEFAULT_BRIGHTNESS;
-  currentColor = CRGB(255, 228, 181);  // Warm white
+  currentColor = CRGB(255, 200, 50);  // Warm yellow/gold (matches IDLE)
   animationStep = 0;
 
   clearEyes();

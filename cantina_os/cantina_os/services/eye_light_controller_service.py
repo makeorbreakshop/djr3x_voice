@@ -29,7 +29,7 @@ import serial
 import serial.tools.list_ports
 from pydantic import ValidationError, BaseModel, Field
 
-from ..base_service import BaseService
+from ..base_service import BaseService, RealtimeService
 from cantina_os.event_payloads import (
     BaseEventPayload,
     EyeCommandPayload,
@@ -159,12 +159,17 @@ class EyeCliCommandPayload(BaseModel):
         return result
 
 
-class EyeLightControllerService(BaseService):
+class EyeLightControllerService(RealtimeService):
     """
-    Service to control the LED patterns for DJ R3X's eyes.
+    Service to control the LED patterns for DJ R3X's eyes with real-time control loop.
 
     This service manages communication with an Arduino over serial connection
     to control LED patterns and animations based on the robot's state and mood.
+
+    Architecture:
+    - Event handlers SET STATE (pattern, color, brightness targets)
+    - 60Hz control loop EXECUTES STATE (sends commands to Arduino)
+    - Future: Amplitude pulsing, smooth transitions, beat sync
     """
 
     # RGB Color mappings for different modes and sentiments
@@ -210,8 +215,20 @@ class EyeLightControllerService(BaseService):
                        Default is False to prefer hardware connection.
             name: Service name.
         """
-        super().__init__(service_name=name, event_bus=event_bus)
-        
+        # Initialize RealtimeService with 60Hz control loop
+        super().__init__(service_name=name, event_bus=event_bus, loop_rate_hz=60)
+
+        # Control loop state (set by event handlers, read by _control_update)
+        self._target_pattern = EyePattern.IDLE
+        self._target_color = self.MODE_COLORS["IDLE"]  # Warm yellow default
+        self._target_brightness = 128  # 0-255 range
+        self._amplitude_modulation = 0.0  # 0.0 to 1.0 (for future TTS pulsing)
+
+        # Current hardware state (what Arduino currently has)
+        self._current_pattern = None
+        self._current_color = None
+        self._current_brightness = None
+
         # Serial configuration
         self.serial_port = serial_port
         self.baud_rate = baud_rate
@@ -359,20 +376,26 @@ class EyeLightControllerService(BaseService):
                     try:
                         # Add a short delay to ensure Arduino is ready
                         await asyncio.sleep(0.5)
-                        
-                        # Skip STARTUP pattern and just set IDLE directly
-                        self.logger.info(f"Setting initial IDLE pattern (attempt {attempt+1}/3)")
+
+                        # Set IDLE color first, then pattern
+                        self.logger.info(f"Setting initial IDLE color and pattern (attempt {attempt+1}/3)")
+
+                        idle_color = self.MODE_COLORS["IDLE"]  # (255, 200, 50) - warm yellow
+                        if self.adapter and hasattr(self.adapter, 'set_color'):
+                            self.logger.info(f"Setting initial color to RGB{idle_color}")
+                            await self.adapter.set_color(*idle_color)
+
                         if await self.set_pattern(EyePattern.IDLE):
                             initial_pattern_set = True
-                            self.logger.info("Initial IDLE pattern set successfully")
+                            self.logger.info("Initial IDLE color and pattern set successfully")
                             break
                         else:
                             self.logger.warning(f"Failed to set initial IDLE pattern (attempt {attempt+1}/3)")
                     except Exception as e:
-                        self.logger.error(f"Error setting initial pattern (attempt {attempt+1}/3): {e}")
-                
+                        self.logger.error(f"Error setting initial color/pattern (attempt {attempt+1}/3): {e}")
+
                 if not initial_pattern_set:
-                    self.logger.warning("Could not set initial pattern, will continue anyway")
+                    self.logger.warning("Could not set initial color/pattern, will continue anyway")
                 
                 self._status = ServiceStatus.RUNNING
                 self.logger.info("Arduino setup complete - EyeLightControllerService running in hardware mode")
@@ -419,7 +442,103 @@ class EyeLightControllerService(BaseService):
         
         self.connected = False
         self._status = ServiceStatus.STOPPED
-    
+
+    async def _control_update(self) -> None:
+        """
+        Real-time control loop update (called 60 times per second).
+
+        This method reads the target state (set by event handlers) and sends
+        commands to the Arduino only when state changes. This prevents spamming
+        the Arduino with redundant commands.
+
+        Architecture:
+        - Event handlers SET: self._target_pattern, self._target_color, self._target_brightness
+        - This method READS targets and SENDS to Arduino if changed
+        - Future: Will add smooth transitions and amplitude pulsing
+        """
+        # Skip if in mock mode or not connected to hardware
+        if self.mock_mode or not self.connected or not self.adapter:
+            # Only log once per startup to avoid spam
+            if not hasattr(self, '_control_loop_skip_logged'):
+                self.logger.warning(
+                    f"Control loop skipping: mock_mode={self.mock_mode}, "
+                    f"connected={self.connected}, adapter={self.adapter is not None}"
+                )
+                self._control_loop_skip_logged = True
+            return
+
+        # Log the first successful control loop execution to verify it's running
+        if not hasattr(self, '_control_loop_started_logged'):
+            self.logger.info(
+                f"Control loop ACTIVE: target_pattern={self._target_pattern}, "
+                f"current_pattern={self._current_pattern}, "
+                f"target_color={self._target_color}, "
+                f"current_color={self._current_color}"
+            )
+            self._control_loop_started_logged = True
+
+        try:
+            # Check if pattern changed
+            if self._target_pattern != self._current_pattern:
+                self.logger.info(
+                    f"Control loop: Pattern changed {self._current_pattern} -> {self._target_pattern}"
+                )
+                await self._send_pattern_to_arduino(self._target_pattern)
+                self._current_pattern = self._target_pattern
+
+            # Check if color changed
+            if self._target_color != self._current_color:
+                self.logger.info(
+                    f"Control loop: Color changed {self._current_color} -> {self._target_color}"
+                )
+                await self._send_color_to_arduino(self._target_color)
+                self._current_color = self._target_color
+
+            # Calculate final brightness (base + amplitude modulation for future)
+            final_brightness = self._target_brightness
+            if self._amplitude_modulation > 0:
+                # Future: Pulse brightness based on speech amplitude
+                # Scale modulation 0.0-1.0 to ±30% brightness variation
+                modulation_factor = 1.0 + (self._amplitude_modulation * 0.3)
+                final_brightness = int(self._target_brightness * modulation_factor)
+                final_brightness = max(0, min(255, final_brightness))  # Clamp to 0-255
+
+            # Check if brightness changed (only send if different to avoid spam)
+            if final_brightness != self._current_brightness:
+                self.logger.info(
+                    f"Control loop: Brightness changed {self._current_brightness} -> {final_brightness}"
+                )
+                await self._send_brightness_to_arduino(final_brightness)
+                self._current_brightness = final_brightness
+
+        except Exception as e:
+            # Don't let control loop crash the service
+            self.logger.error(f"Error in control loop: {e}")
+
+    async def _send_pattern_to_arduino(self, pattern: EyePattern) -> None:
+        """Send pattern command to Arduino (helper for control loop)."""
+        if self.adapter:
+            try:
+                await self.adapter.set_pattern(pattern.value)
+            except Exception as e:
+                self.logger.error(f"Failed to send pattern to Arduino: {e}")
+
+    async def _send_color_to_arduino(self, color: tuple) -> None:
+        """Send color command to Arduino (helper for control loop)."""
+        if self.adapter and hasattr(self.adapter, 'set_color'):
+            try:
+                await self.adapter.set_color(*color)
+            except Exception as e:
+                self.logger.error(f"Failed to send color to Arduino: {e}")
+
+    async def _send_brightness_to_arduino(self, brightness: int) -> None:
+        """Send brightness command to Arduino (helper for control loop)."""
+        if self.adapter and hasattr(self.adapter, 'set_brightness'):
+            try:
+                await self.adapter.set_brightness(brightness)
+            except Exception as e:
+                self.logger.error(f"Failed to send brightness to Arduino: {e}")
+
     async def _auto_detect_arduino(self) -> Optional[str]:
         """
         Auto-detect the Arduino serial port.
@@ -784,100 +903,96 @@ class EyeLightControllerService(BaseService):
             return
 
         # Only change the pattern if we're not in a critical state (like listening or processing)
-        if self.current_pattern not in [EyePattern.LISTENING, EyePattern.THINKING]:
-            # Set color first, then pattern
-            if self.adapter and hasattr(self.adapter, 'set_color'):
-                await self.adapter.set_color(*color)
+        if self._target_pattern not in [EyePattern.LISTENING, EyePattern.THINKING]:
+            # Set target state (control loop will execute)
+            self._target_color = color
+            self._target_pattern = pattern
+            self.logger.info(f"Sentiment detected: {event_payload.label} -> pattern={pattern}, color={color}")
 
-            await self.set_pattern(pattern=pattern, duration=2.0)
-            # After the emotion display, return to current activity pattern
-            if self.current_pattern == EyePattern.SPEAKING:
-                await asyncio.sleep(2.0)
-                await self.set_pattern(EyePattern.SPEAKING)
+            # TODO: Add timer to return to previous pattern after 2 seconds
+            # For now, sentiment changes persist until next event
     
     async def _handle_speech_started(self, event_payload: BaseEventPayload) -> None:
         """
         Handle speech synthesis/generation started events.
-        
+
         Args:
             event_payload: The event payload.
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Speech started, setting eye pattern to SPEAKING")
-            await self.set_pattern(EyePattern.SPEAKING)
+            self.logger.info("Speech started, setting target pattern to SPEAKING")
+            self._target_pattern = EyePattern.SPEAKING
     
     async def _handle_speech_ended(self, event_payload: BaseEventPayload) -> None:
         """
         Handle speech synthesis/generation ended events.
-        
+
         Args:
             event_payload: The event payload.
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Speech ended, setting eye pattern to IDLE")
-            await self.set_pattern(EyePattern.IDLE)
+            self.logger.info("Speech ended, setting target pattern to IDLE")
+            self._target_pattern = EyePattern.IDLE
     
     async def _handle_listening_active(self, event_payload: BaseEventPayload) -> None:
         """
         Handle active listening events.
-        
+
         Args:
             event_payload: The event payload.
         """
         # Only change pattern if in interactive mode
-        if self._is_in_interactive_mode() and self.current_pattern != EyePattern.LISTENING:
-            self.logger.info("Listening active, setting eye pattern to LISTENING")
-            await self.set_pattern(EyePattern.LISTENING)
-    
+        if self._is_in_interactive_mode() and self._target_pattern != EyePattern.LISTENING:
+            self.logger.info("Listening active, setting target pattern to LISTENING")
+            self._target_pattern = EyePattern.LISTENING
+
     async def _handle_listening_ended(self, event_payload: BaseEventPayload) -> None:
         """
         Handle end of listening events.
-        
+
         Args:
             event_payload: The event payload.
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Audio transcription complete, transitioning to thinking pattern")
-            await self.set_pattern(EyePattern.THINKING)
-    
+            self.logger.info("Audio transcription complete, setting target pattern to THINKING")
+            self._target_pattern = EyePattern.THINKING
+
     async def _handle_voice_listening_started(self, event_payload: BaseEventPayload) -> None:
         """Handle voice listening started events (text recording mode)."""
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Voice recording started, setting LED pattern to LISTENING")
-            await self.set_pattern(EyePattern.LISTENING)
-    
+            self.logger.info("Voice recording started, setting target pattern to LISTENING")
+            self._target_pattern = EyePattern.LISTENING
+
     async def _handle_voice_listening_ended(self, event_payload: BaseEventPayload) -> None:
         """Handle voice listening ended events (text recording mode)."""
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Voice recording ended, setting LED pattern to THINKING")
-            # Set pattern to THINKING after voice input is recorded and before processing starts
-            await self.set_pattern(EyePattern.THINKING)
-            # Note: We'll immediately get a processing started event next
-    
+            self.logger.info("Voice recording ended, setting target pattern to THINKING")
+            self._target_pattern = EyePattern.THINKING
+
     async def _handle_voice_processing_started(self, event_payload: BaseEventPayload) -> None:
         """Handle voice processing started events (text recording mode)."""
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Voice processing started, setting LED pattern to THINKING")
-            await self.set_pattern(EyePattern.THINKING)
-    
+            self.logger.info("Voice processing started, setting target pattern to THINKING")
+            self._target_pattern = EyePattern.THINKING
+
     async def _handle_mouse_recording_stopped(self, event_payload: BaseEventPayload) -> None:
         """
         Handle mouse recording stopped events - triggers immediately when mouse is clicked
         to stop recording, before transcript processing completes.
-        
+
         Args:
             event_payload: The event payload.
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Mouse recording stopped, immediately setting eye pattern to THINKING")
-            await self.set_pattern(EyePattern.THINKING)
+            self.logger.info("Mouse recording stopped, setting target pattern to THINKING")
+            self._target_pattern = EyePattern.THINKING
     
     @compound_command("eye test")
     @command_error_handler
@@ -1099,67 +1214,44 @@ class EyeLightControllerService(BaseService):
 
             self.logger.info(f"System mode changed to: {new_mode}, updating eye pattern and color")
 
-            # Map system modes to eye patterns and colors
+            # Map system modes to eye patterns and colors (set target state)
             if new_mode == "IDLE":
-                # Normal idle pattern with warm yellow/gold
-                color = self.MODE_COLORS["IDLE"]
-                self.logger.info(f"🎨 DEBUG: IDLE mode - attempting to set color to {color}")
-                self.logger.info(f"🔍 DEBUG: self.adapter = {self.adapter}")
-                self.logger.info(f"🔍 DEBUG: has set_color method? {hasattr(self.adapter, 'set_color') if self.adapter else 'adapter is None'}")
-                if self.adapter and hasattr(self.adapter, 'set_color'):
-                    self.logger.info(f"🎨 Calling set_color({color[0]}, {color[1]}, {color[2]})")
-                    result = await self.adapter.set_color(*color)
-                    self.logger.info(f"✅ set_color returned: {result}")
-                else:
-                    self.logger.warning(f"⚠️ Skipping set_color - adapter check failed")
-                await self.set_pattern(EyePattern.IDLE)
+                self._target_color = self.MODE_COLORS["IDLE"]
+                self._target_pattern = EyePattern.IDLE
+                self._target_brightness = 128
+                self.logger.info(f"Mode IDLE: target color={self._target_color}, pattern={self._target_pattern}")
 
             elif new_mode == "AMBIENT":
-                # Ambient/party mode - use purple/engaged pattern (will cycle colors in animation)
-                color = self.MODE_COLORS["AMBIENT"]
-                if self.adapter and hasattr(self.adapter, 'set_color'):
-                    await self.adapter.set_color(*color)
-                await self.set_pattern(EyePattern.ENGAGED)
+                self._target_color = self.MODE_COLORS["AMBIENT"]
+                self._target_pattern = EyePattern.ENGAGED
+                self._target_brightness = 128
+                self.logger.info(f"Mode AMBIENT: target color={self._target_color}, pattern={self._target_pattern}")
 
             elif new_mode == "INTERACTIVE":
-                # Voice interactive mode - cyan color with engaged pattern
-                # This pattern indicates DJ R3X is ready for interaction
-                # but not yet actively listening
-                color = self.MODE_COLORS["INTERACTIVE"]
-                self.logger.info(f"🎨 DEBUG: INTERACTIVE mode - attempting to set color to {color}")
-                self.logger.info(f"🔍 DEBUG: self.adapter = {self.adapter}")
-                self.logger.info(f"🔍 DEBUG: has set_color method? {hasattr(self.adapter, 'set_color') if self.adapter else 'adapter is None'}")
-                if self.adapter and hasattr(self.adapter, 'set_color'):
-                    self.logger.info(f"🎨 Calling set_color({color[0]}, {color[1]}, {color[2]})")
-                    result = await self.adapter.set_color(*color)
-                    self.logger.info(f"✅ set_color returned: {result}")
-                else:
-                    self.logger.warning(f"⚠️ Skipping set_color - adapter check failed")
-                await self.set_pattern(EyePattern.ENGAGED)
+                self._target_color = self.MODE_COLORS["INTERACTIVE"]
+                self._target_pattern = EyePattern.ENGAGED
+                self._target_brightness = 128
+                self.logger.info(f"Mode INTERACTIVE: target color={self._target_color}, pattern={self._target_pattern}")
 
             elif new_mode == "SLEEPING":
-                # Sleeping mode - dim orange at low brightness
-                color = self.MODE_COLORS["SLEEPING"]
-                if self.adapter and hasattr(self.adapter, 'set_color'):
-                    await self.adapter.set_color(*color)
-                await self.set_brightness(0.3)
-                await self.set_pattern(EyePattern.IDLE)
+                self._target_color = self.MODE_COLORS["SLEEPING"]
+                self._target_pattern = EyePattern.IDLE
+                self._target_brightness = int(255 * 0.3)  # 30% brightness
+                self.logger.info(f"Mode SLEEPING: target color={self._target_color}, pattern={self._target_pattern}, brightness={self._target_brightness}")
 
             else:
-                # Unknown mode, use idle pattern with warm white
-                self.logger.warning(f"Unknown mode: {new_mode}, using default IDLE pattern")
-                color = self.MODE_COLORS["IDLE"]
-                if self.adapter and hasattr(self.adapter, 'set_color'):
-                    await self.adapter.set_color(*color)
-                await self.set_pattern(EyePattern.IDLE)
+                # Unknown mode, use idle defaults
+                self.logger.warning(f"Unknown mode: {new_mode}, using default IDLE")
+                self._target_color = self.MODE_COLORS["IDLE"]
+                self._target_pattern = EyePattern.IDLE
+                self._target_brightness = 128
 
         except Exception as e:
             self.logger.error(f"Error handling mode change: {e}")
-            # Fallback to idle pattern with warm white
-            color = self.MODE_COLORS["IDLE"]
-            if self.adapter and hasattr(self.adapter, 'set_color'):
-                await self.adapter.set_color(*color)
-            await self.set_pattern(EyePattern.IDLE)
+            # Fallback to idle defaults
+            self._target_color = self.MODE_COLORS["IDLE"]
+            self._target_pattern = EyePattern.IDLE
+            self._target_brightness = 128
             
     def _is_in_interactive_mode(self) -> bool:
         """Check if we're in interactive voice mode."""
