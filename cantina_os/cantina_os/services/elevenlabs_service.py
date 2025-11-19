@@ -21,6 +21,7 @@ from cantina_os.event_payloads import (
     BaseEventPayload,
     SpeechGenerationRequestPayload,
     SpeechGenerationCompletePayload,
+    SpeechAmplitudePayload,
     ServiceStatus,
     LogLevel,
     LLMResponsePayload
@@ -458,24 +459,76 @@ class ElevenLabsService(BaseService):
                         self.logger.info(f"Starting streaming TTS with elevenlabs SDK for text: {text[:50]}...")
                         self.logger.info(f"Request details - Model: {model_id}, Voice: {voice_id}, Speed: {speed}")
 
-                        # Use the new SDK 2.x API: client.text_to_speech.stream()
-                        # Key optimization: optimize_streaming_latency=4 gives ~75% latency improvement
+                        # Use PCM format for zero-latency streaming (no MP3 decoding overhead)
                         audio_stream = eleven_client.text_to_speech.stream(
                             text=text,
                             voice_id=voice_id,
                             model_id=model_id,
                             voice_settings=voice_settings,
-                            output_format="mp3_44100_128"  # Match non-streaming format to prevent sample rate mismatch
+                            output_format="pcm_24000"  # ✅ 24kHz PCM - raw audio, no decoding needed
                         )
 
-                        # Use the ElevenLabs stream utility to play the audio
-                        # This blocks in the audio thread until playback is complete
-                        self.logger.info("Starting audio playback with elevenlabs.stream")
+                        self.logger.info("🔊 Streaming PCM audio with real-time amplitude calculation")
 
                         try:
-                            from elevenlabs import stream as elevenlabs_stream
-                            elevenlabs_stream(audio_stream)
-                            self.logger.info("Audio streaming complete")
+                            import numpy as np
+                            import sounddevice as sd
+                            import time
+                            from datetime import datetime
+
+                            # Constants for PCM processing
+                            SAMPLE_RATE = 24000  # 24kHz
+                            MAX_AMPLITUDE = 32768.0  # 16-bit audio max
+
+                            # Stream output device for continuous playback
+                            stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype='int16')
+                            stream.start()
+
+                            chunk_count = 0
+                            start_time = time.time()
+
+                            # Process and play each PCM chunk immediately (true streaming)
+                            for chunk in audio_stream:
+                                # Only process bytes (filter out metadata)
+                                if isinstance(chunk, bytes):
+                                    chunk_count += 1
+
+                                    # Convert raw PCM bytes directly to numpy array (no ffmpeg subprocess!)
+                                    samples = np.frombuffer(chunk, dtype=np.int16)
+
+                                    # Calculate RMS amplitude
+                                    rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
+                                    # Boost amplitude by 3x for more dramatic mouth movement (ElevenLabs PCM is quiet)
+                                    # Most values are 0.0-0.3, boost them to 0.0-0.9 range
+                                    AMPLITUDE_BOOST = 3.0
+                                    normalized_amplitude = min(1.0, (rms / MAX_AMPLITUDE) * AMPLITUDE_BOOST)
+
+                                    # Emit amplitude event (thread-safe)
+                                    payload_dict = {
+                                        "conversation_id": conversation_id,
+                                        "amplitude": float(normalized_amplitude),
+                                        "timestamp_offset": time.time() - start_time,
+                                        "timestamp": datetime.now().isoformat(),
+                                        "event_id": f"amp_{datetime.now().timestamp()}"
+                                    }
+
+                                    async def emit_amplitude():
+                                        await self.emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
+
+                                    asyncio.run_coroutine_threadsafe(emit_amplitude(), self._event_loop)
+
+                                    # Play chunk immediately (true streaming, no accumulation!)
+                                    stream.write(samples)
+
+                                    self.logger.debug(f"🎵 Chunk {chunk_count}: {len(samples)} samples, RMS: {normalized_amplitude:.3f}")
+
+                            # Close stream after all chunks processed
+                            stream.stop()
+                            stream.close()
+
+                            self.logger.info(f"📊 Streamed {chunk_count} PCM chunks in real-time")
+
+                            self.logger.info("✅ PCM audio streaming complete")
                         except Exception as stream_error:
                             self.logger.error(f"Error in elevenlabs.stream: {stream_error}")
                             raise
