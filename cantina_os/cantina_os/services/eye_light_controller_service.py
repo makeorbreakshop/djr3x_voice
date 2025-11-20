@@ -230,9 +230,10 @@ class EyeLightControllerService(RealtimeService):
         self._current_color = None
         self._current_brightness = None
 
-        # Mouth amplitude throttling (to prevent 60Hz spam to Arduino)
+        # Mouth amplitude throttling (to prevent Arduino buffer overflow)
         self._last_mouth_command_time = 0.0
-        self.MOUTH_UPDATE_INTERVAL = 0.05  # 20Hz max (50ms between commands)
+        self.MOUTH_UPDATE_INTERVAL = 0.10  # 10Hz max (100ms between commands) - reduced from 20Hz to prevent overflow
+        self._last_mouth_level = -1  # Track last sent value to avoid duplicate commands
 
         # Serial configuration
         self.serial_port = serial_port
@@ -496,6 +497,9 @@ class EyeLightControllerService(RealtimeService):
                 await self._send_color_to_arduino(self._target_color)
                 self._current_color = self._target_color
 
+                # Add small delay after color change to prevent command collision
+                await asyncio.sleep(0.05)
+
             # Check if pattern changed
             if self._target_pattern != self._current_pattern:
                 self.logger.info(
@@ -529,6 +533,11 @@ class EyeLightControllerService(RealtimeService):
         """Send pattern command to Arduino (helper for control loop)."""
         if self.adapter:
             try:
+                # For critical pattern changes, flush the buffer first to ensure command gets through
+                if pattern in [EyePattern.LISTENING, EyePattern.THINKING, EyePattern.SPEAKING]:
+                    await self.adapter.flush_serial_buffer()
+                    self.logger.debug(f"Flushed serial buffer before sending critical pattern: {pattern}")
+
                 await self.adapter.set_pattern(pattern.value)
             except Exception as e:
                 self.logger.error(f"Failed to send pattern to Arduino: {e}")
@@ -979,14 +988,24 @@ class EyeLightControllerService(RealtimeService):
                     alpha * new_amplitude + (1 - alpha) * self._amplitude_modulation
                 )
 
-                # Send mouth amplitude command (throttled to 20Hz to avoid Arduino spam)
+                # Send mouth amplitude command (throttled and deduplicated to avoid Arduino spam)
                 now = time.time()
                 if now - self._last_mouth_command_time >= self.MOUTH_UPDATE_INTERVAL:
                     # Scale amplitude (0.0-1.0) to mouth level (0-255)
-                    mouth_level = int(self._amplitude_modulation * 255)
-                    if self.adapter:
-                        await self.adapter.set_mouth_amplitude(mouth_level)
-                    self._last_mouth_command_time = now
+                    # Add minimum baseline for ENGAGED mode to ensure some contrast
+                    if self._current_mode == SystemMode.INTERACTIVE:
+                        # In ENGAGED mode: map 0.0-1.0 to 20-255 range for better contrast
+                        mouth_level = int(20 + (self._amplitude_modulation * 235))
+                    else:
+                        # Other modes: full 0-255 range
+                        mouth_level = int(self._amplitude_modulation * 255)
+
+                    # Only send if value actually changed (prevent duplicate commands)
+                    if mouth_level != self._last_mouth_level:
+                        if self.adapter:
+                            await self.adapter.set_mouth_amplitude(mouth_level)
+                        self._last_mouth_level = mouth_level
+                        self._last_mouth_command_time = now
 
                     # Log occasionally for debugging (every 10th event to avoid spam)
                     if not hasattr(self, '_amplitude_log_counter'):

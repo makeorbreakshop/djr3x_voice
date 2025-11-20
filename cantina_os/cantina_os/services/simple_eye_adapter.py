@@ -300,9 +300,14 @@ class SimpleEyeAdapter:
             
             # Send command with newline character (Arduino typically expects \n termination)
             command_str = command + '\n'
-            self.logger.info(f"📤 Sending to Arduino: '{command}' (with newline)")
+            # Reduce logging for mouth amplitude commands (M commands) to avoid spam
+            if command.startswith('M'):
+                self.logger.debug(f"📤 Sending mouth amplitude: '{command}'")
+            else:
+                self.logger.info(f"📤 Sending to Arduino: '{command}' (with newline)")
+
             bytes_written = self.serial_conn.write(command_str.encode('utf-8'))
-            self.logger.info(f"📤 Wrote {bytes_written} bytes to serial port")
+            self.logger.debug(f"📤 Wrote {bytes_written} bytes to serial port")
             self.serial_conn.flush()
             
             # Clear any existing input before waiting for response
@@ -312,15 +317,20 @@ class SimpleEyeAdapter:
             start_time = time.time()
             response = ""
 
-            self.logger.info(f"⏳ Waiting for Arduino response (timeout: {self.timeout}s)")
+            # Only log waiting for non-mouth commands
+            if not command.startswith('M'):
+                self.logger.info(f"⏳ Waiting for Arduino response (timeout: {self.timeout}s)")
+
             while (time.time() - start_time) < self.timeout:
                 if self.serial_conn.in_waiting > 0:
                     bytes_available = self.serial_conn.in_waiting
-                    self.logger.info(f"📥 Arduino has {bytes_available} bytes available")
+                    if not command.startswith('M'):
+                        self.logger.info(f"📥 Arduino has {bytes_available} bytes available")
                     try:
                         char = self.serial_conn.read(1).decode('utf-8')
                         response += char
-                        self.logger.info(f"📥 Received: '{char}' → Full response so far: '{response}'")
+                        if not command.startswith('M'):
+                            self.logger.info(f"📥 Received: '{char}' → Full response so far: '{response}'")
 
                         # Check for success/error
                         if '+' in response:
@@ -380,11 +390,29 @@ class SimpleEyeAdapter:
             import traceback
             self.logger.debug(traceback.format_exc())
             return False
-            
+
+    async def flush_serial_buffer(self) -> None:
+        """Flush both input and output serial buffers to clear any queued commands."""
+        if self.serial_conn and self.connected:
+            try:
+                # Clear input buffer (responses from Arduino)
+                if self.serial_conn.in_waiting > 0:
+                    discarded = self.serial_conn.read(self.serial_conn.in_waiting)
+                    self.logger.debug(f"Flushed {len(discarded)} bytes from input buffer")
+
+                # Clear output buffer (commands to Arduino)
+                self.serial_conn.reset_output_buffer()
+                self.serial_conn.reset_input_buffer()
+
+                # Small delay to ensure buffers are truly clear
+                await asyncio.sleep(0.01)
+            except Exception as e:
+                self.logger.warning(f"Error flushing serial buffers: {e}")
+
     async def set_pattern(self, pattern: EyePattern) -> bool:
         """
         Set the LED pattern.
-        
+
         Args:
             pattern: The pattern to display
             
