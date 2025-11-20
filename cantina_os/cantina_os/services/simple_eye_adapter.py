@@ -123,7 +123,7 @@ class SimpleEyeAdapter:
 
         try:
             # Send state command
-            self.logger.info(f"Setting state to {state} (command: {command})")
+            self.logger.debug(f"Setting state to {state} (command: {command})")
             self.connection.write(f"{command}\n".encode())
 
             # Wait for response

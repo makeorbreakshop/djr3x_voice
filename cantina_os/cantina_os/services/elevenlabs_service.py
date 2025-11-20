@@ -320,13 +320,6 @@ class ElevenLabsService(BaseService):
         )
         self.logger.info("ElevenLabsService: Subscribed to SYSTEM_MODE_CHANGED for connection pre-warming.")
 
-        # Subscribe to MIC_RECORDING_START for backup connection warmup
-        await self.subscribe(
-            EventTopics.MIC_RECORDING_START,
-            self._handle_mic_start_for_warmup
-        )
-        self.logger.info("ElevenLabsService: Subscribed to MIC_RECORDING_START for connection refresh.")
-
         self.logger.info("ElevenLabsService event subscriptions complete")
     
     async def _cleanup(self) -> None:
@@ -508,9 +501,9 @@ class ElevenLabsService(BaseService):
                                         # Map from -60dB to -10dB range to 0.0-1.0 (adjusted for -24 LUFS baseline)
                                         # -60dB = silence, -10dB = loud speech
                                         normalized_amplitude = max(0, min(1.0, (db_value + 50) / 40))
-                                        # Apply 8x boost for dramatic mouth movement (was 2.5x)
-                                        # This ensures full M000-M255 range utilization
-                                        normalized_amplitude = min(1.0, normalized_amplitude * 8.0)
+                                        # Apply 4x boost for good range without hitting max too easily
+                                        # Reduced from 8x to prevent constant max brightness
+                                        normalized_amplitude = min(1.0, normalized_amplitude * 4.0)
                                     else:
                                         normalized_amplitude = 0  # Complete silence = completely dark
 
@@ -1321,15 +1314,5 @@ class ElevenLabsService(BaseService):
         except Exception as e:
             self.logger.error(f"Error in mode change warmup handler: {e}")
 
-    async def _handle_mic_start_for_warmup(self, payload: Dict[str, Any]) -> None:
-        """
-        Handle MIC_RECORDING_START event to refresh connection before TTS is needed.
-        This is a safety net in case the connection was idle or dropped.
-        By the time TTS is requested, connection will be fresh and ready.
-        """
-        try:
-            self.logger.info("Mic recording started - refreshing ElevenLabs API connection")
-            # Run warmup in background without blocking recording
-            asyncio.create_task(self._warmup_connection())
-        except Exception as e:
-            self.logger.error(f"Error in mic start warmup handler: {e}") 
+    # Removed _handle_mic_start_for_warmup - warmup now only happens on ENGAGE
+    # This eliminates the delay on every mouse click 

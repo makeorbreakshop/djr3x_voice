@@ -356,13 +356,6 @@ class ClaudeService(BaseService):
         ))
         self.logger.info("ClaudeService: Subscribed to SYSTEM_MODE_CHANGED for connection pre-warming.")
 
-        # Subscribe to MIC_RECORDING_START for backup connection warmup
-        asyncio.create_task(self.subscribe(
-            EventTopics.MIC_RECORDING_START,
-            self._handle_mic_start_for_warmup
-        ))
-        self.logger.info("ClaudeService: Subscribed to MIC_RECORDING_START for connection refresh.")
-
     async def _handle_voice_transcript(self, payload: Dict[str, Any]) -> None:
         """Handle text transcript from the VOICE_LISTENING_STOPPED event when recording ends."""
         try:
@@ -1540,15 +1533,5 @@ Keep it energetic!
         except Exception as e:
             self.logger.error(f"Error in mode change warmup handler: {e}")
 
-    async def _handle_mic_start_for_warmup(self, payload: Dict[str, Any]) -> None:
-        """
-        Handle MIC_RECORDING_START event to refresh connection before user finishes speaking.
-        This is a safety net in case the connection was idle or dropped.
-        By the time recording stops, connection will be fresh and ready for API call.
-        """
-        try:
-            self.logger.info("Mic recording started - refreshing Claude API connection")
-            # Run warmup in background without blocking recording
-            asyncio.create_task(self._warmup_connection())
-        except Exception as e:
-            self.logger.error(f"Error in mic start warmup handler: {e}")
+    # Removed _handle_mic_start_for_warmup - warmup now only happens on ENGAGE
+    # This eliminates the 2-3 second delay on every mouse click

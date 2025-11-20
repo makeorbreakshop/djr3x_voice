@@ -232,7 +232,7 @@ class EyeLightControllerService(RealtimeService):
 
         # Mouth amplitude throttling (to prevent Arduino buffer overflow)
         self._last_mouth_command_time = 0.0
-        self.MOUTH_UPDATE_INTERVAL = 0.10  # 10Hz max (100ms between commands) - reduced from 20Hz to prevent overflow
+        self.MOUTH_UPDATE_INTERVAL = 0.0167  # 60Hz max (~16.7ms between commands) - matches Arduino frame rate
         self._last_mouth_level = -1  # Track last sent value to avoid duplicate commands
 
         # Serial configuration
@@ -519,9 +519,6 @@ class EyeLightControllerService(RealtimeService):
 
             # Check if brightness changed (only send if different to avoid spam)
             if final_brightness != self._current_brightness:
-                self.logger.info(
-                    f"Control loop: Brightness changed {self._current_brightness} -> {final_brightness}"
-                )
                 await self._send_brightness_to_arduino(final_brightness)
                 self._current_brightness = final_brightness
 
@@ -533,11 +530,6 @@ class EyeLightControllerService(RealtimeService):
         """Send pattern command to Arduino (helper for control loop)."""
         if self.adapter:
             try:
-                # For critical pattern changes, flush the buffer first to ensure command gets through
-                if pattern in [EyePattern.LISTENING, EyePattern.THINKING, EyePattern.SPEAKING]:
-                    await self.adapter.flush_serial_buffer()
-                    self.logger.debug(f"Flushed serial buffer before sending critical pattern: {pattern}")
-
                 await self.adapter.set_pattern(pattern.value)
             except Exception as e:
                 self.logger.error(f"Failed to send pattern to Arduino: {e}")
@@ -955,10 +947,21 @@ class EyeLightControllerService(RealtimeService):
             self.logger.info("Speech ended, triggering green confirmation flash")
             # Reset amplitude modulation
             self._amplitude_modulation = 0.0
-            # Explicitly close mouth when speech ends
+            # Reset last mouth level to force update on next speech
+            self._last_mouth_level = -1
+            # Explicitly close mouth when speech ends - send multiple times to ensure it gets through
             if self.adapter:
-                await self.adapter.set_mouth_amplitude(0)
-                self.logger.debug("Sent M000 to close mouth after speech")
+                try:
+                    # Send reset command 3 times with small delay to ensure it gets through
+                    for i in range(3):
+                        await self.adapter.set_mouth_amplitude(0)
+                        if i < 2:  # Don't delay after last send
+                            await asyncio.sleep(0.02)  # 20ms delay between sends
+                    self.logger.info("Mouth reset to M000 (sent 3x for reliability)")
+                except Exception as e:
+                    self.logger.error(f"Failed to reset mouth: {e}")
+            else:
+                self.logger.warning("Cannot reset mouth - adapter not initialized")
             # Trigger flash pattern (will auto-return to IDLE in Arduino)
             self._target_pattern = EyePattern.FLASH
 
@@ -1001,15 +1004,6 @@ class EyeLightControllerService(RealtimeService):
                             await self.adapter.set_mouth_amplitude(mouth_level)
                         self._last_mouth_level = mouth_level
                         self._last_mouth_command_time = now
-
-                    # Log occasionally for debugging (every 10th event to avoid spam)
-                    if not hasattr(self, '_amplitude_log_counter'):
-                        self._amplitude_log_counter = 0
-                    self._amplitude_log_counter += 1
-                    if self._amplitude_log_counter % 10 == 0:
-                        self.logger.debug(
-                            f"Amplitude: {self._amplitude_modulation:.3f}, Mouth: {mouth_level}"
-                        )
 
         except Exception as e:
             # Don't crash the service if amplitude handling fails

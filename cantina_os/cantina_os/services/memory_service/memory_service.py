@@ -42,6 +42,51 @@ from ...base_service import BaseService
 from ...core.event_topics import EventTopics
 
 
+def extract_json_from_response(raw_text: str) -> str:
+    """Extract JSON from Claude response, handling markdown code blocks.
+
+    Args:
+        raw_text: Raw text from Claude API response
+
+    Returns:
+        Cleaned JSON string ready for parsing
+
+    Raises:
+        ValueError: If no valid JSON structure found
+    """
+    text = raw_text.strip()
+
+    # Remove markdown code blocks if present
+    if text.startswith("```"):
+        parts = text.split("```")
+        if len(parts) >= 3:  # Proper code block: ```...```
+            content = parts[1]
+            # Remove language identifier if present
+            if content.strip().startswith("json"):
+                content = content.strip()[4:]
+            text = content.strip()
+        elif len(parts) == 2:  # Unclosed code block
+            content = parts[1]
+            if content.strip().startswith("json"):
+                content = content.strip()[4:]
+            text = content.strip()
+        else:
+            # Malformed, just remove all backticks
+            text = text.replace("```", "").strip()
+
+    # Find JSON object boundaries
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+
+    if first_brace == -1 or last_brace == -1:
+        raise ValueError(f"No JSON object found in response (first 200 chars): {text[:200]}")
+
+    # Extract just the JSON object
+    json_str = text[first_brace:last_brace + 1]
+
+    return json_str
+
+
 class VisitSummary(BaseModel):
     """Model for a single visit's episodic memory."""
     visit_number: int
@@ -860,7 +905,15 @@ Extract structured episodic memories in JSON format:
   ]
 }}
 
-CRITICAL: Return ONLY valid JSON, no markdown, no explanation, no code blocks."""
+CRITICAL FORMATTING RULES:
+1. Return ONLY valid JSON starting with {{ and ending with }}
+2. NO markdown code blocks (no ```)
+3. NO explanatory text before or after the JSON
+4. NO comments inside the JSON
+5. Use double quotes for all strings
+6. Ensure all arrays and objects are properly closed
+
+Your response must start with {{ and end with }} - nothing else."""
 
             # Call Claude Haiku for extraction
             response = self._anthropic_client.messages.create(
@@ -871,15 +924,14 @@ CRITICAL: Return ONLY valid JSON, no markdown, no explanation, no code blocks.""
 
             raw_response = response.content[0].text.strip()
 
-            # Remove markdown code blocks if present
-            if raw_response.startswith("```"):
-                raw_response = raw_response.split("```")[1]
-                if raw_response.startswith("json"):
-                    raw_response = raw_response[4:]
-                raw_response = raw_response.strip()
-
-            # Parse JSON response
-            visit_data = json.loads(raw_response)
+            # Extract and parse JSON from response
+            try:
+                json_str = extract_json_from_response(raw_response)
+                visit_data = json.loads(json_str)
+            except ValueError as e:
+                # Fallback: try parsing raw response directly
+                self.logger.warning(f"Failed to extract JSON cleanly: {e}, attempting direct parse")
+                visit_data = json.loads(raw_response)
 
             # Create VisitSummary episodic memory
             visit_summary = VisitSummary(
@@ -936,12 +988,18 @@ CRITICAL: Return ONLY valid JSON, no markdown, no explanation, no code blocks.""
 
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse visit summary JSON for {profile.name}: {e}")
-            self.logger.debug(f"Raw response: {raw_response}")
+            self.logger.error(f"Raw Claude response (first 500 chars): {raw_response[:500]}")
             # Fall back to simple summary in metadata
             profile.metadata["conversation_summary"] = f"Visit #{profile.visit_count} - {int(interaction_duration/60)}min interaction"
 
         except Exception as e:
             self.logger.error(f"Error generating visit summary for {profile.name}: {e}", exc_info=True)
+            # Log raw response if available for debugging
+            try:
+                if 'raw_response' in locals():
+                    self.logger.error(f"Raw response available (first 500 chars): {raw_response[:500]}")
+            except:
+                pass
 
     async def _catchup_unsummarized_conversations(self) -> None:
         """Startup catchup: Generate summaries for conversations that weren't summarized.

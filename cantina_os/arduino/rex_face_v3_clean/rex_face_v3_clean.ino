@@ -14,7 +14,14 @@
  *   Mnnn - Mouth amplitude (0-255)
  *   R - Reset system
  *   ? - Help
- *   T - Run automated test sequence
+ *   T - Run full automated test sequence
+ *   T1 - Test IDLE state only
+ *   T2 - Test ENGAGED state only
+ *   T3 - Test LISTENING state only
+ *   T4 - Test THINKING state only
+ *   T5 - Test SPEAKING state only
+ *   T6 - Test FLASH only
+ *   T7 - Test mouth amplitude staging only
  */
 
 // CRITICAL: Buffer size MUST be defined BEFORE including Arduino.h
@@ -53,12 +60,14 @@ enum SystemState {
 };
 
 // State colors (Arduino owns these!)
-const CRGB COLOR_IDLE_EYES = CRGB(255, 120, 0);      // Warm orange
-const CRGB COLOR_IDLE_MOUTH = CRGB(0, 30, 100);      // Very dark blue
-const CRGB COLOR_ENGAGED_EYES = CRGB(0, 255, 255);   // Bright cyan
-const CRGB COLOR_ENGAGED_MOUTH = CRGB(255, 200, 0);  // Golden (when speaking)
-const CRGB COLOR_THINKING_DOT = CRGB(0, 255, 255);   // Cyan dots
-const CRGB COLOR_FLASH = CRGB(0, 255, 0);            // Green
+const CRGB COLOR_IDLE_EYES_OUTER = CRGB(255, 60, 0);    // Reddish-orange outer ring
+const CRGB COLOR_IDLE_EYES_CENTER = CRGB(255, 180, 80); // Light peachy-orange center pupils with more red
+const CRGB COLOR_IDLE_MOUTH = CRGB(0, 50, 150);          // Subtle blue glow (tube amp aesthetic)
+const CRGB COLOR_ENGAGED_EYES = CRGB(0, 35, 110);        // Darker blue outer ring (dimmer than center)
+const CRGB COLOR_ENGAGED_CENTER = CRGB(100, 180, 255);   // Light blue center pupils for ENGAGED states
+const CRGB COLOR_ENGAGED_MOUTH = CRGB(255, 60, 0);       // Reddish-orange (same as IDLE outer ring)
+const CRGB COLOR_THINKING_DOT = CRGB(0, 255, 255);       // Cyan dots
+const CRGB COLOR_FLASH = CRGB(0, 255, 0);                // Green
 
 // ============================================
 // STATE MACHINE
@@ -77,10 +86,11 @@ struct AnimationTimer {
   int step;
 };
 
-AnimationTimer breathingTimer = {0, 50, 0};    // 20 FPS
+AnimationTimer breathingTimer = {0, 20, 0};    // 50 FPS - smoother breathing
 AnimationTimer blinkTimer = {0, 10, 0};        // 100 FPS when active
-AnimationTimer pulseTimer = {0, 50, 0};        // 20 FPS
-AnimationTimer thinkingTimer = {0, 50, 0};     // 20 FPS
+AnimationTimer pulseTimer = {0, 20, 0};        // 50 FPS - smoother pulsing
+AnimationTimer thinkingTimer = {0, 30, 0};     // ~33 FPS - smooth rotation
+AnimationTimer mouthGlowTimer = {0, 16, 0};    // 60 FPS - buttery smooth IDLE mouth animation
 
 // ============================================
 // ANIMATION STATE
@@ -88,6 +98,13 @@ AnimationTimer thinkingTimer = {0, 50, 0};     // 20 FPS
 
 // Breathing effect
 float breathingPhase = 0;
+float mouthGlowPhase = 0;
+
+// Mouth glow continuous variation (no interruptions)
+float mouthBrightnessOffset = 0;  // Slowly drifting brightness offset
+float mouthSpeedMultiplier = 1.0;  // Slowly drifting speed multiplier
+float mouthBrightnessDrift = 0.002;  // How fast brightness offset changes
+float mouthSpeedDrift = 0.001;  // How fast speed changes
 
 // Blinking
 bool isBlinking = false;
@@ -122,7 +139,8 @@ void setup() {
   blinkTimer.lastUpdate = now;
   pulseTimer.lastUpdate = now;
   thinkingTimer.lastUpdate = now;
-  nextBlinkTime = now + random(8000, 15000);
+  mouthGlowTimer.lastUpdate = now;
+  nextBlinkTime = now + random(12000, 25000);  // 12-25 seconds - less frequent
 
   // Set initial state
   setState(STATE_IDLE);
@@ -178,6 +196,13 @@ void processSerialCommands() {
       continue;
     }
 
+    // Handle test commands
+    if (c == 'T' && !readingCommand) {
+      commandBuffer = "T";
+      readingCommand = true;
+      continue;
+    }
+
     // Building command
     if (readingCommand) {
       commandBuffer += c;
@@ -196,6 +221,18 @@ void processSerialCommands() {
         commandBuffer = "";
         readingCommand = false;
       }
+      // Test commands (T, T1-T7)
+      else if (commandBuffer[0] == 'T' && (commandBuffer.length() == 1 || commandBuffer.length() == 2)) {
+        if (commandBuffer.length() == 1 || c == '\n' || c == '\r') {
+          handleTestCommand(commandBuffer);
+          commandBuffer = "";
+          readingCommand = false;
+        } else if (commandBuffer.length() == 2 && c >= '1' && c <= '7') {
+          handleTestCommand(commandBuffer);
+          commandBuffer = "";
+          readingCommand = false;
+        }
+      }
       // Invalid command
       else if (commandBuffer.length() > 4) {
         commandBuffer = "";
@@ -212,12 +249,29 @@ void processSerialCommands() {
     else if (c == '?') {
       printHelp();
     }
-    else if (c == 'T') {
-      runTestSequence();
-    }
     else if (c == '\n' || c == '\r') {
       // Ignore newlines
     }
+  }
+}
+
+void handleTestCommand(String cmd) {
+  if (cmd == "T") {
+    runTestSequence();
+  } else if (cmd == "T1") {
+    runTest1();
+  } else if (cmd == "T2") {
+    runTest2();
+  } else if (cmd == "T3") {
+    runTest3();
+  } else if (cmd == "T4") {
+    runTest4();
+  } else if (cmd == "T5") {
+    runTest5();
+  } else if (cmd == "T6") {
+    runTest6();
+  } else if (cmd == "T7") {
+    runTest7();
   }
 }
 
@@ -257,12 +311,12 @@ void setState(SystemState newState) {
   // State-specific initialization
   switch(currentState) {
     case STATE_IDLE:
-      fillEyes(COLOR_IDLE_EYES);
-      nextBlinkTime = millis() + random(8000, 15000);
+      setIdleEyes();
+      nextBlinkTime = millis() + random(12000, 25000);  // 12-25 seconds - less frequent
       break;
 
     case STATE_ENGAGED:
-      fillEyes(COLOR_ENGAGED_EYES);
+      setEngagedEyes();  // Dark blue outer ring, light blue center
       // Mouth goes BLACK when engaged (until speaking)
       fill_solid(mouthLeds, NUM_MOUTH_LEDS, CRGB::Black);
       break;
@@ -278,6 +332,36 @@ void setState(SystemState newState) {
     case STATE_SPEAKING:
       // Keep current eye color
       break;
+  }
+}
+
+void setIdleEyes() {
+  // Outer ring LEDs get reddish-orange
+  for (int i = 0; i < LEDS_PER_EYE; i++) {
+    if (i == 0) {
+      // Center pupils are peachy-orange
+      eyeLeds[LEFT_EYE_START + i] = COLOR_IDLE_EYES_CENTER;
+      eyeLeds[RIGHT_EYE_START + i] = COLOR_IDLE_EYES_CENTER;
+    } else {
+      // Outer ring is reddish-orange
+      eyeLeds[LEFT_EYE_START + i] = COLOR_IDLE_EYES_OUTER;
+      eyeLeds[RIGHT_EYE_START + i] = COLOR_IDLE_EYES_OUTER;
+    }
+  }
+}
+
+void setEngagedEyes() {
+  // Set outer ring to dark blue, center to light blue
+  for (int i = 0; i < LEDS_PER_EYE; i++) {
+    if (i == 0) {
+      // Center pupils are light blue
+      eyeLeds[LEFT_EYE_START + i] = COLOR_ENGAGED_CENTER;
+      eyeLeds[RIGHT_EYE_START + i] = COLOR_ENGAGED_CENTER;
+    } else {
+      // Outer ring is dark blue
+      eyeLeds[LEFT_EYE_START + i] = COLOR_ENGAGED_EYES;
+      eyeLeds[RIGHT_EYE_START + i] = COLOR_ENGAGED_EYES;
+    }
   }
 }
 
@@ -315,21 +399,26 @@ void updateListeningPulse(unsigned long now) {
   if (now - pulseTimer.lastUpdate < pulseTimer.interval) return;
   pulseTimer.lastUpdate = now;
 
-  // Dynamic heartbeat pulse (60 BPM)
-  int cycle = pulseTimer.step % 20;  // 1 second at 20 FPS
+  // Dynamic heartbeat pulse (60 BPM at 50 FPS)
+  int cycle = pulseTimer.step % 50;  // 1 second at 50 FPS
 
   float brightness;
-  if (cycle < 4) {
-    // Quick rise (200ms)
-    brightness = 0.3 + (cycle / 4.0) * 0.7;  // 30% to 100%
+  if (cycle < 10) {
+    // Quick rise (200ms at 50 FPS)
+    brightness = 0.3 + (cycle / 10.0) * 0.7;  // 30% to 100%
   } else {
-    // Slow fall (800ms)
-    brightness = 1.0 - ((cycle - 4) / 16.0) * 0.7;  // 100% to 30%
+    // Slow fall (800ms at 50 FPS)
+    brightness = 1.0 - ((cycle - 10) / 40.0) * 0.7;  // 100% to 30%
   }
 
-  CRGB pulseColor = COLOR_ENGAGED_EYES;
-  pulseColor.nscale8(brightness * 255);
-  fillEyes(pulseColor);
+  // Apply pulse to both center (light blue) and outer (dark blue)
+  for (int i = 0; i < LEDS_PER_EYE; i++) {
+    CRGB baseColor = (i == 0) ? COLOR_ENGAGED_CENTER : COLOR_ENGAGED_EYES;
+    CRGB pulseColor = baseColor;
+    pulseColor.nscale8(brightness * 255);
+    eyeLeds[LEFT_EYE_START + i] = pulseColor;
+    eyeLeds[RIGHT_EYE_START + i] = pulseColor;
+  }
 
   pulseTimer.step++;
 }
@@ -338,18 +427,21 @@ void updateThinkingAnimation(unsigned long now) {
   if (now - thinkingTimer.lastUpdate < thinkingTimer.interval) return;
   thinkingTimer.lastUpdate = now;
 
-  clearEyes();
+  // Start with standard two-tone blue eyes (same as other states)
+  setEngagedEyes();  // Light blue center + darker blue outer ring
 
-  // White center pupils
-  eyeLeds[LEFT_EYE_START] = CRGB(255, 255, 255);
-  eyeLeds[RIGHT_EYE_START] = CRGB(255, 255, 255);
+  // TWO rotating dots (counter-rotating) - adjacent LEDs
+  // Overlay cyan dots on top of the blue ring
+  int leftPos1 = ((thinkingTimer.step / 2) % 6) + 1;
+  int leftPos2 = (leftPos1 % 6) + 1;  // Next LED in ring
+  int rightPos1 = 7 - ((thinkingTimer.step / 2) % 6);
+  int rightPos2 = ((rightPos1 - 7) % 6) + 7;  // Previous LED in ring
 
-  // Rotating dots (counter-rotating)
-  int leftPos = ((thinkingTimer.step / 2) % 6) + 1;
-  int rightPos = 7 - ((thinkingTimer.step / 2) % 6);
-
-  eyeLeds[LEFT_EYE_START + leftPos] = COLOR_THINKING_DOT;
-  eyeLeds[RIGHT_EYE_START + rightPos] = COLOR_THINKING_DOT;
+  // Overlay cyan dots on the outer ring
+  eyeLeds[LEFT_EYE_START + leftPos1] = COLOR_THINKING_DOT;
+  eyeLeds[LEFT_EYE_START + leftPos2] = COLOR_THINKING_DOT;
+  eyeLeds[RIGHT_EYE_START + rightPos1] = COLOR_THINKING_DOT;
+  eyeLeds[RIGHT_EYE_START + rightPos2] = COLOR_THINKING_DOT;
 
   thinkingTimer.step++;
 }
@@ -362,9 +454,14 @@ void updateSpeakingPulse(unsigned long now) {
   float pulse = (sin(pulseTimer.step * 0.1) + 1) / 2;
   float brightness = 0.7 + (pulse * 0.3);  // 70-100%
 
-  CRGB pulseColor = COLOR_ENGAGED_EYES;
-  pulseColor.nscale8(brightness * 255);
-  fillEyes(pulseColor);
+  // Apply pulse to both center (light blue) and outer (dark blue)
+  for (int i = 0; i < LEDS_PER_EYE; i++) {
+    CRGB baseColor = (i == 0) ? COLOR_ENGAGED_CENTER : COLOR_ENGAGED_EYES;
+    CRGB pulseColor = baseColor;
+    pulseColor.nscale8(brightness * 255);
+    eyeLeds[LEFT_EYE_START + i] = pulseColor;
+    eyeLeds[RIGHT_EYE_START + i] = pulseColor;
+  }
 
   pulseTimer.step++;
 }
@@ -380,18 +477,32 @@ void applyBreathingEffect() {
   if (now - breathingTimer.lastUpdate < breathingTimer.interval) return;
   breathingTimer.lastUpdate = now;
 
-  // Gentle breathing (3.5 second cycle)
-  breathingPhase += 0.0285;  // Complete cycle in 70 frames at 20 FPS
+  // Gentle breathing (3.5 second cycle at 50 FPS)
+  breathingPhase += 0.036;  // Complete cycle in ~175 frames at 50 FPS = 3.5 seconds
   if (breathingPhase > TWO_PI) breathingPhase -= TWO_PI;
 
   float breathValue = (sin(breathingPhase) + 1) / 2;
   float brightness = 0.85 + (breathValue * 0.15);  // ±15% variation
 
-  CRGB baseColor = (currentState == STATE_IDLE) ? COLOR_IDLE_EYES : COLOR_ENGAGED_EYES;
-  CRGB breathColor = baseColor;
-  breathColor.nscale8(brightness * 255);
-
-  fillEyes(breathColor);
+  if (currentState == STATE_IDLE) {
+    // IDLE: Apply breathing to both center (peachy-orange) and outer (reddish-orange)
+    for (int i = 0; i < LEDS_PER_EYE; i++) {
+      CRGB baseColor = (i == 0) ? COLOR_IDLE_EYES_CENTER : COLOR_IDLE_EYES_OUTER;
+      CRGB breathColor = baseColor;
+      breathColor.nscale8(brightness * 255);
+      eyeLeds[LEFT_EYE_START + i] = breathColor;
+      eyeLeds[RIGHT_EYE_START + i] = breathColor;
+    }
+  } else {
+    // ENGAGED: Breathing with light blue center, dark blue outer
+    for (int i = 0; i < LEDS_PER_EYE; i++) {
+      CRGB baseColor = (i == 0) ? COLOR_ENGAGED_CENTER : COLOR_ENGAGED_EYES;
+      CRGB breathColor = baseColor;
+      breathColor.nscale8(brightness * 255);
+      eyeLeds[LEFT_EYE_START + i] = breathColor;
+      eyeLeds[RIGHT_EYE_START + i] = breathColor;
+    }
+  }
 }
 
 void applyBlinkingEffect() {
@@ -413,23 +524,33 @@ void applyBlinkingEffect() {
       float progress = blinkElapsed / 100.0;
       float brightness = 1.0 - (progress * 0.9);  // Go to 10% brightness
 
-      CRGB blinkColor = COLOR_IDLE_EYES;
-      blinkColor.nscale8(brightness * 255);
-      fillEyes(blinkColor);
+      // Apply blink to both center and outer
+      for (int i = 0; i < LEDS_PER_EYE; i++) {
+        CRGB baseColor = (i == 0) ? COLOR_IDLE_EYES_CENTER : COLOR_IDLE_EYES_OUTER;
+        CRGB blinkColor = baseColor;
+        blinkColor.nscale8(brightness * 255);
+        eyeLeds[LEFT_EYE_START + i] = blinkColor;
+        eyeLeds[RIGHT_EYE_START + i] = blinkColor;
+      }
 
     } else if (blinkElapsed < 200) {
       // Opening (100ms)
       float progress = (blinkElapsed - 100) / 100.0;
       float brightness = 0.1 + (progress * 0.9);  // Return to 100%
 
-      CRGB blinkColor = COLOR_IDLE_EYES;
-      blinkColor.nscale8(brightness * 255);
-      fillEyes(blinkColor);
+      // Apply blink to both center and outer
+      for (int i = 0; i < LEDS_PER_EYE; i++) {
+        CRGB baseColor = (i == 0) ? COLOR_IDLE_EYES_CENTER : COLOR_IDLE_EYES_OUTER;
+        CRGB blinkColor = baseColor;
+        blinkColor.nscale8(brightness * 255);
+        eyeLeds[LEFT_EYE_START + i] = blinkColor;
+        eyeLeds[RIGHT_EYE_START + i] = blinkColor;
+      }
 
     } else {
       // Blink complete
       isBlinking = false;
-      nextBlinkTime = now + random(8000, 15000);  // 8-15 seconds
+      nextBlinkTime = now + random(12000, 25000);  // 12-25 seconds - less frequent
     }
   }
 }
@@ -439,11 +560,59 @@ void applyBlinkingEffect() {
 // ============================================
 
 void updateMouth() {
-  // IDLE state: Show very dark blue mouth (subtle glow)
+  // IDLE state: Organic tube amp glow with continuous smooth variation
   if (currentState == STATE_IDLE) {
-    CRGB dimBlue = COLOR_IDLE_MOUTH;
-    dimBlue.nscale8(30);  // 30/255 = ~12% brightness for subtle presence
-    fill_solid(mouthLeds, NUM_MOUTH_LEDS, dimBlue);
+    unsigned long now = millis();
+
+    // Frame-rate limit at 60 FPS for buttery smoothness
+    if (now - mouthGlowTimer.lastUpdate < mouthGlowTimer.interval) return;
+    mouthGlowTimer.lastUpdate = now;
+
+    // Clear all first
+    fill_solid(mouthLeds, NUM_MOUTH_LEDS, CRGB::Black);
+
+    // Continuous smooth drifting (no sudden changes)
+    // Brightness offset slowly oscillates
+    mouthBrightnessOffset += mouthBrightnessDrift;
+    if (mouthBrightnessOffset > TWO_PI) mouthBrightnessOffset -= TWO_PI;
+
+    // Speed multiplier slowly oscillates between 0.7x and 1.3x
+    mouthSpeedMultiplier = 1.0 + (sin(mouthBrightnessOffset * 0.3) * 0.3);
+
+    // Main pulse: 20 second cycle (faster than before)
+    mouthGlowPhase += 0.00523 * mouthSpeedMultiplier;  // ~1200 frames at 60 FPS = 20 seconds
+    if (mouthGlowPhase > TWO_PI) mouthGlowPhase -= TWO_PI;
+
+    float glowValue = (sin(mouthGlowPhase) + 1) / 2;  // 0.0 to 1.0
+
+    // Brightness with continuous drift: 20%-38% base range
+    float brightnessDrift = sin(mouthBrightnessOffset) * 0.05;  // ±5% smooth drift
+    float brightness = 0.20 + (glowValue * 0.18) + brightnessDrift;
+    brightness = constrain(brightness, 0.15, 0.42);
+
+    // Start with base blue
+    CRGB tubeGlow = COLOR_IDLE_MOUTH;
+
+    // Add orange warmth as brightness increases (subtle, always present)
+    // More orange at peaks, less at valleys - CONTINUOUS, not random
+    if (glowValue > 0.5) {
+      float warmth = (glowValue - 0.5) / 0.5;  // 0.0 to 1.0 in top 50%
+      warmth = warmth * warmth;  // Square for more contrast at peak
+
+      // Add red and green for orange/amber warmth
+      int warmAdd = warmth * 35;  // Subtle orange glow
+      tubeGlow.r = min(255, tubeGlow.r + warmAdd);
+      tubeGlow.g = min(255, tubeGlow.g + (warmAdd * 0.4));
+    }
+
+    tubeGlow.nscale8(brightness * 255);
+
+    // Only light the middle of the V (LEDs 1, 2, 5, 6 form the V shape)
+    mouthLeds[1] = tubeGlow;  // Left inner
+    mouthLeds[2] = tubeGlow;  // Left middle
+    mouthLeds[5] = tubeGlow;  // Right middle
+    mouthLeds[6] = tubeGlow;  // Right inner
+
     return;
   }
 
@@ -459,52 +628,72 @@ void updateMouth() {
     return;
   }
 
-  // Logarithmic scaling for better dynamics
+  // Logarithmic scaling for better dynamics with good sensitivity
   float normalizedAmp = mouthAmplitude / 255.0;
-  float scaledAmp = sqrt(normalizedAmp);  // Square root for better response
+  // Square root (x^0.5) - balanced compression for dynamic speech
+  float scaledAmp = sqrt(normalizedAmp);
+
+  // Apply ANOTHER square root for more aggressive compression (cube root-like)
+  // This makes it MUCH harder to hit max brightness
+  scaledAmp = sqrt(scaledAmp);  // Now effectively x^0.25 but applied post sqrt for smoothness
 
   // Clear mouth first
   fill_solid(mouthLeds, NUM_MOUTH_LEDS, CRGB::Black);
 
   CRGB mouthColor = COLOR_ENGAGED_MOUTH;
 
-  // Stage 1: Center LEDs (always first to light)
+  // Stage 1: TRUE MIDDLE (LEDs 1, 6 only) - always first to light
+  // Starts very dim, grows slowly
   if (scaledAmp > 0.0) {
-    int centerBright = scaledAmp * 255;
-    CRGB centerColor = mouthColor;
-    centerColor.nscale8(centerBright);
-    mouthLeds[1] = centerColor;
-    mouthLeds[6] = centerColor;
+    float stage1Scale = min(1.0, scaledAmp / 0.4);  // 0-40% scales this stage 0-100%
+    int middleBright = stage1Scale * stage1Scale * 180;  // Quadratic, max 180 (reduced from 255)
+    CRGB middleColor = mouthColor;
+
+    // ONLY add white if OVERALL amplitude is EXTREMELY loud (95%+)
+    if (scaledAmp > 0.95) {
+      float whiteness = (scaledAmp - 0.95) / 0.05;  // 0.0 to 1.0 in top 5% ONLY
+      int whiteAdd = whiteness * whiteness * 40;  // Quadratic, max 40 white (very subtle)
+      middleColor.r = min(255, middleColor.r + whiteAdd);
+      middleColor.g = min(255, middleColor.g + whiteAdd);
+      middleColor.b = min(255, middleColor.b + whiteAdd);
+    }
+
+    middleColor.nscale8(middleBright);
+    mouthLeds[1] = middleColor;  // Inner top left
+    mouthLeds[6] = middleColor;  // Inner top right
   }
 
-  // Stage 2: Corner LEDs (at 20% threshold)
-  if (scaledAmp > 0.2) {
-    float cornerScale = (scaledAmp - 0.2) / 0.8;
-    int cornerBright = cornerScale * 200;  // Max 200 for contrast
+  // Stage 2: Expand to middle sides (LEDs 2, 5) - NO WHITE
+  if (scaledAmp > 0.30) {
+    float stage2Scale = (scaledAmp - 0.30) / 0.30;  // 30-60% scales this stage 0-100%
+    stage2Scale = min(1.0, stage2Scale);
+    int sideBright = stage2Scale * stage2Scale * 160;  // Quadratic, max 160 (reduced from 245)
+    CRGB sideColor = mouthColor;
+    sideColor.nscale8(sideBright);
+    mouthLeds[2] = sideColor;  // Middle left
+    mouthLeds[5] = sideColor;  // Middle right
+  }
+
+  // Stage 3: Expand to corners (UP) - NO WHITE
+  if (scaledAmp > 0.60) {
+    float stage3Scale = (scaledAmp - 0.60) / 0.20;  // 60-80% scales this stage 0-100%
+    stage3Scale = min(1.0, stage3Scale);
+    int cornerBright = stage3Scale * stage3Scale * 140;  // Quadratic, max 140 (reduced from 230)
     CRGB cornerColor = mouthColor;
     cornerColor.nscale8(cornerBright);
-    mouthLeds[0] = cornerColor;
-    mouthLeds[7] = cornerColor;
+    mouthLeds[0] = cornerColor;  // Top left corner
+    mouthLeds[7] = cornerColor;  // Top right corner
   }
 
-  // Stage 3: Lower-middle LEDs (at 40% threshold)
-  if (scaledAmp > 0.4) {
-    float lowerScale = (scaledAmp - 0.4) / 0.6;
-    int lowerBright = lowerScale * 255;
-    CRGB lowerColor = mouthColor;
-    lowerColor.nscale8(lowerBright);
-    mouthLeds[2] = lowerColor;
-    mouthLeds[5] = lowerColor;
-  }
-
-  // Stage 4: Bottom LEDs (at 60% threshold)
-  if (scaledAmp > 0.6) {
-    float bottomScale = (scaledAmp - 0.6) / 0.4;
-    int bottomBright = bottomScale * 255;
+  // Stage 4: Expand to bottom (DOWN) - only at high volumes
+  if (scaledAmp > 0.80) {
+    float stage4Scale = (scaledAmp - 0.80) / 0.20;  // 80-100% scales this stage 0-100%
+    stage4Scale = min(1.0, stage4Scale);
+    int bottomBright = stage4Scale * stage4Scale * 200;  // Quadratic, max 200 (reduced from 240)
     CRGB bottomColor = mouthColor;
     bottomColor.nscale8(bottomBright);
-    mouthLeds[3] = bottomColor;
-    mouthLeds[4] = bottomColor;
+    mouthLeds[3] = bottomColor;  // Bottom left
+    mouthLeds[4] = bottomColor;  // Bottom right
   }
 }
 
@@ -571,39 +760,69 @@ void resetSystem() {
 void printHelp() {
   Serial.println("\n=== DJ R3X V3 Commands ===");
   Serial.println("State Commands:");
-  Serial.println("  SI - IDLE (orange eyes, dark blue mouth)");
+  Serial.println("  SI - IDLE (white center, orange ring, dark blue mouth)");
   Serial.println("  SE - ENGAGED (cyan eyes, black mouth)");
   Serial.println("  SL - LISTENING (pulsing)");
   Serial.println("  ST - THINKING (rotating dots)");
   Serial.println("  SS - SPEAKING (pulsing + mouth)");
   Serial.println("  SF - FLASH (green confirmation)");
-  Serial.println("\nOther Commands:");
+  Serial.println("\nMouth Commands:");
   Serial.println("  Mnnn - Mouth amplitude (0-255)");
+  Serial.println("\nTest Commands:");
+  Serial.println("  T   - Run full test sequence");
+  Serial.println("  T1  - Test IDLE state");
+  Serial.println("  T2  - Test ENGAGED state");
+  Serial.println("  T3  - Test LISTENING state");
+  Serial.println("  T4  - Test THINKING state");
+  Serial.println("  T5  - Test SPEAKING state");
+  Serial.println("  T6  - Test FLASH");
+  Serial.println("  T7  - Test mouth amplitude staging");
+  Serial.println("\nOther Commands:");
   Serial.println("  R - Reset");
-  Serial.println("  T - Run test sequence");
   Serial.println("  ? - This help");
   Serial.println("========================\n");
 }
 
 void runTestSequence() {
-  Serial.println("\n=== Starting Test Sequence ===");
+  Serial.println("\n=== Starting Full Test Sequence ===");
+  runTest1();
+  delay(500);
+  runTest2();
+  delay(500);
+  runTest3();
+  delay(500);
+  runTest4();
+  delay(500);
+  runTest5();
+  delay(500);
+  runTest6();
+  delay(500);
+  runTest7();
+  Serial.println("\n=== Full Test Complete ===");
+  Serial.println("Returning to IDLE state\n");
+  setState(STATE_IDLE);
+  mouthAmplitude = 0;
+  updateBaseState();
+  applyBreathingEffect();
+  updateMouth();
+  FastLED.show();
+  Serial.println("+");
+}
 
-  // Disable normal loop updates during test
-  bool savedFlash = flashActive;
-  flashActive = false;
-
-  // Test 1: IDLE state
-  Serial.println("\nTest 1: IDLE State");
-  Serial.println("  Expected: Orange eyes, dark blue mouth");
+void runTest1() {
+  Serial.println("\n[T1] IDLE State");
+  Serial.println("  Expected: White center pupils, reddish-orange outer ring, dark blue mouth");
   setState(STATE_IDLE);
   updateBaseState();
   applyBreathingEffect();
   updateMouth();
   FastLED.show();
   delay(3000);
+  Serial.println("+");
+}
 
-  // Test 2: ENGAGED state
-  Serial.println("\nTest 2: ENGAGED State");
+void runTest2() {
+  Serial.println("\n[T2] ENGAGED State");
   Serial.println("  Expected: Cyan eyes, BLACK mouth");
   setState(STATE_ENGAGED);
   updateBaseState();
@@ -611,9 +830,11 @@ void runTestSequence() {
   updateMouth();
   FastLED.show();
   delay(3000);
+  Serial.println("+");
+}
 
-  // Test 3: LISTENING state
-  Serial.println("\nTest 3: LISTENING State");
+void runTest3() {
+  Serial.println("\n[T3] LISTENING State");
   Serial.println("  Expected: Pulsing cyan eyes");
   setState(STATE_LISTENING);
   for (int i = 0; i < 60; i++) {  // 3 seconds at 20 FPS
@@ -621,9 +842,11 @@ void runTestSequence() {
     FastLED.show();
     delay(50);
   }
+  Serial.println("+");
+}
 
-  // Test 4: THINKING state
-  Serial.println("\nTest 4: THINKING State");
+void runTest4() {
+  Serial.println("\n[T4] THINKING State");
   Serial.println("  Expected: White pupils, rotating cyan dots");
   setState(STATE_THINKING);
   for (int i = 0; i < 60; i++) {  // 3 seconds
@@ -631,9 +854,11 @@ void runTestSequence() {
     FastLED.show();
     delay(50);
   }
+  Serial.println("+");
+}
 
-  // Test 5: SPEAKING state with mouth amplitude
-  Serial.println("\nTest 5: SPEAKING State");
+void runTest5() {
+  Serial.println("\n[T5] SPEAKING State");
   Serial.println("  Expected: Gentle pulse, mouth responds to amplitude");
   setState(STATE_SPEAKING);
 
@@ -659,9 +884,11 @@ void runTestSequence() {
     FastLED.show();
     delay(30);
   }
+  Serial.println("+");
+}
 
-  // Test 6: FLASH
-  Serial.println("\nTest 6: FLASH");
+void runTest6() {
+  Serial.println("\n[T6] FLASH");
   Serial.println("  Expected: Two green pulses, return to ENGAGED");
   triggerFlash();
   while (flashActive) {
@@ -669,9 +896,11 @@ void runTestSequence() {
     FastLED.show();
   }
   delay(1000);
+  Serial.println("+");
+}
 
-  // Test 7: Mouth amplitude staging
-  Serial.println("\nTest 7: Mouth Amplitude Stages");
+void runTest7() {
+  Serial.println("\n[T7] Mouth Amplitude Stages");
   setState(STATE_SPEAKING);
 
   int testAmplitudes[] = {0, 25, 75, 125, 175, 225, 255};
@@ -683,17 +912,6 @@ void runTestSequence() {
     FastLED.show();
     delay(1000);
   }
-
-  // Return to IDLE
-  Serial.println("\n=== Test Complete ===");
-  Serial.println("Returning to IDLE state\n");
-  setState(STATE_IDLE);
-  mouthAmplitude = 0;
-  updateBaseState();
-  applyBreathingEffect();
-  updateMouth();
-  FastLED.show();
-
-  flashActive = savedFlash;
   Serial.println("+");
 }
+
