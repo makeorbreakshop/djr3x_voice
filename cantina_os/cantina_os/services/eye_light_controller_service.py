@@ -944,26 +944,26 @@ class EyeLightControllerService(RealtimeService):
         """
         # Only change pattern if in interactive mode
         if self._is_in_interactive_mode():
-            self.logger.info("Speech ended, triggering green confirmation flash")
+            self.logger.info("Speech ended, resetting mouth and triggering green flash")
+
+            # IMPORTANT: Change pattern FIRST to prevent any more amplitude updates
+            # This stops the amplitude handler from continuing to update the mouth
+            self._target_pattern = EyePattern.FLASH
+
             # Reset amplitude modulation
             self._amplitude_modulation = 0.0
             # Reset last mouth level to force update on next speech
             self._last_mouth_level = -1
-            # Explicitly close mouth when speech ends - send multiple times to ensure it gets through
+
+            # Now reset mouth to black (pattern change above prevents race condition)
             if self.adapter:
                 try:
-                    # Send reset command 3 times with small delay to ensure it gets through
-                    for i in range(3):
-                        await self.adapter.set_mouth_amplitude(0)
-                        if i < 2:  # Don't delay after last send
-                            await asyncio.sleep(0.02)  # 20ms delay between sends
-                    self.logger.info("Mouth reset to M000 (sent 3x for reliability)")
+                    await self.adapter.set_mouth_amplitude(0)
+                    self.logger.debug("Mouth reset to M000")
                 except Exception as e:
                     self.logger.error(f"Failed to reset mouth: {e}")
             else:
                 self.logger.warning("Cannot reset mouth - adapter not initialized")
-            # Trigger flash pattern (will auto-return to IDLE in Arduino)
-            self._target_pattern = EyePattern.FLASH
 
     async def _handle_amplitude(self, event_payload: dict) -> None:
         """

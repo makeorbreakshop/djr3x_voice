@@ -363,7 +363,10 @@ class MemoryService(BaseService):
             self.logger.error(f"Error handling person detected: {e}", exc_info=True)
 
     async def _handle_person_exited(self, payload: Dict[str, Any]) -> None:
-        """Handle VISION_PERSON_EXITED event - calculate interaction duration and generate summary.
+        """Handle VISION_PERSON_EXITED event - calculate interaction duration.
+
+        Summary generation is DEFERRED until system returns to IDLE mode to avoid
+        interfering with active conversations during INTERACTIVE mode.
 
         CRITICAL: Uses atomic profile update to prevent data loss during shutdown.
         All profile modifications happen before the single save operation.
@@ -388,21 +391,20 @@ class MemoryService(BaseService):
 
                 self.logger.info(f"Recorded {interaction_duration:.1f}s interaction for {person_name}")
 
-                # Generate conversation summary if person had a conversation
-                # CRITICAL: This modifies the profile IN-PLACE without saving
-                if self._person_needs_summary:
-                    await self._generate_visit_summary(profile, interaction_duration)
-                    self._person_needs_summary = False
+                # DO NOT generate summary here - it will be done when returning to IDLE mode
+                # This prevents summarization from interfering with active conversations
+                # The _person_needs_summary flag remains set for later processing
 
-                # ATOMIC SAVE: Single save with all updates (interaction time + summary)
+                # ATOMIC SAVE: Single save with interaction time update
                 await self._save_profile(profile)
                 self.logger.debug(f"Profile saved atomically for {person_name}")
 
-            # Clear tracking
+            # Clear current person tracking, but keep _person_needs_summary flag
+            # so summary can be generated when transitioning to IDLE
             if self._current_person == person_name:
                 self._current_person = None
                 self._person_arrival_time = None
-                self._person_needs_summary = False
+                # Note: _person_needs_summary intentionally NOT cleared here
 
         except Exception as e:
             self.logger.error(f"Error handling person exited: {e}", exc_info=True)
