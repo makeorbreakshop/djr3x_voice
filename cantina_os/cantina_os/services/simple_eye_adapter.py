@@ -531,17 +531,33 @@ class SimpleEyeAdapter:
     async def set_mouth_amplitude(self, amplitude: int) -> bool:
         """
         Set mouth opening amplitude (0-255).
+        FIRE AND FORGET - Does not wait for response to prevent buffer overflow.
 
         Args:
             amplitude: Mouth opening level (0=closed/dim, 255=fully open/bright)
 
         Returns:
-            True if successful, False otherwise
+            True if command was sent (no confirmation wait)
         """
         # Clamp to 0-255
         level = min(255, max(0, int(amplitude)))
         command = f"M{level:03d}"  # Format: M000 to M255
-        return await self._send_command(command)
+
+        # CRITICAL: Fire and forget for mouth commands to prevent buffer overflow
+        # Arduino's 64-byte buffer fills quickly at high update rates
+        if self.connected and self.serial_conn:
+            try:
+                command_str = command + '\n'
+                self.serial_conn.write(command_str.encode('utf-8'))
+                # Don't flush or wait - let OS handle buffering
+                self.logger.debug(f"Sent mouth amplitude: {command} (fire-and-forget)")
+                return True
+            except Exception as e:
+                self.logger.error(f"Failed to send mouth command: {e}")
+                return False
+
+        self.logger.warning("Cannot send mouth command: Not connected")
+        return False
 
     async def reset(self) -> bool:
         """

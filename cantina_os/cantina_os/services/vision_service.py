@@ -89,9 +89,14 @@ class VisionService(BaseService):
         self._no_person_frames = 0  # Frames with no face detected
         self._person_exit_threshold = 10  # Frames before emitting PERSON_EXITED (2 seconds at 5 FPS)
 
+        # Per-person scene capture tracking to prevent re-capture spam
+        self._person_last_scene_capture: Dict[str, float] = {}  # {person_name: last_capture_timestamp}
+        self._person_scene_cooldown = 60.0  # Don't re-capture same person within 60 seconds
+
         # Scene capture state
         self._last_scene_capture_time: Optional[float] = None
         self._scene_staleness_threshold = 300.0  # 5 minutes in seconds
+        self._scene_capture_cooldown = 60.0  # Minimum 60 seconds between ANY scene captures (cost reduction)
         self._frame_count = 0  # Track frames for first-frame detection
 
     def _get_camera_names(self) -> Dict[int, str]:
@@ -590,8 +595,10 @@ class VisionService(BaseService):
 
         Also triggers smart scene capture based on:
         - First frame (startup)
-        - Person state changes
         - Scene staleness (>5 minutes)
+
+        NOTE: Scene capture on person changes DISABLED to reduce Claude API costs.
+        Person detection events are still emitted for context awareness.
 
         Args:
             person_name: Detected person's name (or None)
@@ -627,9 +634,18 @@ class VisionService(BaseService):
                 self._current_person_confidence = confidence
                 self._person_detection_time = current_time
 
-                # Trigger scene capture on person change
-                should_capture_scene = True
-                capture_reason = f"person_changed_from_{old_person or 'none'}_to_{person_name}"
+                # Smart scene capture: Check if we should capture for this person
+                # If same person recently captured, skip. If new person, always capture.
+                last_capture = self._person_last_scene_capture.get(person_name, 0)
+                time_since_capture = current_time - last_capture
+
+                if time_since_capture > self._person_scene_cooldown:
+                    # Either first time seeing this person, or haven't captured in a while
+                    should_capture_scene = True
+                    capture_reason = f"person_changed_from_{old_person or 'none'}_to_{person_name}"
+                    self.logger.info(f"Will capture scene for {person_name} (last capture: {time_since_capture:.1f}s ago)")
+                else:
+                    self.logger.info(f"Skipping scene capture for {person_name} (captured {time_since_capture:.1f}s ago, cooldown: {self._person_scene_cooldown}s)")
             else:
                 # Same person, just update confidence if significantly different
                 if abs(confidence - self._current_person_confidence) > 0.1:
@@ -655,9 +671,14 @@ class VisionService(BaseService):
                         }
                     )
 
-                    # Trigger scene capture on person exit
-                    should_capture_scene = True
-                    capture_reason = f"person_exited_{self._current_person}"
+                    # Smart scene capture on exit: Only if person was here for a while
+                    # Don't capture if they just flickered in/out quickly
+                    if duration > 30.0:  # Person was here for more than 30 seconds
+                        should_capture_scene = True
+                        capture_reason = f"person_exited_{self._current_person}_after_{duration:.0f}s"
+                        self.logger.info(f"Will capture exit scene for {self._current_person} (was present for {duration:.1f}s)")
+                    else:
+                        self.logger.info(f"Skipping exit scene capture for {self._current_person} (only present for {duration:.1f}s)")
 
                     # Clear person state
                     self._current_person = None
@@ -728,7 +749,14 @@ class VisionService(BaseService):
             )
 
             # Update scene capture state
-            self._last_scene_capture_time = time.time()
+            capture_time = time.time()
+            self._last_scene_capture_time = capture_time
+
+            # Track per-person capture time to prevent re-capture spam
+            if person_name:
+                self._person_last_scene_capture[person_name] = capture_time
+                self.logger.debug(f"Updated last capture time for {person_name}: {capture_time}")
+
             if reason == "startup_first_frame":
                 self.startup_scene_captured = True
                 # Send CLI notification about startup scene
