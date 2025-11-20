@@ -40,7 +40,12 @@ class _Config(BaseModel):
         # Vision / person tracking
         "current_scene_description",  # Scene description from vision
         "current_person_present",  # Who's currently in front of camera
-        "person_memory"  # Dict of person profiles {name: {...}}
+        "person_memory",  # Dict of person profiles {name: {...}}
+        "vision_metadata",  # Vision capture metadata (timestamps, etc.)
+        "last_vision_update",  # Timestamp of last vision scene update
+        "last_person_detection_time",  # Timestamp of last person detection
+        "last_person_confidence",  # Confidence score of last person detection
+        "last_person_exit_time"  # Timestamp of last person exit
     ]
 
 # ---------------------------------------------------------------------------

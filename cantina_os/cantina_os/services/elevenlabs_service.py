@@ -480,6 +480,11 @@ class ElevenLabsService(BaseService):
                             chunk_count = 0
                             start_time = time.time()
 
+                            # AGC (Automatic Gain Control) for dynamic range adaptation
+                            recent_rms_values = []  # Track recent RMS values for AGC
+                            agc_window_size = 30  # 30 chunks ≈ 0.5s of history
+                            min_dynamic_range_db = 12  # Minimum dB range to maintain visibility
+
                             # Process and play each PCM chunk immediately (true streaming)
                             for chunk in audio_stream:
                                 # Only process bytes (filter out metadata)
@@ -493,17 +498,34 @@ class ElevenLabsService(BaseService):
                                     rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
 
                                     # Use logarithmic scaling for more natural dynamics
-                                    # This gives better perceptual loudness mapping
                                     import math
                                     if rms > 0:
                                         # Convert to dB (logarithmic scale)
                                         db_value = 20 * math.log10(rms / MAX_AMPLITUDE)
-                                        # Map from -60dB to -10dB range to 0.0-1.0 (adjusted for -24 LUFS baseline)
-                                        # -60dB = silence, -10dB = loud speech
-                                        normalized_amplitude = max(0, min(1.0, (db_value + 50) / 40))
-                                        # Apply 4x boost for good range without hitting max too easily
-                                        # Reduced from 8x to prevent constant max brightness
-                                        normalized_amplitude = min(1.0, normalized_amplitude * 4.0)
+
+                                        # AGC: Track recent RMS values in dB
+                                        recent_rms_values.append(db_value)
+                                        if len(recent_rms_values) > agc_window_size:
+                                            recent_rms_values.pop(0)
+
+                                        # Calculate dynamic range from recent audio
+                                        if len(recent_rms_values) >= 10:  # Need minimum samples
+                                            recent_min_db = min(recent_rms_values)
+                                            recent_max_db = max(recent_rms_values)
+                                            dynamic_range_db = max(min_dynamic_range_db, recent_max_db - recent_min_db)
+
+                                            # Map current dB relative to recent range
+                                            # This makes subtle variations visible even in narrow-range speech
+                                            normalized_amplitude = (db_value - recent_min_db) / dynamic_range_db
+                                            normalized_amplitude = max(0, min(1.0, normalized_amplitude))
+
+                                            # Apply moderate boost to utilize full LED range
+                                            # 2x boost gives good dynamics without constant saturation
+                                            normalized_amplitude = min(1.0, normalized_amplitude * 2.0)
+                                        else:
+                                            # Fallback to static range during first few chunks
+                                            normalized_amplitude = max(0, min(1.0, (db_value + 50) / 40))
+                                            normalized_amplitude = min(1.0, normalized_amplitude * 2.0)
                                     else:
                                         normalized_amplitude = 0  # Complete silence = completely dark
 
