@@ -508,8 +508,9 @@ class ElevenLabsService(BaseService):
                                         # Map from -60dB to -10dB range to 0.0-1.0 (adjusted for -24 LUFS baseline)
                                         # -60dB = silence, -10dB = loud speech
                                         normalized_amplitude = max(0, min(1.0, (db_value + 50) / 40))
-                                        # Apply boost for more dramatic movement
-                                        normalized_amplitude = min(1.0, normalized_amplitude * 2.5)
+                                        # Apply 8x boost for dramatic mouth movement (was 2.5x)
+                                        # This ensures full M000-M255 range utilization
+                                        normalized_amplitude = min(1.0, normalized_amplitude * 8.0)
                                     else:
                                         normalized_amplitude = 0  # Complete silence = completely dark
 

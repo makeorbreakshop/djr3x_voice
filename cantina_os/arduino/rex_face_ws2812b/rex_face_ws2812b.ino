@@ -25,6 +25,11 @@
  * 2025-11-19 @ 3:15 PM - ENGAGED pattern: Changed from rotating searchlight to smooth breathing cyan ring with white pupils (3.5s cycle)
  * 2025-11-19 @ 3:15 PM - Mouth idle state: Added dim blue baseline (50/255 brightness) - mouth always lit, blooms brighter when talking
  * 2025-11-19 @ 3:15 PM - CRITICAL FIX: Removed ALL debug Serial.print() statements - was polluting serial protocol causing Python timeouts
+ * 2025-11-20 @ 2:30 PM - VERIFIED: Buffer fix working (256 bytes), fire-and-forget mouth commands, mode-specific colors
+ * 2025-11-20 @ 2:30 PM - PYTHON: Applied 8x amplitude boost in elevenlabs_service.py for full M000-M255 range utilization
+ * 2025-11-20 @ 3:00 PM - FIX: Removed white pupils from ENGAGED pattern - now pure cyan breathing (was causing color mixing issues)
+ * 2025-11-20 @ 3:15 PM - CRITICAL FIX: Removed default: case sharing IDLE code - was causing pattern confusion
+ * 2025-11-20 @ 3:15 PM - Added proper default case that just holds current color steady
  */
 
 // CRITICAL: Increase serial buffer for MEGA 2560 (8KB SRAM available!)
@@ -359,16 +364,16 @@ void setPattern(char pattern) {
   lastUpdate = millis();
 
   switch (pattern) {
-    case 'I': // IDLE - All LEDs solid color
+    case 'I': // IDLE - Orange eyes, blue mouth
+      // Note: currentColor should be orange (set by Python via 'C' command)
       fillEyes(currentColor);
       mouthColor = CRGB(0, 100, 255);  // Blue mouth for idle
-      // FastLED.show(); // Removed - single show() in loop()
       break;
 
-    case 'E': // ENGAGED - Breathing cyan eyes with golden yellow mouth
-      fillEyes(currentColor);  // Eyes stay cyan (set by Python)
+    case 'E': // ENGAGED - Cyan eyes, golden mouth
+      // Note: currentColor should be cyan (set by Python via 'C' command)
+      fillEyes(currentColor);
       mouthColor = CRGB(255, 200, 0);  // Golden yellow mouth for engaged
-      // FastLED.show(); // Removed - single show() in loop()
       break;
 
     case 'S': // SPEAKING - Will be animated
@@ -545,7 +550,7 @@ void updateEyeAnimation() {
       }
       break;
 
-    case 'E': // ENGAGED - Smooth breathing cyan with white pupils
+    case 'E': // ENGAGED - Smooth breathing cyan (all LEDs same color)
       {
         // Smooth breathing effect (3.5 second cycle)
         float breatheCycle = (animationStep % 70) / 70.0;  // 70 frames @ 50ms = 3.5 sec
@@ -554,15 +559,12 @@ void updateEyeAnimation() {
         // Modulate brightness ±15% around base
         float brightnessMod = 0.85 + (breatheValue * 0.3);  // 0.85 to 1.15
 
-        // White pupils (constant)
-        eyeLeds[LEFT_EYE_START] = CRGB(255, 255, 255);
-        eyeLeds[RIGHT_EYE_START] = CRGB(255, 255, 255);
-
-        // Cyan ring with breathing modulation
+        // Apply breathing to ALL LEDs (no white pupils - pure cyan)
         CRGB breathingColor = currentColor;
         breathingColor.nscale8(brightnessMod * 255);
 
-        for (int i = 1; i < LEDS_PER_EYE; i++) {
+        // Fill entire eyes with breathing cyan
+        for (int i = 0; i < LEDS_PER_EYE; i++) {
           setEyeLED(LEFT_EYE_START, i, breathingColor);
           setEyeLED(RIGHT_EYE_START, i, breathingColor);
         }
@@ -676,7 +678,6 @@ void updateEyeAnimation() {
       break;
 
     case 'I': // IDLE - Breathing with synchronized blinking (Disney-style "illusion of life")
-    default:
       {
         unsigned long currentTime = millis();
 
@@ -721,6 +722,12 @@ void updateEyeAnimation() {
 
         animationStep++;
       }
+      break;
+
+    default:
+      // Unknown pattern - just hold current color steady
+      // This prevents any unhandled patterns from doing weird things
+      fillEyes(currentColor);
       break;
   }
 

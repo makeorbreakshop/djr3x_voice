@@ -1,9 +1,9 @@
 {
   "name": "Brandon",
-  "visit_count": 14,
+  "visit_count": 17,
   "first_seen": 1763481057.5385568,
-  "last_seen": 1763647461.283621,
-  "total_interaction_time_seconds": 13172.134484291077,
+  "last_seen": 1763654447.461271,
+  "total_interaction_time_seconds": 16539.015845775604,
   "personality_traits": [
     "Casual and friendly tone ('Hey. What's up?')",
     "Problem-solving oriented and methodical (testing systems one by one)",
@@ -67,9 +67,9 @@
   "preferences": {},
   "notes": [],
   "metadata": {
-    "conversation_summary": "UPDATED SUMMARY:\nVisit #13 - Brandon continuing to test DJ R3X's hardware functionality. Testing mouth/voice output and eye LED responsiveness. Brandon troubleshooting timing issues with the eye light system, noting inconsistent performance. Focused on identifying which features are operational versus experiencing technical difficulties.",
-    "summary_updated_at": 1763587267.002303,
-    "summary_visit_count": 8,
+    "conversation_summary": "UPDATED SUMMARY:\nVisit #13 - Brandon continuing to test DJ R3X's hardware functionality. Testing mouth/voice output and eye LED responsiveness. Brandon troubleshooting timing issues with the eye light system, noting inconsistent performance and delays when switching to listening mode. Eye pulsing feature now working, though Brandon reports additional intermittent technical issues. Focused on identifying which features are operational versus experiencing technical difficulties.",
+    "summary_updated_at": 1763654441.96452,
+    "summary_visit_count": 9,
     "follow_up_opportunities": [
       "Check on whether eye light timing out issues were resolved",
       "Ask what specifically was being tested with mouth and eye systems",

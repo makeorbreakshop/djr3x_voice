@@ -14,8 +14,8 @@ import time
 from typing import Optional, Dict, Any
 
 
-class SimpleEyeAdapter:
-    """Clean adapter for V3 Arduino protocol (drop-in replacement)."""
+class SimpleEyeAdapterV3:
+    """Clean adapter for V3 Arduino protocol."""
 
     def __init__(
         self,

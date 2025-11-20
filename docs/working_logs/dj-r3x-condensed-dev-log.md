@@ -48,6 +48,9 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 - **Technical**: Added platform-specific audio playback support
 
 ### 2025-05-06: LED System Updates
+- **Issue**: Eye animation state management issues
+- **Solution**: Centralized LED settings dictionary
+- **Impact**: Improved animation reliability
 - **Issue**: Complex JSON communication causing timeouts
 - **Solution**: Upgraded to ArduinoJson v7.4.1, enhanced protocol with timeout protection
 - **Impact**: Eliminated "Invalid JSON" warnings, more reliable communication
@@ -980,6 +983,42 @@ Clean System Operation: Eliminated VLC error spam while preserving functionality
 - **Solution**: Fixed ducking to use self.backends.get(self.active_source) for multi-backend support, added missing _speech_cache_to_event dict initialization
 - **Impact**: Both local VLC and Spotify backends work correctly for audio ducking, timeline speech tracking functions properly
 - **Technical**: Changed from self._backend (non-existent) to self.backends[self.active_source], added self._speech_cache_to_event: Dict[str, str] = {}
+
+### 2025-11-18: CLI Voice Feedback & Vision Command Integration
+- **Issue**: No visual feedback for voice interactions in CLI, vision window launch was manual
+- **Solution**: Added real-time transcription display with emojis, integrated `vision` command to launch detection window
+- **Impact**: Clear visual feedback for voice interactions, one-command vision window launch
+- **Technical**: Subscribed to TRANSCRIPTION_INTERIM/FINAL and LLM_RESPONSE events, subprocess.Popen for detached window
+
+### 2025-11-19: Real-Time Control Architecture & Disney-Level Eye Animations
+- **Issue**: Serial buffer overflow causing lost commands, no smooth 60Hz hardware updates
+- **Solution**: Created RealtimeService base class with control loop, fixed Arduino serial handling (while vs if), Disney-level idle animations
+- **Impact**: Smooth 60Hz LED updates, realistic blinking (asymmetric timing, partial blinks, double blinks), white pupil contrast
+- **Technical**: Control loop separates event handlers from hardware execution, wake-up boot sequence with organic transitions
+
+### 2025-11-19: Mouth LED Integration & Audio Amplitude Streaming
+- **Issue**: No real-time amplitude for LED visualization, mouth animation needed
+- **Solution**: RMS amplitude calculation from TTS audio stream, center-out bloom mouth animation, PCM format migration
+- **Impact**: Eye pupils pulse with speech, mouth opens/closes naturally, eliminated ffmpeg subprocess overhead
+- **Technical**: NumPy RMS calculation per audio chunk, 60Hz control loop modulation, switched from MP3 to PCM_24000
+
+### 2025-11-20: Audio Fix & LED Dynamic Range Enhancement
+- **Issue**: NameError in ElevenLabs PCM streaming, mouth LEDs only using 27% range
+- **Solution**: Added missing import time, 8x amplitude boost, logarithmic scaling, mode-specific mouth colors
+- **Impact**: Audio plays correctly, mouth animations use full 0-100% range, ENGAGED mode dramatic on/off effect
+- **Technical**: Golden yellow mouth for ENGAGED, log scale -60dB to -10dB, black baseline when silent
+
+### 2025-11-20: Vision Service Optimization - Smart Scene Capture
+- **Issue**: Face detection flickering causing excessive Claude Vision API calls ($$$)
+- **Solution**: Per-person cooldown tracking (60s), skip capture for brief exits (<30s), immediate capture for new people
+- **Impact**: 70-80% reduction in Claude Vision API costs while maintaining full contextual awareness
+- **Technical**: Dict[person_name, last_capture_time], cooldown logic in _handle_person_detection()
+
+### 2025-11-20: Serial Buffer Root Cause Discovery
+- **Issue**: LED timeouts, 836 commands in 3min overwhelming Arduino
+- **Solution**: Increased buffer 64→256 bytes (MEGA has 8KB SRAM), fire-and-forget for mouth commands, throttle to 10Hz
+- **Impact**: No more buffer overflow, smooth LED animations, reliable command execution
+- **Technical**: #define SERIAL_RX_BUFFER_SIZE 256, removed response waits for streaming data
 
 ## 🔗 Key References
 - [Architecture Standards](./ARCHITECTURE_STANDARDS.md)
