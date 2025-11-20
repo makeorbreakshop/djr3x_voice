@@ -175,7 +175,7 @@ class EyeLightControllerService(RealtimeService):
 
     # RGB Color mappings for different modes and sentiments
     MODE_COLORS = {
-        "IDLE": (255, 60, 0),          # Deep orange-red (matches Arduino default)
+        "IDLE": (255, 120, 0),         # Bright orange (more orange, less red)
         "AMBIENT": (128, 0, 255),      # Purple (will cycle in animation)
         "INTERACTIVE": (0, 255, 255),  # Cyan (alert, ready)
         "SLEEPING": (255, 68, 0),      # Dim orange

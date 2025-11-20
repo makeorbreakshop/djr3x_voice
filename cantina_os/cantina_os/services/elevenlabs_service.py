@@ -498,14 +498,20 @@ class ElevenLabsService(BaseService):
 
                                     # Calculate RMS amplitude
                                     rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
-                                    # Boost amplitude by 8x for VERY dramatic mouth movement
-                                    # ElevenLabs outputs at -24 LUFS (6% of max), we want 50-100% mouth opening
-                                    # Raw values are 0.02-0.07, boost them to 0.16-0.56 range for visible animation
-                                    AMPLITUDE_BOOST = 8.0
-                                    # Also add a floor to ensure minimum mouth movement even on quiet sounds
-                                    MIN_AMPLITUDE = 0.15  # Always at least 15% open when speaking
-                                    boosted = (rms / MAX_AMPLITUDE) * AMPLITUDE_BOOST
-                                    normalized_amplitude = min(1.0, max(MIN_AMPLITUDE, boosted) if boosted > 0.01 else 0)
+
+                                    # Use logarithmic scaling for more natural dynamics
+                                    # This gives better perceptual loudness mapping
+                                    import math
+                                    if rms > 0:
+                                        # Convert to dB (logarithmic scale)
+                                        db_value = 20 * math.log10(rms / MAX_AMPLITUDE)
+                                        # Map from -60dB to -10dB range to 0.0-1.0 (adjusted for -24 LUFS baseline)
+                                        # -60dB = silence, -10dB = loud speech
+                                        normalized_amplitude = max(0, min(1.0, (db_value + 50) / 40))
+                                        # Apply boost for more dramatic movement
+                                        normalized_amplitude = min(1.0, normalized_amplitude * 2.5)
+                                    else:
+                                        normalized_amplitude = 0  # Complete silence = completely dark
 
                                     # Emit amplitude event (thread-safe)
                                     payload_dict = {

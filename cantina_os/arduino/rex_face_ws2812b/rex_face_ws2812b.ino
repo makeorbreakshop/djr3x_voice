@@ -55,7 +55,7 @@ CRGB mouthLeds[NUM_MOUTH_LEDS];
 char currentPattern = 'I';  // Default to IDLE
 char previousPattern = 'I';  // For returning after flash
 int currentBrightness = DEFAULT_BRIGHTNESS;
-CRGB currentColor = CRGB(255, 60, 0);  // Deep orange-red (pairs with white pupil)
+CRGB currentColor = CRGB(255, 120, 0);  // Bright orange (more orange, less red)
 CRGB previousColor;  // For returning after flash
 unsigned long lastUpdate = 0;
 int animationStep = 0;
@@ -741,7 +741,7 @@ void setBrightness(int brightness) {
 void resetEyes() {
   FastLED.setBrightness(DEFAULT_BRIGHTNESS);
   currentBrightness = DEFAULT_BRIGHTNESS;
-  currentColor = CRGB(255, 100, 0);  // Warm orange-gold (matches IDLE)
+  currentColor = CRGB(255, 120, 0);  // Bright orange (matches IDLE)
   animationStep = 0;
 
   clearEyes();
@@ -802,7 +802,7 @@ void playWakeUpAnimation() {
    *   - Natural asymmetric timing (fast close, slow open)
    */
 
-  CRGB idleColor = CRGB(255, 60, 0);  // Deep orange-red (constant color)
+  CRGB idleColor = CRGB(255, 120, 0);  // Bright orange (constant color)
 
   // PHASE 1: Deep Sleep - Small constricted pupils only (500ms @ 30fps)
   clearEyes();
@@ -1091,11 +1091,24 @@ void updateMouth() {
   // Animation blooms from center (1,6) outward to top (0,7) and bottom (3,4)
   // Uses brightness gradients with delayed cascades for smooth diffused effect
 
+  // Special case: ENGAGED mode with no amplitude = completely black mouth
+  if (currentPattern == 'E' && mouthAmplitude == 0) {
+    for (int i = 0; i < NUM_MOUTH_LEDS; i++) {
+      mouthLeds[i] = CRGB::Black;
+    }
+    return;
+  }
+
   // Normalize amplitude to 0.0-1.0 range
   float openness = mouthAmplitude / 255.0;
 
-  // Dim idle baseline: 20% brightness when silent, 100% when talking
-  int idleBrightness = 50;  // ~20% brightness for idle state
+  // Dynamic baseline based on mode
+  // ENGAGED = completely dark when silent for dramatic effect
+  // Others = small baseline glow for visibility
+  int idleBrightness = 0;
+  if (currentPattern != 'E' && mouthAmplitude == 0) {
+    idleBrightness = 20;  // Small glow for other modes when silent
+  }
 
   // CENTER START: Upper-middle LEDs (1, 6) - brightest, bloom from here
   int centerBright = idleBrightness + (openness * (255 - idleBrightness));
