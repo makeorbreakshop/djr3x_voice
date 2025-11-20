@@ -358,10 +358,6 @@ void setPattern(char pattern) {
     case 'E': // ENGAGED - Breathing cyan eyes with golden yellow mouth
       fillEyes(currentColor);  // Eyes stay cyan (set by Python)
       mouthColor = CRGB(255, 200, 0);  // Golden yellow mouth for engaged
-      // Set a minimum baseline brightness for better contrast in ENGAGED mode
-      if (mouthAmplitude < 20 && mouthAmplitude > 0) {
-        mouthAmplitude = 20;  // Ensure minimum visibility when talking
-      }
       // FastLED.show(); // Removed - single show() in loop()
       break;
 

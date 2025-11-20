@@ -992,13 +992,8 @@ class EyeLightControllerService(RealtimeService):
                 now = time.time()
                 if now - self._last_mouth_command_time >= self.MOUTH_UPDATE_INTERVAL:
                     # Scale amplitude (0.0-1.0) to mouth level (0-255)
-                    # Add minimum baseline for ENGAGED mode to ensure some contrast
-                    if self._current_mode == SystemMode.INTERACTIVE:
-                        # In ENGAGED mode: map 0.0-1.0 to 20-255 range for better contrast
-                        mouth_level = int(20 + (self._amplitude_modulation * 235))
-                    else:
-                        # Other modes: full 0-255 range
-                        mouth_level = int(self._amplitude_modulation * 255)
+                    # Full 0-255 range for maximum contrast (black when silent)
+                    mouth_level = int(self._amplitude_modulation * 255)
 
                     # Only send if value actually changed (prevent duplicate commands)
                     if mouth_level != self._last_mouth_level:
