@@ -2,10 +2,12 @@
  * DJ R3X Face Controller - WS2812B RGB Version
  * Controls eyes (2x7 LED rings) and mouth (8 LED V-shape)
  * Extended protocol with RGB color support
+ * OPTIMIZED FOR ARDUINO MEGA 2560 (8KB SRAM, 4 Serial Ports)
  *
  * Hardware:
  * - Eyes: Pin 6, 14 LEDs (2 rings of 7)
  * - Mouth: Pin 5, 8 LEDs (V-shaped, fills bottom-up)
+ * - Board: MEGA 2560 R3 or PRO (ATmega2560)
  *
  * Serial Commands:
  * - Pattern: I/L/T/S/E/F/H/D/A (Idle/Listen/Think/Speak/Engage/Flash/Happy/Sad/Angry)
@@ -18,11 +20,19 @@
  * 2025-11-19 @ 12:30 PM - Redesigned interaction animations (ENGAGED/LISTENING/THINKING/SPEAKING) with green completion flash
  * 2025-11-19 @ 3:00 PM - Fixed FLASH pattern in Python, LISTENING triggers on recording (not transcripts), sped up THINKING (1.5s)
  * 2025-11-19 @ 3:20 PM - Flash now runs at 100fps - TWO super fast smooth green pulses (0.3s total)
+ * 2025-11-20 - Added MEGA 2560 optimizations and increased buffer size to 256 bytes
  * 2025-11-19 @ 1:45 PM - Added mouth control: 8 LED V-shape on pin 5 with amplitude VU meter, wake-up yawn animation, and TALK test command
  * 2025-11-19 @ 3:15 PM - ENGAGED pattern: Changed from rotating searchlight to smooth breathing cyan ring with white pupils (3.5s cycle)
  * 2025-11-19 @ 3:15 PM - Mouth idle state: Added dim blue baseline (50/255 brightness) - mouth always lit, blooms brighter when talking
  * 2025-11-19 @ 3:15 PM - CRITICAL FIX: Removed ALL debug Serial.print() statements - was polluting serial protocol causing Python timeouts
  */
+
+// CRITICAL: Increase serial buffer for MEGA 2560 (8KB SRAM available!)
+// This MUST be defined before any includes to take effect
+#ifdef __AVR_ATmega2560__
+  #define SERIAL_RX_BUFFER_SIZE 256  // Increase from default 64 bytes
+  #define SERIAL_TX_BUFFER_SIZE 256  // 4x larger buffer = way less overflow!
+#endif
 
 #include <FastLED.h>
 
