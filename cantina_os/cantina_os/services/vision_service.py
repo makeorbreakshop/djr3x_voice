@@ -34,7 +34,11 @@ from cantina_os.event_payloads import (
     VisionScenePayload,
     VisionErrorPayload,
     VisionRequestPayload,
+    VisionCameraListPayload,
+    VisionCameraSelectedPayload,
+    CliResponsePayload,
 )
+from cantina_os.utils.command_decorators import compound_command, command_error_handler, register_service_commands
 
 
 class VisionService(BaseService):
@@ -52,8 +56,19 @@ class VisionService(BaseService):
         super().__init__(service_name="vision", event_bus=event_bus)
         self.config = config or {}
 
-        # Camera configuration - auto-detect best camera (skip Continuity Camera)
-        self.camera_index = self._find_best_camera(self.config.get("camera_index"))
+        # Camera configuration - check env, then config, then auto-detect
+        env_camera_index = os.getenv("VISION_CAMERA_INDEX")
+        if env_camera_index is not None:
+            try:
+                preferred_index = int(env_camera_index)
+                self.logger.info(f"Using VISION_CAMERA_INDEX from .env: {preferred_index}")
+            except ValueError:
+                self.logger.warning(f"Invalid VISION_CAMERA_INDEX in .env: {env_camera_index}, falling back to auto-detect")
+                preferred_index = self.config.get("camera_index")
+        else:
+            preferred_index = self.config.get("camera_index")
+
+        self.camera_index = self._find_best_camera(preferred_index)
 
         # Claude configuration
         api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -251,6 +266,14 @@ class VisionService(BaseService):
 
         # Subscribe to vision window open requests
         self._event_bus.on(EventTopics.VISION_WINDOW_OPEN, self._handle_vision_window_open)
+
+        # Subscribe to vision commands (camera list/select/status)
+        await self.subscribe(EventTopics.VISION_COMMAND, self._handle_vision_command)
+        self.logger.info("Subscribed to VISION_COMMAND events")
+
+        # Auto-register camera commands using decorators
+        register_service_commands(self, self._event_bus)
+        self.logger.info("Auto-registered camera commands using decorators")
 
         # Start continuous monitoring if enabled
         if self.enable_continuous_monitoring and FACE_RECOGNITION_AVAILABLE and self.known_face_encodings:
@@ -781,4 +804,225 @@ class VisionService(BaseService):
         self._event_bus.emit(
             EventTopics.VISION_SCENE_ERROR,
             error_payload.model_dump()
+        )
+
+    async def _handle_vision_command(self, payload: dict):
+        """Route vision commands to appropriate handlers."""
+        command = payload.get("command", "")
+        subcommand = payload.get("subcommand", "")
+
+        # Build full command name
+        full_command = f"{command} {subcommand}".strip() if subcommand else command
+
+        # Route to appropriate handler
+        if full_command == "camera list":
+            await self.handle_camera_list(payload)
+        elif full_command == "camera status":
+            await self.handle_camera_status(payload)
+        elif full_command == "camera select":
+            await self.handle_camera_select(payload)
+        else:
+            self.logger.warning(f"Unknown vision command: {full_command}")
+            response = CliResponsePayload(
+                message=f"Unknown camera command: {full_command}",
+                is_error=True
+            )
+            self._event_bus.emit(EventTopics.CLI_RESPONSE, response.model_dump())
+
+    @compound_command("camera list", event_topic=EventTopics.VISION_COMMAND)
+    @command_error_handler
+    async def handle_camera_list(self, payload: dict):
+        """Handle 'camera list' command - lists available cameras."""
+        self.logger.info("Listing available cameras")
+        await self._list_cameras()
+
+    @compound_command("camera status", event_topic=EventTopics.VISION_COMMAND)
+    @command_error_handler
+    async def handle_camera_status(self, payload: dict):
+        """Handle 'camera status' command - shows current camera."""
+        self.logger.info("Showing camera status")
+        await self._show_camera_status()
+
+    @compound_command("camera select", event_topic=EventTopics.VISION_COMMAND)
+    @command_error_handler
+    async def handle_camera_select(self, payload: dict):
+        """Handle 'camera select <index>' command - selects camera."""
+        args = payload.get("args", [])
+
+        if not args or len(args) == 0:
+            response = CliResponsePayload(
+                message="Usage: camera select <index>",
+                is_error=True
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+            return
+
+        index_str = args[0]
+        self.logger.info(f"Selecting camera: {index_str}")
+        await self._select_camera(index_str)
+
+    async def _list_cameras(self):
+        """List all available cameras."""
+        self.logger.info("Listing available cameras")
+
+        camera_names = self._get_camera_names()
+
+        if not camera_names:
+            response = CliResponsePayload(
+                message="❌ No cameras detected!",
+                is_error=True
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+            return
+
+        # Build formatted output
+        lines = ["", "=" * 70, "Available Cameras", "=" * 70]
+
+        for idx, name in camera_names.items():
+            current_marker = " [CURRENT]" if idx == self.camera_index else ""
+            lines.append(f"\nCamera {idx}{current_marker}:")
+            lines.append(f"  Name: {name}")
+
+        lines.append("\n" + "=" * 70)
+        lines.append("\nUse 'camera select <index>' to choose a camera")
+
+        response = CliResponsePayload(
+            message="\n".join(lines),
+            is_error=False
+        )
+        self._event_bus.emit(
+            EventTopics.CLI_RESPONSE,
+            response.model_dump()
+        )
+
+        # Emit camera list event
+        camera_list_payload = VisionCameraListPayload(cameras=camera_names)
+        self._event_bus.emit(
+            EventTopics.VISION_CAMERA_LIST,
+            camera_list_payload.model_dump()
+        )
+
+    async def _select_camera(self, index_str: str):
+        """Select a camera and save to .env."""
+        try:
+            index = int(index_str)
+        except ValueError:
+            response = CliResponsePayload(
+                message=f"Invalid camera index: {index_str}",
+                is_error=True
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+            return
+
+        # Test if camera exists
+        try:
+            test_camera = cv2.VideoCapture(index)
+            if not test_camera.isOpened():
+                response = CliResponsePayload(
+                    message=f"❌ Camera {index} is not available",
+                    is_error=True
+                )
+                self._event_bus.emit(
+                    EventTopics.CLI_RESPONSE,
+                    response.model_dump()
+                )
+                return
+            test_camera.release()
+        except Exception as e:
+            response = CliResponsePayload(
+                message=f"❌ Failed to test camera {index}: {e}",
+                is_error=True
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+            return
+
+        # Save to .env
+        env_path = os.path.join(os.path.dirname(__file__), "../../../.env")
+
+        try:
+            # Read existing .env
+            lines = []
+            if os.path.exists(env_path):
+                with open(env_path, 'r') as f:
+                    lines = f.readlines()
+
+            # Update or append VISION_CAMERA_INDEX
+            updated = False
+            for i, line in enumerate(lines):
+                if line.strip().startswith('VISION_CAMERA_INDEX='):
+                    lines[i] = f'VISION_CAMERA_INDEX={index}\n'
+                    updated = True
+                    break
+
+            if not updated:
+                if lines and not lines[-1].endswith('\n'):
+                    lines.append('\n')
+                lines.append(f'VISION_CAMERA_INDEX={index}\n')
+
+            # Write back
+            with open(env_path, 'w') as f:
+                f.writelines(lines)
+
+            camera_names = self._get_camera_names()
+            camera_name = camera_names.get(index, f"Camera {index}")
+
+            response = CliResponsePayload(
+                message=f"✅ Camera {index} selected: {camera_name}\n   Saved to .env - restart CantinaOS to apply",
+                is_error=False
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+
+            # Emit camera selected event
+            camera_selected_payload = VisionCameraSelectedPayload(
+                camera_index=index,
+                camera_name=camera_name,
+                saved_to_env=True
+            )
+            self._event_bus.emit(
+                EventTopics.VISION_CAMERA_SELECTED,
+                camera_selected_payload.model_dump()
+            )
+
+        except Exception as e:
+            response = CliResponsePayload(
+                message=f"❌ Failed to save camera selection: {e}",
+                is_error=True
+            )
+            self._event_bus.emit(
+                EventTopics.CLI_RESPONSE,
+                response.model_dump()
+            )
+
+    async def _show_camera_status(self):
+        """Show current camera status."""
+        camera_names = self._get_camera_names()
+        current_name = camera_names.get(self.camera_index, f"Camera {self.camera_index}")
+
+        env_camera = os.getenv("VISION_CAMERA_INDEX")
+        env_str = f" (from .env: {env_camera})" if env_camera else " (auto-detected)"
+
+        message = f"📷 Current camera: {self.camera_index} - {current_name}{env_str}"
+
+        response = CliResponsePayload(
+            message=message,
+            is_error=False
+        )
+        self._event_bus.emit(
+            EventTopics.CLI_RESPONSE,
+            response.model_dump()
         )

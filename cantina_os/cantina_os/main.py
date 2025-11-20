@@ -334,7 +334,10 @@ class CantinaOS:
         for cmd in ["debug latency", "debug latency conversation", "debug latency reset"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "latency_tracker", EventTopics.LATENCY_COMMAND)
-        
+
+        # Note: Camera commands are auto-registered by VisionService decorators
+        # (camera list, camera select, camera status)
+
         # Log registered commands for debugging
         commands = dispatcher.get_registered_commands()
         self.logger.info(f"Registered commands: {', '.join(commands)}")

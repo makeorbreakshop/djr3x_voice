@@ -203,6 +203,9 @@ class EventTopics(str, Enum):
     VISION_WINDOW_OPENED = "vision.window.opened"  # Vision window successfully opened
     VISION_WINDOW_CLOSED = "vision.window.closed"  # Vision window closed
     VISION_WINDOW_ERROR = "vision.window.error"  # Error opening vision window
+    VISION_COMMAND = "vision.command"  # General vision commands (list, select, status)
+    VISION_CAMERA_LIST = "vision.camera.list"  # List available cameras
+    VISION_CAMERA_SELECTED = "vision.camera.selected"  # Camera selected
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
