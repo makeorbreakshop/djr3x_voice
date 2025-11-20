@@ -2,8 +2,8 @@
   "name": "Brandon",
   "visit_count": 18,
   "first_seen": 1763481057.5385568,
-  "last_seen": 1763661381.344265,
-  "total_interaction_time_seconds": 20168.3113861084,
+  "last_seen": 1763661394.4574358,
+  "total_interaction_time_seconds": 20137.64139199257,
   "personality_traits": [
     "Casual and friendly tone ('Hey. What's up?')",
     "Problem-solving oriented and methodical (testing systems one by one)",
@@ -67,9 +67,9 @@
   "preferences": {},
   "notes": [],
   "metadata": {
-    "conversation_summary": "UPDATED SUMMARY:\nVisit #13 - Brandon continuing to test DJ R3X's hardware functionality. Testing mouth/voice output and eye LED responsiveness. Brandon troubleshooting timing issues with the eye light system, noting inconsistent performance. Focused on identifying which features are operational versus experiencing technical difficulties.",
-    "summary_updated_at": 1763587267.002303,
-    "summary_visit_count": 8,
+    "conversation_summary": "UPDATED SUMMARY:\nVisit #19 - Brandon is filming a video featuring DJ R3X and a projector demonstration. He's testing R3X's ability to pilot Star Tours after relocating the character from the cantina. Brandon is working on technical troubleshooting, specifically addressing an issue with R3X's mouth reset mechanism. He's preparing dynamic short responses from R3X for the video content.",
+    "summary_updated_at": 1763660864.36752,
+    "summary_visit_count": 10,
     "follow_up_opportunities": [
       "Check on whether eye light timing out issues were resolved",
       "Ask what specifically was being tested with mouth and eye systems",
