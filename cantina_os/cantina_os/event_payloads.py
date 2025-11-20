@@ -940,3 +940,21 @@ class VisionErrorPayload(BaseEventPayload):
     retry_count: int = Field(
         default=0, description="Number of retry attempts"
     )
+
+
+class VisionCameraListPayload(BaseEventPayload):
+    """Payload for camera list response."""
+
+    cameras: Dict[int, str] = Field(
+        ..., description="Dictionary mapping camera index to camera name"
+    )
+
+
+class VisionCameraSelectedPayload(BaseEventPayload):
+    """Payload for camera selection event."""
+
+    camera_index: int = Field(..., description="Selected camera index")
+    camera_name: str = Field(..., description="Name of the selected camera")
+    saved_to_env: bool = Field(
+        default=True, description="Whether selection was saved to .env file"
+    )
