@@ -351,12 +351,20 @@ void setPattern(char pattern) {
   switch (pattern) {
     case 'I': // IDLE - All LEDs solid color
       fillEyes(currentColor);
+      mouthColor = CRGB(0, 100, 255);  // Blue mouth for idle
+      // FastLED.show(); // Removed - single show() in loop()
+      break;
+
+    case 'E': // ENGAGED - Breathing cyan eyes with golden yellow mouth
+      fillEyes(currentColor);  // Eyes stay cyan (set by Python)
+      mouthColor = CRGB(255, 200, 0);  // Golden yellow mouth for engaged
       // FastLED.show(); // Removed - single show() in loop()
       break;
 
     case 'S': // SPEAKING - Will be animated
       // Initial state - will pulse in animation
       fillEyes(currentColor);
+      // Mouth keeps current color during speaking (animated by amplitude)
       // FastLED.show(); // Removed - single show() in loop()
       break;
 
@@ -365,11 +373,13 @@ void setPattern(char pattern) {
       clearEyes();
       setEyeLED(LEFT_EYE_START, 0, currentColor);
       setEyeLED(RIGHT_EYE_START, 0, currentColor);
+      mouthColor = CRGB(128, 0, 255);  // Purple mouth for thinking
       // FastLED.show(); // Removed - single show() in loop()
       break;
 
     case 'L': // LISTENING - Pulsing rotation
       fillEyes(currentColor);
+      mouthColor = CRGB(0, 50, 200);  // Darker blue mouth for listening
       // FastLED.show(); // Removed - single show() in loop()
       break;
 
