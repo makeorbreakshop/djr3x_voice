@@ -662,11 +662,50 @@ class ClaudeService(BaseService):
     # Vision event handlers (event-driven state management)
 
     async def _handle_scene_captured(self, payload: Dict[str, Any]):
-        """Handle VISION_SCENE_CAPTURED event."""
+        """
+        Handle VISION_SCENE_CAPTURED event.
+
+        This handles both automatic scene captures (face recognition) and
+        on-demand tool call results (analyze_scene).
+        """
         import time
-        self._current_scene = payload.get("description", "")
+
+        description = payload.get("description", "")
+        conversation_id = payload.get("conversation_id")
+        metadata = payload.get("metadata", {})
+        analysis_type = metadata.get("analysis_type")
+
+        # Always update current scene context
+        self._current_scene = description
         self._scene_timestamp = time.time()
-        self.logger.info(f"Scene updated: {self._current_scene[:100]}...")
+
+        # Handle on-demand tool call results (analyze_scene)
+        if analysis_type == "on_demand_tool_call" and conversation_id:
+            self.logger.info(f"Vision tool result for conversation {conversation_id}: {description[:80]}...")
+
+            # Add vision result directly to conversation memory as a tool response
+            # This allows Claude to incorporate the vision data into his response
+            # using the main persona (not verbal feedback)
+            question = metadata.get("question", "What do you see?")
+
+            # Format the tool response content
+            tool_response_content = f"Vision Analysis Result: {description}"
+
+            # Add to conversation memory as tool response
+            # This follows the same pattern as other tools (play_music, etc.)
+            # but the vision result becomes part of the ongoing conversation
+            self._memory.add_message(
+                role="user",
+                content=f"[Vision system response to '{question}']: {description}"
+            )
+
+            # Now trigger Claude to respond to this new information
+            # by re-running the conversation with the vision data included
+            asyncio.create_task(self._generate_vision_response(conversation_id, description, question))
+
+        else:
+            # Automatic scene capture (face recognition)
+            self.logger.info(f"Scene updated (automatic): {description[:100]}...")
 
     async def _handle_person_detected(self, payload: Dict[str, Any]):
         """Handle VISION_PERSON_DETECTED event.
@@ -1203,8 +1242,12 @@ class ClaudeService(BaseService):
             # Visual-only tools that shouldn't be part of conversation
             visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern"}
 
+            # Vision tools that handle their own response generation
+            # (analyze_scene adds vision result to conversation and re-runs Claude)
+            vision_tools = {"analyze_scene"}
+
             # Add tool response as a message (skip for visual-only tools)
-            if intent_name not in visual_only_tools:
+            if intent_name not in visual_only_tools and intent_name not in vision_tools:
                 if tool_call_id:
                     self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")
                     self._memory.add_message(
@@ -1286,6 +1329,35 @@ class ClaudeService(BaseService):
             # Emit a fallback response
             fallback_msg = f"Action completed successfully."
             await self._emit_llm_response(fallback_msg)
+
+    async def _generate_vision_response(self, conversation_id: str, description: str, question: str) -> None:
+        """
+        Generate Claude's response after vision analysis completes.
+
+        This re-runs the conversation with the vision result added as context,
+        allowing Claude to respond naturally using the main persona.
+
+        Args:
+            conversation_id: The conversation ID to track this response
+            description: The vision analysis result
+            question: The original question asked
+        """
+        try:
+            self.logger.info(f"Generating vision response for conversation {conversation_id}")
+
+            # Get the current conversation messages from memory
+            messages = self._memory.get_messages_for_api()
+
+            # Call Claude with the full conversation (now including vision result)
+            await self._get_claude_response(messages=messages)
+
+            # The response will be emitted through the normal flow
+            # (no need to emit here, _get_claude_response handles it)
+
+        except Exception as e:
+            self.logger.error(f"Error generating vision response: {e}", exc_info=True)
+            # Emit fallback response
+            await self._emit_llm_response(f"Hmm, I'm having trouble processing what I'm seeing. {description[:100]}...")
 
     async def _handle_dj_commentary_request(self, payload: Dict[str, Any]) -> None:
         """Handle DJ commentary generation requests from BrainService."""

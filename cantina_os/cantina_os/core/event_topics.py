@@ -206,6 +206,7 @@ class EventTopics(str, Enum):
     VISION_COMMAND = "vision.command"  # General vision commands (list, select, status)
     VISION_CAMERA_LIST = "vision.camera.list"  # List available cameras
     VISION_CAMERA_SELECTED = "vision.camera.selected"  # Camera selected
+    VISION_ANALYSIS_REQUEST = "vision.analysis.request"  # On-demand vision analysis from Claude tool
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"

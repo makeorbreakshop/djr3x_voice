@@ -1,80 +1,144 @@
 {
   "name": "Brandon",
-  "visit_count": 19,
+  "visit_count": 26,
   "first_seen": 1763481057.5385568,
-  "last_seen": 1763669749.104154,
-  "total_interaction_time_seconds": 20346.099478006363,
+  "last_seen": 1763741777.535278,
+  "total_interaction_time_seconds": 23252.73130297661,
   "personality_traits": [
-    "Casual and friendly tone ('Hey. What's up?')",
-    "Problem-solving oriented and methodical (testing systems one by one)",
-    "Casual, friendly communication style ('Hey', 'Yo', 'What is up')",
-    "Direct and practical problem-solver approach"
+    "Quick to provide feedback (calling jokes 'really bad')",
+    "Casual and friendly communication style (\"Yo. Yo. Yo.\")",
+    "Direct and persistent when trying to get information",
+    "Very casual, friendly communication style ('Yo', 'my friend')",
+    "Direct and practical - quickly gets to testing functionality"
   ],
   "music_preferences": {},
   "conversation_style": {},
   "notable_facts": [
-    "Brandon is actively working on maintaining/fixing DJ R3X's systems",
-    "He's troubleshooting specific hardware: eye LEDs, voice/mouth mechanisms, lighting systems",
-    "Brandon appears to be technical/hands-on with the robot",
-    "Brandon is involved in maintaining/troubleshooting R3X's systems",
-    "Has made 12 visits total - this is an established relationship",
-    "Working with eye light systems that have recurring technical issues"
+    "He appears to be iterating/documenting something ('documenting the chaos')",
+    "Brandon is working on a Star Tours inspired movie theater project",
+    "Brandon appears to be testing R3X's visual/camera capabilities",
+    "Visit was extremely short at only 11 seconds",
+    "Brandon is technically minded - testing and troubleshooting equipment",
+    "He's iterative in his approach, trying multiple angles to get a response",
+    "Appears to be engaged in some kind of project or work (mentioned making progress)",
+    "Brandon is engaged with testing and troubleshooting R3X's systems",
+    "He's working on 'making some progress' on something (unspecified project)",
+    "Visit was extremely short - only 2 seconds"
   ],
   "recent_visits": [
     {
-      "visit_number": 10,
-      "date": "2025-11-19",
-      "duration_seconds": 18.718929052352905,
-      "summary": "Brandon made a very brief visit (18 seconds) focused on troubleshooting DJ R3X's visual and audio systems. He was testing whether the eyes and voice/mouth functionality were working properly.",
+      "visit_number": 20,
+      "date": "2025-11-20",
+      "duration_seconds": 10.793575048446655,
+      "summary": "Very brief visit where Brandon mentioned working on a Star Tours-inspired movie theater project. He asked for dad jokes and discussed documentation of creative work.",
       "memorable_moments": [
-        "Brandon mentioned eyes only seem to interact when receiving transcripts",
-        "Brandon provided lights that DJ R3X can 'talk through'",
-        "Brandon tested voice functionality, noting it doesn't seem to be working",
-        "Called DJ R3X by multiple name variations: 'DJ Rick', 'DJ Rex', 'DJ Ricks'",
-        "Very brief interaction - lasted only 18 seconds"
+        "Asked if R3X could see what he looks like",
+        "Requested dad jokes, then said 'Those were really bad'",
+        "Corrected himself: 'Actually, tell a good joke'",
+        "Mentioned 'We're documenting the chaos'",
+        "Working on a Star Tours inspired movie theater project"
       ],
       "music_played": [],
       "topics_discussed": [
-        "DJ R3X eye functionality",
-        "Voice/audio system troubleshooting",
-        "Lighting/LED systems",
-        "Transcript interaction mechanics"
+        "Dad jokes",
+        "Star Tours-inspired movie theater project",
+        "Documentation/filming"
       ],
-      "mood": "Focused and methodical; troubleshooting mode rather than casual hangout"
+      "mood": "Casual, creative, slightly hurried (very brief visit)"
     },
     {
-      "visit_number": 12,
-      "date": "2025-11-19",
-      "duration_seconds": 87.89923095703125,
-      "summary": "Brief troubleshooting visit where Brandon tested DJ R3X's functionality, particularly focusing on mouth and eye responsiveness. Expressed frustration with recurring technical timeouts related to eye light systems.",
+      "visit_number": 20,
+      "date": "2025-11-20",
+      "duration_seconds": 140.11980819702148,
+      "summary": "Brandon's 20th visit was brief (2 minutes) and exploratory. He asked for dad jokes, discussed a Star Tours-inspired movie theater project, and asked questions about R3X's capabilities regarding visual perception and photography.",
       "memorable_moments": [
-        "Brandon called R3X 'DJ Ricks' initially",
-        "Noted that R3X's eyes 'didn't change at all, so that's great'",
-        "Repetitive 'Yo. Yo. Yo. Yo. Yo.' testing sequence",
-        "Expressed concern about consistent timing out issues with eye light equipment",
-        "Asked 'Why does our stuff seem to keep timing out?'"
+        "Brandon requested dad jokes multiple times, noting the first attempts were 'really bad'",
+        "Mentioned working on a Star Tours inspired movie theater project",
+        "Asked if R3X could see him and what he was wearing",
+        "Asked if R3X could take pictures or see objects",
+        "Opening line: 'We're documenting the chaos'"
       ],
       "music_played": [],
       "topics_discussed": [
-        "R3X mouth functionality",
-        "R3X eye responsiveness and lighting",
-        "Technical troubleshooting and system timeouts"
+        "Dad jokes",
+        "Star Tours inspired movie theater project",
+        "R3X's visual perception capabilities",
+        "Photography capabilities"
       ],
-      "mood": "Focused and slightly frustrated; conducting technical diagnostics with patience"
+      "mood": "Playful and curious, testing boundaries"
+    },
+    {
+      "visit_number": 21,
+      "date": "2025-11-20",
+      "duration_seconds": 11.905555963516235,
+      "summary": "Very brief visit (11 seconds) where Brandon attempted to show R3X something physical, asking multiple times if R3X could see or take pictures of what he was holding.",
+      "memorable_moments": [
+        "Brandon asked for dad jokes, then said they were 'really bad'",
+        "Brandon mentioned working on a Star Tours inspired movie theater project",
+        "Brandon repeatedly asked if R3X could see him, what he was wearing, and what he was holding up",
+        "Brandon asked R3X to take a picture of something he was holding"
+      ],
+      "music_played": [],
+      "topics_discussed": [
+        "Dad jokes",
+        "Star Tours inspired movie theater project",
+        "R3X's visual/camera capabilities"
+      ],
+      "mood": "Experimental, curious, testing-oriented"
+    },
+    {
+      "visit_number": 22,
+      "date": "2025-11-20",
+      "duration_seconds": 16.5067400932312,
+      "summary": "Brandon stopped by for a brief 16-second visit to test if DJ R3X's visual capabilities were working properly. He held up an object and asked if the system could see it, seemingly troubleshooting the equipment.",
+      "memorable_moments": [
+        "Brandon repeatedly tried to get R3X to acknowledge and describe something he was holding up",
+        "Asked \"Can you tell what this is?\" multiple times",
+        "Expressed concern about R3X having trouble seeing initially: \"Why do you think you had trouble seeing that?\"",
+        "Said \"Yo. Yo. Yo.\" and \"What is up, my friend? How are feeling right now?\"",
+        "Brandon mentioned \"I'm making some progress\" suggesting he's working on something"
+      ],
+      "music_played": [],
+      "topics_discussed": [
+        "Testing R3X's visual/camera capabilities",
+        "Troubleshooting equipment functionality",
+        "Personal project progress"
+      ],
+      "mood": "Focused and slightly curious, troubleshooting with friendly energy"
+    },
+    {
+      "visit_number": 22,
+      "date": "2025-11-20",
+      "duration_seconds": 2.2226388454437256,
+      "summary": "Very brief visit (2 seconds) where Brandon tested if R3X was working and responsive. He had some concerns about R3X's functionality and seemed to be troubleshooting.",
+      "memorable_moments": [
+        "Brandon opened with enthusiastic 'Yo. Yo. Yo.' greeting",
+        "Asked R3X to 'just talk back' and be more conversational",
+        "Brandon was showing something physical but R3X had trouble seeing it",
+        "Brandon called R3X 'DJ Rex' (note the variation in name)",
+        "Brandon noted that R3X 'sounded insane just then' - performance issue concern"
+      ],
+      "music_played": [],
+      "topics_discussed": [
+        "R3X system functionality testing",
+        "Vision/camera capabilities",
+        "R3X responsiveness and communication quality"
+      ],
+      "mood": "Casual, slightly concerned about R3X's technical performance, troubleshooting-focused"
     }
   ],
   "relationship_progression": "stranger",
   "preferences": {},
   "notes": [],
   "metadata": {
-    "conversation_summary": "UPDATED SUMMARY:\nVisit #19 - Brandon is filming a video featuring DJ R3X and a projector demonstration. He's testing R3X's ability to pilot Star Tours after relocating the character from the cantina. Brandon continues troubleshooting the mouth reset mechanism and is requesting dynamic, short verbal responses from R3X for video content. They appear to be making progress on the technical issues and getting closer to a successful test run.",
-    "summary_updated_at": 1763663133.9526558,
-    "summary_visit_count": 11,
+    "conversation_summary": "UPDATED SUMMARY:\nVisit #24 (continued) - Brandon continuing diagnostic testing of DJ R3X's vision/camera capabilities, holding up various objects for identification. DJ R3X initially misidentified a microphone as a drone controller. Ollie present in studio playing on iPad, prefers monster trucks and race cars. Brandon using playful banter and joke interactions during the technical testing session.",
+    "summary_updated_at": 1763731511.4010549,
+    "summary_visit_count": 25,
     "follow_up_opportunities": [
-      "Check on whether eye light timing out issues were resolved",
-      "Ask what specifically was being tested with mouth and eye systems",
-      "Inquire about the nature of the eye light equipment failures"
+      "Ask what specific progress Brandon is making on his project",
+      "Follow up on the vision/camera issues he encountered",
+      "Confirm R3X is functioning properly now"
     ],
-    "last_summary_update": 1763586275.436367
+    "last_summary_update": 1763673965.9161751
   }
 }

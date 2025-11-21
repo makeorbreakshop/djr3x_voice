@@ -34,6 +34,7 @@ from cantina_os.event_payloads import (
     VisionScenePayload,
     VisionErrorPayload,
     VisionRequestPayload,
+    VisionAnalysisRequestPayload,
     VisionCameraListPayload,
     VisionCameraSelectedPayload,
     CliResponsePayload,
@@ -106,7 +107,9 @@ class VisionService(BaseService):
 
         # Per-person scene capture tracking to prevent re-capture spam
         self._person_last_scene_capture: Dict[str, float] = {}  # {person_name: last_capture_timestamp}
-        self._person_scene_cooldown = 60.0  # Don't re-capture same person within 60 seconds
+        self._person_last_exit: Dict[str, float] = {}  # {person_name: last_exit_timestamp}
+        self._person_scene_cooldown = 300.0  # Don't re-capture same person within 5 minutes
+        self._person_reentry_grace = 120.0  # If person left <2 min ago, don't capture on re-entry
 
         # Scene capture state
         self._last_scene_capture_time: Optional[float] = None
@@ -263,6 +266,10 @@ class VisionService(BaseService):
 
         # Subscribe to on-demand vision requests
         self._event_bus.on(EventTopics.VISION_ON_DEMAND_REQUEST, self._handle_vision_request)
+
+        # Subscribe to vision analysis requests (from Claude tool calls)
+        await self.subscribe(EventTopics.VISION_ANALYSIS_REQUEST, self._handle_vision_analysis_request)
+        self.logger.info("Subscribed to VISION_ANALYSIS_REQUEST events")
 
         # Subscribe to vision window open requests
         self._event_bus.on(EventTopics.VISION_WINDOW_OPEN, self._handle_vision_window_open)
@@ -426,6 +433,68 @@ class VisionService(BaseService):
             self.logger.error(f"Failed to handle vision request: {e}")
             await self._emit_error(str(e), "processing")
 
+    async def _handle_vision_analysis_request(self, payload: dict):
+        """
+        Handle on-demand vision analysis from Claude tool calls.
+
+        This is triggered by the analyze_scene tool when users ask questions like
+        "what do you see?", "look at this", etc.
+
+        Args:
+            payload: VisionAnalysisRequestPayload dict
+        """
+        question = payload.get("question", "What do you see?")
+        conversation_id = payload.get("conversation_id")
+        reason = payload.get("reason", "user_requested")
+
+        self.logger.info(f"Vision analysis request: '{question}' (conversation_id={conversation_id})")
+
+        try:
+            # Reopen camera if needed
+            if not self.camera:
+                self.camera = cv2.VideoCapture(self.camera_index)
+                if not self.camera.isOpened():
+                    raise Exception(f"Failed to open camera {self.camera_index}")
+
+                # Wait for camera to stabilize
+                await asyncio.sleep(0.5)
+
+            # Capture frame
+            ret, frame = await asyncio.to_thread(self.camera.read)
+            if not ret or frame is None:
+                raise Exception("Failed to capture frame")
+
+            # Analyze the scene with the user's question
+            start_time = time.time()
+            description = await self._analyze_scene(frame, question)
+            analysis_time = (time.time() - start_time) * 1000
+
+            # Emit VISION_SCENE_CAPTURED event with conversation_id
+            # This will be picked up by ClaudeService's _handle_scene_captured
+            scene_payload = VisionScenePayload(
+                description=description,
+                camera_index=self.camera_index,
+                analysis_time_ms=analysis_time,
+                conversation_id=conversation_id,
+                metadata={
+                    "analysis_type": "on_demand_tool_call",
+                    "question": question,
+                    "reason": reason
+                }
+            )
+
+            self._event_bus.emit(
+                EventTopics.VISION_SCENE_CAPTURED,
+                scene_payload.model_dump()
+            )
+
+            self.logger.info(f"Vision analysis complete in {analysis_time:.0f}ms: {description[:80]}...")
+
+        except Exception as e:
+            error_msg = f"Failed to analyze scene: {e}"
+            self.logger.error(error_msg)
+            await self._emit_error(error_msg, "vision_analysis")
+
     async def _handle_vision_window_open(self, payload: dict) -> None:
         """
         Handle request to open vision detection window.
@@ -441,7 +510,8 @@ class VisionService(BaseService):
         import tempfile
 
         try:
-            camera_id = payload.get("camera_id", 0)
+            # Use configured camera index (from .env) unless explicitly overridden
+            camera_id = payload.get("camera_id", self.camera_index)
             mode = payload.get("mode", "combined")
 
             # Get path to test_vision.py script
@@ -658,11 +728,18 @@ class VisionService(BaseService):
                 self._person_detection_time = current_time
 
                 # Smart scene capture: Check if we should capture for this person
-                # If same person recently captured, skip. If new person, always capture.
+                # If same person recently captured, skip. If person just re-entered, skip.
                 last_capture = self._person_last_scene_capture.get(person_name, 0)
                 time_since_capture = current_time - last_capture
 
-                if time_since_capture > self._person_scene_cooldown:
+                # Check if this person just left recently (reentry grace period)
+                last_exit = self._person_last_exit.get(person_name, 0)
+                time_since_exit = current_time - last_exit if last_exit > 0 else float('inf')
+
+                if time_since_exit < self._person_reentry_grace:
+                    # Person just left and came back - don't recapture (prevents bounce spam)
+                    self.logger.info(f"Skipping scene capture for {person_name} reentry (left {time_since_exit:.1f}s ago, grace: {self._person_reentry_grace}s)")
+                elif time_since_capture > self._person_scene_cooldown:
                     # Either first time seeing this person, or haven't captured in a while
                     should_capture_scene = True
                     capture_reason = f"person_changed_from_{old_person or 'none'}_to_{person_name}"
@@ -683,6 +760,9 @@ class VisionService(BaseService):
                 if self._no_person_frames >= self._person_exit_threshold:
                     duration = current_time - self._person_detection_time if self._person_detection_time else 0.0
                     self.logger.info(f"Person exited: {self._current_person} (duration: {duration:.1f}s)")
+
+                    # Track exit time for reentry grace period
+                    self._person_last_exit[self._current_person] = current_time
 
                     # Emit VISION_PERSON_EXITED event
                     self._event_bus.emit(

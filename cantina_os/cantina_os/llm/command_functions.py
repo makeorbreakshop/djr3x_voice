@@ -25,18 +25,25 @@ class StopMusicParams(BaseModel):
 class SetEyeColorParams(BaseModel):
     """Parameters for setting eye color."""
     color: str = Field(
-        ..., 
+        ...,
         description="The color for the eyes. Can be a basic color name like 'red', 'blue', 'green', etc."
     )
     pattern: Optional[str] = Field(
-        None, 
+        None,
         description="Optional LED pattern to display. Defaults to 'solid' if not specified."
     )
     intensity: Optional[float] = Field(
-        None, 
+        None,
         description="Brightness level from 0.0 to 1.0. Defaults to 1.0 if not specified.",
         ge=0.0,
         le=1.0
+    )
+
+class AnalyzeSceneParams(BaseModel):
+    """Parameters for analyzing what the camera sees."""
+    question: str = Field(
+        default="What do you see?",
+        description="The specific question to ask about the camera image. Examples: 'What do you see?', 'What is this object?', 'Read the text on this', 'Who is in the room?'"
     )
 
 class FunctionDefinition(BaseModel):
@@ -78,11 +85,23 @@ def create_set_eye_color_function() -> Dict[str, Any]:
         }
     }
 
+def create_analyze_scene_function() -> Dict[str, Any]:
+    """Create the analyze_scene function definition for OpenAI."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "analyze_scene",
+            "description": "Capture and analyze what the camera sees right now using vision AI. Use this when the user asks 'what do you see?', 'look at this', 'what is this?', or refers to their physical environment.",
+            "parameters": AnalyzeSceneParams.schema()
+        }
+    }
+
 # Collection of all available functions
 AVAILABLE_FUNCTIONS = [
     create_play_music_function(),
     create_stop_music_function(),
-    create_set_eye_color_function()
+    create_set_eye_color_function(),
+    create_analyze_scene_function()
 ]
 
 def get_all_function_definitions() -> List[Dict[str, Any]]:
@@ -94,5 +113,6 @@ def function_name_to_model_map() -> Dict[str, Any]:
     return {
         "play_music": PlayMusicParams,
         "stop_music": StopMusicParams,
-        "set_eye_color": SetEyeColorParams
+        "set_eye_color": SetEyeColorParams,
+        "analyze_scene": AnalyzeSceneParams
     } 

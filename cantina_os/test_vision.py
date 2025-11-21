@@ -1920,7 +1920,25 @@ Examples:
     # Determine camera ID for modes that need camera
     camera_id = args.camera
 
-    # If no camera specified or --select-camera flag used, show interactive selection
+    # If no camera specified, try to read from .env
+    if camera_id is None and not args.select_camera:
+        import os
+        from pathlib import Path
+
+        # Try to load from .env file (same location as VisionService uses)
+        env_path = Path(__file__).parent.parent / ".env"
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                for line in f:
+                    if line.strip().startswith('VISION_CAMERA_INDEX='):
+                        try:
+                            camera_id = int(line.split('=')[1].strip())
+                            print(f"📷 Using camera {camera_id} from .env")
+                            break
+                        except (ValueError, IndexError):
+                            pass
+
+    # If still no camera specified or --select-camera flag used, show interactive selection
     if camera_id is None or args.select_camera:
         camera_id = VisionTester.select_camera_interactive()
         if camera_id is None:

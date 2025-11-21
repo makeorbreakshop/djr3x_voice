@@ -910,6 +910,9 @@ class VisionScenePayload(BaseEventPayload):
     analysis_time_ms: Optional[float] = Field(
         None, description="Time taken to analyze the scene in milliseconds"
     )
+    conversation_id: Optional[str] = Field(
+        None, description="Conversation ID for linking vision result to dialogue context"
+    )
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional scene metadata"
     )
@@ -926,6 +929,22 @@ class VisionRequestPayload(BaseEventPayload):
     )
     detailed: bool = Field(
         default=False, description="Whether to request detailed analysis"
+    )
+
+
+class VisionAnalysisRequestPayload(BaseEventPayload):
+    """Payload for on-demand vision analysis from Claude tool calls."""
+
+    question: str = Field(
+        default="What do you see?",
+        description="The specific question to ask about the camera image"
+    )
+    conversation_id: Optional[str] = Field(
+        None, description="Conversation ID for linking analysis to dialogue"
+    )
+    reason: str = Field(
+        default="user_requested",
+        description="Why analysis was triggered (user_requested, automatic, etc.)"
     )
 
 

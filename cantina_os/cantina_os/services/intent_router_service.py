@@ -25,6 +25,7 @@ from ..event_payloads import (
     IntentExecutionResultPayload,
     MusicCommandPayload,
     EyeCommandPayload,
+    VisionAnalysisRequestPayload,
     ServiceStatus
 )
 
@@ -51,7 +52,8 @@ class IntentRouterService(BaseService):
         self._intent_handlers = {
             "play_music": self._handle_play_music_intent,
             "stop_music": self._handle_stop_music_intent,
-            "set_eye_color": self._handle_set_eye_color_intent
+            "set_eye_color": self._handle_set_eye_color_intent,
+            "analyze_scene": self._handle_analyze_scene_intent
         }
         
     async def _start(self) -> None:
@@ -108,16 +110,20 @@ class IntentRouterService(BaseService):
                 # Handlers now return result information
                 result = await handler(parameters, conversation_id)
                 self.logger.info(f"Handler for intent {intent_name} completed with result: {result}")
-                
+
                 # Emit intent execution result for verbal feedback
-                await self._emit_intent_execution_result(
-                    intent_name, 
-                    parameters, 
-                    result, 
-                    tool_call_id, 
-                    conversation_id,
-                    original_text
-                )
+                # SKIP for analyze_scene - it handles its own response generation
+                if intent_name != "analyze_scene":
+                    await self._emit_intent_execution_result(
+                        intent_name,
+                        parameters,
+                        result,
+                        tool_call_id,
+                        conversation_id,
+                        original_text
+                    )
+                else:
+                    self.logger.info(f"Skipping INTENT_EXECUTION_RESULT for {intent_name} (handles own response)")
             else:
                 self.logger.warning(f"No handler for intent: {intent_name}")
                 
@@ -389,4 +395,49 @@ class IntentRouterService(BaseService):
             return {
                 "success": False,
                 "error": f"Failed to set eye color: {str(e)}"
+            }
+
+    async def _handle_analyze_scene_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
+        """
+        Handle the analyze_scene intent.
+
+        This intent triggers on-demand vision analysis when the user asks
+        "what do you see?", "look at this", etc.
+
+        Args:
+            parameters: Intent parameters containing the question
+            conversation_id: Conversation context ID
+
+        Returns:
+            Result dict (fire-and-forget, actual result comes via VISION_SCENE_CAPTURED)
+        """
+        try:
+            question = parameters.get("question", "What do you see?")
+
+            self.logger.info(f"Vision analysis request: '{question}'")
+
+            # Emit vision analysis request event
+            payload = VisionAnalysisRequestPayload(
+                question=question,
+                conversation_id=conversation_id,
+                reason="user_requested"
+            )
+
+            await self.emit(EventTopics.VISION_ANALYSIS_REQUEST, payload)
+            self.logger.info(f"Emitted VISION_ANALYSIS_REQUEST event")
+
+            # Return fire-and-forget result
+            # Actual vision result will come via VISION_SCENE_CAPTURED → ClaudeService
+            return {
+                "success": True,
+                "action": "analyze_scene",
+                "question": question,
+                "message": f"Analyzing scene: {question}"
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error handling analyze_scene intent: {e}")
+            return {
+                "success": False,
+                "error": f"Failed to analyze scene: {str(e)}"
             } 
