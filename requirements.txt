@@ -7,6 +7,7 @@ sounddevice==0.4.6
 python-vlc==3.0.21203
 pynput==1.7.6
 requests==2.31.0
+pygame==2.5.2  # LED visualization UI
 
 # Speech recognition and AI services
 SpeechRecognition==3.10.0

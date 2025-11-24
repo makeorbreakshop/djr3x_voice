@@ -33,7 +33,8 @@ from .services import (
     ModeChangeSoundService,
     MusicControllerService,
     MouseInputService,
-    IntentRouterService
+    IntentRouterService,
+    LEDVisualizerService  # LED visualization service for debugging
 )
 from .services.vision_service import VisionService  # Vision service for scene understanding
 from .services.claude_service import ClaudeService  # Claude 3.5 Sonnet 4.5 LLM provider
@@ -370,6 +371,7 @@ class CantinaOS:
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
+            "led_visualizer",  # Add LED visualizer for debugging LED patterns
             "debug",  # Add debug service for LLM response logging
             "cli"
         ]
@@ -548,6 +550,7 @@ class CantinaOS:
             "claude": ClaudeService,  # Claude 3.5 Sonnet 4.5 LLM provider
             "elevenlabs": ElevenLabsService,
             "eye_light_controller": EyeLightControllerService,
+            "led_visualizer": LEDVisualizerService,  # LED visualization service
             "cli": CLIService,
             "yoda_mode_manager": YodaModeManagerService,
             "mode_command_handler": ModeCommandHandlerService,
