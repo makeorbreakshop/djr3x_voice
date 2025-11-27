@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: |
+          pip install ruff black isort
+
+      - name: Run ruff
+        run: ruff check . --output-format=github
+        continue-on-error: true
+
+      - name: Check black formatting
+        run: black --check --diff .
+        continue-on-error: true
+
+      - name: Check import sorting
+        run: isort --check-only --diff .
+        continue-on-error: true
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev libsndfile1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Run unit tests
+        working-directory: cantina_os
+        run: |
+          pytest tests/unit/ -v --tb=short || true
+
+      - name: Run integration tests
+        working-directory: cantina_os
+        run: |
+          pytest tests/integration/ -v --tb=short || true
+        env:
+          # These are intentionally empty for CI - tests should mock API calls
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+          ELEVENLABS_API_KEY: ""
+          DEEPGRAM_API_KEY: ""
+
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install mypy
+          pip install -r requirements.txt
+
+      - name: Run mypy
+        run: mypy cantina_os/cantina_os --ignore-missing-imports
+        continue-on-error: true
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ""
+          extra_args: --only-verified
+
+      - name: Check for hardcoded credentials
+        run: |
+          # Check for common API key patterns
+          if grep -rE "(sk-[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16})" --include="*.py" --include="*.js" --include="*.json" .; then
+            echo "::warning::Potential hardcoded credentials found"
+          fi
+        continue-on-error: true

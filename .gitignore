@@ -2,6 +2,14 @@
 .env
 env.visible
 
+# User memory and interaction data (CRITICAL - contains personal info)
+cantina_os/memory_data/
+memory_data/
+
+# Vision/face recognition training data (contains personal images)
+cantina_os/vision_data/training/
+vision_data/training/
+
 # Python
 __pycache__/
 *.py[cod]
