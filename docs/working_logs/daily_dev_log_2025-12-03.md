@@ -8,7 +8,7 @@ DJ R3X is an animatronic character from Star Wars that operates as a DJ at Oga's
 ## [Implementation] Feature: TextualDashboardService - Command Input Integration
 
 **Date**: 2025-12-03
-**Status**: ✅ COMPLETE
+**Status**: ❌ BROKEN - Dashboard crashes on startup with blocking I/O error
 
 ### Problem
 The initial TextualDashboardService implementation (from 2025-12-02) provided visual monitoring but lacked command input capability. The dashboard took over the terminal completely, preventing users from typing commands. This required choosing between visual monitoring OR command control, not both.
@@ -102,12 +102,25 @@ Added command input widget to the Textual dashboard, enabling full CLI functiona
 
 ### Testing
 
-- ✅ Service initialization with command input
-- ✅ Command emission via `CLI_COMMAND` events
-- ✅ Response handling via `CLI_RESPONSE` events
-- ✅ Input focus on startup
-- ✅ Command/response display in event log
-- ✅ Config flag enables/disables dashboard
+- ✅ Service initialization with command input (in isolation)
+- ✅ Command emission via `CLI_COMMAND` events (in isolation)
+- ✅ Response handling via `CLI_RESPONSE` events (in isolation)
+- ❌ **FAILED: Dashboard crashes on actual startup**
+
+### Critical Issue Found
+
+When running `dj-r3x`, the dashboard crashes with:
+```
+BlockingIOError: [Errno 35] write could not complete without blocking
+```
+
+**Root Cause**: Textual's `run_async()` conflicts with the existing asyncio event loop in CantinaOS. The dashboard tries to write to terminal in a blocking way while other services are also using stdout/stderr.
+
+**Conflict**: The logging system (using `logging.StreamHandler(sys.stdout)`) and Textual both trying to control the terminal simultaneously causes blocking I/O errors.
+
+### This Implementation is NOT Production Ready
+
+The dashboard does NOT work when integrated with the full CantinaOS system. It only works in isolated tests where it's the only thing running.
 
 ### Usage
 
@@ -121,7 +134,23 @@ dj-r3x  # Now opens dashboard with command input
 ENABLE_TUI_DASHBOARD=false dj-r3x
 ```
 
-### Future Enhancements (Not Implemented)
+### Required Fixes Before This Can Work
+
+1. **Fix Logging Conflict**:
+   - Disable console logging handler when Textual dashboard is active
+   - Route all logs through Textual's log widget instead
+   - Or use file-only logging when dashboard is enabled
+
+2. **Fix Asyncio Integration**:
+   - Properly integrate Textual's event loop with CantinaOS's asyncio.run()
+   - May need to run dashboard in separate thread or process
+   - Or redesign to use Textual as the main app (major refactor)
+
+3. **Test with Full System**:
+   - Currently only tested in isolation
+   - Need to verify all services work with dashboard running
+
+### Future Enhancements (If/When Fixed)
 
 - Command history (up/down arrow navigation)
 - Tab completion for commands
@@ -132,12 +161,13 @@ ENABLE_TUI_DASHBOARD=false dj-r3x
 
 ## 📝 Summary for Condensed Log
 
-### 2025-12-03: TextualDashboardService - Added Command Input
-- **Enhancement**: Added command input widget to Textual dashboard
-- **Problem Solved**: Dashboard no longer prevents typing commands
+### 2025-12-03: TextualDashboardService - Command Input (BROKEN)
+- **Enhancement Attempted**: Added command input widget to Textual dashboard
 - **Implementation**: Input widget → CLI_COMMAND events → CLI_RESPONSE handling
-- **UI**: Command input box at bottom, responses color-coded (✓/✗)
-- **Configuration**: Enabled by default, can disable via `ENABLE_TUI_DASHBOARD=false`
-- **Result**: Dashboard is now full-featured replacement for CLI (visual + interactive)
+- **UI Design**: Command input box at bottom, responses color-coded (✓/✗)
 - **Lines Changed**: ~150 lines added to textual_dashboard_service.py
-- **Testing**: All command emission and response handling tests passed
+- **Testing**: Unit tests passed in isolation
+- **CRITICAL FAILURE**: Dashboard crashes on actual startup with BlockingIOError
+- **Root Cause**: Textual's terminal control conflicts with CantinaOS logging system
+- **Status**: DISABLED by default until blocking I/O conflict is resolved
+- **Conclusion**: Textual integration is more complex than anticipated - needs major refactoring or alternative approach
