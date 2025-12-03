@@ -55,6 +55,9 @@ from .services.debug_service import DebugService
 # Import the latency tracker service
 from .services.latency_tracker_service import LatencyTrackerService
 
+# Import the textual dashboard service
+from .services.textual_dashboard_service import TextualDashboardService
+
 # Import the CLI formatter for enhanced output (using minimal version)
 from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
 
@@ -371,6 +374,7 @@ class CantinaOS:
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
             "debug",  # Add debug service for LLM response logging
+            "textual_dashboard",  # Add textual dashboard service for TUI monitoring (before CLI)
             "cli"
         ]
         
@@ -564,7 +568,8 @@ class CantinaOS:
             "cached_speech_service": CachedSpeechService,
             "debug": DebugService,
             "latency_tracker": LatencyTrackerService,
-            "vision": VisionService
+            "vision": VisionService,
+            "textual_dashboard": TextualDashboardService
         }
         
         # Early return if service doesn't exist in map
@@ -656,7 +661,16 @@ class CantinaOS:
             service_config["spotify_redirect_uri"] = self._config.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888")
             service_config["spotify_device_name"] = self._config.get("SPOTIFY_DEVICE_NAME")
             service_config["default_source"] = self._config.get("MUSIC_DEFAULT_SOURCE", "local")
-        
+
+        elif service_name == "textual_dashboard":
+            # Configure textual dashboard
+            if "enable_dashboard" not in service_config:
+                # Check environment variable (ENABLE_TUI_DASHBOARD=true)
+                enable_env = self._config.get("ENABLE_TUI_DASHBOARD", "false").lower()
+                service_config["enable_dashboard"] = enable_env == "true"
+            if "log_filter_level" not in service_config:
+                service_config["log_filter_level"] = self._config.get("TUI_LOG_LEVEL", "INFO")
+
         # Timeline services configuration
         elif service_name == "brain_service":
             # Configure brain service
