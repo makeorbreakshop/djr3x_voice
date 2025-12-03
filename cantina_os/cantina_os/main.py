@@ -665,8 +665,8 @@ class CantinaOS:
         elif service_name == "textual_dashboard":
             # Configure textual dashboard
             if "enable_dashboard" not in service_config:
-                # Check environment variable (ENABLE_TUI_DASHBOARD=true)
-                enable_env = self._config.get("ENABLE_TUI_DASHBOARD", "false").lower()
+                # Check environment variable (ENABLE_TUI_DASHBOARD=true/false, default: true)
+                enable_env = self._config.get("ENABLE_TUI_DASHBOARD", "true").lower()
                 service_config["enable_dashboard"] = enable_env == "true"
             if "log_filter_level" not in service_config:
                 service_config["log_filter_level"] = self._config.get("TUI_LOG_LEVEL", "INFO")
