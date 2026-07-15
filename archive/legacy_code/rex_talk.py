@@ -181,9 +181,7 @@ def validate_config():
         print(f"\nPlease set these variables in your .env file or export them directly.")
         sys.exit(1)
 
-    # Print the API key information for debugging
-    print(f"{Fore.CYAN}ElevenLabs API key loaded (length: {len(ELEVENLABS_API_KEY)}){Style.RESET_ALL}")
-    print(f"{Fore.CYAN}API key format: {ELEVENLABS_API_KEY[:3]}...{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}ElevenLabs API key loaded from the environment.{Style.RESET_ALL}")
     
     # Trim any whitespace from the API key
     clean_api_key = ELEVENLABS_API_KEY.strip()
@@ -429,8 +427,8 @@ def generate_and_play_audio_rest(text):
             print(response.text)
             
     except Exception as e:
-        print(f"{Fore.RED}Error generating or playing audio: {str(e)}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}API Key: {ELEVENLABS_API_KEY[:4]}...{ELEVENLABS_API_KEY[-4:]}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error generating or playing audio: {type(e).__name__}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Verify that the ElevenLabs credential is valid and active.{Style.RESET_ALL}")
 
 # Main application loop
 @debug_timer
@@ -517,4 +515,4 @@ def main():
             print(f"{Fore.RED}Error state: {str(e)}{Style.RESET_ALL}")
 
 if __name__ == "__main__":
-    main() 
+    main()

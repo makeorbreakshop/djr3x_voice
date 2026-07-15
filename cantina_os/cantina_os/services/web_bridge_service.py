@@ -294,9 +294,9 @@ class WebBridgeService(BaseService, SocketIOValidationMixin, StatusPayloadValida
                                 })
 
                 return {"tracks": tracks}
-            except Exception as e:
-                logger.error(f"Error fetching music library: {e}")
-                return {"tracks": [], "error": str(e)}
+            except Exception:
+                logger.error("Error fetching music library")
+                return {"tracks": [], "error": "Unable to fetch music library"}
 
     def _add_socketio_handlers(self) -> None:
         """Add Socket.IO event handlers."""
