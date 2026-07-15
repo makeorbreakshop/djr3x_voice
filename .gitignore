@@ -50,6 +50,7 @@ Thumbs.db
 
 # Test files and directories
 test_*.py
+!tests/test_security_alert_regressions.py
 test_*.json
 batch_test_results_*.json
 tests/data/

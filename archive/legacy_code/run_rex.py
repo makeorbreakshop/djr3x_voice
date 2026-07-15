@@ -17,8 +17,7 @@ if not elevenlabs_key:
     print("Error: ELEVENLABS_API_KEY not found in .env file")
     sys.exit(1)
 
-# Print confirmation with masked key
-print(f"Using ElevenLabs API key: {elevenlabs_key[:4]}...{elevenlabs_key[-4:]}")
+print("Using ElevenLabs API key from the environment")
 
 # Import configuration from app_settings
 from config.app_settings import (
@@ -53,4 +52,4 @@ print(f"- Channels: {CHANNELS}")
 print()
 
 # Run the DJ-R3X script with the environment variables set
-subprocess.run([sys.executable, "rex_talk.py"]) 
+subprocess.run([sys.executable, "rex_talk.py"])

@@ -532,11 +532,16 @@ class VisionService(BaseService):
                 # Fallback to system Python if venv not found
                 venv_python = sys.executable
 
-            # Launch the script in background (non-blocking)
-            # Log errors to a temp file for debugging
-            error_log = tempfile.mktemp(suffix=".log", prefix="vision_")
-
-            with open(error_log, 'w') as err_file:
+            # Launch the script in background (non-blocking).
+            # Create the error log atomically so another process cannot replace it
+            # between choosing the path and opening the file.
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".log",
+                prefix="vision_",
+                delete=False,
+            ) as err_file:
+                error_log = err_file.name
                 subprocess.Popen(
                     [str(venv_python), str(script_path), "--mode", mode, "--camera", str(camera_id)],
                     stdout=err_file,

@@ -371,9 +371,9 @@ async def get_music_library():
                     }
                 ]
             }
-    except Exception as e:
-        logger.error(f"Error fetching music library: {e}")
-        return {"tracks": [], "error": str(e)}
+    except Exception:
+        logger.error("Error fetching music library")
+        return {"tracks": [], "error": "Unable to fetch music library"}
 
 @app.get("/api/logs")
 async def get_logs():
