@@ -229,42 +229,74 @@ class DebugService(BaseService):
         except Exception as e:
             self.logger.error(f"Error handling command trace: {e}")
             
-    async def _handle_performance_metric(self, payload: PerformanceMetricPayload) -> None:
-        """Handle performance metric events."""
+    async def _handle_performance_metric(self, payload: Any) -> None:
+        """Handle performance metric events.
+
+        FIXED 2026-09-17: this read ``payload.operation`` and ``payload.duration_ms``. No
+        payload in this system has either field - ``PerformanceMetricPayload``
+        (event_payloads.py) is metric_name/value/unit/component - and
+        ``BaseService.debug_performance_metric`` emits a plain **dict**, so attribute access
+        failed on both counts. LatencyTrackerService emits four of these after every reply, so
+        every single turn logged four copies of
+
+            Error handling performance metric: 'dict' object has no attribute 'operation'
+
+        and no metric was ever recorded. Both payload shapes are on the bus, so both are
+        accepted here.
+        """
         if not self._metrics_enabled:
             return
-            
+
         try:
-            operation = payload.operation
-            duration = payload.duration_ms
-            
-            if operation not in self._metrics:
-                self._metrics[operation] = {
+            if isinstance(payload, PerformanceMetricPayload):
+                metric = payload
+            else:
+                metric = PerformanceMetricPayload(**(payload or {}))
+        except Exception as e:
+            # One line, not a storm: a malformed metric is worth knowing about but must not
+            # look like a system failure.
+            self.logger.warning(f"Ignoring malformed performance metric payload: {e}")
+            return
+
+        try:
+            name = metric.metric_name
+            value = float(metric.value)
+
+            if name not in self._metrics:
+                self._metrics[name] = {
                     "count": 0,
-                    "total_ms": 0,
-                    "min_ms": float("inf"),
-                    "max_ms": float("-inf")
+                    "total": 0.0,
+                    "min": float("inf"),
+                    "max": float("-inf"),
+                    "unit": metric.unit,
                 }
-                
-            metrics = self._metrics[operation]
-            metrics["count"] += 1
-            metrics["total_ms"] += duration
-            metrics["min_ms"] = min(metrics["min_ms"], duration)
-            metrics["max_ms"] = max(metrics["max_ms"], duration)
-            
-            # Log if duration exceeds threshold
-            threshold = self._config.dict().get("performance_thresholds", {}).get(operation)
-            if threshold and duration > threshold:
+
+            recorded = self._metrics[name]
+            recorded["count"] += 1
+            recorded["total"] += value
+            recorded["min"] = min(recorded["min"], value)
+            recorded["max"] = max(recorded["max"], value)
+
+            # Log if the value exceeds a configured threshold for this metric.
+            threshold = (
+                self._config.model_dump()
+                .get("performance_thresholds", {})
+                .get(name)
+            )
+            if threshold and value > threshold:
                 await self._log_queue.put({
                     "timestamp": datetime.now(),
                     "component": "performance",
                     "level": LogLevel.WARNING,
-                    "message": f"Operation {operation} took {duration}ms (threshold: {threshold}ms)"
+                    "message": (
+                        f"{name} was {value} {metric.unit} "
+                        f"(threshold: {threshold} {metric.unit})"
+                    )
                 })
-                
+
         except Exception as e:
             self.logger.error(f"Error handling performance metric: {e}")
-            
+
     async def _handle_state_transition(self, payload: Dict[str, Any]) -> None:
         """Handle state transition events."""
         try:
