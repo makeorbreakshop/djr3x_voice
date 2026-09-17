@@ -69,9 +69,9 @@ class LatencyTrackerService(BaseService):
         await asyncio.gather(
             self.subscribe(EventTopics.VOICE_LISTENING_STARTED, self._handle_voice_started),
             self.subscribe(EventTopics.TRANSCRIPTION_FINAL, self._handle_transcription_complete),
-            self.subscribe(EventTopics.LLM_RESPONSE_TEXT, self._handle_llm_response),
-            self.subscribe(EventTopics.SPEECH_SYNTHESIS_STARTED, self._handle_tts_started),
-            self.subscribe(EventTopics.SPEECH_SYNTHESIS_ENDED, self._handle_tts_ended),
+            self.subscribe(EventTopics.LLM_RESPONSE, self._handle_llm_response),
+            self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_tts_started),
+            self.subscribe(EventTopics.SPEECH_GENERATION_COMPLETE, self._handle_tts_ended),
             self.subscribe(EventTopics.LATENCY_COMMAND, self.handle_latency_command),
         )
 

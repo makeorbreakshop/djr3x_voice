@@ -15,6 +15,7 @@ import time
 import uuid
 import glob
 import math
+import random
 
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
@@ -400,8 +401,14 @@ class MusicControllerService(BaseService):
         self.logger.info(status_msg)
         await self._send_success(status_msg)
 
-    async def _load_music_library(self):
-        """Load available music tracks from the music directory."""
+    async def _load_music_library(self) -> int:
+        """Load available music tracks from the music directory.
+
+        Returns:
+            The number of tracks in the library - which is the number of *playable* tracks,
+            not the number of files found. Those differ when filenames parse to the same
+            title; see the duplicate warning below.
+        """
         try:
             # Get the absolute path to log where we're looking
             abs_music_dir = os.path.abspath(self.music_dir)
@@ -435,7 +442,7 @@ class MusicControllerService(BaseService):
             # Now that we've potentially updated self.music_dir, check it exists
             if not os.path.exists(self.music_dir):
                 self.logger.error(f"Could not find any valid music directory")
-                return
+                return 0
             
             # Clear existing local tracks
             self.libraries["local"].clear()
@@ -476,7 +483,18 @@ class MusicControllerService(BaseService):
                             provider="local"  # Mark as local file
                         )
 
-                        # Store in local library
+                        # Store in local library. The library is keyed by *title*, so two
+                        # files whose filenames parse to the same title collide and one
+                        # silently replaces the other - which is why the log used to print
+                        # "Loaded 22 music tracks" and "21 tracks loaded" 0 ms apart.
+                        # "Utinni.mp3" and "The Dusty Jawas - Utinni.mp3" are the real case.
+                        if title in self.libraries["local"]:
+                            self.logger.warning(
+                                f"Duplicate track title '{title}': "
+                                f"{os.path.basename(self.libraries['local'][title].path)} "
+                                f"is being replaced by {filename}. "
+                                "The library is keyed by title, so only one is playable."
+                            )
                         self.libraries["local"][title] = track
                         music_files_count += 1
 
@@ -487,8 +505,20 @@ class MusicControllerService(BaseService):
             # Update tracks alias to point to active source library
             self.tracks = self.libraries[self.active_source]
 
-            self.logger.info(f"Loaded {music_files_count} music tracks from {self.music_dir}")
-            
+            # Report the library size, not the file count: those differ whenever titles
+            # collide, and the library size is the number of tracks that can be played.
+            track_count = len(self.libraries["local"])
+            if music_files_count != track_count:
+                self.logger.info(
+                    f"Loaded {track_count} tracks from {music_files_count} files in "
+                    f"{self.music_dir} ({music_files_count - track_count} dropped to "
+                    "duplicate titles)"
+                )
+            else:
+                self.logger.info(
+                    f"Loaded {track_count} tracks from {self.music_dir}"
+                )
+
             # Alert if no music found
             if music_files_count == 0:
                 self.logger.warning("No music files found. Music playback will be unavailable.")
@@ -498,11 +528,13 @@ class MusicControllerService(BaseService):
             await self.emit(
                 EventTopics.MUSIC_LIBRARY_UPDATED,
                 {
-                    "track_count": music_files_count,
+                    "track_count": track_count,
                     "tracks": track_data
                 }
             )
-            
+
+            return track_count
+
         except Exception as e:
             self.logger.error(f"Error loading music library: {e}")
             await self._emit_status(
@@ -862,9 +894,21 @@ class MusicControllerService(BaseService):
             await self._send_error(f"Error playing music: {str(e)}")
 
     async def _stop_playback(self) -> None:
-        """Stop music playback with improved VLC cleanup"""
+        """Stop music playback through the active backend.
+
+        This used to gate on ``self.player`` and drive VLC directly. Playback moved to the
+        pluggable backends (``LocalMusicBackend`` owns its own VLC player), and nothing sets
+        ``self.player`` any more - so the gate was always true and *every* stop returned
+        "No music is currently playing" without touching the audio. Found by
+        ``scripts/claude_live_verify.py``: Claude's ``stop_music`` tool call arrived, reached
+        MUSIC_COMMAND, and the track kept playing.
+
+        ``self.current_track`` is the service's own record of what is playing, so it is the
+        correct gate. ``self.player`` is still cleaned up for the crossfade path, which does
+        assign it.
+        """
         try:
-            if not self.player:
+            if not self.current_track and not self.player:
                 await self._send_success("No music is currently playing")
                 return
             
@@ -879,17 +923,23 @@ class MusicControllerService(BaseService):
                 
             # Get track info before cleanup
             track_name = self.current_track.name if self.current_track else "Unknown"
-            
-            # Stop the player with improved cleanup
-            try:
-                self.player.stop()
-                # Give VLC time to stop cleanly
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                self.logger.debug(f"Error stopping VLC player: {e}")
-            
-            # Clean up the player
-            await self._cleanup_player(self.player)
+
+            # Stop through the backend that actually owns the playback.
+            backend = self.backends.get(self.active_source)
+            if backend:
+                try:
+                    await backend.stop_playback()
+                except Exception as e:
+                    self.logger.debug(f"Error stopping {self.active_source} backend: {e}")
+
+            # The crossfade path assigns self.player directly; clean that up too.
+            if self.player:
+                try:
+                    self.player.stop()
+                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    self.logger.debug(f"Error stopping VLC player: {e}")
+                await self._cleanup_player(self.player)
             self.player = None
             self.current_track = None
             
@@ -957,14 +1007,41 @@ class MusicControllerService(BaseService):
         await self._list_tracks()
 
     @compound_command("play music")
-    @validate_compound_command(min_args=1, required_args=["track_name"])
+    # min_args=0 since 2026-09-17: "play some music" names no track, and neither does typing
+    # the `p` shortcut at the prompt. Requiring one argument meant the fast router's generic
+    # dispatch was rejected at the CLI arg check after landing in 483 ms - the same class of
+    # bug as the `eye pattern` arg-count rejection, and again only visible in
+    # scripts/system_smoke_run.py, because the command was emitted correctly and discarded
+    # afterwards.
+    @validate_compound_command(min_args=0, required_args=["track_name"])
     @command_error_handler
     async def handle_play_music(self, payload: dict) -> None:
-        """Handle 'play music <track>' command - plays specified track."""
+        """Handle 'play music [track]' command - plays the named track, or any track."""
         args = payload.get("args", [])
-        track_query = " ".join(args)
+        track_query = " ".join(args).strip()
+
+        if not track_query:
+            await self._play_any_track()
+            return
+
         self.logger.info(f"Playing music track: {track_query}")
         await self._smart_play_track(track_query)
+
+    async def _play_any_track(self, source: str = "cli") -> None:
+        """Play something. For when the request names no track.
+
+        Random rather than "the first one": a DJ asked for "some music" twice in a row should
+        not play Bai Tee Tee both times. Whichever track starts is reported back on
+        MUSIC_PLAYBACK_STARTED, which is what the spoken confirmation is built from, so the
+        randomness cannot desynchronise what R3X says from what is playing.
+        """
+        if not self.tracks:
+            await self._send_error("No music tracks available. Please install music first.")
+            return
+
+        track_name = random.choice(list(self.tracks.keys()))
+        self.logger.info(f"No track named; playing {track_name}")
+        await self._play_track_by_name(track_name, source)
 
     @compound_command("stop music")
     @command_error_handler

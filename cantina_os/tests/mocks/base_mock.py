@@ -13,17 +13,35 @@ class BaseMockService(ABC):
         """Initialize the mock service."""
         self._calls: List[Tuple[str, Any]] = []
         self._responses: Dict[str, Any] = {}
-        
+        self._initialized: bool = False
+
     def record_call(self, method: str, *args, **kwargs) -> None:
         """Record a method call with its arguments."""
         self._calls.append((method, (args, kwargs)))
-        
+
     def get_calls(self, method: Optional[str] = None) -> List[Tuple[str, Any]]:
         """Get recorded calls, optionally filtered by method name."""
         if method is None:
             return self._calls
         return [(m, args) for m, args in self._calls if m == method]
-        
+
+    @property
+    def calls(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Get recorded calls grouped by method name, in a dict-friendly shape.
+
+        Each entry is ``{"args": <positional args tuple>, "kwargs": <kwargs dict>}``,
+        e.g. ``mock.calls["generate_speech"][0]["args"][0]``.
+        """
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for method, (args, kwargs) in self._calls:
+            result.setdefault(method, []).append({"args": args, "kwargs": kwargs})
+        return result
+
+    @property
+    def is_initialized(self) -> bool:
+        """Whether initialize() has been called without a subsequent shutdown()."""
+        return self._initialized
+
     def set_response(self, key: str, response: Any) -> None:
         """Set a mock response for a given key."""
         self._responses[key] = response
@@ -44,11 +62,13 @@ class BaseMockService(ABC):
     async def initialize(self) -> None:
         """Initialize the mock service."""
         self.record_call('initialize')
-        
+        self._initialized = True
+
     @abstractmethod
     async def shutdown(self) -> None:
         """Shutdown the mock service."""
         self.record_call('shutdown')
+        self._initialized = False
         
     async def start(self) -> None:
         """Start the mock service."""

@@ -2,7 +2,18 @@
 
 ## Executive Summary
 
-DJ R3X is undergoing a major architectural transition from a legacy MVP design (`src/`) to the new **CantinaOS** framework (`cantina_os/`). The system is an AI-powered voice-interactive DJ robot that processes user speech, generates intelligent responses, and controls music playback with synchronized LED animations. The architecture emphasizes event-driven decoupling, ROS-inspired service patterns, and precise audio pipeline coordination.
+DJ R3X is an AI-powered voice-interactive DJ robot that processes user speech, generates
+intelligent responses, and controls music playback with synchronized LED animations. The
+architecture emphasizes event-driven decoupling, ROS-inspired service patterns, and precise
+audio pipeline coordination.
+
+**The runtime is CantinaOS** (`cantina_os/`). The legacy MVP under `src/` is superseded and
+no longer runs - it is described in section 1 only so nobody edits it expecting an effect.
+
+**The LLM is Claude Haiku 4.5, not GPT.** `openai` was removed as a dependency on
+2026-09-17; nothing under `cantina_os/` imports it, and `gpt_service.py` - though still on
+disk and still in main.py's `service_class_map` - is absent from `service_order`, so it
+never starts. Any doc or comment in this repo referring to "GPT" in the live path is stale.
 
 ---
 
@@ -21,7 +32,8 @@ The original MVP implementation uses a tightly-coupled monolithic approach:
   - `SystemModeManager`: System state management
   - `CommandInputThread`: CLI interface
 
-**Status**: Still functional, serves as reference but being phased out.
+**Status**: **Dead.** Not started by anything; `main.py` builds CantinaOS only. Retained as
+a historical reference. A fix applied here is a fix applied to nothing.
 
 ### CantinaOS Architecture (`cantina_os/`)
 
@@ -96,12 +108,13 @@ Services communicate via events by default. Direct method calls are permitted on
 
 ## 3. Audio Processing Pipeline
 
-### Complete Flow: Mic → GPT → Speaker
+### Complete Flow: Mic → Claude → Speaker
 
 #### Stage 1: Speech Recognition (Mic → Text)
 
 **DeepgramDirectMicService** (`services/deepgram_direct_mic_service.py`):
-- Captures microphone audio using Deepgram's `Microphone` class
+- Captures microphone audio by driving **PyAudio directly** (there is no Deepgram
+  `Microphone` helper in the live service; that was the SDK-4 variant, now dead)
 - Streams audio to Deepgram in real-time via WebSocket
 - Emits interim transcriptions (`TRANSCRIPTION_INTERIM`) with confidence
 - Emits final transcriptions (`TRANSCRIPTION_FINAL`) when voice activity ends
@@ -178,6 +191,141 @@ MusicControllerService, EyeLightControllerService (listen for ducking/visual syn
 - Coordinates complex sequences: music fade, speech timing, LED animations
 - Executes `DjTransitionPlanPayload` steps synchronously
 - Handles audio ducking at precise millisecond intervals
+
+---
+
+## 3b. The Jev Fast Intent Router
+
+Added 2026-09-17 on branch `jev-fast-router`. This is the most important recent change to
+the voice loop, and it changes where you should look when a command "does nothing".
+
+### Why
+
+Measured off raw log timestamps, not marketing:
+
+| Interval | Measured |
+|---|---|
+| Click-stop → music actually playing | **1,899 ms** |
+| Click-stop → R3X starts speaking | **~3,745 ms** |
+| Event bus + the entire tool-routing chain | **15 ms combined** |
+
+**The bus was never the problem.** 73% of the 1,899 ms was a single Claude round trip whose
+only job, for `play_music` / `stop_music` / `set_eye_color`, was to pick a tool name - a
+decision that needs no LLM. Worse, tool calls were only extracted after
+`stream.get_final_message()`, so the music could not start until Claude had finished talking.
+
+### How it fits
+
+`JevIntentService` (`services/jev_intent_service.py`) subscribes to the same
+`VOICE_LISTENING_STOPPED` event as `ClaudeService` and emits **`INTENT_DETECTED`** - the
+exact event `ClaudeService` emits after a tool call. `IntentRouterService` already
+subscribed to it and `IntentPayload` already carried `confidence`, so **the execution side
+needed zero changes.**
+
+```
+VOICE_LISTENING_STOPPED { transcript, conversation_id }
+   |
+   +--> JevIntentService ---- ~190 ms ----> INTENT_DETECTED
+   |         (typesafe.ai System One, model pinned to jev-1.13.0)
+   |                                              |
+   |                                    IntentRouterService
+   |                                    CommandDispatcherService
+   |                                    MUSIC_COMMAND / EYE_COMMAND / DJ_COMMAND
+   |
+   +--> ClaudeService --- awaits the router's verdict, then speaks only
+```
+
+Files: `llm/jev_client.py` (async httpx client, one pre-warmed connection, `attempts=1`,
+800 ms timeout, fails open), `llm/jev_intents.py` (the question catalogue and thresholds),
+`services/jev_intent_service.py`, `core/fast_router_gate.py` (the dedup rendezvous).
+
+### The decision rule
+
+Three overlapping reads in **one** request, all of which must agree:
+
+1. a **Choice** over all six tools plus `general_chat` / `unclear` - decides *which*;
+2. **one Noul per tool** - an absolute "is the speaker asking for *this*, now?";
+3. **`is_a_command`** - "instruction, or conversation?".
+
+The mechanism matters: *"did you turn the music down"* **wins** the Choice competition at
+0.94 and **fails** its own Noul at 0.47. The two reads fail independently, and that is what
+buys the safety - for one extra request of tokens, not one extra round trip. Over 66
+utterances x 5 passes x 8 designs this was the only arm with **0 false triggers and 0 wrong
+executions in 330 calls**; every choice-only design false-triggers.
+
+Risk-tiered gates, because one threshold is the wrong model:
+
+| Tier | Tools | Gate |
+|---|---|---|
+| Free - instantly reversible | `set_eye_animation`, `next_track` | confidence >= 0.75, noul >= 0.5 |
+| Cheap - reversible but noticeable | `play_music`, `stop_music`, `dj_mode_on/off` | confidence >= 0.85 **and** noul >= 0.7 |
+| Committing - writes shared state | *(empty today)* | never fires from the router alone |
+
+The free tier is derived as `JEV_CONFIDENCE_THRESHOLD - 0.10`, so one knob moves both.
+
+Two deliberate omissions, both from the benchmark: **no `volume_up`/`volume_down`** (R3X has
+no volume tool, and they caused the worst confusions - *"quiet please"* → `volume_down`), and
+**no conversation history in `state`** (history raised strict accuracy ~4 points but made the
+router eager and reintroduced a false trigger; only the assistant's identity line goes in,
+which is what fixes *"put on some cantina tunes"* - 0.97 with it, `general_chat` without).
+
+### Dedup - and why Claude does not repeat the action
+
+Both services wake on the same event. Without coordination Claude's own `tool_use` would
+restart the music a second time and narrate a future it did not cause.
+
+`ClaudeService` awaits the router's verdict via `core/fast_router_gate.py`, bounded by
+`FAST_ROUTER_WAIT_S` (1.2 s). When an action was taken it prepends an
+`<action_already_taken>` XML block (same convention as `_build_vision_context_for_message`)
+and sets **`tool_choice={"type": "none"}`** - the tools stay in the request so the prompt
+cache still hits, but Claude can only speak. `INTENT_CONSUMED` is also emitted for anything
+that wants to observe the decision.
+
+Cost: ~190 ms on the *spoken* path, nothing on the *action* path - the music is already
+playing before Claude is called.
+
+### Fail-open is the whole design
+
+No `TYPESAFE_API_KEY` → router inactive, no wait at all, every turn takes the Claude path.
+Timeout, HTTP error or malformed body → `classify()` returns `None` and never raises into the
+voice loop. Router hung → bounded wait, then the turn proceeds exactly as it did before.
+
+A miss costs one slow turn. A false trigger blasts music into the room while someone was
+asking a question. **That asymmetry is deliberate**, so *"quiet please"* being declined is
+the *correct* failure and not a bug to chase. Every decline logs the full probability map at
+INFO - that is your eval set.
+
+### Measured, on the real event bus
+
+| Path | Measured |
+|---|---|
+| Baseline (Claude tool call) | 1,899 ms |
+| Jev router, warm, 5 consecutive turns | **p50 197 ms** (min 160, max 260) |
+| Jev router, speculative cache hit | **1.6 ms** |
+| — of which all of CantinaOS | **2-3 ms** |
+
+Confirmed again in a full-system run on 2026-09-17 with real VLC: `MUSIC_COMMAND` at 214 ms
+(warm), `DJ_COMMAND` 226 ms, `EYE_COMMAND` 316 ms, event loop ticking 147-215 times per turn.
+
+**The ~100 ms target is not reachable on the non-speculative path.** The Jev round trip alone
+is p50 ~188 ms, of which ~86 ms is raw network RTT, and CantinaOS contributes 2-3 ms. There
+is nothing left to optimise on our side. The speculative path *does* beat it, whenever a
+partial transcript matches - the common case for short commands.
+
+### When a voice command "does nothing", check in this order
+
+1. Was it classified? Every decline logs the probability map at INFO.
+2. Did `INTENT_DETECTED` fire? If yes, the router did its job.
+3. Did the action topic (`MUSIC_COMMAND` / `EYE_COMMAND` / `DJ_COMMAND`) fire?
+4. **Did something downstream discard it?** This is the one that bites. Two live examples,
+   both found by `scripts/system_smoke_run.py` and invisible to unit tests:
+   - eye colour requests dispatched in 209 ms and were then rejected by a CLI arg-count
+     check, because the intent was laundered through `CLI_COMMAND` as a two-arg
+     `eye pattern <pattern> <color>` while the compound command is registered with
+     `max_args=1`. Fixed by emitting `EYE_COMMAND` directly.
+   - `next_track` still dispatches correctly and still does nothing outside DJ mode:
+     `dj next` is the only skip capability and BrainService refuses it, because
+     MusicControllerService understands only "play" and "stop". Open gap.
 
 ---
 
@@ -351,12 +499,36 @@ All events related to a single user utterance carry the same `conversation_id`. 
 - Preventing stale events from old conversations affecting current interaction
 - Debugging and performance analysis
 
+**The capture service owns the turn id.** `DeepgramDirectMicService._handle_mic_recording_start`
+mints a uuid per turn (and `CLIService`'s `record` command does the same on the typed path),
+puts it on `VOICE_LISTENING_STARTED`, and carries it on `VOICE_LISTENING_STOPPED`. Everything
+downstream **adopts** it - `ClaudeService._handle_voice_transcript` takes the incoming id
+rather than keeping its own.
+
 ```
-User speaks → TRANSCRIPTION_FINAL (conversation_id: "abc123")
-  → LLM_RESPONSE_TEXT (same conversation_id)
-  → SPEECH_SYNTHESIS_STARTED (same conversation_id)
-  → LED updates ignore old conversation_id events
+VOICE_LISTENING_STARTED  (conversation_id: "abc123")   <- minted here, opens the latency record
+  → TRANSCRIPTION_FINAL  (same)
+  → VOICE_LISTENING_STOPPED (same)
+  → INTENT_DETECTED / LLM_RESPONSE (same)
+  → SPEECH_GENERATION_STARTED / _COMPLETE (same)       <- closes the latency record
+  → LED updates and CLI display ignore other ids
 ```
+
+**This was broken until 2026-09-17, and it is worth knowing how.** The capture services threw
+the id away on `VOICE_LISTENING_STOPPED` (emitting `{"transcript": ...}`, or a bare `{}` on the
+CLI path) and `ClaudeService` minted its own in `reset_conversation()`. Every handler in
+`LatencyTrackerService` guards on `conversation_id not in self._conversation_metrics`, so it
+dropped **100% of its measurements** and had never recorded anything. `CLIService._handle_llm_response`
+has the same guard, so the CLI was also silently swallowing R3X's replies - which nobody had
+connected to a latency bug. Note the failure mode: two ids that never match produce **silence**,
+not an error. Assume nothing about a metric you have not seen a number for.
+
+Also fixed at the same time: `MemoryService` and `LatencyTrackerService` both subscribed to
+`LLM_RESPONSE_TEXT`, `SPEECH_SYNTHESIS_STARTED` and `SPEECH_SYNTHESIS_ENDED` - **none of which
+any service emits.** The live topics are `LLM_RESPONSE`, `SPEECH_GENERATION_STARTED` and
+`SPEECH_GENERATION_COMPLETE`. MemoryService had therefore been recording what Brandon said and
+never what R3X replied, building every person summary from a one-sided transcript. Subscribing
+to a topic nothing emits is silent; grep for an emitter before trusting a subscription.
 
 ### Pattern 2: Event-Driven Communication (With Exceptions)
 
@@ -458,12 +630,61 @@ Higher-priority layers pause lower layers (e.g., DJ commentary pauses background
 
 ## 9. Configuration & Environment
 
+### 9a. Which LLM backend the Claude path uses
+
+`cantina_os/llm/anthropic_provider.py` is the single place this is decided, and all three
+Anthropic clients go through it - `ClaudeService`, `MemoryService`'s summariser, and
+`VisionService`.
+
+| Credential present | Result |
+|---|---|
+| `ANTHROPIC_API_KEY` | direct to Anthropic; **always wins** |
+| `OPENROUTER_API_KEY` only | the same `anthropic` SDK with `base_url="https://openrouter.ai/api"` |
+| neither | `resolve_provider()` returns `None`; the service treats the LLM as unavailable |
+
+`LLM_PROVIDER` (`anthropic`/`openrouter`/`auto`) forces the choice. A forced provider whose
+key is missing is **unavailable**, not a redirect to the other one - silent cross-provider
+fallback would make a misconfiguration look like a working system on someone else's bill.
+`ANTHROPIC_BASE_URL` overrides the host for whichever provider was chosen.
+
+Why it works at all: OpenRouter serves the Anthropic Messages format, and the SDK sends
+`x-api-key` + `anthropic-version` to `{base_url}/v1/messages` regardless of host. Streaming,
+`temperature`, `tools` and `tool_choice: {"type": "none"}` all behave identically - measured
+by `cantina_os/scripts/claude_live_verify.py`, not assumed.
+
+**Two traps.**
+
+1. The base URL is `https://openrouter.ai/api`, *not* `.../api/v1`. The SDK appends its own
+   `/v1`; the doubled prefix returns an HTML 404 that surfaces as `NotFoundError` with a
+   page of Next.js markup in the message.
+2. Model ids differ (`claude-haiku-4-5-20251001` vs `anthropic/claude-haiku-4.5`). They are
+   translated once, at client construction, and written back into `_config["MODEL"]` - so
+   every call site keeps using the Anthropic id and `CLAUDE_MODEL` stays portable. Add new
+   models to `OPENROUTER_MODEL_MAP`; an unmapped id passes through unchanged rather than
+   raising.
+
+`anthropic` is pinned `<1.0` because 1.x removed `temperature` from `messages.create()` and
+seven call sites pass it. That pin is unrelated to the provider choice.
+
 ### Configuration Sources
 
 1. **Environment Variables** (`.env` file):
-   - API keys: `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`
-   - Hardware: `LED_SERIAL_PORT`, `LED_BAUD_RATE`
-   - Audio: `SAMPLE_RATE`, `CHANNELS`
+   - API keys: `ANTHROPIC_API_KEY` **or** `OPENROUTER_API_KEY` (see below),
+     `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `TYPESAFE_API_KEY` (the Jev fast intent
+     router; optional - absent means the router is simply inactive)
+   - LLM provider: `LLM_PROVIDER` (`anthropic`/`openrouter`/`auto`), `ANTHROPIC_BASE_URL`
+   - Fast router: `JEV_ROUTER_ENABLED`, `JEV_CONFIDENCE_THRESHOLD` (0.85),
+     `JEV_COMMAND_THRESHOLD` (0.5), `JEV_TIMEOUT_S` (0.8), `JEV_SPECULATE`,
+     `FAST_ROUTER_WAIT_S` (1.2)
+   - Hardware: `ARDUINO_SERIAL_PORT`, `ARDUINO_BAUD_RATE`, `FORCE_MOCK_LED_CONTROLLER`
+   - Music: `MUSIC_DEFAULT_SOURCE`, `ENABLE_SPOTIFY`, `SPOTIFY_CLIENT_ID`,
+     `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`
+
+   Note: `ARDUINO_SERIAL_PORT` **overrides** the `serial_port` passed to
+   `EyeLightControllerService` in code (`eye_light_controller_service.py:258-266`). Anything
+   that calls `load_dotenv()` therefore changes that service's behaviour process-wide - which
+   is a real test-isolation hazard, since `DeepgramDirectMicService.__init__` does exactly
+   that at `deepgram_direct_mic_service.py:59`.
 
 2. **Service-Level Config** (passed during initialization):
    - Pydantic models validate all configuration
@@ -478,13 +699,63 @@ Higher-priority layers pause lower layers (e.g., DJ commentary pauses background
 
 ## 10. Testing Strategy
 
-### Service Isolation
+### Running the suite
 
-All services can be instantiated with mock components:
-- `MockDeepgramService`: Returns pre-scripted transcriptions
-- `MockElevenLabsService`: Skips actual TTS API calls
-- `MockMusicControllerService`: Simulates playback events
-- Mock event bus for unit testing individual services
+```bash
+cd cantina_os
+../venv/bin/python -m pytest tests/ -q                            # 274 passed, 55 skipped
+../venv/bin/python -m pytest tests/test_jev_intent_router.py -q    # fast, offline, no API
+```
+
+**Current state as of 2026-09-17: 274 passed, 55 skipped, 0 failed.** For most of 2026 this
+was `0 passed, 144 errors` - `tests/conftest.py` patched `deepgram.Deepgram`, a symbol
+removed in deepgram-sdk 4.x, inside an `autouse=True` fixture, so setup raised
+`AttributeError` for every test in the suite. If you ever see the whole suite error at
+setup, suspect the autouse fixture before anything else.
+
+Every one of the 55 skips carries a written reason naming the production code that changed.
+Do not "fix" a skip by deleting the reason. The groups are: dead services (`gpt_service`,
+the SDK-4 deepgram service, the flat `music_controller_service.py` shadowed by its package),
+hardware-bound tests, tests needing real API credit, and a handful pinned open against
+production defects that should be fixed rather than asserted.
+
+### Two traps that have wasted real time
+
+**1. The event bus's `emit`/`on` are SYNCHRONOUS.** `main.py:162` builds a
+`pyee.AsyncIOEventEmitter`, whose `emit()` returns `bool` and schedules coroutine handlers
+on the loop. `BaseService.emit()`/`subscribe()` (`base_service.py:247,269`) therefore call
+them **without** `await`, which is correct. Consequences:
+- Never write `await bus.emit(...)` in a test: it raises
+  `TypeError: object bool can't be used in 'await' expression`.
+- Never give a mock bus an `async def emit`: the unawaited coroutine never runs its body, so
+  the test silently observes nothing and passes for the wrong reason. This pattern was
+  responsible for dozens of the 2026 test failures.
+- `cantina_os/event_bus.py`'s `EventBus` class declares these as `async def`. It is a live
+  landmine for anything wired to `EventBus()` rather than the pyee bus.
+
+**2. `BaseService._emit_status` emits the literal string `"service_status"`**
+(`base_service.py:155`), not `EventTopics.SERVICE_STATUS_UPDATE` (`"service.status.update"`).
+Subscribing to the constant will not see lifecycle status events.
+
+### Driving the real system without hardware
+
+`cantina_os/scripts/system_smoke_run.py` boots a real `CantinaOS` - real bus, real
+IntentRouterService, CommandDispatcherService, BrainService and MusicControllerService
+driving real VLC - mocks the Arduino, skips the three services that need hardware and OS
+permissions (mic capture, mouse trigger, vision), and injects transcripts as
+`VOICE_LISTENING_STARTED` / `VOICE_LISTENING_STOPPED` exactly as the capture services emit
+them. It prints every bus event per turn with millisecond offsets plus an event-loop tick
+count, so a freeze shows up as a tick count near zero.
+
+```bash
+cd cantina_os
+../venv/bin/python scripts/system_smoke_run.py
+```
+
+Prefer this over unit tests when the question is "does this actually work on this box". It
+is what caught the eye-colour routing bug and the `next_track` gap on 2026-09-17; both were
+invisible to unit tests, because both dispatched correctly and were then discarded
+downstream.
 
 ### Integration Testing
 
@@ -535,7 +806,7 @@ python3 -m cantina_os.main # ❌ Will use system Python, not venv
 **Environment Requirements**:
 - Virtual environment at `/Users/brandoncullum/DJ-R3X Voice/venv/`
 - All dependencies installed via `pip install -r requirements.txt`
-- API keys loaded from `.env` file in project root (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
+- API keys loaded from `.env` file in project root (ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
 - Running from `cantina_os/` directory for correct module resolution
 - **Terminal**: Use Terminal.app, NOT Warp (Warp has known issues with macOS Accessibility permissions for mouse input via pynput)
 

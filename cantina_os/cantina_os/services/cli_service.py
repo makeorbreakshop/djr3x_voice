@@ -28,6 +28,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
+from ..core.console_logging import write_with_retry
 from ..event_payloads import (
     CliCommandPayload,
     CliResponsePayload,
@@ -126,7 +127,10 @@ class CLIService(BaseService):
 
         # Voice interaction display state
         self._last_interim_text = ""
-        self._current_conversation_id = None
+        # The conversation_id of the in-flight voice turn. Set by `record` (and by incoming
+        # transcription payloads), read by `done` so VOICE_LISTENING_STOPPED carries it, and by
+        # _handle_llm_response, which drops any reply whose id does not match this one.
+        self._current_conversation_id: Optional[str] = None
         
     @property
     def event_bus(self):
@@ -373,8 +377,15 @@ class CLIService(BaseService):
                 if self._mic_recording_active:
                     self.logger.info("Stopping microphone recording with 'done' command")
                     # Emit event to stop microphone recording
-                    await self.emit(EventTopics.VOICE_LISTENING_STOPPED, {})
+                    # FIXED 2026-09-17: carry the conversation_id minted by `record` below.
+                    # Emitting `{}` here broke the turn's identity for every downstream
+                    # consumer, exactly as in deepgram_direct_mic_service.
+                    await self.emit(
+                        EventTopics.VOICE_LISTENING_STOPPED,
+                        {"conversation_id": self._current_conversation_id},
+                    )
                     self._mic_recording_active = False
+                    self._current_conversation_id = None
                     return
                 else:
                     self.logger.info("'done' command received but no recording is active")
@@ -393,6 +404,7 @@ class CLIService(BaseService):
 
                 # Generate a conversation ID for this voice interaction
                 conversation_id = str(uuid.uuid4())
+                self._current_conversation_id = conversation_id
                 self.logger.info(f"Starting voice conversation with ID: {conversation_id}")
 
                 # Start microphone recording without entering text input mode
@@ -617,14 +629,24 @@ class CLIService(BaseService):
             while self._running:
                 message, is_error = await self._output_queue.get()
                 try:
-                    # Use loop.run_in_executor for potentially blocking operations
+                    # Use loop.run_in_executor for potentially blocking operations.
+                    #
+                    # write_with_retry, not a bare write: _setup_stdin_reader puts stdin into
+                    # non-blocking mode and on a tty stdout shares that file description, so a
+                    # full terminal buffer raises BlockingIOError. That is what discarded a
+                    # `help` listing on 2026-09-17 10:55:44 ("Error writing output: [Errno 35]
+                    # write could not complete without blocking"). The stream is momentarily
+                    # full, not broken, so the right answer is to wait rather than drop.
                     loop = asyncio.get_running_loop()
-                    if is_error:
-                        await loop.run_in_executor(None, lambda: sys.stderr.write(str(message) + '\n'))
-                        await loop.run_in_executor(None, sys.stderr.flush)
-                    else:
-                        await loop.run_in_executor(None, lambda: sys.stdout.write(str(message) + '\n'))
-                        await loop.run_in_executor(None, sys.stdout.flush)
+                    stream = sys.stderr if is_error else sys.stdout
+                    text = str(message) + '\n'
+                    written = await loop.run_in_executor(
+                        None, lambda: write_with_retry(stream, text)
+                    )
+                    if not written:
+                        self.logger.error(
+                            "Output dropped: stdout stayed blocked for the full retry budget"
+                        )
                 except Exception as e:
                     self.logger.error(f"Error writing output: {e}")
                 finally:

@@ -8,6 +8,27 @@ These tests verify the functionality of the music controller including:
 - Audio ducking during speech
 """
 
+import pytest
+pytest.skip(
+    "Stale: written against a since-rewritten MusicControllerService API. Current "
+    "implementation is the package at cantina_os/services/music_controller_service/"
+    "music_controller_service.py (the flat music_controller_service.py this test "
+    "originally targeted is dead code, shadowed by the package). Divergences: "
+    "__init__ now takes (event_bus, config: Dict[str, Any] = None) with music_dir "
+    "nested inside config, not a music_dir= kwarg (line 84-90); tracks are loaded "
+    "into self.libraries['local'/'spotify'] via pluggable MusicBackend classes "
+    "(_initialize_backends, line 300+) instead of a flat self.tracks dict scanned "
+    "directly from music_dir; get_track_list is now `async def` and returns a Dict, "
+    "not a sync method returning a List (line 1060); there is no MUSIC_STATE_CHANGE "
+    "event topic anywhere in cantina_os/core/event_topics.py anymore (playback "
+    "state is communicated via MUSIC_PLAYBACK_STARTED/STOPPED and other topics); "
+    "and DJ-mode/crossfade/compound-command features (register_service_commands, "
+    "backends, track_end_timer) have no analog in this test file at all. Rewriting "
+    "this file requires designing new tests against the current backend-based "
+    "architecture rather than patching individual assertions.",
+    allow_module_level=True,
+)
+
 import os
 import pytest
 import asyncio
@@ -17,7 +38,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 
 from cantina_os.services.music_controller_service import MusicControllerService, MusicTrack
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     MusicCommandPayload,
     BaseEventPayload,

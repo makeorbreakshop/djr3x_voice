@@ -264,7 +264,10 @@ class SpotifyMusicBackend(MusicBackend):
             self.device_id = await self._discover_device(device_name)
 
             if not self.device_id:
-                self.logger.error("No Spotify device found. Make sure Spotify app is running.")
+                # _discover_device has already said why, at WARNING. Saying it again, at
+                # ERROR, with a guess at the cause, is what made one revoked token look like
+                # two system failures.
+                self.logger.debug("No Spotify device available; Spotify backend not enabled")
                 return False
 
             self.logger.info(f"Spotify backend initialized (device: {self.device_id})")
@@ -303,7 +306,11 @@ class SpotifyMusicBackend(MusicBackend):
             return first_device["id"]
 
         except Exception as e:
-            self.logger.error(f"Error discovering Spotify device: {e}")
+            # WARNING, not ERROR, and one line rather than two: Spotify is optional, its
+            # absence is handled, and the caller already logs the failed backend. The 10:55:15
+            # pair in the 2026-09-17 log was two ERRORs for a revoked refresh token, the
+            # second of which ("Make sure Spotify app is running") was wrong advice.
+            self.logger.warning(f"Spotify unavailable: {e}")
             return None
 
     async def play_track(self, track: MusicTrack) -> bool:

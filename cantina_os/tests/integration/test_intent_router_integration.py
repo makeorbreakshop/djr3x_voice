@@ -6,12 +6,37 @@ intent detection to command emission.
 """
 
 import pytest
+
+pytest.skip(
+    "This suite wires GPTService/IntentRouterService (BaseService subclasses) to "
+    "cantina_os/event_bus.py's EventBus class, whose on()/emit() are `async def` "
+    "coroutine methods. BaseService.subscribe() and BaseService.emit() "
+    "(cantina_os/base_service.py:246-247, 268-269) call `self._event_bus.emit(...)` "
+    "and `self._event_bus.on(...)` WITHOUT awaiting them, with a comment claiming "
+    "pyee's AsyncIOEventEmitter.emit/on are not coroutines - true for the raw pyee "
+    "emitter that production actually uses (cantina_os/main.py:162 constructs "
+    "`AsyncIOEventEmitter()`, never `EventBus()`), but false for this wrapper class. "
+    "An unawaited coroutine's body never runs, so against a real EventBus() every "
+    "subscribe() and emit() through BaseService is a silent no-op: no handler is ever "
+    "registered and no event ever reaches a listener (verified directly: a minimal "
+    "BaseService subscribed via EventBus() never received an emitted event in an "
+    "isolated repro). This is a genuine production-level bug/incompatibility between "
+    "event_bus.py's EventBus and base_service.py, not a stale-API test issue, and is "
+    "out of scope for a test-only fix under this task's rules. Separately, "
+    "the fixture also overwrites gpt_service._config wholesale with a dict missing "
+    "'ENABLE_INTERIM_STREAMING', which GPTService._setup_subscriptions "
+    "(gpt_service.py:286) accesses unconditionally via `self._config[...]` - that "
+    "part alone would be a one-line test fix, but it's moot underneath the EventBus "
+    "issue above.",
+    allow_module_level=True,
+)
+
 from unittest.mock import MagicMock, patch, AsyncMock
 import asyncio
 import json
 
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     TranscriptionTextPayload, 
     IntentPayload,

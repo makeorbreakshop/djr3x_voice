@@ -1,34 +1,21 @@
-# Core dependencies
-python-dotenv==1.0.0
-numpy==1.24.3
-pyee==11.0.1
-pydub==0.25.1
-sounddevice==0.4.6
-python-vlc==3.0.21203
-pynput==1.7.6
-requests==2.31.0
+# DJ R3X Voice - root requirements
+#
+# REWRITTEN 2026-09-17.
+#
+# This file used to be a second, independent dependency list that disagreed with
+# cantina_os/requirements.txt - README.md and CLAUDE.md told a fresh setup to install THIS
+# file, while start-dashboard.sh actually installs cantina_os/requirements.txt. The two drifted
+# badly: this file pinned `anthropic==0.52.2` while cantina_os required `>=0.72.0`, and it also
+# carried three packages that nothing imports -
+#
+#   whisper==1.1.10   NOT OpenAI Whisper. That name on PyPI is Graphite's time-series database
+#                     format (it installs whisper-create.py / rrd2whisper.py). A genuine trap.
+#   librosa==0.10.1   no `import librosa` anywhere under cantina_os/
+#   openai==2.7.1     no `import openai` anywhere under cantina_os/; the only OpenAI call sites
+#                     left are in archive/legacy_code/, and gpt_service.py (which never starts)
+#                     hand-rolls HTTP via aiohttp
+#
+# Rather than keep two lists in sync, this file now defers to the one the app actually installs.
+# There is exactly one place to edit.
 
-# Speech recognition and AI services
-SpeechRecognition==3.10.0
-openai==2.7.1  # Updated for GPT-4o/GPT-4.1 support, improved latency (232-320ms)
-anthropic==0.52.2  # Claude 3.5 Sonnet 4.5 support with streaming
-whisper==1.1.10
-deepgram-sdk>=5.0.0  # SDK 5.x - Persistent WebSocket with KeepAlive for reduced latency
-elevenlabs==2.22.0  # Updated for Flash v2.5 (75ms latency), latency optimization levels
-
-# Music services
-spotipy==2.25.1  # Spotify Connect API integration
-
-# Audio processing
-librosa==0.10.1
-soundfile==0.12.1
-
-# Serial communication
-pyserial==3.5
-pyserial-asyncio==0.6
-
-# Development tools
-black==23.3.0
-pylint==2.17.4
-pytest==7.3.1
-pytest-asyncio==0.21.1 
+-r cantina_os/requirements.txt

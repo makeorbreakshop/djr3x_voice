@@ -18,7 +18,7 @@ from cantina_os.event_payloads import (
     ServiceStatus,
     LLMResponsePayload
 )
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.elevenlabs_service import (
     ElevenLabsService,
     SpeechPlaybackMethod,
@@ -85,12 +85,32 @@ class TestElevenLabsService:
         assert service._config.api_key == "mock-api-key"
         assert service._config.voice_id == "test-voice-id"
         assert service._config.model_id == "test-model-id"
-        assert service._config.playback_method == SpeechPlaybackMethod.SYSTEM
-        
+        # ElevenLabsService.__init__ now force-overrides playback_method to
+        # STREAMING regardless of config (see elevenlabs_service.py:119-121:
+        # "Force streaming playback method regardless of config"), so the
+        # SYSTEM value in test_config is intentionally ignored.
+        assert service._config.playback_method == SpeechPlaybackMethod.STREAMING
+
         # Check status enum instead of string
         assert service._status == ServiceStatus.INITIALIZING
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(
+        reason=(
+            "Production bug, not a stale test: ElevenLabsService defines "
+            "_cleanup() (elevenlabs_service.py:325) to close self._client "
+            "and remove self._temp_dir, but BaseService.stop() "
+            "(base_service.py:97-106) calls self._stop(), never "
+            "self._cleanup(). ElevenLabsService does not override _stop(), "
+            "so it inherits BaseService's no-op _stop() (base_service.py:"
+            "108-110) and _cleanup() is dead code -- stop() never closes "
+            "the HTTP client or removes the temp dir. Patching _cleanup() "
+            "here (as the original test did) papers over this: the patch "
+            "target is simply never invoked by the real lifecycle. Left "
+            "failing/skipped per instructions rather than silently "
+            "reworking the assertions to match the (buggy) real behavior."
+        )
+    )
     async def test_start_stop(self, service):
         """Test the service start and stop lifecycle."""
         # Create a mock client
@@ -128,8 +148,13 @@ class TestElevenLabsService:
             assert service._client is mock_client  # Check the exact mock object
             assert service._temp_dir is not None
             
-            # Verify the event bus emit was called for status update
-            assert any(call[0][0] == EventTopics.SERVICE_STATUS_UPDATE for call in service._event_bus.emit.call_args_list)
+            # Verify the event bus emit was called for status update.
+            # NOTE: BaseService._emit_status() emits the literal string
+            # "service_status" (base_service.py:155), not
+            # EventTopics.SERVICE_STATUS_UPDATE ("service.status.update") --
+            # possible drift between the two that's worth reconciling in
+            # production, but out of scope for this test fix.
+            assert any(call[0][0] == "service_status" for call in service._event_bus.emit.call_args_list)
             
             # Stop the service
             await service.stop()
@@ -179,7 +204,8 @@ class TestElevenLabsService:
             voice_id=service._config.voice_id,
             model_id=service._config.model_id,
             stability=0.7,
-            similarity_boost=0.5
+            similarity_boost=0.5,
+            speed=1.1  # _generate_speech now requires `speed` (elevenlabs_service.py:877-884)
         )
 
         # Verify the result
@@ -225,44 +251,33 @@ class TestElevenLabsService:
             voice_id=service._config.voice_id,
             model_id=service._config.model_id,
             stability=0.7,
-            similarity_boost=0.5
+            similarity_boost=0.5,
+            speed=1.1  # _generate_speech now requires `speed` (elevenlabs_service.py:877-884)
         )
 
         # Verify the result
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("httpx.AsyncClient.post")
-    @patch.object(ElevenLabsService, "_play_audio")
-    async def test_handle_speech_generation_request(self, 
-                                                    mock_play_audio, 
-                                                    mock_post, 
-                                                    service, 
-                                                    mock_audio_data):
-        """Test handling a speech generation request."""
-        # Configure the mock response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.content = mock_audio_data
-        mock_post.return_value = mock_response
-        
-        # Mock the play_audio method to avoid actual playback
-        mock_play_audio.return_value = None
-        
-        # Start the service with mocked _start method
+    async def test_handle_speech_generation_request(self, service):
+        """Test handling a speech generation request.
+
+        NOTE: playback_method is now force-set to STREAMING in __init__
+        (elevenlabs_service.py:119-121), so _handle_speech_generation_request
+        no longer calls httpx directly or _play_audio -- it enqueues the
+        request onto self._speech_request_queue for the background audio
+        thread to process (elevenlabs_service.py:648-668). The old
+        mock_post/_play_audio-based assertions tested a code path that is now
+        dead for this service configuration.
+        """
+        # Start the service with a mocked _start method (avoid real HTTP client)
         async def patched_start():
-            service._client = httpx.AsyncClient(
-                base_url="https://api.elevenlabs.io/v1",
-                headers={"xi-api-key": service._config.api_key},
-                timeout=30.0
-            )
-            service._temp_dir = tempfile.TemporaryDirectory()
             service._status = ServiceStatus.RUNNING
             service._started = True
-            
+
         with patch.object(service, '_start', side_effect=patched_start):
             await service.start()
-        
+
         # Create a test payload
         request_payload = SpeechGenerationRequestPayload(
             text="Test speech generation",
@@ -270,50 +285,55 @@ class TestElevenLabsService:
             voice_id=None,  # Use default from service
             model_id=None   # Use default from service
         )
-        
+
         # Handle the request
         await service._handle_speech_generation_request(request_payload)
-        
-        # Verify API call was made
-        mock_post.assert_called_once()
-        
-        # Verify the temp file was created and passed to _play_audio
-        mock_play_audio.assert_called_once()
-        file_path_arg = mock_play_audio.call_args[0][0]
-        assert "test-conversation-id" in file_path_arg
-        
-        # Verify completion event was emitted
-        emit_calls = [call for call in service._event_bus.emit.call_args_list 
-                      if call[0][0] == EventTopics.SPEECH_GENERATION_COMPLETE]
-        assert len(emit_calls) > 0
-        
-        # Check payload content in the emit call
-        emit_payload = emit_calls[-1][0][1]
-        assert emit_payload["conversation_id"] == "test-conversation-id"
-        assert emit_payload["success"] is True
+
+        # Verify the request was enqueued for the streaming audio thread
+        assert service._speech_request_queue.qsize() == 1
+        queued_request = service._speech_request_queue.get_nowait()
+        assert queued_request["text"] == "Test speech generation"
+        assert queued_request["conversation_id"] == "test-conversation-id"
+        assert queued_request["voice_id"] == service._config.voice_id
+        assert queued_request["model_id"] == service._config.model_id
+
+        # In streaming mode, SPEECH_GENERATION_COMPLETE is emitted later by
+        # the audio thread, not by _handle_speech_generation_request itself
+        # (see comment at elevenlabs_service.py:667-668), so no completion
+        # event is expected here.
 
     @pytest.mark.asyncio
     async def test_handle_llm_response(self, service, mock_event_bus):
-        """Test handling an LLM response."""
-        # Mock the _handle_speech_generation_request method
-        service._handle_speech_generation_request = AsyncMock()
-        
+        """Test handling a complete LLM response.
+
+        NOTE: _handle_llm_response no longer calls
+        _handle_speech_generation_request directly. It now buffers the
+        response and, once complete, creates a timeline plan and emits
+        PLAN_READY for TimelineExecutorService to coordinate playback with
+        ducking (elevenlabs_service.py:740-841,
+        _create_speech_timeline_plan).
+        """
         # Create an LLM response payload
         llm_payload = {
             "text": "This is a test LLM response",
             "conversation_id": "test-llm-conversation",
             "is_complete": True
         }
-        
+
         # Call the handler
         await service._handle_llm_response(llm_payload)
-        
-        # Verify that _handle_speech_generation_request was called with correct args
-        service._handle_speech_generation_request.assert_called_once()
-        call_arg = service._handle_speech_generation_request.call_args[0][0]
-        
-        # Check the request payload has correct values
-        assert call_arg.text == "This is a test LLM response"
-        assert call_arg.conversation_id == "test-llm-conversation"
-        assert call_arg.voice_id == service._config.voice_id
-        assert call_arg.model_id == service._config.model_id 
+
+        # Verify a PLAN_READY event was emitted with a "speak" step containing
+        # the buffered text
+        emit_calls = [
+            call for call in service._event_bus.emit.call_args_list
+            if call[0][0] == EventTopics.PLAN_READY
+        ]
+        assert len(emit_calls) == 1
+
+        plan_payload = emit_calls[-1][0][1]
+        steps = plan_payload["plan"]["steps"]
+        assert len(steps) == 1
+        assert steps[0]["step_type"] == "speak"
+        assert steps[0]["text"] == "This is a test LLM response"
+        assert steps[0]["id"] == "test-llm-conversation" 

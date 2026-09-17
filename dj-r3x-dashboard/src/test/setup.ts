@@ -6,7 +6,11 @@ import * as matchers from '@testing-library/jest-dom/matchers'
 expect.extend(matchers)
 
 // Clean up after each test case
-afterEach(cleanup)
+// The semicolon is load-bearing: without it, automatic semicolon insertion does NOT
+// apply (the next statement begins with `(`), so TypeScript parses this as
+// `afterEach(cleanup)(global as any)` and fails the build with
+// "This expression is not callable. Type 'void' has no call signatures."
+afterEach(cleanup);
 
 // Mock IntersectionObserver
 (global as any).IntersectionObserver = class IntersectionObserver {

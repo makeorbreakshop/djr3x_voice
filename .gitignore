@@ -49,9 +49,14 @@ ehthumbs.db
 Thumbs.db
 
 # Test files and directories
-test_*.py
-!tests/test_security_alert_regressions.py
-test_*.json
+# FIXED 2026-09-17: these were unanchored, so `test_*.py` ignored the ENTIRE real test
+# suite under cantina_os/tests/ - every existing test file had to be force-added, and any
+# newly written test was invisible to `git status` and silently left out of commits.
+# Now anchored to the throwaway scratch scripts that actually live at the repo root and
+# at cantina_os/ top level; cantina_os/tests/ is tracked normally.
+/test_*.py
+/test_*.json
+/cantina_os/test_*.py
 batch_test_results_*.json
 tests/data/
 test_articles/
@@ -111,3 +116,9 @@ coverage.xml
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Rolled-aside virtualenvs (see chore(deps) 2026-09-17)
+venv.old-*/
+
+# Runtime conversation memory (contains personal data; never commit)
+/cantina_os/memory_data/

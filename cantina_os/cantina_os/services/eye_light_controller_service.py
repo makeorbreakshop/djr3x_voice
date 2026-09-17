@@ -962,6 +962,10 @@ class EyeLightControllerService(RealtimeService):
                     self.logger.debug("Mouth reset to M000")
                 except Exception as e:
                     self.logger.error(f"Failed to reset mouth: {e}")
+            elif self.mock_mode:
+                # No adapter is the definition of mock mode, not a fault. This fired once per
+                # reply in the 2026-09-17 run, where the Arduino was simply not plugged in.
+                self.logger.debug("No mouth to reset - mock mode")
             else:
                 self.logger.warning("Cannot reset mouth - adapter not initialized")
 

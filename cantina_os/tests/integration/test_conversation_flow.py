@@ -1,10 +1,19 @@
+"""SKIPPED 2026-09-17 - this module tests code that is dead at HEAD."""
+
+import pytest
+
+pytest.skip(
+    "wires together two services that are dead at HEAD: `deepgram_transcription_service` (the SDK-4 variant, commented out of services/__init__.py:9 as deprecated and unimportable against any deepgram-sdk >= 4) and `gpt_service` (present in main.py's service_class_map but absent from service_order, so never instantiated). See audit 2026-09-17 sections 4.4 and 4.5. Resurrecting either is not wanted; the live path is deepgram_direct_mic_service + claude_service, covered by test_deepgram_direct_mic_service.py and test_claude_service.py.",
+    allow_module_level=True,
+)
+
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from typing import Dict, Any
 
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.mic_input_service import MicInputService
 from cantina_os.services.deepgram_transcription_service import DeepgramTranscriptionService
 from cantina_os.services.gpt_service import GPTService

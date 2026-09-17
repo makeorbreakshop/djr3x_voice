@@ -38,6 +38,8 @@ try:
 except ImportError:
     Anthropic = None  # Graceful degradation if not installed
 
+from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
+
 from ...base_service import BaseService
 from ...core.event_topics import EventTopics
 
@@ -218,14 +220,28 @@ class MemoryService(BaseService):
         # Anthropic client for conversation summarization
         self._anthropic_client: Optional[Anthropic] = None
         self._summarization_enabled = self._config.get("enable_summarization", True)
+        # Fast and cheap for summaries. Rewritten to the provider's own id in the
+        # OpenRouter case, so both summarisation call sites read it from here.
+        self._summarization_model = self._config.get(
+            "SUMMARIZATION_MODEL", "claude-haiku-4-5-20251001"
+        )
 
         if self._summarization_enabled and Anthropic:
-            api_key = self._config.get("ANTHROPIC_API_KEY")
-            if api_key:
-                self._anthropic_client = Anthropic(api_key=api_key)
-                self.logger.info("Anthropic client initialized for conversation summarization")
+            provider = resolve_provider(self._config)
+            if provider:
+                self._anthropic_client = Anthropic(**client_kwargs(provider))
+                self._summarization_model = map_model(
+                    self._summarization_model, provider.provider
+                )
+                self.logger.info(
+                    f"Anthropic client initialized for conversation summarization "
+                    f"via {provider.provider} (model {self._summarization_model})"
+                )
             else:
-                self.logger.warning("ANTHROPIC_API_KEY not found - conversation summarization disabled")
+                self.logger.warning(
+                    "Neither ANTHROPIC_API_KEY nor OPENROUTER_API_KEY found - "
+                    "conversation summarization disabled"
+                )
                 self._summarization_enabled = False
         elif self._summarization_enabled and not Anthropic:
             self.logger.warning("anthropic package not installed - conversation summarization disabled")
@@ -302,7 +318,7 @@ class MemoryService(BaseService):
         ))
 
         asyncio.create_task(self.subscribe(
-            EventTopics.LLM_RESPONSE_TEXT,
+            EventTopics.LLM_RESPONSE,
             self._handle_llm_response
         ))
 
@@ -796,7 +812,7 @@ SUMMARY:"""
 
             # Call Claude Haiku API for summarization
             response = self._anthropic_client.messages.create(
-                model="claude-haiku-4-5-20251001",  # Fast and cheap for summaries
+                model=self._summarization_model,
                 max_tokens=150,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -919,7 +935,7 @@ Your response must start with {{ and end with }} - nothing else."""
 
             # Call Claude Haiku for extraction
             response = self._anthropic_client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=self._summarization_model,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )

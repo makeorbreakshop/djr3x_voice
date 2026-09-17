@@ -2,73 +2,58 @@ import React from 'react'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 import SystemTab from '../../../src/components/tabs/SystemTab'
+import { SocketProvider } from '../../../src/contexts/SocketContext'
 
-// Mock the useSocket hook
+// ROOT CAUSE (fixed 2026-09-17): SystemTab reads socket state via
+// `useSocketContext()` (src/contexts/SocketContext.tsx), which throws unless the
+// tree is wrapped in a real <SocketProvider>. These tests used to mock
+// '../../../src/hooks/useSocket' directly, but SystemTab no longer imports that
+// hook itself (it imports useSocketContext instead), so the mock never applied
+// and every render() threw "useSocketContext must be used within a
+// SocketProvider" before any assertion ran.
+//
+// Fix: mock the lower-level 'socket.io-client' module (which the real useSocket
+// hook still uses internally) and render SystemTab inside the real
+// SocketProvider. This exercises the real hook/context wiring against a fake
+// transport, matching how the app actually composes these modules.
+
+type Handler = (...args: any[]) => void
+const listeners: Record<string, Handler[]> = {}
+
 const mockSocket = {
-  on: vi.fn(),
-  off: vi.fn(),
+  on: vi.fn((event: string, handler: Handler) => {
+    listeners[event] = listeners[event] || []
+    listeners[event].push(handler)
+  }),
+  off: vi.fn((event: string, handler: Handler) => {
+    listeners[event] = (listeners[event] || []).filter(h => h !== handler)
+  }),
   emit: vi.fn(),
+  onAny: vi.fn(),
+  close: vi.fn(),
 }
 
-vi.mock('../../../src/hooks/useSocket', () => ({
-  useSocket: () => mockSocket
+vi.mock('socket.io-client', () => ({
+  io: () => mockSocket,
 }))
 
-// Mock data for testing
-const mockServiceData = [
-  { 
-    name: 'DeepgramDirectMicService', 
-    status: 'online', 
-    uptime: '2h 15m', 
-    memory: '45 MB', 
-    cpu: '5.2%', 
-    lastActivity: '10:30:45', 
-    errorCount: 0, 
-    successRate: 98.5 
-  },
-  { 
-    name: 'GPTService', 
-    status: 'offline', 
-    uptime: '--', 
-    memory: '--', 
-    cpu: '--', 
-    lastActivity: '--', 
-    errorCount: 3, 
-    successRate: 0 
-  },
-]
-
-const mockSystemMetrics = {
-  totalMemory: 512,
-  cpuUsage: 45.2,
-  eventLatency: 120,
-  errorRate: 2.1,
-  eventsPerMinute: 25,
-  uptime: '2h 15m 30s',
-  activeServices: 5,
-  totalServices: 6
+// Fire a fake socket event to every handler registered for it (mirrors how
+// socket.io would dispatch an incoming event to all listeners).
+const fireSocketEvent = (event: string, data?: any) => {
+  ;(listeners[event] || []).forEach(handler => handler(data))
 }
 
-const mockLogEntries = [
-  {
-    id: '1',
-    timestamp: '2025-06-06 10:30:45',
-    level: 'INFO' as const,
-    service: 'DeepgramDirectMicService',
-    message: 'Voice recording started successfully'
-  },
-  {
-    id: '2',
-    timestamp: '2025-06-06 10:30:50',
-    level: 'ERROR' as const,
-    service: 'GPTService',
-    message: 'API request failed: Connection timeout'
-  }
-]
+const renderSystemTab = () =>
+  render(
+    <SocketProvider>
+      <SystemTab />
+    </SocketProvider>
+  )
 
 describe('SystemTab Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.keys(listeners).forEach(key => delete listeners[key])
   })
 
   afterEach(() => {
@@ -76,108 +61,98 @@ describe('SystemTab Component', () => {
   })
 
   describe('Initial Render', () => {
-    it('should render service health grid', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('SERVICE HEALTH MONITORING')).toBeInTheDocument()
-      expect(screen.getByText('Service')).toBeInTheDocument()
-      expect(screen.getByText('Status')).toBeInTheDocument()
-      expect(screen.getByText('Memory')).toBeInTheDocument()
-      expect(screen.getByText('CPU')).toBeInTheDocument()
+    // The following five tests asserted headings/panels ("SERVICE HEALTH
+    // MONITORING", "INDIVIDUAL SERVICE METRICS", "PERFORMANCE PROFILING &
+    // ANALYTICS", "SYSTEM INFO", "CONFIGURATION") that do not exist anywhere in
+    // the current src/components/tabs/SystemTab.tsx (verified via grep — zero
+    // matches). The component was rewritten into a simpler health/metrics/log
+    // dashboard (see SystemTab.tsx:261-518) and these sections were never
+    // reimplemented, so the tests are skipped rather than deleted.
+    it.skip('should render service health grid', () => {
+      // Obsolete: SystemTab.tsx has no "SERVICE HEALTH MONITORING" table; the
+      // current equivalent is the "SERVICE STATUS" grid at SystemTab.tsx:342-372.
     })
 
-    it('should render individual service metrics section', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('INDIVIDUAL SERVICE METRICS')).toBeInTheDocument()
+    it.skip('should render individual service metrics section', () => {
+      // Obsolete: "INDIVIDUAL SERVICE METRICS" section removed entirely.
     })
 
-    it('should render performance profiling section', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('PERFORMANCE PROFILING & ANALYTICS')).toBeInTheDocument()
-      expect(screen.getByText('Performance Timeline (Last 60 seconds)')).toBeInTheDocument()
+    it.skip('should render performance profiling section', () => {
+      // Obsolete: "PERFORMANCE PROFILING & ANALYTICS" / timeline charts removed entirely.
     })
 
     it('should render real-time event log', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('REAL-TIME EVENT LOG')).toBeInTheDocument()
-      expect(screen.getByPlaceholderText('Search logs...')).toBeInTheDocument()
+      renderSystemTab()
+      // Current heading is "RECENT ACTIVITY" (SystemTab.tsx:420); there is no
+      // search input anymore (no "Search logs..." placeholder exists in the file).
+      expect(screen.getByText('RECENT ACTIVITY')).toBeInTheDocument()
     })
 
-    it('should render system information panel', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('SYSTEM INFO')).toBeInTheDocument()
-      expect(screen.getByText('CantinaOS Version:')).toBeInTheDocument()
-      expect(screen.getByText('Event Bus:')).toBeInTheDocument()
+    it.skip('should render system information panel', () => {
+      // Obsolete: "SYSTEM INFO" panel / "CantinaOS Version:" / "Event Bus:" removed entirely.
     })
 
-    it('should render configuration panel', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('CONFIGURATION')).toBeInTheDocument()
-      expect(screen.getByText('OpenAI API:')).toBeInTheDocument()
-      expect(screen.getByText('ElevenLabs API:')).toBeInTheDocument()
+    it.skip('should render configuration panel', () => {
+      // Obsolete: "CONFIGURATION" panel with "OpenAI API:" / "ElevenLabs API:" removed entirely.
     })
 
-    it('should render performance metrics panel', () => {
-      render(<SystemTab />)
-      expect(screen.getByText('PERFORMANCE METRICS')).toBeInTheDocument()
+    it.skip('should render performance metrics panel', () => {
+      // Obsolete: dedicated "PERFORMANCE METRICS" panel removed; current equivalent
+      // is the "KEY METRICS" grid at SystemTab.tsx:377-414.
     })
   })
 
   describe('Socket Event Handling', () => {
     it('should register socket event listeners on mount', () => {
-      render(<SystemTab />)
-      
+      renderSystemTab()
+
+      // Fixed: SystemTab.tsx:212-214 registers these three events directly on the
+      // socket (system_status, service_status_update, system_metrics). It no
+      // longer listens for 'cantina_event', 'config_status' or 'system_error' —
+      // those were removed along with the config/log-search panels above.
+      expect(mockSocket.on).toHaveBeenCalledWith('system_status', expect.any(Function))
       expect(mockSocket.on).toHaveBeenCalledWith('service_status_update', expect.any(Function))
-      expect(mockSocket.on).toHaveBeenCalledWith('cantina_event', expect.any(Function))
       expect(mockSocket.on).toHaveBeenCalledWith('system_metrics', expect.any(Function))
-      expect(mockSocket.on).toHaveBeenCalledWith('config_status', expect.any(Function))
-      expect(mockSocket.on).toHaveBeenCalledWith('system_error', expect.any(Function))
     })
 
     it('should handle service status updates', async () => {
-      render(<SystemTab />)
-      
-      // Get the service status handler
-      const serviceStatusHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'service_status_update'
-      )?.[1]
+      renderSystemTab()
 
-      expect(serviceStatusHandler).toBeDefined()
-
-      // Simulate service status update
+      // Fixed: service keys must match SystemTab's internal service list
+      // (SystemTab.tsx:82-95), e.g. 'deepgram_direct_mic', not the old display
+      // name 'DeepgramDirectMicService'.
       await act(async () => {
-        serviceStatusHandler({
-          service: 'DeepgramDirectMicService',
+        fireSocketEvent('service_status_update', {
+          service: 'deepgram_direct_mic',
           status: 'RUNNING',
           uptime: '2h 15m',
           memory: '45 MB',
           cpu: '5.2%',
           error_count: 0,
-          success_rate: 98.5
+          success_rate: 98.5,
         })
       })
 
-      // Check if UI updates with new status
       await waitFor(() => {
-        expect(screen.getByText('DeepgramDirectMicService')).toBeInTheDocument()
+        // getServiceDisplayName maps 'deepgram_direct_mic' -> 'Voice Input'
+        // (SystemTab.tsx:51).
+        expect(screen.getByText('Voice Input')).toBeInTheDocument()
+        expect(screen.getByText('online')).toBeInTheDocument()
       })
     })
 
     it('should handle system events and add to logs', async () => {
-      render(<SystemTab />)
-      
-      // Get the system event handler
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
+      renderSystemTab()
 
-      expect(systemEventHandler).toBeDefined()
-
-      // Simulate system event
+      // Fixed: log ingestion now happens inside the shared useSocket hook via the
+      // 'cantina_event' listener (src/hooks/useSocket.ts:262-268), which builds a
+      // LogEntry and exposes it through context as `logs`. SystemTab renders those
+      // via `filteredLogs` (SystemTab.tsx:449).
       await act(async () => {
-        systemEventHandler({
+        fireSocketEvent('cantina_event', {
           level: 'INFO',
           service: 'TestService',
-          message: 'Test message'
+          message: 'Test message',
         })
       })
 
@@ -188,55 +163,53 @@ describe('SystemTab Component', () => {
   })
 
   describe('Service Management', () => {
-    it('should handle service restart', () => {
-      render(<SystemTab />)
-      
-      const restartButtons = screen.getAllByText('Restart')
-      fireEvent.click(restartButtons[0])
-
-      expect(mockSocket.emit).toHaveBeenCalledWith('service_command', {
-        action: 'restart',
-        service: expect.any(String)
-      })
+    it.skip('should handle service restart', () => {
+      // Obsolete: there are no per-service "Restart" buttons or a
+      // 'service_command' emit anywhere in SystemTab.tsx — only a single
+      // system-wide restart button remains (see next test).
     })
 
     it('should handle system restart', () => {
-      render(<SystemTab />)
-      
+      renderSystemTab()
+
       const systemRestartButton = screen.getByText('Restart System')
       fireEvent.click(systemRestartButton)
 
       expect(mockSocket.emit).toHaveBeenCalledWith('system_command', {
-        action: 'restart'
+        action: 'restart',
       })
     })
 
     it('should handle config refresh', () => {
-      render(<SystemTab />)
-      
-      const refreshConfigButton = screen.getByText('Refresh Config')
-      fireEvent.click(refreshConfigButton)
+      renderSystemTab()
+
+      // Fixed: the button was renamed from "Refresh Config" to "Refresh Status"
+      // (SystemTab.tsx:328), but it still emits the same 'system_command' /
+      // 'refresh_config' payload (SystemTab.tsx:258).
+      const refreshButton = screen.getByText('Refresh Status')
+      fireEvent.click(refreshButton)
 
       expect(mockSocket.emit).toHaveBeenCalledWith('system_command', {
-        action: 'refresh_config'
+        action: 'refresh_config',
       })
     })
   })
 
   describe('Log Management', () => {
     it('should filter logs by level', async () => {
-      render(<SystemTab />)
-      
-      // Add some test logs first
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
+      renderSystemTab()
 
-      systemEventHandler({ level: 'ERROR', service: 'Test', message: 'Error message' })
-      systemEventHandler({ level: 'INFO', service: 'Test', message: 'Info message' })
+      await act(async () => {
+        fireSocketEvent('cantina_event', { level: 'ERROR', service: 'Test', message: 'Error message' })
+        fireSocketEvent('cantina_event', { level: 'INFO', service: 'Test', message: 'Info message' })
+      })
 
-      // Change log level filter to ERROR
-      const logLevelSelect = screen.getByDisplayValue('INFO')
+      await waitFor(() => expect(screen.getByText('Error message')).toBeInTheDocument())
+
+      // Fixed: the log-level <select> still exists (SystemTab.tsx:423-432);
+      // getByDisplayValue matches the *label* of the selected <option>
+      // ("Info+"), not its value attribute ("INFO").
+      const logLevelSelect = screen.getByDisplayValue('Info+')
       fireEvent.change(logLevelSelect, { target: { value: 'ERROR' } })
 
       await waitFor(() => {
@@ -245,268 +218,132 @@ describe('SystemTab Component', () => {
       })
     })
 
-    it('should filter logs by search term', async () => {
-      render(<SystemTab />)
-      
-      // Add test logs
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
-
-      systemEventHandler({ level: 'INFO', service: 'Test', message: 'Voice recording started' })
-      systemEventHandler({ level: 'INFO', service: 'Test', message: 'Music playback stopped' })
-
-      // Search for "voice"
-      const searchInput = screen.getByPlaceholderText('Search logs...')
-      fireEvent.change(searchInput, { target: { value: 'voice' } })
-
-      await waitFor(() => {
-        expect(screen.getByText('Voice recording started')).toBeInTheDocument()
-        expect(screen.queryByText('Music playback stopped')).not.toBeInTheDocument()
-      })
+    it.skip('should filter logs by search term', () => {
+      // Obsolete: there is no "Search logs..." input in SystemTab.tsx anymore —
+      // log filtering is level-only (see test above).
     })
 
-    it('should clear all logs', async () => {
-      render(<SystemTab />)
-      
-      // Add test logs
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
-
-      systemEventHandler({ level: 'INFO', service: 'Test', message: 'Test message' })
-
-      await waitFor(() => {
-        expect(screen.getByText('Test message')).toBeInTheDocument()
-      })
-
-      // Clear logs
-      const clearButton = screen.getByText('Clear')
-      fireEvent.click(clearButton)
-
-      await waitFor(() => {
-        expect(screen.queryByText('Test message')).not.toBeInTheDocument()
-      })
+    it.skip('should clear all logs', () => {
+      // Obsolete: there is no "Clear" logs button in SystemTab.tsx anymore.
     })
 
-    it('should export logs', () => {
-      // Mock URL.createObjectURL and document.createElement
-      const mockCreateObjectURL = vi.fn(() => 'blob:test-url')
-      const mockClick = vi.fn()
-      const mockCreateElement = vi.fn(() => ({
-        href: '',
-        download: '',
-        click: mockClick
-      }))
-
-      global.URL.createObjectURL = mockCreateObjectURL
-      global.URL.revokeObjectURL = vi.fn()
-      document.createElement = mockCreateElement
-
-      render(<SystemTab />)
-      
-      // Add test logs
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
-
-      systemEventHandler({ level: 'INFO', service: 'Test', message: 'Test message' })
-
-      const exportButton = screen.getByText('Export Logs')
-      fireEvent.click(exportButton)
-
-      expect(mockCreateObjectURL).toHaveBeenCalled()
-      expect(mockClick).toHaveBeenCalled()
+    it.skip('should export logs', () => {
+      // Obsolete: there is no "Export Logs" button/feature in SystemTab.tsx anymore.
     })
   })
 
   describe('Alert System', () => {
     it('should create alerts for high CPU usage', async () => {
-      render(<SystemTab />)
-      
-      // Simulate high CPU usage
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
+      renderSystemTab()
 
       await act(async () => {
-        systemMetricsHandler({
+        fireSocketEvent('system_metrics', {
           cpuUsage: 85.5,
           totalMemory: 400,
           eventLatency: 50,
-          errorRate: 1.0
+          errorRate: 1.0,
         })
       })
 
-      // Wait for debounced alert creation
       await waitFor(() => {
         expect(screen.getByText('High CPU Usage')).toBeInTheDocument()
-        expect(screen.getByText(/CPU usage is at 85.5%/)).toBeInTheDocument()
-      }, { timeout: 3000 })
+        expect(screen.getByText(/CPU usage at 85.5%/)).toBeInTheDocument()
+      })
     })
 
-    it('should create alerts for high memory usage', async () => {
-      render(<SystemTab />)
-      
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
-
-      systemMetricsHandler({
-        cpuUsage: 30,
-        totalMemory: 1200,
-        eventLatency: 50,
-        errorRate: 1.0
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('High Memory Usage')).toBeInTheDocument()
-      })
+    it.skip('should create alerts for high memory usage', () => {
+      // Obsolete: SystemTab's alert effect (SystemTab.tsx:239-249) only checks
+      // cpuUsage, errorRate and offline-service ratio — there is no memory-usage
+      // alert condition anymore.
     })
 
     it('should dismiss alerts', async () => {
-      render(<SystemTab />)
-      
-      // Create alert
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
+      renderSystemTab()
 
-      systemMetricsHandler({
-        cpuUsage: 85,
-        totalMemory: 400,
-        eventLatency: 50,
-        errorRate: 1.0
+      await act(async () => {
+        fireSocketEvent('system_metrics', {
+          cpuUsage: 85,
+          totalMemory: 400,
+          eventLatency: 50,
+          errorRate: 1.0,
+        })
       })
 
       await waitFor(() => {
         expect(screen.getByText('High CPU Usage')).toBeInTheDocument()
       })
 
-      // Dismiss alert
-      const dismissButton = screen.getByText('Dismiss')
-      fireEvent.click(dismissButton)
+      // Note: with no services online (all 12 default to 'offline' until a
+      // service_status_update arrives), a "Services Offline" warning alert is
+      // also active alongside "High CPU Usage" — so there can be more than one
+      // "Dismiss" button. Scope to the CPU alert's own dismiss button.
+      const cpuAlertCard = screen.getByText('High CPU Usage').closest('div.flex.items-center.justify-between')
+      const dismissButton = cpuAlertCard?.querySelector('button')
+      expect(dismissButton).toBeTruthy()
+      fireEvent.click(dismissButton as HTMLButtonElement)
 
       await waitFor(() => {
         expect(screen.queryByText('High CPU Usage')).not.toBeInTheDocument()
       })
     })
 
-    it('should show dismissed alerts in history', async () => {
-      render(<SystemTab />)
-      
-      // Create and dismiss alert
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
-
-      systemMetricsHandler({ cpuUsage: 85 })
-
-      await waitFor(() => {
-        expect(screen.getByText('High CPU Usage')).toBeInTheDocument()
-      })
-
-      const dismissButton = screen.getByText('Dismiss')
-      fireEvent.click(dismissButton)
-
-      // Show history
-      const historyButton = screen.getByText(/Show History/)
-      fireEvent.click(historyButton)
-
-      await waitFor(() => {
-        expect(screen.getByText('DISMISSED ALERTS')).toBeInTheDocument()
-      })
+    it.skip('should show dismissed alerts in history', () => {
+      // Obsolete: there is no dismissed-alerts history / "Show History" /
+      // "DISMISSED ALERTS" UI in SystemTab.tsx anymore — dismissed alerts are
+      // simply filtered out (SystemTab.tsx:116-117, 477).
     })
   })
 
   describe('Performance Metrics', () => {
-    it('should display correct health score colors', async () => {
-      render(<SystemTab />)
-      
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
-
-      // Good performance
-      systemMetricsHandler({
-        cpuUsage: 30,
-        totalMemory: 400,
-        eventLatency: 50,
-        errorRate: 0.5
-      })
-
-      await waitFor(() => {
-        const healthScore = screen.getByText('95')
-        expect(healthScore).toHaveClass('text-sw-green')
-      })
+    it.skip('should display correct health score colors', () => {
+      // Obsolete: calculateHealthScore (SystemTab.tsx:68-78) factors in the
+      // fraction of services currently online, which defaults to 0 (all services
+      // start 'offline', SystemTab.tsx:82-95) unless service_status_update events
+      // are simulated for all 12 services. The old test assumed a starting score
+      // of 95 with no service data, which no longer matches the real formula.
     })
 
-    it('should show bottleneck detection when system is optimal', async () => {
-      render(<SystemTab />)
-      
-      const systemMetricsHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'system_metrics'
-      )?.[1]
-
-      systemMetricsHandler({
-        cpuUsage: 30,
-        totalMemory: 400,
-        eventLatency: 50,
-        errorRate: 0.5
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('System Running Optimally')).toBeInTheDocument()
-      })
+    it.skip('should show bottleneck detection when system is optimal', () => {
+      // Obsolete: there is no "Bottleneck Detection" / "System Running Optimally" UI in SystemTab.tsx anymore.
     })
 
-    it('should calculate stability index correctly', () => {
-      render(<SystemTab />)
-      
-      // Should show 100% when no services have errors
-      expect(screen.getByText('100%')).toBeInTheDocument()
+    it.skip('should calculate stability index correctly', () => {
+      // Obsolete: there is no "stability index" concept/metric in SystemTab.tsx anymore.
     })
   })
 
   describe('Accessibility', () => {
-    it('should have proper ARIA labels for buttons', () => {
-      render(<SystemTab />)
-      
-      const restartButtons = screen.getAllByText('Restart')
-      restartButtons.forEach(button => {
-        expect(button).toBeInTheDocument()
-      })
+    it.skip('should have proper ARIA labels for buttons', () => {
+      // Obsolete: depends on the removed per-service "Restart" buttons (see
+      // 'should handle service restart' above).
     })
 
-    it('should support keyboard navigation', () => {
-      render(<SystemTab />)
-      
-      const searchInput = screen.getByPlaceholderText('Search logs...')
-      expect(searchInput).toBeInTheDocument()
-      
-      fireEvent.focus(searchInput)
-      expect(document.activeElement).toBe(searchInput)
+    it.skip('should support keyboard navigation', () => {
+      // Obsolete: depends on the removed "Search logs..." input (see
+      // 'should filter logs by search term' above).
     })
   })
 
   describe('Error Handling', () => {
-    it('should handle missing socket gracefully', () => {
-      vi.mocked(require('../../../src/hooks/useSocket').useSocket).mockReturnValue(null)
-      
-      expect(() => render(<SystemTab />)).not.toThrow()
+    it.skip('should handle missing socket gracefully', () => {
+      // Obsolete by design change: SystemTab now reads state via
+      // useSocketContext(), which intentionally throws when rendered outside a
+      // SocketProvider (src/contexts/SocketContext.tsx:8-14) rather than
+      // degrading to a null socket. The old test asserted the previous
+      // permissive behavior (a null useSocket() return was tolerated), which is
+      // no longer how the component is composed in the real app (see
+      // src/app/page.tsx:40, which always wraps children in SocketProvider).
     })
 
     it('should handle malformed socket data', async () => {
-      render(<SystemTab />)
-      
-      const systemEventHandler = mockSocket.on.mock.calls.find(
-        call => call[0] === 'cantina_event'
-      )?.[1]
+      renderSystemTab()
 
-      // Should not crash with malformed data
-      expect(() => {
-        systemEventHandler({ invalid: 'data' })
-      }).not.toThrow()
+      // Fixed: malformed events now flow through 'cantina_event' (see above).
+      await act(async () => {
+        expect(() => {
+          fireSocketEvent('cantina_event', { invalid: 'data' })
+        }).not.toThrow()
+      })
     })
   })
 })

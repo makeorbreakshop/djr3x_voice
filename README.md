@@ -6,13 +6,15 @@ A voice-first "mini-assistant" that listens, thinks, and speaks back in a DJ R3X
 
 DJ-R3X Voice Assistant is a Python application that creates an interactive Star Wars droid DJ experience with:
 
-- **Voice Recognition**: Listens for commands using SpeechRecognition and Whisper
-- **AI Processing**: Generates DJ R3X-style responses with OpenAI's GPT-4o
-- **Text-to-Speech**: Converts responses to lifelike speech using ElevenLabs
-- **LED Animation**: Synchronizes eye/mouth animations with speech via Arduino
-- **Music Management**: Plays background music that automatically ducks during speech
+- **Speech recognition**: Deepgram Nova-3 over a persistent streaming WebSocket
+- **Fast intent routing**: deterministic tools fire in ~190 ms, before the LLM is even called
+- **Conversation**: Claude Haiku 4.5, with prompt caching
+- **Text-to-speech**: ElevenLabs Flash v2.5
+- **LED animation**: eye and mouth animations driven off speech amplitude, over serial to an Arduino
+- **Music**: local library or Spotify via VLC, auto-ducking under speech
 
-The project uses a modern event-driven CantinaOS architecture for reliable, scalable voice assistant functionality.
+The runtime is the event-driven **CantinaOS** architecture: one event bus, 22 services,
+started in a fixed order by `cantina_os/cantina_os/main.py`.
 
 ## 🎛️ Web Dashboard
 
@@ -97,15 +99,34 @@ Each 8x8 LED matrix represents one eye of DJ-R3X:
 ## Setup Instructions
 
 ### 1. Install Dependencies
-Install all required Python packages:
+
+CantinaOS runs from a virtualenv at the repo root and needs Python 3.11 (see
+`pyproject.toml`). PortAudio must be present before pyaudio will build:
+
 ```bash
-python3 -m pip install -r requirements.txt
+brew install portaudio            # macOS; required by pyaudio
+brew install --cask vlc           # required by MusicControllerService via python-vlc
+
+python3.11 -m venv venv
+./venv/bin/python -m pip install --upgrade pip setuptools wheel
+./venv/bin/python -m pip install -r cantina_os/requirements.txt
 ```
 
-If you encounter issues with PyAudio installation, you may need to install PortAudio first:
-```bash
-brew install portaudio  # For macOS
-```
+`cantina_os/requirements.txt` is the single source of truth - it is the file
+`start-dashboard.sh` installs, and the root `requirements.txt` now just defers to it with
+`-r`. (Until 2026-09-17 these were two independent lists that disagreed with each other,
+and this README pointed at the wrong one.)
+
+`start-dashboard.sh` installs dependencies automatically, keyed on a SHA-256 of
+`cantina_os/requirements.txt`, so editing that file triggers a reinstall on the next start
+and an unchanged file costs nothing.
+
+**Two pins are deliberate. Do not widen them without reading why:**
+
+| Pin | Why |
+|---|---|
+| `anthropic>=0.72.0,<1.0` | anthropic 1.x removes `temperature` from `messages.create()` with no `**kwargs` passthrough and no replacement anywhere in `anthropic.types`. Seven call sites pass it. Migrating is a real behaviour change, not a version bump. |
+| `deepgram-sdk>=5.3.4,<6.0` | 6.x and 7.x delete the `deepgram.extensions` package that the live STT service needs for `ListenV1ControlMessage`. The 7.x equivalent is `deepgram.listen.v1.ListenV1KeepAlive`, which means rewriting the only live STT path. |
 
 ### 2. API Keys Setup
 You need to set up the following API keys:
@@ -128,41 +149,100 @@ python3 get_new_elevenlabs_key.py
 3. Click on the voice
 4. Copy the Voice ID from the URL (the string after /voice-lab/)
 
-#### OpenAI API Key
-1. Go to https://platform.openai.com/api-keys
-2. Create a new API key
-3. Copy the API key
+#### Anthropic API Key
+The LLM is Claude Haiku 4.5, not GPT. Get a key at https://console.anthropic.com/settings/keys.
+(`openai` was removed as a dependency on 2026-09-17 - nothing under `cantina_os/` imports it.)
+
+#### Deepgram API Key
+Streaming speech-to-text: https://console.deepgram.com/
+
+#### Anthropic API Key — or an OpenRouter key instead
+The conversational LLM is Claude Haiku 4.5. There are two ways to reach it, and the code
+picks between them on its own (`cantina_os/llm/anthropic_provider.py`):
+
+| Set this | What happens |
+|---|---|
+| `ANTHROPIC_API_KEY` | Direct to Anthropic. This wins whenever it is present. |
+| `OPENROUTER_API_KEY` only | The same `anthropic` SDK, pointed at OpenRouter's Anthropic-compatible `/v1/messages`. |
+| Neither | ClaudeService fails to initialise and every turn falls back to the fast router alone. |
+
+OpenRouter works because it speaks the Anthropic Messages format verbatim, and the official
+SDK is not bound to Anthropic's host: it sends `x-api-key` and `anthropic-version` to
+`{base_url}/v1/messages`. Streaming, `temperature`, `tools` and `tool_choice: {"type":
+"none"}` all behave identically — measured, see `scripts/claude_live_verify.py`.
+
+Two knobs, both optional:
+
+* `LLM_PROVIDER` — `anthropic`, `openrouter`, or `auto` (the default). A forced provider
+  whose key is missing is treated as unavailable; it does **not** fall through to the other.
+* `ANTHROPIC_BASE_URL` — overrides the host for whichever provider was chosen. For a local
+  proxy or another gateway.
+
+Model ids are translated at the client boundary, so configure `CLAUDE_MODEL` with the
+Anthropic id either way (`claude-haiku-4-5-20251001` becomes `anthropic/claude-haiku-4.5`).
+Note for anyone adding a provider: the SDK appends its own `/v1`, so the base URL is
+`https://openrouter.ai/api`, **not** `.../api/v1`.
+
+Pricing is the same on both for Haiku 4.5 — $1.00 / $5.00 per million input/output tokens.
+
+#### typesafe.ai API Key
+Powers the Jev fast intent router (see below). https://typesafe.ai
+**Optional** - without it the router is simply inactive and every turn takes the slower
+Claude path.
 
 ### 3. Create a .env File
-Create a file named `.env` in the same directory with the following contents:
+Create a `.env` in the repo root. `env.example` is the template.
 
 ```
-# API Keys
-OPENAI_API_KEY=your_openai_api_key
-ELEVENLABS_API_KEY=your_elevenlabs_api_key
+# --- Required ---
+# One of these two. ANTHROPIC_API_KEY wins if both are set; see above.
+ANTHROPIC_API_KEY=...            # Claude Haiku 4.5 - the conversational LLM
+OPENROUTER_API_KEY=...           # same SDK, Anthropic-compatible gateway
+# LLM_PROVIDER=auto              # anthropic | openrouter | auto (default)
+# ANTHROPIC_BASE_URL=            # override the host for the chosen provider
+DEEPGRAM_API_KEY=...             # streaming speech-to-text
+ELEVENLABS_API_KEY=...           # speech synthesis
+ELEVENLABS_VOICE_ID=...
 
-# ElevenLabs Voice ID
-ELEVENLABS_VOICE_ID=your_elevenlabs_voice_id_here
+# --- Fast intent router (optional but strongly recommended) ---
+# Absent -> router inactive, every turn takes the Claude path (~1.9 s to action).
+TYPESAFE_API_KEY=...
+JEV_ROUTER_ENABLED=true          # kill switch
+JEV_CONFIDENCE_THRESHOLD=0.85    # cheap-tier gate; the free tier is this minus 0.10
+JEV_COMMAND_THRESHOLD=0.5        # the is_a_command veto
+JEV_TIMEOUT_S=0.8                # HTTP timeout; no retries on the hot path
+JEV_SPECULATE=true               # classify partial transcripts while the user is still talking
+FAST_ROUTER_WAIT_S=1.2           # how long ClaudeService waits for the router's verdict
 
-# OpenAI Model Configuration
-OPENAI_MODEL=gpt-4o
+# --- Hardware ---
+ARDUINO_SERIAL_PORT=/dev/cu.usbmodemXXXXX
+MOCK_LED_CONTROLLER=false
+FORCE_MOCK_LED_CONTROLLER=false  # set true to run with no Arduino attached
 
-# Operation Modes
-TEXT_ONLY_MODE=false
-DISABLE_AUDIO_PROCESSING=false
+# --- Music ---
+MUSIC_DEFAULT_SOURCE=local       # local | spotify
+ENABLE_SPOTIFY=false
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+SPOTIFY_REDIRECT_URI=
 
-# Personality Configuration
-DJ_R3X_PERSONA="You are DJ R3X, a droid DJ from Star Wars. You have an upbeat, quirky personality. You occasionally use sound effect words like 'BZZZT!' and 'WOOP!' You like to keep responses brief and entertaining. You love music and Star Wars."
+# --- Personality ---
+DJ_R3X_PERSONA_FILE=dj_r3x-persona.txt
 ```
 
-Replace the placeholder values with your actual API keys and voice ID.
+Note: `ARDUINO_SERIAL_PORT` in `.env` **overrides** the `serial_port` passed to
+`EyeLightControllerService` in code (`eye_light_controller_service.py:258-266`). That is by
+design, but it means a stale value in `.env` wins over anything a caller asks for.
 
-### 4. Test ElevenLabs API
-Before running the main program, you can test if your ElevenLabs API connection is working:
+### 4. Verify the keys
 
 ```bash
-python3 test_elevenlabs_rest.py
+cd cantina_os
+../venv/bin/python -m pytest tests/test_jev_integration_live.py -q   # exercises TYPESAFE_API_KEY
+../venv/bin/python scripts/system_smoke_run.py --with-tts            # exercises ELEVENLABS_API_KEY
 ```
+
+(The old `test_elevenlabs_rest.py` this section used to point at no longer exists.)
 
 ### 5. Arduino Setup
 
@@ -179,88 +259,176 @@ python3 test_elevenlabs_rest.py
 
 ### 6. Run the Program
 
-#### Legacy Version
-Run the original monolithic version using:
+Everything - CantinaOS, dependency install and the Next.js dashboard - starts from one
+script:
 
 ```bash
-python3 run_rex.py
+./start-dashboard.sh     # CantinaOS + dashboard on http://localhost:3000
+./stop-dashboard.sh
 ```
 
-#### MVP Architecture Version
-Run the modern event-driven MVP architecture version (recommended):
+CantinaOS alone, with its CLI on stdin:
 
 ```bash
-python3 run_r3x_mvp.py
+cd cantina_os
+../venv/bin/python -m cantina_os.main
 ```
 
-You can also use these additional options:
+Then type `engage` to enter interactive voice mode. The trigger is a **left mouse click**
+(click once to start recording, click again to stop) - there is no wake word in the live
+loop, despite the Porcupine model and `test_wake_word.py` still being on disk. On macOS the
+click trigger needs Accessibility permission, and it must be granted to **Terminal.app** -
+Warp does not work.
+
+`help` lists the CLI commands. `engage` / `ambient` / `disengage` change mode; `play music`,
+`stop music`, `dj start`, `dj stop`, `dj next`, `eye pattern <name>` and
+`debug latency` are all reachable without speaking.
+
+### Running the system without a microphone
+
+`cantina_os/scripts/system_smoke_run.py` boots a real CantinaOS - real event bus, real
+IntentRouterService, CommandDispatcherService, BrainService and MusicControllerService
+driving real VLC - mocks the Arduino, skips the three services that need hardware and OS
+permissions (mic capture, the mouse trigger, vision), and injects transcripts exactly as
+the capture services emit them. It prints every bus event per turn with millisecond offsets
+and an event-loop tick count, so a freeze shows up as a tick count near zero.
+
 ```bash
-# Run in demo mode with predefined interactions
-python3 run_r3x_mvp.py --demo
-
-# Play background music during operation
-python3 run_r3x_mvp.py --music path/to/music.mp3
-
-# Run in test mode (no API keys required)
-python3 run_r3x_mvp.py --test
+cd cantina_os
+../venv/bin/python scripts/system_smoke_run.py            # silent; no TTS
+../venv/bin/python scripts/system_smoke_run.py --with-tts # also start ElevenLabs (paid, audible)
 ```
 
-### Test Mode
-The application includes a test mode that allows you to run the system without requiring API keys or external hardware. This is useful for development, testing, and demonstration purposes.
+This is how the eye-colour and next-track bugs fixed on 2026-09-17 were found; neither was
+visible to unit tests.
 
-In test mode:
-- Voice responses use pre-defined test responses instead of calling OpenAI
-- Speech synthesis generates simple audio patterns instead of using ElevenLabs
-- LED control gracefully handles missing Arduino connections
-- Music playback works if VLC is installed, but is optional
-- On macOS, VLC must be installed via `brew install --cask vlc` for proper integration
+### Running the tests
 
-To run in test mode:
 ```bash
-python3 run_r3x_mvp.py --test
+cd cantina_os
+../venv/bin/python -m pytest tests/ -q                       # whole suite
+../venv/bin/python -m pytest tests/test_jev_intent_router.py -q   # fast, offline, no API
 ```
 
-You can combine test mode with other flags:
+Current state: **274 passed, 55 skipped, 0 failed.** Every skip carries a written reason
+naming the production code that changed - dead services (`gpt_service`, the SDK-4 deepgram
+service, the flat `music_controller_service.py` shadowed by its package), hardware-bound
+tests, tests needing real API credit, and a handful pinned open against production defects
+that should be fixed rather than asserted.
+
+Some suites make real network calls:
+
+- `tests/test_jev_integration_live.py` calls the real typesafe.ai API (needs
+  `TYPESAFE_API_KEY`; ~30 classifications, about $0.002).
+- `tests/test_jev_intent_router.py` is fully offline - it replays recorded `jev-1.13.0`
+  responses from `tests/fixtures/jev_recorded_responses.json`.
+
+Dashboard tests:
+
 ```bash
-# Run demo sequence in test mode
-python3 run_r3x_mvp.py --test --demo
+cd dj-r3x-dashboard
+npm test -- --run
+npm run build
 ```
 
-## MVP Architecture
+## Architecture
 
-The MVP architecture implements an event-driven design with the following components:
+The runtime is **CantinaOS**: `cantina_os/cantina_os/main.py` builds one
+`pyee.AsyncIOEventEmitter` bus and starts 22 services in a fixed order. Services talk only
+over the bus - direct calls between them are allowed for read-only state queries and
+prohibited for mutations. CLAUDE.md has the full pipeline walkthrough, event-payload
+conventions and per-service notes.
 
-1. **Event Bus** (`src/bus.py`) - Core communication system that enables all components to interact via events
-2. **Voice Manager** (`src/voice_manager.py`) - Manages voice interaction pipeline:
-   - Speech recognition (using SpeechRecognition and WhisperManager)
-   - Text processing (via OpenAI API)
-   - Speech synthesis (via ElevenLabs API)
-3. **LED Manager** (`src/led_manager.py`) - Controls Arduino-connected LED matrices:
-   - Updates animations based on system state
-   - Synchronizes mouth movement with speech amplitude
-   - Provides visual feedback during different interaction phases
-4. **Music Manager** (`src/music_manager.py`) - Handles background music features:
-   - Plays background tracks with VLC
-   - Implements auto-ducking (lowering volume) during speech
-   - Manages music transitions and playlist features
+(Earlier revisions of this README described an "MVP architecture" under `src/` -
+`bus.py`, `voice_manager.py`, `led_manager.py`, `music_manager.py`. That layer is
+superseded and no longer runs. It is documented here only so nobody edits it expecting an
+effect.)
 
-### Events System
-The system uses these key events for inter-component communication:
-- `voice.listening_started/stopped` - Speech recording state
-- `voice.processing_started` - Voice is being transcribed/processed
-- `voice.speaking_started` - Speech synthesis begins
-- `voice.beat` - Emitted ~50 times per second with amplitude data during speech
-- `voice.speaking_finished` - Speech completes
-- `music.track_started` - New background music track begins
-- `music.volume_ducked/restored` - Volume state changes
-- `system.error` - Error handling events
+### A turn, end to end
 
-### Resource Management
-The MVP architecture provides proper resource cleanup, ensuring all components are gracefully shut down when the application exits, addressing these key areas:
-- Serial port connections for LED control
-- Audio playback resources
-- Background tasks
-- Event handlers
+```
+left mouse click  ->  MouseInputService        pynput
+  ->  DeepgramDirectMicService                 PyAudio -> Deepgram streaming WebSocket
+        mints the turn's conversation_id, emits VOICE_LISTENING_STARTED
+  ->  VOICE_LISTENING_STOPPED { transcript, conversation_id }
+        |
+        +--> JevIntentService      ~190 ms, deterministic, fires the action
+        |      -> INTENT_DETECTED -> IntentRouterService -> CommandDispatcherService
+        |           -> MUSIC_COMMAND / EYE_COMMAND / DJ_COMMAND
+        |
+        +--> ClaudeService         waits for the router's verdict, then speaks
+               -> LLM_RESPONSE -> ElevenLabsService -> TimelineExecutorService -> speaker
+```
+
+### The Jev fast intent router
+
+Measured before this existed: a click-to-stop took **1,899 ms** to actually start the music,
+and **73% of that was a single Claude round trip whose only job was to pick a tool name.**
+The event bus and the whole tool-routing chain cost **15 ms combined** - the bus was never
+the problem.
+
+`JevIntentService` wakes on the same `VOICE_LISTENING_STOPPED` event as `ClaudeService` and
+asks the typesafe.ai System One API a fixed set of small questions about the transcript in
+one round trip, getting back calibrated probabilities rather than prose. When they agree,
+it emits `INTENT_DETECTED` - the exact event `ClaudeService` emits after a tool call, so the
+execution side needed no changes at all.
+
+**Measured on the real event bus:** transcript -> `MUSIC_COMMAND` **p50 197 ms** (min 160,
+max 260), of which CantinaOS itself is **2-3 ms**; the rest is the network. A speculative
+cache hit - the router classifies partial transcripts while the user is still talking -
+dispatches in **1.6 ms**.
+
+Three reads must agree before anything fires:
+
+1. a **Choice** across all six tools plus `general_chat` / `unclear` - decides *which*;
+2. **one Noul per tool** - an absolute "is the speaker asking for *this*, now?";
+3. **`is_a_command`** - "instruction, or conversation?".
+
+The independence is what buys the safety. *"did you turn the music down"* **wins** the
+Choice competition at 0.94 and **fails** its own Noul at 0.47. Over 66 utterances x 5 passes
+x 8 designs, this was the only arm with **0 false triggers and 0 wrong executions in 330
+calls**; every choice-only design false-triggers.
+
+Thresholds are risk-tiered, because one number is the wrong model:
+
+| Tier | Tools | Gate |
+|---|---|---|
+| Free - instantly reversible | `set_eye_animation`, `next_track` | confidence >= 0.75, noul >= 0.5 |
+| Cheap - reversible but noticeable | `play_music`, `stop_music`, `dj_mode_on/off` | confidence >= 0.85 **and** noul >= 0.7 |
+| Committing - writes shared state | *(none today)* | never fires from the router alone |
+
+The free tier is derived as `JEV_CONFIDENCE_THRESHOLD - 0.10`, so one knob moves both.
+
+**It fails open by construction.** No `TYPESAFE_API_KEY`, a timeout, an HTTP error or a
+malformed body all produce "no verdict", and the turn proceeds down the Claude path exactly
+as it did before. A miss costs one slow turn; a false trigger blasts music into the room
+while someone was asking a question. The whole design is built around that asymmetry -
+which is why *"quiet please"* being declined is the *correct* failure, not a bug.
+
+**Dedup.** Both services wake on the same event, so without coordination Claude's own
+`tool_use` would restart the music a second time and narrate a future it did not cause.
+`ClaudeService` awaits the router's verdict (bounded by `FAST_ROUTER_WAIT_S`, default 1.2 s;
+no router registered means no wait at all), and when an action was taken it prepends an
+`<action_already_taken>` block and sets `tool_choice={"type": "none"}` - the tools stay in
+the request so the prompt cache still hits, but Claude can only speak.
+
+Model is pinned to **`jev-1.13.0`**, not `jev-latest`: a silent model bump would move every
+threshold underneath us.
+
+### Known gaps
+
+- **No wake word in the live loop.** The trigger is a left mouse click. A Porcupine model
+  and a working test harness exist and are wired to nothing.
+- **No automatic end-of-speech detection.** Deepgram's `endpointing`, `utterance_end_ms`
+  and `vad_events` were all deliberately disabled; you click again to stop.
+- **`next_track` only works in DJ mode.** `dj next` is the only skip capability, and
+  MusicControllerService understands only "play" and "stop" - there is no playlist cursor
+  to advance otherwise.
+- **`_select_smart_track` has a hardcoded track list**, so generic requests resolve to
+  `cantina_band` and the real Spotify library is never consulted.
+- **The dashboard is structurally disconnected.** `dj-r3x-bridge/` creates its own
+  `EventBus()` in its own process and no script launches it, so dashboard commands reach
+  nothing.
 
 ## Troubleshooting
 
@@ -273,79 +441,102 @@ The MVP architecture provides proper resource cleanup, ensuring all components a
 
 ## Features
 
-### Voice Recognition
-- Uses offline Whisper model for speech-to-text (no internet required for transcription)
-- Supports push-to-talk mode (toggle with spacebar) or automatic voice detection
-- Provides visual and audio feedback during listening state
+### Speech recognition
+- **Deepgram** Nova-3 over a persistent streaming WebSocket kept alive between turns, so no
+  handshake is paid mid-utterance
+- Trigger is a **left mouse click** (click to start, click again to stop). There is no wake
+  word in the live loop and no automatic end-of-speech detection - Deepgram's `endpointing`,
+  `utterance_end_ms` and `vad_events` are deliberately disabled
+- `openai-whisper` was removed as a dependency on 2026-09-17; nothing imported it
 
-### AI Processing
-- Processes speech input using OpenAI's GPT-4o model
-- Maintains DJ R3X character personality across interactions
-- Provides context-aware responses in DJ R3X's distinctive style
+### Intent routing
+- The **Jev fast intent router** dispatches `play_music`, `stop_music`, `dj_mode_on/off`,
+  `next_track` and `set_eye_animation` in ~190 ms, before Claude is called at all
+- Risk-tiered thresholds, three independent reads that must agree, and fail-open behaviour -
+  see the Architecture section
 
-### Speech Synthesis
-- Converts responses to lifelike speech using ElevenLabs
-- Supports customized voice settings via configuration
-- Optional audio processing for enhanced output quality
+### Conversation
+- **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) with prompt caching
+- Blocking SDK calls run on `asyncio.to_thread`, so the event loop keeps ticking during a
+  turn - verified at 175 loop ticks through a turn that included both a Jev call and a
+  blocking Claude call
+- When the fast router already acted, Claude gets an `<action_already_taken>` block and
+  `tool_choice={"type": "none"}`, so it narrates rather than re-running the action
 
-### LED Animation
-- Synchronizes LED eye/mouth animations with speech
-- Different patterns for idle, listening, processing, and speaking states
-- Visual feedback coordinated with audio through event system
+### Speech synthesis
+- **ElevenLabs** Flash v2.5 (`eleven_flash_v2_5`), PCM, streamed on a worker thread
 
-### Music Management
-- Background music playback with automatic ducking during speech
-- Support for playlists and random track selection
-- Smooth volume transitions during speech interactions
+### LED animation
+- Eye and mouth patterns for idle, listening, thinking and speaking, plus sentiment colours
+- Mouth brightness is modulated from live speech amplitude
+- Runs without an Arduino attached via `FORCE_MOCK_LED_CONTROLLER=true`
+
+### Music
+- Local library from `audio/music/` (23 tracks) or Spotify Connect, both through VLC
+- Auto-ducks under speech and restores afterwards
+- DJ mode queues tracks with generated commentary between them; reachable by voice since
+  2026-09-17
 
 ## Usage
 
 ### Interactive Mode
-Run the MVP version and interact through the command line:
 
 ```bash
-python3 run_r3x_mvp.py
+cd cantina_os
+../venv/bin/python -m cantina_os.main
 ```
 
-Available commands:
-- Type any text to have DJ R3X respond to it
-- `speak <text>` - Generate and speak a response to text
-- `music <file>` - Play a background music file
-- `stop` - Stop music playback
-- `duck` - Duck music volume manually
-- `restore` - Restore music volume manually
-- `exit` or `quit` - Exit the program
-- `help` - Show command help
-
-### Demo Mode
-Run a demonstration with predefined interactions:
-
-```bash
-python3 run_r3x_mvp.py --demo
-```
+Type `engage` to enter interactive voice mode, then trigger a turn with a left mouse click
+(click to start recording, click again to stop). `help` lists every CLI command; the useful
+ones are `engage` / `ambient` / `disengage`, `play music`, `stop music`, `list music`,
+`dj start` / `dj stop` / `dj next`, `eye pattern <name>`, `debug latency` and `quit`.
 
 ## Project Structure
 
-### Core Files
-- `run_r3x_mvp.py`: Launcher for the MVP architecture
-- `src/main.py`: Main application entry point and component coordinator
-- `src/bus.py`: Event bus implementation for inter-component communication
-- `src/voice_manager.py`: Speech processing and synthesis pipeline
-- `src/led_manager.py`: LED animation control and visual feedback
-- `src/music_manager.py`: Music playback and volume management 
-- `whisper_manager.py`: Local speech-to-text processing
-- `audio_processor.py`: Audio processing utilities
-
-### Legacy Files
-- `run_rex.py`: Wrapper for the original monolithic application
-- `rex_talk.py`: Original application with all functionality in one file
+### What actually runs
+- `cantina_os/cantina_os/main.py`: the `CantinaOS` application - builds the event bus,
+  registers CLI commands, and starts 22 services in a fixed order
+- `cantina_os/cantina_os/core/`: event bus, event topics, payload models, the fast-router gate
+- `cantina_os/cantina_os/services/`: one directory or module per service (see CLAUDE.md for
+  the full pipeline walkthrough)
+- `cantina_os/cantina_os/llm/`: the Jev client, its question catalogue, and the Claude prompt
+  assembly
+- `cantina_os/scripts/system_smoke_run.py`: drive a real CantinaOS with hardware mocked
+- `start-dashboard.sh` / `stop-dashboard.sh`: the supported way to start and stop everything
+- `dj-r3x-dashboard/`: Next.js dashboard
+- `audio/music/`: the local music library MusicControllerService plays from
+- `arduino/`: the LED firmware
 
 ### Configuration
-- `config/`: Configuration files for various components
-- `env.example`: Template for creating your `.env` file
+- `env.example`: template for your `.env`
+- `cantina_os/requirements.txt`: the only Python dependency list (the root file defers to it)
+
+### Not live, despite appearances
+Kept on disk but reachable from nothing. Do not edit these expecting an effect - a fix
+applied here is a fix applied to nothing:
+
+- `src/`, `rex_talk.py`, `run_rex.py`, `run_r3x_mvp.py` and the rest of the pre-CantinaOS
+  MVP: gone or superseded. Earlier revisions of this README documented them as the way to
+  run the project; they are not.
+- `services/gpt_service.py`: in main.py's `service_class_map` but absent from
+  `service_order`, so never instantiated. The live LLM path is `ClaudeService`.
+- `services/music_controller_service.py` (flat file): shadowed by the package of the same
+  name, which is what Python imports and what main.py runs.
+- `services/web_bridge_service.py` and `dj-r3x-bridge/`: in neither `service_order` nor
+  `service_class_map`, and the bridge runs its own `EventBus()` in its own process that
+  shares nothing with CantinaOS. No script launches it.
+- `services/deepgram_direct_mic_service_sdk4.py` and the three
+  `deepgram_direct_mic_service_sdk5*` variants: only
+  `deepgram_direct_mic_service.py` is imported. Five files named after the same service is
+  a real hazard when grepping.
+- `simple_eye_adapter_v2_backup.py`, `simple_eye_adapter_v3.py`,
+  `eye_light_controller_service_v3_patch.py`: only `simple_eye_adapter.py` is imported.
+- `DJ-R3X-Web/`: contains nothing but `node_modules/`.
+- The Porcupine wake-word model and `test_wake_word.py`: a working harness wired to
+  nothing. The live trigger is a mouse click.
 
 ### Testing
-- Various test scripts for different components
+See "Running the tests" above. 274 passing, 55 explicitly skipped.
 
 ## License
 

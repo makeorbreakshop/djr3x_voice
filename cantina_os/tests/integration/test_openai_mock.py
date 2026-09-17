@@ -1,3 +1,12 @@
+"""SKIPPED 2026-09-17 - this module tests code that is dead at HEAD."""
+
+import pytest
+
+pytest.skip(
+    'Exercises tests/mocks/openai_mock.py, which stands in for GPTService - dead (see test_gpt_service.py). `openai` is no longer a dependency of cantina_os at all; nothing under cantina_os/ imports it (audit 2026-09-17 section 4.4).',
+    allow_module_level=True,
+)
+
 """Integration tests for the OpenAI mock service."""
 import pytest
 import asyncio

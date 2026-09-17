@@ -18,7 +18,7 @@ import logging
 import time
 import json
 import uuid
-from typing import Optional, Dict, Any, List, Deque
+from typing import Optional, Dict, Any, List, Deque, Tuple
 from collections import deque
 
 from anthropic import Anthropic
@@ -34,6 +34,8 @@ from ...event_payloads import (
     LogLevel
 )
 from ...llm.command_functions import get_all_function_definitions, function_name_to_model_map
+from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
+from ...core.fast_router_gate import GATE as FAST_ROUTER_GATE, ActionTaken
 from pydantic import BaseModel, ValidationError
 
 
@@ -100,6 +102,29 @@ class SessionMemory:
         self.current_token_count = 0
 
 
+def _response_text(response: Any) -> str:
+    """Concatenate the text of every ``text`` block in an Anthropic response.
+
+    ADDED 2026-09-17. All four call sites below used to read ``response.content[0].text``
+    directly. That is only correct when the FIRST block happens to be a text block. On the
+    main voice turn (which is sent ``tools=``), Claude routinely returns a ``tool_use`` block
+    first - and ``ToolUseBlock`` has no ``.text``, so the expression raises AttributeError and
+    takes down the turn. The same is true of ``thinking`` blocks. It also silently discarded
+    any text after the first block.
+
+    Filtering on ``block.type == "text"`` is stable across every block type the SDK models
+    (thinking, redacted_thinking, tool_use, server_tool_use, the tool-result blocks,
+    container_upload), so this does not need updating when the SDK gains new ones.
+    """
+    if not getattr(response, "content", None):
+        return ""
+    return "".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    )
+
+
 class ClaudeService(BaseService):
     """
     Service for natural language processing using Claude 3.5 Sonnet 4.5.
@@ -134,6 +159,8 @@ class ClaudeService(BaseService):
 
         # Anthropic client
         self._client: Optional[Anthropic] = None
+        # Which backend the client ended up pointed at; set in _initialize.
+        self._provider = None
 
         # Request tracking
         self._request_timestamps: List[float] = []
@@ -172,8 +199,11 @@ class ClaudeService(BaseService):
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Load configuration from provided dict."""
         # Anthropic API key is required
-        if "ANTHROPIC_API_KEY" not in config:
-            self.logger.warning("ANTHROPIC_API_KEY not provided, service will fail to initialize")
+        if not config.get("ANTHROPIC_API_KEY") and not config.get("OPENROUTER_API_KEY"):
+            self.logger.warning(
+                "Neither ANTHROPIC_API_KEY nor OPENROUTER_API_KEY provided, "
+                "service will fail to initialize"
+            )
 
         # Try to load DJ R3X persona from config path or common locations
         persona_paths = [
@@ -201,6 +231,12 @@ class ClaudeService(BaseService):
 
         return {
             "ANTHROPIC_API_KEY": config.get("ANTHROPIC_API_KEY", ""),
+            # OpenRouter speaks the Anthropic Messages format, so it is reachable with the
+            # same SDK via a base_url override. Used only when ANTHROPIC_API_KEY is absent
+            # unless LLM_PROVIDER forces it. See llm/anthropic_provider.py.
+            "OPENROUTER_API_KEY": config.get("OPENROUTER_API_KEY", ""),
+            "ANTHROPIC_BASE_URL": config.get("ANTHROPIC_BASE_URL", ""),
+            "LLM_PROVIDER": config.get("LLM_PROVIDER", ""),
             # Claude Haiku 4.5 (claude-haiku-4-5-20251001): fastest, best latency for voice interactions
             "MODEL": config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
             "MAX_TOKENS": config.get("MAX_TOKENS", 40000),  # Increased from 4000 to utilize Claude's 200K window
@@ -210,25 +246,45 @@ class ClaudeService(BaseService):
             "TIMEOUT": config.get("TIMEOUT", 30),
             "RATE_LIMIT_REQUESTS": config.get("RATE_LIMIT_REQUESTS", 100),
             "STREAMING": config.get("STREAMING", True),
-            "ENABLE_INTERIM_STREAMING": config.get("ENABLE_INTERIM_STREAMING", False)  # Disabled by default (saves API calls)
+            "ENABLE_INTERIM_STREAMING": config.get("ENABLE_INTERIM_STREAMING", False),  # Disabled by default (saves API calls)
+            # Ceiling on how long we wait for the Jev fast router's verdict before building the
+            # prompt ourselves. Only applies when a router has registered on the gate; it must
+            # exceed the router's own Jev timeout so a slow classifier resolves the gate first.
+            # Output budget for a *spoken* turn. 1024 tokens is ~4,000 characters, i.e.
+            # minutes of speech; the 555-char reply at 2026-09-17 10:56:45 took 33 s to
+            # synthesise and outran the timeline's wait. The persona asks for 2-3 sentences
+            # (~250 chars); this is the backstop that stops a runaway generation reaching TTS
+            # at all.
+            "SPOKEN_REPLY_MAX_TOKENS": config.get("SPOKEN_REPLY_MAX_TOKENS", 160),
+            "FAST_ROUTER_WAIT_S": config.get("FAST_ROUTER_WAIT_S", 1.2),
+            # How long to wait, after a verdict, for the execution side to report what the
+            # action actually did (for play_music: which track really started). Kept above
+            # IntentRouterService's own 0.8 s playback wait so the amended record is there.
+            "FAST_ROUTER_OUTCOME_WAIT_S": config.get("FAST_ROUTER_OUTCOME_WAIT_S", 1.2)
         }
 
     async def _initialize(self) -> None:
         """Initialize the Claude service."""
         try:
-            # Get API key - try config first, then environment
-            api_key = self._config.get("ANTHROPIC_API_KEY", "").strip()
-            if not api_key:
-                # Fallback to environment variable
-                import os
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            # Resolve the backend: direct Anthropic when its key exists, otherwise
+            # OpenRouter's Anthropic-compatible /v1/messages endpoint. Config is consulted
+            # before the environment so a service config can always override it.
+            provider = resolve_provider(self._config)
+            if provider is None:
+                raise ValueError(
+                    "No Anthropic-compatible credential found: set ANTHROPIC_API_KEY or "
+                    "OPENROUTER_API_KEY in config or environment"
+                )
 
-            if not api_key:
-                raise ValueError("ANTHROPIC_API_KEY not found in config or environment")
+            # Model ids differ between the two hosts. Resolve once here and write the
+            # effective id back into config so all seven call sites stay unchanged.
+            requested_model = self._config["MODEL"]
+            self._config["MODEL"] = map_model(requested_model, provider.provider)
+            self._provider = provider
 
             # Initialize Anthropic client with prompt caching enabled
             self._client = Anthropic(
-                api_key=api_key,
+                **client_kwargs(provider),
                 default_headers={
                     "anthropic-beta": "prompt-caching-2024-07-31"  # Enable prompt caching
                 }
@@ -250,7 +306,9 @@ class ClaudeService(BaseService):
             self._load_personas()
 
             self.logger.info(
-                f"Initialized Claude service with model={self._config['MODEL']}"
+                f"Initialized Claude service via provider={provider.provider} "
+                f"model={self._config['MODEL']}"
+                + (f" (requested {requested_model})" if self._config["MODEL"] != requested_model else "")
             )
 
         except Exception as e:
@@ -364,12 +422,38 @@ class ClaudeService(BaseService):
                 self.logger.warning("Received empty payload in VOICE_LISTENING_STOPPED event")
                 return
 
+            # `has_transcript` is set by DeepgramDirectMicService; the `not transcript`
+            # fallback covers any other publisher. Either way an empty recording is not a
+            # turn: no Claude call, no reply, no conversation state touched.
             transcript = payload.get("transcript", "")
-            if not transcript:
-                self.logger.warning("Received empty transcript in VOICE_LISTENING_STOPPED event")
+            if payload.get("has_transcript") is False or not transcript:
+                self.logger.info(
+                    "Empty transcript in VOICE_LISTENING_STOPPED - no turn, no Claude call"
+                )
                 return
 
             self.logger.info(f"Processing final transcript from mouse click: {transcript}")
+
+            # FIXED 2026-09-17: adopt the turn id the capture service already minted.
+            #
+            # LatencyTrackerService keys every metric on conversation_id. It opens a record on
+            # VOICE_LISTENING_STARTED (which carries the mic service's uuid) and expects to close
+            # it on LLM_RESPONSE - but LLM_RESPONSE carried ClaudeService's OWN
+            # _current_conversation_id, minted independently in reset_conversation(). The two ids
+            # never matched, so _handle_llm_response's `conversation_id not in
+            # self._conversation_metrics` guard dropped every single measurement and the tracker
+            # recorded nothing. CLIService._handle_llm_response has the same guard, so the CLI
+            # also silently swallowed R3X's replies.
+            #
+            # The capture service is the right owner of the id: it is the only component that
+            # knows when a turn began, which is what the latency measurement is relative to.
+            turn_id = payload.get("conversation_id")
+            if turn_id and turn_id != self._current_conversation_id:
+                self.logger.debug(
+                    f"Adopting turn id from capture service: {turn_id} "
+                    f"(was {self._current_conversation_id})"
+                )
+                self._current_conversation_id = turn_id
 
             # Maintain conversation context across voice interactions
             await self._process_with_claude(transcript)
@@ -453,11 +537,24 @@ class ClaudeService(BaseService):
 
         self._request_timestamps.append(current_time)
 
+        # FAST ROUTER RENDEZVOUS
+        # The Jev router may already have dispatched this turn's action (~190 ms) while we were
+        # getting here. Wait for its verdict before building the prompt: if an action was taken
+        # we must (a) tell Claude so it narrates the past rather than the future, and (b) stop
+        # it calling the same tool again. This wait costs the *spoken* path ~190 ms and the
+        # *action* path nothing — the music is already playing by the time we block here.
+        action_taken = await self._await_fast_router_verdict(user_input)
+        action_context = self._build_action_taken_context(action_taken) if action_taken else ""
+
         # PREPEND vision context to user message (per Claude best practices for long context)
         vision_context = await self._build_vision_context_for_message()
         if vision_context:
             # Context includes opening <user_input> tag, add closing tag
-            user_input_with_context = vision_context + user_input + "\n</user_input>"
+            user_input_with_context = action_context + vision_context + user_input + "\n</user_input>"
+        elif action_context:
+            # No vision context, but we still need the user_input wrapper so the action block
+            # cannot be mistaken for something the user said.
+            user_input_with_context = action_context + "<user_input>\n" + user_input + "\n</user_input>"
         else:
             # No context, just use raw user input
             user_input_with_context = user_input
@@ -474,10 +571,12 @@ class ClaudeService(BaseService):
 
         try:
             self.logger.info("Making API call to Claude...")
+            # tool_choice "none" when the action is already done: Claude can only speak.
+            suppress_tools = action_taken is not None
             if self._config["STREAMING"]:
-                await self._stream_claude_response(messages_for_api)
+                await self._stream_claude_response(messages_for_api, suppress_tools=suppress_tools)
             else:
-                await self._get_claude_response(messages_for_api)
+                await self._get_claude_response(messages_for_api, suppress_tools=suppress_tools)
             self.logger.info("API call completed successfully")
         except Exception as e:
             error_msg = f"Error processing with Claude: {str(e)}"
@@ -489,7 +588,71 @@ class ClaudeService(BaseService):
             )
             raise
 
-    async def _get_claude_response(self, messages: List[Dict[str, Any]]) -> None:
+    async def _await_fast_router_verdict(self, user_input: str) -> Optional[ActionTaken]:
+        """Wait for the Jev fast router's verdict on this turn, if a router is running.
+
+        Returns the action it dispatched, or None when nothing fired, no router is registered,
+        or the wait timed out. Never raises — a failure here must degrade to the normal Claude
+        turn, not break it.
+        """
+        if not FAST_ROUTER_GATE.enabled:
+            return None
+
+        try:
+            action = await FAST_ROUTER_GATE.wait_for_verdict(
+                user_input, timeout_s=self._config["FAST_ROUTER_WAIT_S"]
+            )
+        except Exception as e:
+            self.logger.warning(f"Fast router wait failed ({e}); continuing normally")
+            return None
+
+        if action is None:
+            self.logger.info("Fast router took no action; Claude owns this turn's tool calls")
+            return None
+
+        # The verdict says *what was dispatched*; the outcome says *what happened*. For
+        # play_music those differ almost always - a generic request dispatches no track and
+        # MusicControllerService picks - and it is the outcome R3X has to narrate. Without
+        # this wait the action block named the request, which on 2026-09-17 10:57:25 had R3X
+        # announcing "Cantina Band" over Huttuk Cheeka.
+        action = await FAST_ROUTER_GATE.wait_for_outcome(
+            user_input, timeout_s=self._config["FAST_ROUTER_OUTCOME_WAIT_S"]
+        ) or action
+
+        # Consume it so a retry of the same transcript cannot suppress tools twice.
+        FAST_ROUTER_GATE.consume(user_input)
+        self.logger.info(
+            f"Fast router already executed '{action.intent_name}' "
+            f"(confidence {action.confidence:.2f}); suppressing tools for this turn"
+        )
+        return action
+
+    def _build_action_taken_context(self, action: ActionTaken) -> str:
+        """XML block telling Claude the action is already done.
+
+        Follows the same XML-tag convention as ``_build_vision_context_for_message`` — Claude
+        parses tagged context markedly better than prose, and the tags keep system-supplied
+        facts visibly distinct from ``<user_input>``.
+        """
+        params = ", ".join(f"{k}={v!r}" for k, v in (action.parameters or {}).items())
+        return (
+            "<action_already_taken>\n"
+            f"  <tool>{action.intent_name}</tool>\n"
+            f"  <parameters>{params or 'none'}</parameters>\n"
+            "  <status>Already executed. This is done and the user can already see or hear "
+            "the result.</status>\n"
+            "  <your_instructions>Do NOT call any tool for this request - it has already been "
+            "carried out for you. Respond with one short spoken line, in character, reacting "
+            "to what you just did. Speak about it in the past or present tense, never as "
+            "something you are about to do.</your_instructions>\n"
+            "</action_already_taken>\n\n"
+        )
+
+    async def _get_claude_response(
+        self,
+        messages: List[Dict[str, Any]],
+        suppress_tools: bool = False
+    ) -> None:
         """Get a non-streaming response from Claude API."""
         if not self._client:
             raise RuntimeError("No Anthropic client initialized")
@@ -508,13 +671,25 @@ class ClaudeService(BaseService):
                 }
             ]
 
-            response = self._client.messages.create(
+            # OFFLOAD: the Anthropic client is synchronous, so calling it directly from this
+            # coroutine blocks the whole event loop - and therefore every other service - for
+            # the full duration of the request. asyncio.to_thread keeps the loop free.
+            # Same pattern as services/vision_service.py.
+            request_kwargs: Dict[str, Any] = dict(
                 model=self._config["MODEL"],
-                max_tokens=1024,
+                max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
+            )
+            if suppress_tools:
+                # The fast router already executed this turn's action. Keep the tool block in
+                # the request so the prompt cache still hits, but forbid its use.
+                request_kwargs["tool_choice"] = {"type": "none"}
+
+            response = await asyncio.to_thread(
+                self._client.messages.create, **request_kwargs
             )
 
             self.logger.info(f"Successfully received response from Claude")
@@ -529,7 +704,7 @@ class ClaudeService(BaseService):
                     self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
 
             # Extract content from response
-            message_content = response.content[0].text if response.content else ""
+            message_content = _response_text(response)
 
             # Check for tool calls
             tool_calls = []
@@ -568,8 +743,21 @@ class ClaudeService(BaseService):
             self.logger.error(f"Error in _get_claude_response: {str(e)}")
             raise
 
-    async def _stream_claude_response(self, messages: List[Dict[str, Any]]) -> None:
-        """Stream responses from Claude API."""
+    async def _stream_claude_response(
+        self,
+        messages: List[Dict[str, Any]],
+        suppress_tools: bool = False
+    ) -> None:
+        """Stream responses from Claude API.
+
+        The Anthropic client is synchronous, and ``for text in stream.text_stream`` never
+        yields to the event loop. Run directly in this coroutine it froze all 22 services for
+        the full generation (measured: a 1,817 ms window with no service logging a single line,
+        after which all 13 "streamed" chunks arrived in a 2 ms burst - the eyes, mouth LEDs and
+        music ducking all stalled with it). So the whole blocking read runs on a worker thread
+        and each chunk is marshalled back onto the loop as it genuinely arrives, which is what
+        makes the streaming real downstream instead of only on the wire.
+        """
         if not self._client:
             raise RuntimeError("No Anthropic client initialized")
 
@@ -578,6 +766,7 @@ class ClaudeService(BaseService):
         try:
             full_content = ""
             tool_calls = []
+            loop = asyncio.get_running_loop()
 
             # Use static system prompt (vision context is now in user messages)
             # OPTIMIZATION: Use prompt caching for system prompt and tools
@@ -590,49 +779,64 @@ class ClaudeService(BaseService):
                 }
             ]
 
-            # Use streaming with Claude
-            with self._client.messages.stream(
+            request_kwargs: Dict[str, Any] = dict(
                 model=self._config["MODEL"],
-                max_tokens=1024,
+                max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
-            ) as stream:
-                chunk_count = 0
-                current_tool_use = None
+            )
+            if suppress_tools:
+                # The fast router already executed this turn's action. Keep the tool block in
+                # the request so the prompt cache still hits, but forbid its use.
+                request_kwargs["tool_choice"] = {"type": "none"}
 
-                for text in stream.text_stream:
-                    if text:
-                        full_content += text
-                        chunk_count += 1
-                        if chunk_count % 10 == 0:
-                            self.logger.debug(f"Processed {chunk_count} chunks, current content: {full_content[:50]}...")
-                        await self._emit_llm_stream_chunk(text, is_complete=False)
+            def _emit_chunk_from_thread(text: str) -> None:
+                """Hand one chunk to the event loop from the worker thread.
 
-                # Get the final message after streaming completes
-                final_message = stream.get_final_message()
+                Fire-and-forget on purpose: waiting on the future here would serialise the
+                worker against the loop and undo the offload.
+                """
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_llm_stream_chunk(text, is_complete=False), loop
+                )
 
-                # Log token usage for cost/performance tracking
-                if hasattr(final_message, 'usage'):
-                    usage = final_message.usage
-                    self.logger.info(f"📊 TOKEN USAGE (streaming) - Input: {usage.input_tokens}, Output: {usage.output_tokens}, Total: {usage.input_tokens + usage.output_tokens}")
-                    if hasattr(usage, 'cache_creation_input_tokens') and usage.cache_creation_input_tokens:
-                        self.logger.info(f"💾 CACHE CREATED: {usage.cache_creation_input_tokens} tokens")
-                    if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
-                        self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
+            def _blocking_stream() -> Tuple[str, int, Any]:
+                """Runs on a worker thread. Reads the sync stream to completion."""
+                content = ""
+                count = 0
+                assert self._client is not None
+                with self._client.messages.stream(**request_kwargs) as stream:
+                    for text in stream.text_stream:
+                        if text:
+                            content += text
+                            count += 1
+                            _emit_chunk_from_thread(text)
+                    return content, count, stream.get_final_message()
 
-                # Extract tool calls from final message
-                for block in final_message.content:
-                    if hasattr(block, 'type') and block.type == 'tool_use':
-                        tool_calls.append({
-                            "type": "function",
-                            "id": block.id,
-                            "function": {
-                                "name": block.name,
-                                "arguments": json.dumps(block.input)
-                            }
-                        })
+            full_content, chunk_count, final_message = await asyncio.to_thread(_blocking_stream)
+
+            # Log token usage for cost/performance tracking
+            if hasattr(final_message, 'usage'):
+                usage = final_message.usage
+                self.logger.info(f"📊 TOKEN USAGE (streaming) - Input: {usage.input_tokens}, Output: {usage.output_tokens}, Total: {usage.input_tokens + usage.output_tokens}")
+                if hasattr(usage, 'cache_creation_input_tokens') and usage.cache_creation_input_tokens:
+                    self.logger.info(f"💾 CACHE CREATED: {usage.cache_creation_input_tokens} tokens")
+                if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
+                    self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
+
+            # Extract tool calls from final message
+            for block in final_message.content:
+                if hasattr(block, 'type') and block.type == 'tool_use':
+                    tool_calls.append({
+                        "type": "function",
+                        "id": block.id,
+                        "function": {
+                            "name": block.name,
+                            "arguments": json.dumps(block.input)
+                        }
+                    })
 
             self.logger.info(f"Completed streaming response with {chunk_count} chunks")
             self.logger.info(f"Processed {len(tool_calls)} tool calls")
@@ -1003,7 +1207,7 @@ class ClaudeService(BaseService):
                 temperature=self._config["TEMPERATURE"]
             )
 
-            return response.content[0].text if response.content else ""
+            return _response_text(response)
 
         except Exception as e:
             self.logger.debug(f"Error in _get_draft_claude_response: {str(e)}")
@@ -1224,6 +1428,7 @@ class ClaudeService(BaseService):
             success = result_payload.success
             result = result_payload.result
             tool_call_id = result_payload.tool_call_id
+            source = result_payload.source
 
             self.logger.info(f"Processing execution result for intent: {intent_name}")
             self.logger.info(f"Result success: {success}, parameters: {parameters}")
@@ -1240,7 +1445,7 @@ class ClaudeService(BaseService):
                 response_content = f"{intent_name} completed."
 
             # Visual-only tools that shouldn't be part of conversation
-            visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern"}
+            visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern", "set_eye_animation"}
 
             # Vision tools that handle their own response generation
             # (analyze_scene adds vision result to conversation and re-runs Claude)
@@ -1262,10 +1467,31 @@ class ClaudeService(BaseService):
                         content=f"Tool execution result for {intent_name}: {response_content}"
                     )
 
-                # Generate verbal response in background WITHOUT waiting
-                # This allows the tool to execute immediately while DJ commentary plays over it
-                asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
-                self.logger.info(f"Started background verbal response generation for {intent_name}")
+                # ONE SPOKEN REPLY PER TURN.
+                #
+                # This second, verbal-feedback Claude call exists for the case where *Claude*
+                # called the tool: the main turn's reply was generated before the tool ran, so
+                # something has to narrate the result.
+                #
+                # When the *fast router* executed the action, that is not the case. Claude's
+                # main turn for this very transcript is still in flight and carries the
+                # <action_already_taken> block, so it will confirm the action itself. Generating
+                # a reply here too produces two plans on the foreground timeline layer, and the
+                # later one cancels the earlier one mid-sentence. Measured live on 2026-09-17
+                # 10:57:25: "Now spinning up "Cantina Band" for you" started speaking and was
+                # cut off 467 ms later by "Oh YEAH! Now we're talking! Cantina Band is
+                # SPINNING". The tool result still goes into memory above - only the extra
+                # spoken reply is dropped.
+                if source == "jev_fast_router":
+                    self.logger.info(
+                        f"Fast router executed '{intent_name}'; the main turn owns this turn's "
+                        "spoken reply, skipping verbal-feedback generation"
+                    )
+                else:
+                    # Generate verbal response in background WITHOUT waiting
+                    # This allows the tool to execute immediately while DJ commentary plays over it
+                    asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
+                    self.logger.info(f"Started background verbal response generation for {intent_name}")
             else:
                 # For visual-only tools, just log that we're skipping verbal feedback
                 self.logger.info(f"Skipping verbal feedback for visual-only tool: {intent_name}")
@@ -1310,7 +1536,10 @@ class ClaudeService(BaseService):
                 {"role": "user", "content": intent_details}
             ]
 
-            response = self._client.messages.create(
+            # OFFLOAD: sync Anthropic client - keep the event loop free (see
+            # _stream_claude_response for why this matters).
+            response = await asyncio.to_thread(
+                self._client.messages.create,
                 model=self._config["MODEL"],
                 max_tokens=200,
                 system=verbal_feedback_persona,
@@ -1318,7 +1547,7 @@ class ClaudeService(BaseService):
                 temperature=0.7
             )
 
-            verbal_response = response.content[0].text if response.content else "Action completed successfully."
+            verbal_response = _response_text(response) or "Action completed successfully."
             self.logger.info(f"Generated verbal response: {verbal_response}")
 
             # Emit the verbal response
@@ -1499,7 +1728,10 @@ Keep it energetic!
 
             self.logger.info(f"Commentary prompt created for {context} context")
 
-            response = self._client.messages.create(
+            # OFFLOAD: sync Anthropic client - keep the event loop free (see
+            # _stream_claude_response for why this matters).
+            response = await asyncio.to_thread(
+                self._client.messages.create,
                 model=self._config["MODEL"],
                 max_tokens=150,
                 system=persona,
@@ -1507,7 +1739,7 @@ Keep it energetic!
                 temperature=0.8
             )
 
-            commentary_text = response.content[0].text if response.content else ""
+            commentary_text = _response_text(response)
             self.logger.info(f"Generated commentary: {commentary_text}")
 
             # Emit the commentary response
@@ -1567,9 +1799,16 @@ Keep it energetic!
             self.logger.info("🔄 Warming up Claude API connection for faster response latency")
             self._last_connection_warmup_time = current_time
 
+            if not self._client:
+                self.logger.warning("Connection warmup skipped: no Anthropic client")
+                return
+
             # Make a lightweight API call to establish connection
             # Use a very simple system prompt and short message to minimize tokens
-            self._client.messages.create(
+            # OFFLOAD: even a 10-token warmup blocks the loop if called inline, and this fires
+            # on every mode change.
+            await asyncio.to_thread(
+                self._client.messages.create,
                 model=self._config["MODEL"],
                 max_tokens=10,
                 system="You are a helpful assistant.",

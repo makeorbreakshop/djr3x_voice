@@ -11,7 +11,7 @@ from unittest.mock import Mock, AsyncMock
 from pyee.asyncio import AsyncIOEventEmitter
 
 from cantina_os.services.yoda_mode_manager_service import YodaModeManagerService, SystemMode
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     SystemModeChangePayload,
     ServiceStatusPayload,
@@ -66,7 +66,11 @@ async def test_initialization(yoda_mode_manager):
 async def test_start_service(yoda_mode_manager, event_bus):
     """Test service startup."""
     status_events = []
-    event_bus.on(EventTopics.SERVICE_STATUS_UPDATE, status_events.append)
+    # NOTE: BaseService._emit_status (base_service.py ~line 155) emits on the
+    # hardcoded literal topic "service_status", NOT
+    # EventTopics.SERVICE_STATUS_UPDATE ("service.status.update"). Listening
+    # on the EventTopics constant would never observe these events.
+    event_bus.on("service_status", status_events.append)
     
     await yoda_mode_manager.start()
     
@@ -105,7 +109,11 @@ async def test_valid_mode_transition(yoda_mode_manager, event_bus):
 async def test_invalid_mode_transition(yoda_mode_manager, event_bus):
     """Test invalid mode transition."""
     status_events = []
-    event_bus.on(EventTopics.SERVICE_STATUS_UPDATE, status_events.append)
+    # NOTE: BaseService._emit_status (base_service.py ~line 155) emits on the
+    # hardcoded literal topic "service_status", NOT
+    # EventTopics.SERVICE_STATUS_UPDATE ("service.status.update"). Listening
+    # on the EventTopics constant would never observe these events.
+    event_bus.on("service_status", status_events.append)
     
     await yoda_mode_manager.start()
     await yoda_mode_manager.set_mode("INVALID_MODE")
@@ -151,7 +159,11 @@ async def test_mode_change_request_handling(yoda_mode_manager, event_bus):
 async def test_error_handling_in_mode_request(yoda_mode_manager, event_bus):
     """Test error handling in mode change request handler."""
     status_events = []
-    event_bus.on(EventTopics.SERVICE_STATUS_UPDATE, status_events.append)
+    # NOTE: BaseService._emit_status (base_service.py ~line 155) emits on the
+    # hardcoded literal topic "service_status", NOT
+    # EventTopics.SERVICE_STATUS_UPDATE ("service.status.update"). Listening
+    # on the EventTopics constant would never observe these events.
+    event_bus.on("service_status", status_events.append)
     
     await yoda_mode_manager.start()
     

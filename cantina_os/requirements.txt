@@ -10,13 +10,30 @@ aiofiles>=23.2.1  # Async file I/O for logging service
 sounddevice>=0.4.6  # Audio capture and playback
 numpy>=1.24.0    # Audio data manipulation
 pyaudio>=0.2.14  # Audio recording and playback (requires PortAudio system dependency)
-deepgram-sdk>=5.1.0  # UPDATED 2025-10-20: Latest SDK with Flux model support for voice agents
-openai-whisper>=20231117  # Local ASR (optional)
+# PINNED 2026-09-17: <6.0. deepgram-sdk 6.x and 7.x removed the `deepgram.extensions`
+# package entirely; the live service (services/deepgram_direct_mic_service.py:22, :326) needs
+# `deepgram.extensions.types.sockets.ListenV1ControlMessage`, which 6.1.1 and 7.9.0 do not have.
+# The 7.x equivalent is `deepgram.listen.v1.ListenV1KeepAlive` - a real migration of the only
+# live STT path, which cannot be verified without a mic and a Deepgram key. Separate work.
+deepgram-sdk>=5.3.4,<6.0  # highest 5.x; verified to satisfy every live v5 idiom
+# REMOVED 2026-09-17: openai-whisper is imported nowhere under cantina_os/ (audit §4.2).
+# It pulled in torch (127 MB) and numba/llvmlite for no runtime benefit.
 python-vlc>=3.0.20000  # VLC media player integration for music playback
+pydub>=0.25.1  # Lazy fallback decode path in elevenlabs_service.py:1070
 
 # LLM Integration
-openai>=2.6.0  # UPDATED 2025-10-20: GPT-4.1 family support with improved performance
-anthropic>=0.72.0  # UPDATED 2025-11-07: Latest stable SDK (0.72.0+) with fixed Anthropic client initialization
+# REMOVED 2026-09-17: no `import openai` anywhere under cantina_os/ (audit §4.4). The only
+# OpenAI call sites are in archive/legacy_code/; gpt_service.py hand-rolls HTTP via aiohttp
+# and is not in main.py's service_order, so it never starts.
+# UPDATED 2026-09-17: upper bound added. The install guard in start-dashboard.sh had been
+# silently skipping every dependency change since Nov 2025, so this line never actually
+# installed and the venv stayed on 0.52.2. Now that the guard is fixed, an unbounded
+# `>=0.72.0` resolves to anthropic 1.x, which REMOVES the `temperature` parameter from
+# messages.create() with no **kwargs passthrough - every Claude call in claude_service,
+# vision_service and memory_service would raise TypeError on the next start. Verified:
+# `>=0.72.0,<1.0` resolves to 0.125.0, which keeps `temperature` and supports
+# `tool_choice={"type": "none"}`. Migrating to 1.x is a separate, deliberate piece of work.
+anthropic>=0.72.0,<1.0
 
 # Speech Synthesis
 elevenlabs>=2.17.0  # UPDATED 2025-10-20: Flash v2.5 model with 75ms latency, v3 with emotional range
@@ -24,6 +41,10 @@ soundfile>=0.12.1  # Audio file reading/writing for sounddevice
 
 # Hardware Control
 pyserial>=3.5  # Serial communication for Arduino/LED control
+# ADDED 2026-09-17: pynput supplies the system's ONLY input trigger
+# (services/mouse_input_service.py:23, registered main.py:362) but was missing from this
+# file, so a clean install produced a CantinaOS that could not be triggered at all.
+pynput>=1.7.6  # Mouse-click push-to-talk trigger
 
 # Vision Processing
 opencv-python>=4.8.0  # Computer vision and image processing
@@ -41,6 +62,9 @@ pytest-asyncio>=0.21.1
 pytest-cov>=4.1.0
 aioresponses>=0.7.4  # For mocking async HTTP responses in tests
 psutil>=5.9.0  # For resource monitoring in tests
+
+# Music Backends
+spotipy>=2.25.1  # Optional Spotify Connect backend (music_backends.py, try-guarded)
 
 # CLI Enhancement
 colorama>=0.4.6  # Cross-platform colored terminal output
