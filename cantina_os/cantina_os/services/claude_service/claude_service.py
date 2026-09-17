@@ -101,6 +101,29 @@ class SessionMemory:
         self.current_token_count = 0
 
 
+def _response_text(response: Any) -> str:
+    """Concatenate the text of every ``text`` block in an Anthropic response.
+
+    ADDED 2026-09-17. All four call sites below used to read ``response.content[0].text``
+    directly. That is only correct when the FIRST block happens to be a text block. On the
+    main voice turn (which is sent ``tools=``), Claude routinely returns a ``tool_use`` block
+    first - and ``ToolUseBlock`` has no ``.text``, so the expression raises AttributeError and
+    takes down the turn. The same is true of ``thinking`` blocks. It also silently discarded
+    any text after the first block.
+
+    Filtering on ``block.type == "text"`` is stable across every block type the SDK models
+    (thinking, redacted_thinking, tool_use, server_tool_use, the tool-result blocks,
+    container_upload), so this does not need updating when the SDK gains new ones.
+    """
+    if not getattr(response, "content", None):
+        return ""
+    return "".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    )
+
+
 class ClaudeService(BaseService):
     """
     Service for natural language processing using Claude 3.5 Sonnet 4.5.
@@ -616,7 +639,7 @@ class ClaudeService(BaseService):
                     self.logger.info(f"⚡ CACHE HIT: {usage.cache_read_input_tokens} tokens saved")
 
             # Extract content from response
-            message_content = response.content[0].text if response.content else ""
+            message_content = _response_text(response)
 
             # Check for tool calls
             tool_calls = []
@@ -1119,7 +1142,7 @@ class ClaudeService(BaseService):
                 temperature=self._config["TEMPERATURE"]
             )
 
-            return response.content[0].text if response.content else ""
+            return _response_text(response)
 
         except Exception as e:
             self.logger.debug(f"Error in _get_draft_claude_response: {str(e)}")
@@ -1437,7 +1460,7 @@ class ClaudeService(BaseService):
                 temperature=0.7
             )
 
-            verbal_response = response.content[0].text if response.content else "Action completed successfully."
+            verbal_response = _response_text(response) or "Action completed successfully."
             self.logger.info(f"Generated verbal response: {verbal_response}")
 
             # Emit the verbal response
@@ -1629,7 +1652,7 @@ Keep it energetic!
                 temperature=0.8
             )
 
-            commentary_text = response.content[0].text if response.content else ""
+            commentary_text = _response_text(response)
             self.logger.info(f"Generated commentary: {commentary_text}")
 
             # Emit the commentary response
