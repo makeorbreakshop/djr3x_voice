@@ -1,0 +1,2312 @@
+[
+ {
+  "utterance": "hey Rex play some music",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "play_music": 1.0,
+     "dj_mode_on": 0.0,
+     "general_chat": 0.0,
+     "stop_music": 0.0,
+     "set_eye_animation": 0.0,
+     "unclear": 0.0,
+     "next_track": 0.0,
+     "dj_mode_off": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.09,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "play some music",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "next_track": 0.0,
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0,
+     "unclear": 0.0,
+     "play_music": 1.0,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.07,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "R3X put on some cantina tunes",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "next_track": 0.0,
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0,
+     "unclear": 0.0,
+     "play_music": 1.0,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.14,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1413,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "can you play the cantina band song",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "play_music": 1.0,
+     "unclear": 0.0,
+     "general_chat": 0.0,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0,
+     "dj_mode_on": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.95,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.13,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.06,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.95,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1412,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "stop the music",
+  "expected": "stop_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "stop_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "set_eye_animation": 0.0,
+     "unclear": 0.0,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.0,
+     "stop_music": 1.0,
+     "dj_mode_off": 0.0,
+     "next_track": 0.0,
+     "play_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.35,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 209
+  },
+  "decided": "stop_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "stop the music please",
+  "expected": "stop_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "stop_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_off": 0.0,
+     "general_chat": 0.0,
+     "unclear": 0.0,
+     "play_music": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 0.0,
+     "dj_mode_on": 0.0,
+     "stop_music": 1.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.99,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.32,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 209
+  },
+  "decided": "stop_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "quiet please",
+  "expected": "stop_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "stop_music",
+    "confidence": 0.61,
+    "probabilities": {
+     "stop_music": 0.66,
+     "unclear": 0.17,
+     "play_music": 0.0,
+     "dj_mode_on": 0.0,
+     "next_track": 0.0,
+     "set_eye_animation": 0.0,
+     "general_chat": 0.08,
+     "dj_mode_off": 0.09
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.95,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.33,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.93,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1406,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": "cheap"
+ },
+ {
+  "utterance": "cut the music",
+  "expected": "stop_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "stop_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "next_track": 0.0,
+     "unclear": 0.0,
+     "dj_mode_off": 0.0,
+     "stop_music": 1.0,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.0,
+     "set_eye_animation": 0.0,
+     "play_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.15,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.39,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 209
+  },
+  "decided": "stop_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "skip this one",
+  "expected": "next_track",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "next_track",
+    "confidence": 1.0,
+    "probabilities": {
+     "stop_music": 0.0,
+     "play_music": 0.0,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.0,
+     "unclear": 0.0,
+     "dj_mode_off": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 1.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.24,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.93,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.09,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.95,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 209
+  },
+  "decided": "next_track",
+  "tier": "free"
+ },
+ {
+  "utterance": "next track",
+  "expected": "next_track",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "next_track",
+    "confidence": 1.0,
+    "probabilities": {
+     "play_music": 0.0,
+     "unclear": 0.0,
+     "general_chat": 0.0,
+     "dj_mode_off": 0.0,
+     "stop_music": 0.0,
+     "dj_mode_on": 0.0,
+     "next_track": 1.0,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.13,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1406,
+   "output_tokens": 209
+  },
+  "decided": "next_track",
+  "tier": "free"
+ },
+ {
+  "utterance": "skip this song i don't like it",
+  "expected": "next_track",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "next_track",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "play_music": 0.0,
+     "next_track": 1.0,
+     "unclear": 0.0,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0,
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.27,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1412,
+   "output_tokens": 209
+  },
+  "decided": "next_track",
+  "tier": "free"
+ },
+ {
+  "utterance": "DJ mode",
+  "expected": "dj_mode_on",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "dj_mode_on",
+    "confidence": 0.99,
+    "probabilities": {
+     "stop_music": 0.0,
+     "play_music": 0.0,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.99,
+     "unclear": 0.01,
+     "dj_mode_off": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.42,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.05,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.91,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1406,
+   "output_tokens": 210
+  },
+  "decided": "dj_mode_on",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "start DJ mode",
+  "expected": "dj_mode_on",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "dj_mode_on",
+    "confidence": 1.0,
+    "probabilities": {
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0,
+     "dj_mode_on": 1.0,
+     "stop_music": 0.0,
+     "next_track": 0.0,
+     "dj_mode_off": 0.0,
+     "unclear": 0.0,
+     "play_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.63,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.99,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 210
+  },
+  "decided": "dj_mode_on",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "rex do your dj thing",
+  "expected": "dj_mode_on",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "dj_mode_on",
+    "confidence": 0.85,
+    "probabilities": {
+     "set_eye_animation": 0.0,
+     "unclear": 0.02,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.87,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0,
+     "next_track": 0.0,
+     "play_music": 0.11
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.93,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 210
+  },
+  "decided": "dj_mode_on",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "turn off dj mode",
+  "expected": "dj_mode_off",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "dj_mode_off",
+    "confidence": 1.0,
+    "probabilities": {
+     "next_track": 0.0,
+     "unclear": 0.0,
+     "stop_music": 0.0,
+     "dj_mode_off": 1.0,
+     "general_chat": 0.0,
+     "dj_mode_on": 0.0,
+     "play_music": 0.0,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.31,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.99,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 210
+  },
+  "decided": "dj_mode_off",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "make your eyes blue",
+  "expected": "set_eye_animation",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "set_eye_animation",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "unclear": 0.0,
+     "play_music": 0.0,
+     "stop_music": 0.0,
+     "next_track": 0.0,
+     "dj_mode_off": 0.0,
+     "set_eye_animation": 1.0,
+     "general_chat": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 210
+  },
+  "decided": "set_eye_animation",
+  "tier": "free"
+ },
+ {
+  "utterance": "set your eyes to red",
+  "expected": "set_eye_animation",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "set_eye_animation",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "stop_music": 0.0,
+     "play_music": 0.0,
+     "unclear": 0.0,
+     "next_track": 0.0,
+     "dj_mode_off": 0.0,
+     "set_eye_animation": 1.0,
+     "general_chat": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.99,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 210
+  },
+  "decided": "set_eye_animation",
+  "tier": "free"
+ },
+ {
+  "utterance": "flash your eyes green",
+  "expected": "set_eye_animation",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "set_eye_animation",
+    "confidence": 1.0,
+    "probabilities": {
+     "general_chat": 0.0,
+     "set_eye_animation": 1.0,
+     "dj_mode_on": 0.0,
+     "stop_music": 0.0,
+     "next_track": 0.0,
+     "dj_mode_off": 0.0,
+     "unclear": 0.0,
+     "play_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.99,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 210
+  },
+  "decided": "set_eye_animation",
+  "tier": "free"
+ },
+ {
+  "utterance": "what's your favorite planet",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 1.0,
+    "probabilities": {
+     "play_music": 0.0,
+     "set_eye_animation": 0.0,
+     "dj_mode_on": 0.0,
+     "dj_mode_off": 0.0,
+     "next_track": 0.0,
+     "general_chat": 1.0,
+     "stop_music": 0.0,
+     "unclear": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "tell me a joke",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 1.0,
+    "probabilities": {
+     "unclear": 0.0,
+     "dj_mode_on": 0.0,
+     "general_chat": 1.0,
+     "stop_music": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 0.0,
+     "play_music": 0.0,
+     "dj_mode_off": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.55,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "did you turn the music down",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 0.32,
+    "probabilities": {
+     "stop_music": 0.31,
+     "unclear": 0.27,
+     "play_music": 0.01,
+     "dj_mode_on": 0.0,
+     "next_track": 0.0,
+     "set_eye_animation": 0.0,
+     "general_chat": 0.41000000000000003,
+     "dj_mode_off": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.32,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.08,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.24,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1410,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "rex can you turn the music off later when we leave",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 0.97,
+    "probabilities": {
+     "set_eye_animation": 0.0,
+     "unclear": 0.0,
+     "general_chat": 0.98,
+     "dj_mode_off": 0.0,
+     "stop_music": 0.02,
+     "dj_mode_on": 0.0,
+     "next_track": 0.0,
+     "play_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.16,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.95,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1415,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "i love this song",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 1.0,
+    "probabilities": {
+     "next_track": 0.0,
+     "general_chat": 1.0,
+     "stop_music": 0.0,
+     "set_eye_animation": 0.0,
+     "play_music": 0.0,
+     "dj_mode_off": 0.0,
+     "unclear": 0.0,
+     "dj_mode_on": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "hey rex",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "general_chat",
+    "confidence": 0.97,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "play_music": 0.0,
+     "next_track": 0.0,
+     "unclear": 0.03,
+     "stop_music": 0.0,
+     "dj_mode_off": 0.0,
+     "general_chat": 0.97,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.04,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1406,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "hey rex uh can you",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "unclear",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_on": 0.0,
+     "play_music": 0.0,
+     "next_track": 0.0,
+     "stop_music": 0.0,
+     "unclear": 1.0,
+     "dj_mode_off": 0.0,
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.19,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.08,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.09,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.12,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.08,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.06,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.49,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "[inaudible] the",
+  "expected": null,
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "unclear",
+    "confidence": 1.0,
+    "probabilities": {
+     "general_chat": 0.0,
+     "next_track": 0.0,
+     "stop_music": 0.0,
+     "set_eye_animation": 0.0,
+     "play_music": 0.0,
+     "dj_mode_off": 0.0,
+     "unclear": 1.0,
+     "dj_mode_on": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.25,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.21,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.19,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.19,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.14,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.14,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.19,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 209
+  },
+  "decided": null,
+  "tier": ""
+ },
+ {
+  "utterance": "hey rex play sum music",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "dj_mode_off": 0.0,
+     "general_chat": 0.0,
+     "unclear": 0.0,
+     "play_music": 1.0,
+     "set_eye_animation": 0.0,
+     "next_track": 0.0,
+     "dj_mode_on": 0.0,
+     "stop_music": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.1,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1409,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "stop da music",
+  "expected": "stop_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "stop_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "stop_music": 1.0,
+     "dj_mode_off": 0.0,
+     "dj_mode_on": 0.0,
+     "play_music": 0.0,
+     "next_track": 0.0,
+     "general_chat": 0.0,
+     "set_eye_animation": 0.0,
+     "unclear": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.06,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.39,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1407,
+   "output_tokens": 209
+  },
+  "decided": "stop_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "hey rex play some musci",
+  "expected": "play_music",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "play_music",
+    "confidence": 1.0,
+    "probabilities": {
+     "play_music": 1.0,
+     "dj_mode_off": 0.0,
+     "next_track": 0.0,
+     "general_chat": 0.0,
+     "stop_music": 0.0,
+     "unclear": 0.0,
+     "dj_mode_on": 0.0,
+     "set_eye_animation": 0.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.09,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.96,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1410,
+   "output_tokens": 209
+  },
+  "decided": "play_music",
+  "tier": "cheap"
+ },
+ {
+  "utterance": "next track pleae",
+  "expected": "next_track",
+  "answers": {
+   "intent": {
+    "type": "choice",
+    "noul": null,
+    "choice": "next_track",
+    "confidence": 1.0,
+    "probabilities": {
+     "general_chat": 0.0,
+     "unclear": 0.0,
+     "play_music": 0.0,
+     "dj_mode_off": 0.0,
+     "dj_mode_on": 0.0,
+     "stop_music": 0.0,
+     "set_eye_animation": 0.0,
+     "next_track": 1.0
+    }
+   },
+   "play_music": {
+    "type": "noul",
+    "noul": 0.18,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "stop_music": {
+    "type": "noul",
+    "noul": 0.03,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "next_track": {
+    "type": "noul",
+    "noul": 0.98,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_on": {
+    "type": "noul",
+    "noul": 0.05,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "dj_mode_off": {
+    "type": "noul",
+    "noul": 0.02,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "set_eye_animation": {
+    "type": "noul",
+    "noul": 0.01,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   },
+   "is_a_command": {
+    "type": "noul",
+    "noul": 0.97,
+    "choice": null,
+    "confidence": null,
+    "probabilities": {}
+   }
+  },
+  "usage": {
+   "input_tokens": 1408,
+   "output_tokens": 209
+  },
+  "decided": "next_track",
+  "tier": "free"
+ }
+]
