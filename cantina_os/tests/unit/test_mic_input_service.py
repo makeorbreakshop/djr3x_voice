@@ -107,10 +107,12 @@ async def test_audio_event_emission(event_bus, test_config):
             # Verify event was emitted
             assert len(received_events) > 0
             event = received_events[0]
-            # Access fields directly from the Pydantic model
-            assert hasattr(event, 'samples')
-            assert hasattr(event, 'sample_rate')
-            assert event.sample_rate == test_config["AUDIO_SAMPLE_RATE"]
+            # NOTE: production's _process_audio_chunk (mic_input_service.py ~line 259) emits a
+            # plain dict for AUDIO_RAW_CHUNK, not a Pydantic model, so fields are looked up by
+            # key rather than attribute.
+            assert 'samples' in event
+            assert 'sample_rate' in event
+            assert event['sample_rate'] == test_config["AUDIO_SAMPLE_RATE"]
             
         finally:
             # Ensure cleanup happens even if assertions fail

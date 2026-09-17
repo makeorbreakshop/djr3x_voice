@@ -156,7 +156,10 @@ class TestClaudeServiceLifecycle:
         """Create test configuration."""
         return {
             "ANTHROPIC_API_KEY": "test-key-123",
-            "MODEL": "claude-3-5-sonnet-20241022",
+            # NOTE: production's _load_config reads the model override from the
+            # "CLAUDE_MODEL" key (claude_service.py ~line 213), not "MODEL". "MODEL" is only
+            # the derived/output key in self._config.
+            "CLAUDE_MODEL": "claude-3-5-sonnet-20241022",
             "MAX_TOKENS": 4000,
             "MAX_MESSAGES": 20,
             "TEMPERATURE": 0.7,
@@ -196,8 +199,12 @@ class TestClaudeServiceLifecycle:
 
         service = ClaudeService(mock_event_bus, config)
 
-        # Should have default persona
-        assert "DJ R3X" in service._config["SYSTEM_PROMPT"]
+        # NOTE: _load_config's fallback path list (claude_service.py ~line 178) includes the
+        # relative "dj_r3x-persona.txt", which resolves and succeeds when tests run from the
+        # cantina_os/ directory (per this repo's test-running convention). So this exercises
+        # that fallback finding the real persona file, not the final hardcoded default string.
+        # The real persona spells the name "DJ R-3X" (with a hyphen).
+        assert "DJ R-3X" in service._config["SYSTEM_PROMPT"]
         assert len(service._config["SYSTEM_PROMPT"]) > 0
 
     @pytest.mark.asyncio
@@ -213,8 +220,12 @@ class TestClaudeServiceLifecycle:
             # to mock the subscription setup first to avoid asyncio issues
             await service._initialize()
 
-            # Verify Anthropic client was created
-            mock_anthropic.assert_called_once_with(api_key="test-key-123")
+            # Verify Anthropic client was created. Production now also passes
+            # default_headers to enable prompt caching (claude_service.py ~line 232).
+            mock_anthropic.assert_called_once_with(
+                api_key="test-key-123",
+                default_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+            )
             assert service._client is not None
 
     @pytest.mark.asyncio
@@ -267,8 +278,10 @@ class TestClaudeServiceSubscriptions:
         # Simply verify service loads with proper configuration
         # The actual subscription happens in async tasks which are tested
         # through integration testing
+        # NOTE: config here doesn't set ENABLE_INTERIM_STREAMING, and production now defaults
+        # it to False (disabled, to save API calls - claude_service.py ~line 219).
         assert service._config["ANTHROPIC_API_KEY"] == "test-key"
-        assert service._config["ENABLE_INTERIM_STREAMING"] == True
+        assert service._config["ENABLE_INTERIM_STREAMING"] == False
 
     @pytest.mark.asyncio
     async def test_respects_interim_streaming_config(self, mock_event_bus):
@@ -534,7 +547,9 @@ class TestClaudeServiceIntegration:
 
         config = {
             "ANTHROPIC_API_KEY": "sk-ant-v1-test",
-            "MODEL": "claude-3-5-sonnet-20241022",
+            # NOTE: see TestClaudeServiceLifecycle.mock_config - the override key is
+            # "CLAUDE_MODEL", not "MODEL" (claude_service.py ~line 213).
+            "CLAUDE_MODEL": "claude-3-5-sonnet-20241022",
             "MAX_TOKENS": 4000,
             "TEMPERATURE": 0.7,
             "STREAMING": True,

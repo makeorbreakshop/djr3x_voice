@@ -75,14 +75,14 @@ class TestEyeLightControllerAmplitude:
     @pytest.fixture
     def eye_service(self, mock_event_bus):
         """Create EyeLightControllerService with mocks."""
-        config = {
-            "mock_mode": True,  # Don't try to connect to hardware
-            "serial_port": None,
-            "baud_rate": 115200
-        }
+        # NOTE: EyeLightControllerService.__init__ takes explicit keyword
+        # arguments (mock_mode, serial_port, baud_rate, ...), not a `config`
+        # dict. See cantina_os/services/eye_light_controller_service.py:192.
         service = EyeLightControllerService(
             event_bus=mock_event_bus,
-            config=config
+            mock_mode=True,  # Don't try to connect to hardware
+            serial_port=None,
+            baud_rate=115200,
         )
         return service
 
@@ -155,6 +155,10 @@ class TestEyeLightControllerAmplitude:
         eye_service._target_pattern = EyePattern.SPEAKING
         eye_service._amplitude_modulation = 0.7
 
+        # _handle_speech_ended only acts while in INTERACTIVE mode (see
+        # eye_light_controller_service.py:938-966 / _is_in_interactive_mode).
+        eye_service._current_system_mode = "INTERACTIVE"
+
         # Simulate speech ended
         await eye_service._handle_speech_ended({})
 
@@ -176,18 +180,17 @@ class TestControlLoopAmplitudeApplication:
     @pytest.fixture
     def eye_service(self, mock_event_bus):
         """Create EyeLightControllerService with mocks."""
-        config = {
-            "mock_mode": True,
-            "serial_port": None,
-            "baud_rate": 115200
-        }
         service = EyeLightControllerService(
             event_bus=mock_event_bus,
-            config=config
+            mock_mode=True,
+            serial_port=None,
+            baud_rate=115200,
         )
         # Mock adapter for testing
         service.adapter = Mock()
         service.adapter.set_brightness = AsyncMock()
+        service.adapter.set_color = AsyncMock()
+        service.adapter.set_pattern = AsyncMock()
         service.connected = True
         service.mock_mode = False
         return service
@@ -206,8 +209,10 @@ class TestControlLoopAmplitudeApplication:
 
         # Calculate expected brightness
         # modulation_factor = 1.0 + (0.5 * 0.3) = 1.15
-        # final_brightness = 100 * 1.15 = 115
-        expected_brightness = 115
+        # final_brightness = int(100 * 1.15) = 114 due to float truncation
+        # (eye_light_controller_service.py: final_brightness = int(...)),
+        # since 0.5 * 0.3 == 0.15000000000000002 in binary floating point.
+        expected_brightness = 114
 
         # Check that brightness command was sent
         assert eye_service.adapter.set_brightness.called

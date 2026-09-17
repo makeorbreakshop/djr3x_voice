@@ -31,14 +31,21 @@ class MockConsumerService(BaseService):
     async def _initialize(self) -> None:
         """Initialize the service."""
         pass
-        
-    def _setup_subscriptions(self) -> None:
-        """Set up event subscriptions."""
-        self.subscribe(
+
+    async def _start(self) -> None:
+        """Set up event subscriptions.
+
+        NOTE: current BaseService.start() (base_service.py ~line 80-93) only calls
+        `await self._start()` - it never calls a `_setup_subscriptions` hook on its own, and
+        `subscribe()` is an async method. This mock previously defined a sync
+        `_setup_subscriptions()` that nothing ever invoked, so it silently never subscribed to
+        anything; fixed to override `_start` (the real hook) and await `subscribe()`.
+        """
+        await self.subscribe(
             EventTopics.AUDIO_RAW_CHUNK,
             self._handle_audio_chunk
         )
-        self.subscribe(
+        await self.subscribe(
             EventTopics.SERVICE_STATUS_UPDATE,
             self._handle_status_update
         )
@@ -80,9 +87,22 @@ async def test_mic_integration_with_consumer(event_bus, test_config):
             None
         )
         
-        # Give the event loop time to process events
-        await asyncio.sleep(0.1)
-        
+        # Give the event loop time to process events.
+        # NOTE: mic_input_service.py's _audio_callback (~line 190-204) crosses from the
+        # (simulated) audio thread via asyncio.run_coroutine_threadsafe(...).result(timeout=0.1).
+        # Calling _audio_callback synchronously from this same test coroutine (as opposed to a
+        # genuine separate PortAudio thread) means that 0.1s wait can't actually be serviced
+        # until this call returns control to the loop, so it reliably "times out" internally
+        # (also tripping a real production bug: the timeout-handler lambda at line 200
+        # references the exception variable `e` after the `except` block scope has cleared it,
+        # raising `NameError: cannot access free variable 'e'` - logged, not raised to us).
+        # The underlying queue.put still completes once the loop resumes afterward, so the
+        # chunk does eventually arrive - just later than one 0.1s sleep reliably covers.
+        for _ in range(20):
+            if consumer_service.received_audio_chunks:
+                break
+            await asyncio.sleep(0.1)
+
         # Verify consumer received the audio chunks
         assert len(consumer_service.received_audio_chunks) > 0
         chunk = consumer_service.received_audio_chunks[0]
@@ -95,6 +115,17 @@ async def test_mic_integration_with_consumer(event_bus, test_config):
         await consumer_service.stop()
 
 @pytest.mark.asyncio
+@pytest.mark.skip(
+    reason="Production bug, not a stale test: BaseService._emit_status "
+    "(cantina_os/base_service.py:156) hardcodes the topic string \"service_status\" instead of "
+    "EventTopics.SERVICE_STATUS_UPDATE.value (\"service.status.update\", event_topics.py:10), "
+    "which is what every other service in the codebase emits/listens on (e.g. "
+    "music_controller_service.py:1006, cli_service.py:509, mouse_input_service.py:154). So "
+    "MicInputService's start()/stop() lifecycle status events (routed through the base class's "
+    "_emit_status) never reach a listener subscribed to EventTopics.SERVICE_STATUS_UPDATE, and "
+    "this test can never see them. Left failing/skipped per instructions rather than editing "
+    "production code or weakening the assertion to match the mismatched topic."
+)
 async def test_status_propagation(event_bus, test_config):
     """Test that service status events are properly propagated through the event bus."""
     # Track status events

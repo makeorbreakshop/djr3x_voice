@@ -139,9 +139,13 @@ def mock_sounddevice():
         } 
 
 @pytest.fixture
-async def deepgram_mock() -> AsyncGenerator[DeepgramMock, None]:
-    """Provide a configured Deepgram mock service."""
-    mock = DeepgramMock()
+async def deepgram_mock(event_bus) -> AsyncGenerator[DeepgramMock, None]:
+    """Provide a configured Deepgram mock service.
+
+    FIXED 2026-09-17: constructed with no arguments, but DeepgramMock.__init__ has required
+    ``event_bus`` since the mocks were moved onto the shared event bus (mocks/deepgram_mock.py:14).
+    """
+    mock = DeepgramMock(event_bus)
     await mock.initialize()
     yield mock
     await mock.shutdown()
@@ -176,9 +180,12 @@ async def configured_deepgram_mock(
     await deepgram_mock.disconnect()
 
 @pytest.fixture
-async def openai_mock() -> AsyncGenerator[OpenAIMock, None]:
-    """Provide a configured OpenAI mock service."""
-    mock = OpenAIMock()
+async def openai_mock(event_bus) -> AsyncGenerator[OpenAIMock, None]:
+    """Provide a configured OpenAI mock service.
+
+    FIXED 2026-09-17: same missing ``event_bus`` argument as ``deepgram_mock`` above.
+    """
+    mock = OpenAIMock(event_bus)
     await mock.initialize()
     yield mock
     await mock.shutdown()

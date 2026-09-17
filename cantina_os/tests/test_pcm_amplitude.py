@@ -105,11 +105,13 @@ class TestPCMAmplitudeCalculation:
 
     def test_normalization_clamping(self):
         """Test that normalization properly clamps values above 1.0."""
-        # Create samples that exceed expected range (clipping)
-        samples = np.full(1000, 32767, dtype=np.int16)
-
-        # Calculate RMS
-        rms = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
+        # NOTE: int16 PCM samples are capped at 32767 (max positive int16), so an RMS computed
+        # from real int16 data can never exceed 32768 and this test's own clamp branch was
+        # unreachable (rms/32768.0 tops out at ~0.99997, never 1.0). This isn't a case of
+        # production drift - the assertion's premise was mathematically impossible. Simulate an
+        # out-of-range RMS directly (e.g. from a differently-scaled source) to actually exercise
+        # the min(1.0, ...) clamp.
+        rms = 40000.0
         normalized = min(1.0, rms / 32768.0)
 
         # Should be clamped to 1.0

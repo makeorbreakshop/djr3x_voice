@@ -1,5 +1,30 @@
 """Performance tests for the voice processing pipeline."""
 import pytest
+
+pytest.skip(
+    "Every test in this module depends (via the pipeline_test/configured_elevenlabs_mock "
+    "fixtures in tests/conftest.py) on tests/mocks/elevenlabs_mock.py, which is broken: "
+    "ElevenLabsMock.initialize()/_handle_synthesis_request/text_to_speech "
+    "(elevenlabs_mock.py:40, 59, 70, 79) call `await self.event_bus.on(...)` and "
+    "`await self.event_bus.emit(...)`, but the real event bus is a pyee "
+    "AsyncIOEventEmitter whose on()/emit() are synchronous (see base_service.py:247, "
+    "269 for the same non-awaited pattern in production code) -- awaiting them raises "
+    "`TypeError: object method can't be used in 'await' expression` at fixture setup, "
+    "before any test body runs. tests/mocks/ is outside this batch's scope (only "
+    "tests/services/test_tool_executor_service.py, tests/test_music_controller_service.py, "
+    "tests/integration/test_resource_cleanup.py, tests/performance/test_voice_pipeline.py, "
+    "and tests/integration/test_audio_pipeline.py), so it was not modified here -- please "
+    "route this fix to whoever owns tests/mocks/. Separately, per this batch's own no-real-"
+    "network/no-real-hardware rule: these tests are fully synthetic (DeepgramMock/OpenAIMock/"
+    "ElevenLabsMock all simulate latency with asyncio.sleep, no real API or audio device "
+    "involved), so once the mock bug above is fixed, they exercise only the mocks' own "
+    "canned timings rather than real production latency and should be reassessed for "
+    "whether their asserted budgets (e.g. <3000ms/<1000ms) mean anything, rather than being "
+    "re-enabled as-is. GPTService is not implicated: these tests use the standalone "
+    "OpenAIMock, not the real (dead) GPTService.",
+    allow_module_level=True,
+)
+
 import asyncio
 from typing import Dict, Any
 from .metrics import PerformanceMetrics

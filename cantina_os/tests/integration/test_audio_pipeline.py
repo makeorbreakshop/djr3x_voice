@@ -1,7 +1,32 @@
 """Integration tests for the audio pipeline."""
+import pytest
+
+pytest.skip(
+    "The audio_services fixture (used by every test in this module) cannot run "
+    "against current production code for several independent reasons: "
+    "(1) `ElevenLabsService(event_bus)` (elevenlabs_service.py:88-114) now requires "
+    "a config dict containing ELEVENLABS_API_KEY -- a bare event_bus arg raises "
+    "ValueError immediately; "
+    "(2) `MicInputService._start()` -> `_initialize()` (mic_input_service.py:98-127) "
+    "calls `sd.query_devices()` and opens a real `sd.InputStream` against actual "
+    "audio hardware, which this machine/CI does not have -- per this batch's own "
+    "rule, a test needing a real audio device must be skipped, not faked; "
+    "(3) `from cantina_os.tests.mocks.elevenlabs_mock import ElevenLabsMock` "
+    "resolves to a dead, orphaned copy under cantina_os/cantina_os/tests/mocks/ "
+    "(a leftover duplicate of the real tests/mocks/ directory, nested inside the "
+    "installed cantina_os package) -- editing it is out of bounds under this "
+    "batch's 'do not edit production code under cantina_os/cantina_os/' rule, and "
+    "the currently-maintained tests/mocks/elevenlabs_mock.py that the rest of the "
+    "suite uses has its own pre-existing bug (see test_voice_pipeline.py's skip "
+    "reason: it awaits pyee's synchronous event_bus.on()/emit()), so switching the "
+    "import would not make this file runnable anyway. Fixing this file requires "
+    "sorting out the ElevenLabsMock duplication and the MicInputService hardware "
+    "dependency (e.g. mocking sounddevice) first, which is out of this batch's scope.",
+    allow_module_level=True,
+)
+
 from typing import Dict, Any, List
 import asyncio
-import pytest
 import numpy as np
 import logging
 

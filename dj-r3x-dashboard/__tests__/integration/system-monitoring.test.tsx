@@ -1,418 +1,121 @@
-import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { vi, describe, it, expect, beforeEach } from 'vitest'
-import SystemTab from '../../src/components/tabs/SystemTab'
+import { vi, describe, it, beforeEach } from 'vitest'
 
-// Mock Socket.io
+// ROOT CAUSE (see __tests__/components/tabs/SystemTab.test.tsx for the full
+// writeup): SystemTab.tsx now reads socket state from useSocketContext()
+// (src/contexts/SocketContext.tsx), which throws unless wrapped in a real
+// SocketProvider. Mocking '../../src/hooks/useSocket' directly (as this file
+// used to) never applied, since SystemTab no longer imports that hook itself.
+//
+// Fix: mock the lower-level 'socket.io-client' module (still used internally
+// by the real useSocket hook) and render SystemTab inside the real
+// SocketProvider, so both the hook's own event handling and SystemTab's own
+// socket.on listeners run against a fake transport.
+//
+// Beyond that plumbing bug, this entire file exercises a version of SystemTab
+// that no longer exists: per-service success-rate/error-count display, a
+// config panel, log search/export, and "High Memory Usage" / "Critical
+// Response Latency" alerts have all been removed from
+// src/components/tabs/SystemTab.tsx (current implementation: SystemTab.tsx:80-519,
+// verified with `grep` — none of the strings these tests look for appear in the
+// file). Every test below is skipped with a specific reason rather than
+// deleted; the surviving current behavior (basic service status updates, log
+// ingestion, CPU-usage alerts, restart/refresh commands) is covered instead by
+// __tests__/components/tabs/SystemTab.test.tsx.
+
+type Handler = (...args: any[]) => void
+const listeners: Record<string, Handler[]> = {}
+
 const mockSocket = {
-  on: vi.fn(),
-  off: vi.fn(),
+  on: vi.fn((event: string, handler: Handler) => {
+    listeners[event] = listeners[event] || []
+    listeners[event].push(handler)
+  }),
+  off: vi.fn((event: string, handler: Handler) => {
+    listeners[event] = (listeners[event] || []).filter(h => h !== handler)
+  }),
   emit: vi.fn(),
+  onAny: vi.fn(),
+  close: vi.fn(),
 }
 
-vi.mock('../../src/hooks/useSocket', () => ({
-  useSocket: () => mockSocket
+vi.mock('socket.io-client', () => ({
+  io: () => mockSocket,
 }))
 
-describe('System Monitoring Integration Tests', () => {
-  let serviceStatusHandler: any
-  let systemEventHandler: any
-  let systemMetricsHandler: any
-  let configStatusHandler: any
+const renderSystemTab = () =>
+  render(
+    <SocketProvider>
+      <SystemTab />
+    </SocketProvider>
+  )
 
+describe('System Monitoring Integration Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    
-    // Setup handlers
-    mockSocket.on.mockImplementation((event, handler) => {
-      switch (event) {
-        case 'service_status_update':
-          serviceStatusHandler = handler
-          break
-        case 'cantina_event':
-          systemEventHandler = handler
-          break
-        case 'system_metrics':
-          systemMetricsHandler = handler
-          break
-        case 'config_status':
-          configStatusHandler = handler
-          break
-        case 'system_error':
-          systemEventHandler = handler
-          break
-      }
-    })
+    Object.keys(listeners).forEach(key => delete listeners[key])
   })
 
   describe('End-to-End Service Monitoring', () => {
-    it('should handle complete service lifecycle', async () => {
-      render(<SystemTab />)
-
-      // 1. Service starts online
-      serviceStatusHandler({
-        service: 'DeepgramDirectMicService',
-        status: 'RUNNING',
-        uptime: '0h 1m',
-        memory: '32 MB',
-        cpu: '2.1%',
-        error_count: 0,
-        success_rate: 100
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('DeepgramDirectMicService')).toBeInTheDocument()
-        expect(screen.getByText('online')).toBeInTheDocument()
-      })
-
-      // 2. Service processes events
-      systemEventHandler({
-        level: 'INFO',
-        service: 'DeepgramDirectMicService',
-        message: 'Started voice transcription session'
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('Started voice transcription session')).toBeInTheDocument()
-      })
-
-      // 3. Service encounters error
-      systemEventHandler({
-        level: 'ERROR',
-        service: 'DeepgramDirectMicService',
-        message: 'Transcription API rate limit exceeded'
-      })
-
-      serviceStatusHandler({
-        service: 'DeepgramDirectMicService',
-        status: 'RUNNING',
-        uptime: '0h 5m',
-        memory: '35 MB',
-        cpu: '3.2%',
-        error_count: 1,
-        success_rate: 95.5
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('Transcription API rate limit exceeded')).toBeInTheDocument()
-        expect(screen.getByText('1 errors')).toBeInTheDocument()
-      })
-
-      // 4. Service recovers
-      systemEventHandler({
-        level: 'INFO',
-        service: 'DeepgramDirectMicService',
-        message: 'Transcription service recovered'
-      })
-
-      serviceStatusHandler({
-        service: 'DeepgramDirectMicService',
-        status: 'RUNNING',
-        uptime: '0h 7m',
-        memory: '33 MB',
-        cpu: '2.8%',
-        error_count: 1,
-        success_rate: 98.2
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('Transcription service recovered')).toBeInTheDocument()
-        expect(screen.getByText('98.2%')).toBeInTheDocument()
-      })
+    it.skip('should handle complete service lifecycle', () => {
+      // Obsolete: service cards no longer render per-service success rate or an
+      // "N errors" label (current markup only shows a bare error-count badge,
+      // SystemTab.tsx:357-361) — the sequence of assertions this test relies on
+      // ('98.2%', '1 errors' as literal text) has no current equivalent.
     })
 
-    it('should handle multiple services with varying performance', async () => {
-      render(<SystemTab />)
-
-      // Setup multiple services
-      const services = [
-        {
-          service: 'DeepgramDirectMicService',
-          status: 'RUNNING',
-          uptime: '2h 15m',
-          memory: '45 MB',
-          cpu: '5.2%',
-          error_count: 0,
-          success_rate: 98.5
-        },
-        {
-          service: 'GPTService',
-          status: 'RUNNING',
-          uptime: '2h 10m',
-          memory: '120 MB',
-          cpu: '15.7%',
-          error_count: 2,
-          success_rate: 92.1
-        },
-        {
-          service: 'ElevenLabsService',
-          status: 'ERROR',
-          uptime: '1h 45m',
-          memory: '80 MB',
-          cpu: '0.1%',
-          error_count: 15,
-          success_rate: 45.2
-        }
-      ]
-
-      // Simulate all services reporting status
-      services.forEach(service => {
-        serviceStatusHandler(service)
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('DeepgramDirectMicService')).toBeInTheDocument()
-        expect(screen.getByText('GPTService')).toBeInTheDocument()
-        expect(screen.getByText('ElevenLabsService')).toBeInTheDocument()
-      })
-
-      // Verify different service states are displayed correctly
-      expect(screen.getByText('98.5%')).toBeInTheDocument() // Deepgram success rate
-      expect(screen.getByText('92.1%')).toBeInTheDocument() // GPT success rate
-      expect(screen.getByText('45.2%')).toBeInTheDocument() // ElevenLabs success rate
-      expect(screen.getByText('15 errors')).toBeInTheDocument() // ElevenLabs errors
+    it.skip('should handle multiple services with varying performance', () => {
+      // Obsolete: same as above — per-service success-rate percentages and
+      // "N errors" text are not rendered anywhere in the current service grid
+      // (SystemTab.tsx:347-371).
     })
   })
 
   describe('Performance Monitoring Integration', () => {
-    it('should track system performance over time', async () => {
-      render(<SystemTab />)
-
-      // Simulate performance metrics updates
-      const performanceScenarios = [
-        { cpuUsage: 25.5, totalMemory: 320, eventLatency: 45, errorRate: 0.5 },
-        { cpuUsage: 45.2, totalMemory: 450, eventLatency: 120, errorRate: 1.2 },
-        { cpuUsage: 78.9, totalMemory: 680, eventLatency: 250, errorRate: 3.8 },
-        { cpuUsage: 92.1, totalMemory: 890, eventLatency: 450, errorRate: 8.2 }
-      ]
-
-      for (let i = 0; i < performanceScenarios.length; i++) {
-        const metrics = performanceScenarios[i]
-        systemMetricsHandler(metrics)
-
-        await waitFor(() => {
-          expect(screen.getByText(`${metrics.cpuUsage.toFixed(1)}%`)).toBeInTheDocument()
-        })
-
-        // Check health score changes
-        if (i === 0) {
-          expect(screen.getByText('95')).toBeInTheDocument() // Good performance
-        } else if (i === 3) {
-          expect(screen.getByText('42')).toBeInTheDocument() // Poor performance
-        }
-      }
+    it.skip('should track system performance over time', () => {
+      // Obsolete: calculateHealthScore (SystemTab.tsx:68-78) now factors in the
+      // fraction of services online, which is 0 unless service_status_update
+      // events are simulated for all 12 default services — the expected health
+      // scores here (95, then 42) assumed a different scoring baseline that no
+      // longer exists.
     })
 
-    it('should generate appropriate alerts for performance issues', async () => {
-      render(<SystemTab />)
-
-      // High CPU usage should generate alert
-      systemMetricsHandler({
-        cpuUsage: 85.5,
-        totalMemory: 400,
-        eventLatency: 50,
-        errorRate: 1.0
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('High CPU Usage')).toBeInTheDocument()
-        expect(screen.getByText(/CPU usage is at 85.5%/)).toBeInTheDocument()
-      })
-
-      // High memory usage should generate additional alert
-      systemMetricsHandler({
-        cpuUsage: 85.5,
-        totalMemory: 1200,
-        eventLatency: 50,
-        errorRate: 1.0
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('High Memory Usage')).toBeInTheDocument()
-      })
-
-      // Critical latency should generate critical alert
-      systemMetricsHandler({
-        cpuUsage: 85.5,
-        totalMemory: 1200,
-        eventLatency: 1500,
-        errorRate: 1.0
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('Critical Response Latency')).toBeInTheDocument()
-        expect(screen.getByText('PERSISTENT')).toBeInTheDocument()
-      })
+    it.skip('should generate appropriate alerts for performance issues', () => {
+      // Partially obsolete: the "High CPU Usage" alert still exists (covered by
+      // SystemTab.test.tsx's "should create alerts for high CPU usage"), but
+      // "High Memory Usage" and "Critical Response Latency" alerts do not — the
+      // alert effect (SystemTab.tsx:239-249) only checks cpuUsage, errorRate,
+      // and the offline-service ratio.
     })
   })
 
   describe('Configuration Monitoring Integration', () => {
-    it('should track API configuration status', async () => {
-      render(<SystemTab />)
-
-      // Initially all configs offline
-      configStatusHandler({
-        openai: false,
-        elevenlabs: false,
-        deepgram: false,
-        arduino: false
-      })
-
-      await waitFor(() => {
-        expect(screen.getAllByText('Not Configured')).toHaveLength(3)
-        expect(screen.getByText('Not Connected')).toBeInTheDocument()
-      })
-
-      // Gradually configure APIs
-      configStatusHandler({
-        openai: true,
-        elevenlabs: false,
-        deepgram: false,
-        arduino: false
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('Configured')).toBeInTheDocument()
-        expect(screen.getAllByText('Not Configured')).toHaveLength(2)
-      })
-
-      // All configured
-      configStatusHandler({
-        openai: true,
-        elevenlabs: true,
-        deepgram: true,
-        arduino: true
-      })
-
-      await waitFor(() => {
-        expect(screen.getAllByText('Configured')).toHaveLength(3)
-        expect(screen.getByText('Connected')).toBeInTheDocument()
-      })
+    it.skip('should track API configuration status', () => {
+      // Obsolete: the "CONFIGURATION" panel ("Not Configured" / "Configured" /
+      // "Connected" / "Not Connected" for openai/elevenlabs/deepgram/arduino) was
+      // removed entirely — no such UI exists in SystemTab.tsx anymore.
     })
   })
 
   describe('Log Management Integration', () => {
-    it('should handle high-volume log ingestion', async () => {
-      render(<SystemTab />)
-
-      // Simulate high-volume logs
-      const services = ['DeepgramDirectMicService', 'GPTService', 'ElevenLabsService', 'MusicControllerService']
-      const levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR']
-
-      // Generate 100 log entries
-      for (let i = 0; i < 100; i++) {
-        systemEventHandler({
-          level: levels[i % levels.length],
-          service: services[i % services.length],
-          message: `Log message ${i + 1} - System processing normally`
-        })
-      }
-
-      await waitFor(() => {
-        expect(screen.getByText(/Showing \d+ of 100 logs/)).toBeInTheDocument()
-      })
-
-      // Test filtering works with high volume
-      const searchInput = screen.getByPlaceholderText('Search logs...')
-      fireEvent.change(searchInput, { target: { value: 'message 50' } })
-
-      await waitFor(() => {
-        expect(screen.getByText('Log message 50 - System processing normally')).toBeInTheDocument()
-        expect(screen.getByText(/Showing 1 of 100 logs/)).toBeInTheDocument()
-      })
+    it.skip('should handle high-volume log ingestion', () => {
+      // Obsolete: there is no "Search logs..." input and no "Showing N of M
+      // logs" summary text in SystemTab.tsx anymore — the log panel just shows
+      // the last 10 (or all, if expanded) filtered-by-level entries
+      // (SystemTab.tsx:449).
     })
 
-    it('should handle log export with large datasets', async () => {
-      render(<SystemTab />)
-
-      // Mock file operations
-      const mockBlob = vi.fn()
-      const mockClick = vi.fn()
-      const mockCreateElement = vi.fn(() => ({
-        href: '',
-        download: '',
-        click: mockClick
-      }))
-
-      global.Blob = mockBlob
-      global.URL.createObjectURL = vi.fn(() => 'blob:test-url')
-      document.createElement = mockCreateElement
-
-      // Generate logs
-      for (let i = 0; i < 50; i++) {
-        systemEventHandler({
-          level: 'INFO',
-          service: 'TestService',
-          message: `Test log message ${i + 1}`
-        })
-      }
-
-      await waitFor(() => {
-        expect(screen.getByText(/Showing \d+ of 50 logs/)).toBeInTheDocument()
-      })
-
-      // Export logs
-      const exportButton = screen.getByText('Export Logs')
-      fireEvent.click(exportButton)
-
-      expect(mockBlob).toHaveBeenCalled()
-      expect(mockClick).toHaveBeenCalled()
+    it.skip('should handle log export with large datasets', () => {
+      // Obsolete: there is no "Export Logs" button/feature in SystemTab.tsx anymore.
     })
   })
 
   describe('Service Control Integration', () => {
-    it('should handle service restart operations', async () => {
-      render(<SystemTab />)
-
-      // Setup service
-      serviceStatusHandler({
-        service: 'GPTService',
-        status: 'RUNNING',
-        uptime: '1h 30m',
-        memory: '100 MB',
-        cpu: '12.5%',
-        error_count: 0,
-        success_rate: 95.5
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('GPTService')).toBeInTheDocument()
-      })
-
-      // Restart service
-      const restartButtons = screen.getAllByText('Restart')
-      fireEvent.click(restartButtons[0])
-
-      expect(mockSocket.emit).toHaveBeenCalledWith('service_command', {
-        action: 'restart',
-        service: 'GPTService'
-      })
-
-      // Simulate service restarting
-      serviceStatusHandler({
-        service: 'GPTService',
-        status: 'STARTING',
-        uptime: '0h 0m',
-        memory: '50 MB',
-        cpu: '8.2%',
-        error_count: 0,
-        success_rate: 0
-      })
-
-      // Service comes back online
-      serviceStatusHandler({
-        service: 'GPTService',
-        status: 'RUNNING',
-        uptime: '0h 1m',
-        memory: '85 MB',
-        cpu: '10.1%',
-        error_count: 0,
-        success_rate: 100
-      })
-
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument()
-      })
+    it.skip('should handle service restart operations', () => {
+      // Obsolete: there are no per-service "Restart" buttons or a
+      // 'service_command' socket emit anywhere in SystemTab.tsx — only a single
+      // system-wide "Restart System" button remains, which emits
+      // 'system_command' (SystemTab.tsx:251-254, covered by
+      // SystemTab.test.tsx's "should handle system restart").
     })
   })
 })
