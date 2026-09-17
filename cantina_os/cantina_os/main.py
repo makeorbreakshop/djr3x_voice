@@ -58,6 +58,7 @@ from .services.latency_tracker_service import LatencyTrackerService
 
 # Import the CLI formatter for enhanced output (using minimal version)
 from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
+from .core.console_logging import build_console_handler, default_console_level
 
 # Initial logging setup
 # logging.basicConfig(
@@ -85,20 +86,17 @@ root_logger.setLevel(logging.DEBUG) # Set root logger level to DEBUG to capture 
 # This must happen early so child loggers inherit the correct level
 logging.getLogger("cantina_os").setLevel(logging.DEBUG)
 
-# Create a handler to write logs to the console (this will run in a separate thread)
-console_handler = logging.StreamHandler(sys.stdout)
-
-# Use the minimal CLI formatter for console output if available
-try:
-    minimal_formatter = setup_minimal_logging_formatter()
-    console_handler.setFormatter(minimal_formatter)
-except Exception as e:
-    # Fallback to standard formatter if custom formatter fails
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    print(f"Warning: Could not set up minimal formatter: {e}")
-
-console_handler.setLevel(logging.INFO) # Set console handler level (e.g., INFO)
+# Create a handler to write logs to the console (this will run in a separate thread).
+#
+# BlockingSafeStreamHandler, not logging.StreamHandler: CLIService puts stdin into
+# non-blocking mode and stdout shares that file description on a tty, so a full terminal
+# buffer raises BlockingIOError and a plain StreamHandler discards the line. See
+# core/console_logging.py.
+#
+# The level is WARNING when interactive so the `DJ-R3X>` prompt is not buried under the
+# hundreds of INFO lines a turn produces. LOG_LEVEL still overrides it, and the file handler
+# below stays at DEBUG, so nothing is lost from the diagnostics.
+console_handler = build_console_handler()
 
 # Create a file handler to write logs to a file (DEBUG level to capture everything)
 # Log file is in the project root with timestamp to keep history
@@ -133,8 +131,10 @@ def set_global_log_level(level: int) -> None:
     console_handler.setLevel(level)
     logging.info(f"Console log level set to: {logging.getLevelName(level)}")
 
-# Initial level setting using the new function
-set_global_log_level(logging.INFO)
+# Initial level setting using the new function. build_console_handler already applied this
+# level; calling it explicitly keeps the "Console log level set to: ..." line in the log,
+# which is how you confirm what the console is actually showing.
+set_global_log_level(default_console_level())
 
 # Suppress verbose third-party library logging
 # These libraries log too much at DEBUG level and can cause BlockingIOError
