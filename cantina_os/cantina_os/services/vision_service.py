@@ -29,6 +29,7 @@ except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
 
 from cantina_os.base_service import BaseService
+from cantina_os.llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     VisionScenePayload,
@@ -71,16 +72,20 @@ class VisionService(BaseService):
 
         self.camera_index = self._find_best_camera(preferred_index)
 
-        # Claude configuration
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            self.logger.error("ANTHROPIC_API_KEY not found in environment")
-            self.vision_client = None
-        else:
-            self.vision_client = Anthropic(api_key=api_key)
-
+        # Claude configuration. Direct Anthropic when its key exists, otherwise
+        # OpenRouter's Anthropic-compatible endpoint (see llm/anthropic_provider.py).
         # Model to use (Haiku 4.5 is fast and cheap for vision)
         self.model = "claude-haiku-4-5-20251001"
+        provider = resolve_provider(self.config)
+        if provider is None:
+            self.logger.error(
+                "Neither ANTHROPIC_API_KEY nor OPENROUTER_API_KEY found in environment"
+            )
+            self.vision_client = None
+        else:
+            self.vision_client = Anthropic(**client_kwargs(provider))
+            self.model = map_model(self.model, provider.provider)
+            self.logger.info(f"Vision client using {provider.provider} model {self.model}")
 
         # Continuous monitoring configuration
         self.enable_continuous_monitoring = self.config.get("enable_continuous_monitoring", True)

@@ -254,6 +254,12 @@ class CantinaOS:
             "DEEPGRAM_API_KEY": os.getenv("DEEPGRAM_API_KEY", ""),
             "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
             "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY", ""),
+            # OpenRouter speaks the Anthropic Messages format; used when ANTHROPIC_API_KEY
+            # is absent. LLM_PROVIDER ("anthropic"/"openrouter"/"auto") forces the choice
+            # and ANTHROPIC_BASE_URL overrides the host. See llm/anthropic_provider.py.
+            "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
+            "ANTHROPIC_BASE_URL": os.getenv("ANTHROPIC_BASE_URL", ""),
+            "LLM_PROVIDER": os.getenv("LLM_PROVIDER", ""),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -623,6 +629,9 @@ class CantinaOS:
             # Ensure Claude service has Anthropic API key
             if "ANTHROPIC_API_KEY" not in service_config:
                 service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
+            for key in ("OPENROUTER_API_KEY", "ANTHROPIC_BASE_URL", "LLM_PROVIDER"):
+                if key not in service_config:
+                    service_config[key] = self._config.get(key, "")
             if "CLAUDE_MODEL" not in service_config:
                 # Use Claude Haiku 4.5 for best latency (fastest and most intelligent Haiku)
                 service_config["CLAUDE_MODEL"] = self._config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
@@ -672,6 +681,9 @@ class CantinaOS:
             # Configure memory service with Anthropic API key for summarization
             if "ANTHROPIC_API_KEY" not in service_config:
                 service_config["ANTHROPIC_API_KEY"] = self._config.get("ANTHROPIC_API_KEY", "")
+            for key in ("OPENROUTER_API_KEY", "ANTHROPIC_BASE_URL", "LLM_PROVIDER"):
+                if key not in service_config:
+                    service_config[key] = self._config.get(key, "")
             if "enable_summarization" not in service_config:
                 service_config["enable_summarization"] = True
             if "memory_data_dir" not in service_config:

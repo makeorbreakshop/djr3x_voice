@@ -34,6 +34,7 @@ from ...event_payloads import (
     LogLevel
 )
 from ...llm.command_functions import get_all_function_definitions, function_name_to_model_map
+from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from ...core.fast_router_gate import GATE as FAST_ROUTER_GATE, ActionTaken
 from pydantic import BaseModel, ValidationError
 
@@ -158,6 +159,8 @@ class ClaudeService(BaseService):
 
         # Anthropic client
         self._client: Optional[Anthropic] = None
+        # Which backend the client ended up pointed at; set in _initialize.
+        self._provider = None
 
         # Request tracking
         self._request_timestamps: List[float] = []
@@ -196,8 +199,11 @@ class ClaudeService(BaseService):
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Load configuration from provided dict."""
         # Anthropic API key is required
-        if "ANTHROPIC_API_KEY" not in config:
-            self.logger.warning("ANTHROPIC_API_KEY not provided, service will fail to initialize")
+        if not config.get("ANTHROPIC_API_KEY") and not config.get("OPENROUTER_API_KEY"):
+            self.logger.warning(
+                "Neither ANTHROPIC_API_KEY nor OPENROUTER_API_KEY provided, "
+                "service will fail to initialize"
+            )
 
         # Try to load DJ R3X persona from config path or common locations
         persona_paths = [
@@ -225,6 +231,12 @@ class ClaudeService(BaseService):
 
         return {
             "ANTHROPIC_API_KEY": config.get("ANTHROPIC_API_KEY", ""),
+            # OpenRouter speaks the Anthropic Messages format, so it is reachable with the
+            # same SDK via a base_url override. Used only when ANTHROPIC_API_KEY is absent
+            # unless LLM_PROVIDER forces it. See llm/anthropic_provider.py.
+            "OPENROUTER_API_KEY": config.get("OPENROUTER_API_KEY", ""),
+            "ANTHROPIC_BASE_URL": config.get("ANTHROPIC_BASE_URL", ""),
+            "LLM_PROVIDER": config.get("LLM_PROVIDER", ""),
             # Claude Haiku 4.5 (claude-haiku-4-5-20251001): fastest, best latency for voice interactions
             "MODEL": config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
             "MAX_TOKENS": config.get("MAX_TOKENS", 40000),  # Increased from 4000 to utilize Claude's 200K window
@@ -244,19 +256,25 @@ class ClaudeService(BaseService):
     async def _initialize(self) -> None:
         """Initialize the Claude service."""
         try:
-            # Get API key - try config first, then environment
-            api_key = self._config.get("ANTHROPIC_API_KEY", "").strip()
-            if not api_key:
-                # Fallback to environment variable
-                import os
-                api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+            # Resolve the backend: direct Anthropic when its key exists, otherwise
+            # OpenRouter's Anthropic-compatible /v1/messages endpoint. Config is consulted
+            # before the environment so a service config can always override it.
+            provider = resolve_provider(self._config)
+            if provider is None:
+                raise ValueError(
+                    "No Anthropic-compatible credential found: set ANTHROPIC_API_KEY or "
+                    "OPENROUTER_API_KEY in config or environment"
+                )
 
-            if not api_key:
-                raise ValueError("ANTHROPIC_API_KEY not found in config or environment")
+            # Model ids differ between the two hosts. Resolve once here and write the
+            # effective id back into config so all seven call sites stay unchanged.
+            requested_model = self._config["MODEL"]
+            self._config["MODEL"] = map_model(requested_model, provider.provider)
+            self._provider = provider
 
             # Initialize Anthropic client with prompt caching enabled
             self._client = Anthropic(
-                api_key=api_key,
+                **client_kwargs(provider),
                 default_headers={
                     "anthropic-beta": "prompt-caching-2024-07-31"  # Enable prompt caching
                 }
@@ -278,7 +296,9 @@ class ClaudeService(BaseService):
             self._load_personas()
 
             self.logger.info(
-                f"Initialized Claude service with model={self._config['MODEL']}"
+                f"Initialized Claude service via provider={provider.provider} "
+                f"model={self._config['MODEL']}"
+                + (f" (requested {requested_model})" if self._config["MODEL"] != requested_model else "")
             )
 
         except Exception as e:
