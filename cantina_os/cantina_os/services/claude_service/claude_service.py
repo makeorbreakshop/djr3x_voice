@@ -399,6 +399,27 @@ class ClaudeService(BaseService):
 
             self.logger.info(f"Processing final transcript from mouse click: {transcript}")
 
+            # FIXED 2026-09-17: adopt the turn id the capture service already minted.
+            #
+            # LatencyTrackerService keys every metric on conversation_id. It opens a record on
+            # VOICE_LISTENING_STARTED (which carries the mic service's uuid) and expects to close
+            # it on LLM_RESPONSE - but LLM_RESPONSE carried ClaudeService's OWN
+            # _current_conversation_id, minted independently in reset_conversation(). The two ids
+            # never matched, so _handle_llm_response's `conversation_id not in
+            # self._conversation_metrics` guard dropped every single measurement and the tracker
+            # recorded nothing. CLIService._handle_llm_response has the same guard, so the CLI
+            # also silently swallowed R3X's replies.
+            #
+            # The capture service is the right owner of the id: it is the only component that
+            # knows when a turn began, which is what the latency measurement is relative to.
+            turn_id = payload.get("conversation_id")
+            if turn_id and turn_id != self._current_conversation_id:
+                self.logger.debug(
+                    f"Adopting turn id from capture service: {turn_id} "
+                    f"(was {self._current_conversation_id})"
+                )
+                self._current_conversation_id = turn_id
+
             # Maintain conversation context across voice interactions
             await self._process_with_claude(transcript)
 

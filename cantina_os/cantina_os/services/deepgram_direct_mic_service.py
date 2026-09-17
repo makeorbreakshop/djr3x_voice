@@ -525,7 +525,17 @@ class DeepgramDirectMicService(BaseService):
             if self._logger:
                 self._logger.info(f"Final transcript: {transcript}")
 
-            await self.emit(EventTopics.VOICE_LISTENING_STOPPED, {"transcript": transcript})
+            # FIXED 2026-09-17: carry this turn's conversation_id. It was minted in
+            # _handle_mic_recording_start and put on VOICE_LISTENING_STARTED, but dropped here -
+            # so every downstream consumer (ClaudeService, and through it LatencyTrackerService)
+            # had no way to know which turn the transcript belonged to and invented its own id.
+            await self.emit(
+                EventTopics.VOICE_LISTENING_STOPPED,
+                {
+                    "transcript": transcript,
+                    "conversation_id": self._current_conversation_id,
+                },
+            )
 
             self._is_listening = False
 
