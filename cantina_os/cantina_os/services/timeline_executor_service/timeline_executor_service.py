@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Union
 
 from pydantic import BaseModel, ValidationError
 
@@ -52,7 +53,21 @@ class _Config(BaseModel):
     """Pydantic‑validated configuration for the timeline executor service."""
     default_ducking_level: float = 0.5  # Default ducking level (0.0-1.0) - Updated to 50%
     ducking_fade_ms: int = 500  # Fade time in ms for ducking - Updated for longer transitions
-    speech_wait_timeout: float = 25.0  # Timeout for waiting for speech to complete (increased from 10.0 to handle long commentary)
+    # How long to wait for a speech step to finish. DERIVED FROM TEXT LENGTH since
+    # 2026-09-17: synthesis-plus-playback is close to linear in characters (measured on
+    # ElevenLabs Flash v2.5: 555 chars -> 33.7 s, 107 chars -> 6.4 s, 55 chars -> 3.3 s, i.e.
+    # ~61 ms/char), so a single constant is wrong at both ends. The flat 25 s expired 8 s
+    # before a 555-char reply finished, the plan was marked "completed successfully" while
+    # the audio was still playing, and the real completion logged as an orphan.
+    #
+    # 60 ms/char tracks the measurement; the 8 s base covers request setup and the first-byte
+    # latency that does not scale with length.
+    speech_wait_base_s: float = 8.0
+    speech_wait_per_char_s: float = 0.060
+    #: Ceiling, so a pathological payload cannot wedge a layer indefinitely.
+    speech_wait_max_s: float = 180.0
+    #: Retained for the cached-speech and crossfade waits, which are not text-length bound.
+    speech_wait_timeout: float = 25.0
     layer_priorities: Dict[str, int] = {
         "ambient": 0,     # Lowest priority
         "foreground": 1,  # User-initiated content
@@ -87,6 +102,9 @@ class TimelineExecutorService(BaseService):
         
         self._layer_events: Dict[str, asyncio.Event] = {}  # Events for pausing/resuming layers
         self._speech_end_events: Dict[str, asyncio.Event] = {}  # Events for speech completion (Legacy?)
+        #: Speech ids we have finished waiting on. A completion for one of these is late, not
+        #: orphaned. Bounded because the process is long-lived and only the recent past matters.
+        self._retired_speech_ids: Deque[str] = deque(maxlen=64)
         self._cached_speech_playback_events: Dict[str, asyncio.Event] = {} # Events for cached speech playback completion
         self._crossfade_complete_events: Dict[str, asyncio.Event] = {} # Events for music crossfade completion
         self._speech_cache_to_event: Dict[str, str] = {}  # Maps cache_key -> event_key for wait_for_speech_end
@@ -160,6 +178,7 @@ class TimelineExecutorService(BaseService):
         # Clear events (might need cancellation if waiting) - simpler to just clear dicts
         self._layer_events.clear()
         self._speech_end_events.clear()
+        self._retired_speech_ids.clear()
         self._cached_speech_playback_events.clear()
         self._crossfade_complete_events.clear()
         self._active_speech_playbacks.clear()
@@ -517,6 +536,17 @@ class TimelineExecutorService(BaseService):
             self.logger.error(f"Error executing step {step_type} for plan {plan_id}: {e}", exc_info=True)
             return False, {"error": str(e)}
 
+    def _speech_timeout_for(self, text: str) -> float:
+        """How long this text is allowed to take to synthesise and play.
+
+        See `_Config.speech_wait_base_s` for the measurement behind the constants.
+        """
+        budget = (
+            self._config.speech_wait_base_s
+            + self._config.speech_wait_per_char_s * len(text or "")
+        )
+        return min(budget, self._config.speech_wait_max_s)
+
     async def _execute_speak_step(self, step, plan_id: str) -> tuple[bool, Dict[str, Any]]:
         """Execute a speak step with audio ducking.
         
@@ -568,18 +598,25 @@ class TimelineExecutorService(BaseService):
                 ).model_dump()
             )
             
-            # Wait for speech synthesis to complete with timeout
+            # Wait for speech synthesis to complete, with a budget derived from the text.
+            timeout_s = self._speech_timeout_for(text)
             try:
-                self.logger.info(f"Waiting for speech synthesis to complete (timeout: {self._config.speech_wait_timeout}s)")
+                self.logger.info(
+                    f"Waiting for speech synthesis to complete "
+                    f"(timeout: {timeout_s:.1f}s for {len(text)} chars)"
+                )
                 await asyncio.wait_for(
                     speech_event.wait(),
-                    timeout=self._config.speech_wait_timeout
+                    timeout=timeout_s
                 )
                 speech_success = True
                 self.logger.info(f"Speech synthesis completed successfully for step '{step_id}'")
             except asyncio.TimeoutError:
                 speech_success = False
-                self.logger.error(f"Timeout waiting for speech synthesis to complete for step {step_id}")
+                self.logger.error(
+                    f"Timeout after {timeout_s:.1f}s waiting for speech synthesis to "
+                    f"complete for step {step_id} ({len(text)} chars)"
+                )
                 await self._emit_status(
                     ServiceStatus.ERROR,
                     f"Timeout waiting for speech synthesis to complete for step {step_id}",
@@ -594,7 +631,7 @@ class TimelineExecutorService(BaseService):
             # Note: We don't unduck audio here - that's now handled by the _handle_speech_generation_complete method
             # which responds to the SPEECH_GENERATION_COMPLETE event from ElevenLabsService
             
-            return speech_success, {"text": text, "speech_id": speech_id}
+            return speech_success, {"text": text, "speech_id": speech_id, "timeout_s": timeout_s}
             
         except Exception as e:
             self.logger.error(f"Error in speech step execution: {e}")
@@ -613,9 +650,14 @@ class TimelineExecutorService(BaseService):
             return False, {"error": str(e)}
             
         finally:
-            # Clean up the speech event
+            # Clean up the speech event, and remember that we once waited on it. A completion
+            # arriving after this point is late, not lost: the plan has moved on and the audio
+            # finished on its own. Without this record it logged as
+            # "No waiting event found for speech_id: ..." at WARNING, which reads like a
+            # dropped event (observed 2026-09-17 10:57:18.719).
             if speech_id in self._speech_end_events:
                 del self._speech_end_events[speech_id]
+            self._retired_speech_ids.append(speech_id)
 
     async def _execute_play_music_step(self, step: PlanStep) -> tuple[bool, Dict[str, Any]]:
         """Execute a play_music step."""
@@ -735,6 +777,11 @@ class TimelineExecutorService(BaseService):
                 if speech_id and speech_id in self._speech_end_events:
                     self.logger.debug(f"Setting speech completion event for speech_id: {speech_id}")
                     self._speech_end_events[speech_id].set()
+                elif speech_id and speech_id in self._retired_speech_ids:
+                    self.logger.info(
+                        f"Late speech completion for speech_id: {speech_id} "
+                        "(step already retired; audio finished after the plan moved on)"
+                    )
                 else:
                     self.logger.warning(f"No waiting event found for speech_id: {speech_id}")
                 

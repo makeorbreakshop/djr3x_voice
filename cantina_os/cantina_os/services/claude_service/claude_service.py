@@ -250,6 +250,12 @@ class ClaudeService(BaseService):
             # Ceiling on how long we wait for the Jev fast router's verdict before building the
             # prompt ourselves. Only applies when a router has registered on the gate; it must
             # exceed the router's own Jev timeout so a slow classifier resolves the gate first.
+            # Output budget for a *spoken* turn. 1024 tokens is ~4,000 characters, i.e.
+            # minutes of speech; the 555-char reply at 2026-09-17 10:56:45 took 33 s to
+            # synthesise and outran the timeline's wait. The persona asks for 2-3 sentences
+            # (~250 chars); this is the backstop that stops a runaway generation reaching TTS
+            # at all.
+            "SPOKEN_REPLY_MAX_TOKENS": config.get("SPOKEN_REPLY_MAX_TOKENS", 160),
             "FAST_ROUTER_WAIT_S": config.get("FAST_ROUTER_WAIT_S", 1.2),
             # How long to wait, after a verdict, for the execution side to report what the
             # action actually did (for play_music: which track really started). Kept above
@@ -666,7 +672,7 @@ class ClaudeService(BaseService):
             # Same pattern as services/vision_service.py.
             request_kwargs: Dict[str, Any] = dict(
                 model=self._config["MODEL"],
-                max_tokens=1024,
+                max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],
@@ -770,7 +776,7 @@ class ClaudeService(BaseService):
 
             request_kwargs: Dict[str, Any] = dict(
                 model=self._config["MODEL"],
-                max_tokens=1024,
+                max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
                 temperature=self._config["TEMPERATURE"],

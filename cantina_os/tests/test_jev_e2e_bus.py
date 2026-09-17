@@ -396,7 +396,10 @@ async def test_claude_speaks_but_cannot_call_the_tool_again(claude_rig):
     assert action_ms < reply_ms, "the action must not wait on the spoken reply"
 
     # The critical assertion: Claude was called with tools forbidden.
-    turn_calls = [c for c in stub.messages.calls if c.get("max_tokens") == 1024]
+    # CHANGED 2026-09-17: the main turn used to be identified by max_tokens == 1024, which is
+    # now the spoken-reply budget (SPOKEN_REPLY_MAX_TOKENS). Identify it by what actually makes
+    # it the main turn instead: it is the call that carries the tool schemas.
+    turn_calls = [c for c in stub.messages.calls if c.get("tools")]
     assert turn_calls, f"ClaudeService never made its main turn call; saw {len(stub.messages.calls)}"
     main_call = turn_calls[0]
     assert main_call.get("tool_choice") == {"type": "none"}, (
