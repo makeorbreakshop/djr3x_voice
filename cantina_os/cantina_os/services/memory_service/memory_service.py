@@ -302,7 +302,7 @@ class MemoryService(BaseService):
         ))
 
         asyncio.create_task(self.subscribe(
-            EventTopics.LLM_RESPONSE_TEXT,
+            EventTopics.LLM_RESPONSE,
             self._handle_llm_response
         ))
 
