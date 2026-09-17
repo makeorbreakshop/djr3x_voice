@@ -862,9 +862,21 @@ class MusicControllerService(BaseService):
             await self._send_error(f"Error playing music: {str(e)}")
 
     async def _stop_playback(self) -> None:
-        """Stop music playback with improved VLC cleanup"""
+        """Stop music playback through the active backend.
+
+        This used to gate on ``self.player`` and drive VLC directly. Playback moved to the
+        pluggable backends (``LocalMusicBackend`` owns its own VLC player), and nothing sets
+        ``self.player`` any more - so the gate was always true and *every* stop returned
+        "No music is currently playing" without touching the audio. Found by
+        ``scripts/claude_live_verify.py``: Claude's ``stop_music`` tool call arrived, reached
+        MUSIC_COMMAND, and the track kept playing.
+
+        ``self.current_track`` is the service's own record of what is playing, so it is the
+        correct gate. ``self.player`` is still cleaned up for the crossfade path, which does
+        assign it.
+        """
         try:
-            if not self.player:
+            if not self.current_track and not self.player:
                 await self._send_success("No music is currently playing")
                 return
             
@@ -879,17 +891,23 @@ class MusicControllerService(BaseService):
                 
             # Get track info before cleanup
             track_name = self.current_track.name if self.current_track else "Unknown"
-            
-            # Stop the player with improved cleanup
-            try:
-                self.player.stop()
-                # Give VLC time to stop cleanly
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                self.logger.debug(f"Error stopping VLC player: {e}")
-            
-            # Clean up the player
-            await self._cleanup_player(self.player)
+
+            # Stop through the backend that actually owns the playback.
+            backend = self.backends.get(self.active_source)
+            if backend:
+                try:
+                    await backend.stop_playback()
+                except Exception as e:
+                    self.logger.debug(f"Error stopping {self.active_source} backend: {e}")
+
+            # The crossfade path assigns self.player directly; clean that up too.
+            if self.player:
+                try:
+                    self.player.stop()
+                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    self.logger.debug(f"Error stopping VLC player: {e}")
+                await self._cleanup_player(self.player)
             self.player = None
             self.current_track = None
             
