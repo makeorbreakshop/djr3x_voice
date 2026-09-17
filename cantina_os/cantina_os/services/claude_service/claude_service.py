@@ -1404,6 +1404,7 @@ class ClaudeService(BaseService):
             success = result_payload.success
             result = result_payload.result
             tool_call_id = result_payload.tool_call_id
+            source = result_payload.source
 
             self.logger.info(f"Processing execution result for intent: {intent_name}")
             self.logger.info(f"Result success: {success}, parameters: {parameters}")
@@ -1442,10 +1443,31 @@ class ClaudeService(BaseService):
                         content=f"Tool execution result for {intent_name}: {response_content}"
                     )
 
-                # Generate verbal response in background WITHOUT waiting
-                # This allows the tool to execute immediately while DJ commentary plays over it
-                asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
-                self.logger.info(f"Started background verbal response generation for {intent_name}")
+                # ONE SPOKEN REPLY PER TURN.
+                #
+                # This second, verbal-feedback Claude call exists for the case where *Claude*
+                # called the tool: the main turn's reply was generated before the tool ran, so
+                # something has to narrate the result.
+                #
+                # When the *fast router* executed the action, that is not the case. Claude's
+                # main turn for this very transcript is still in flight and carries the
+                # <action_already_taken> block, so it will confirm the action itself. Generating
+                # a reply here too produces two plans on the foreground timeline layer, and the
+                # later one cancels the earlier one mid-sentence. Measured live on 2026-09-17
+                # 10:57:25: "Now spinning up "Cantina Band" for you" started speaking and was
+                # cut off 467 ms later by "Oh YEAH! Now we're talking! Cantina Band is
+                # SPINNING". The tool result still goes into memory above - only the extra
+                # spoken reply is dropped.
+                if source == "jev_fast_router":
+                    self.logger.info(
+                        f"Fast router executed '{intent_name}'; the main turn owns this turn's "
+                        "spoken reply, skipping verbal-feedback generation"
+                    )
+                else:
+                    # Generate verbal response in background WITHOUT waiting
+                    # This allows the tool to execute immediately while DJ commentary plays over it
+                    asyncio.create_task(self._get_verbal_response_for_intent(intent_name, parameters, result, success))
+                    self.logger.info(f"Started background verbal response generation for {intent_name}")
             else:
                 # For visual-only tools, just log that we're skipping verbal feedback
                 self.logger.info(f"Skipping verbal feedback for visual-only tool: {intent_name}")

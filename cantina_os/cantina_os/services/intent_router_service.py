@@ -99,6 +99,7 @@ class IntentRouterService(BaseService):
         conversation_id = None
         original_text = ""
         tool_call_id = None
+        source = None
         try:
             self.logger.debug(f"Received intent payload: {payload}")
 
@@ -106,6 +107,12 @@ class IntentRouterService(BaseService):
             parameters = payload.get("parameters", {})
             conversation_id = payload.get("conversation_id", None)
             original_text = payload.get("original_text", "")
+            # Provenance, set by JevIntentService to "jev_fast_router". It has to survive into
+            # INTENT_EXECUTION_RESULT: ClaudeService needs it to know whether the spoken
+            # confirmation for this turn is already coming from its own main turn (fast router)
+            # or has to be generated here (its own tool call). Dropping it is what produced two
+            # spoken replies on 2026-09-17 10:57:24.
+            source = payload.get("source")
             
             # Get the tool call ID if available (from the original OpenAI tool call)
             # This allows us to link execution results back to the original call
@@ -134,7 +141,8 @@ class IntentRouterService(BaseService):
                         result,
                         tool_call_id,
                         conversation_id,
-                        original_text
+                        original_text,
+                        source
                     )
                 else:
                     self.logger.info(f"Skipping INTENT_EXECUTION_RESULT for {intent_name} (handles own response)")
@@ -148,7 +156,8 @@ class IntentRouterService(BaseService):
                     {"success": False, "message": f"No handler for intent: {intent_name}"}, 
                     tool_call_id,
                     conversation_id,
-                    original_text
+                    original_text,
+                    source
                 )
         
         except Exception as e:
@@ -162,7 +171,8 @@ class IntentRouterService(BaseService):
                     {"success": False, "message": f"Error: {str(e)}"}, 
                     tool_call_id,
                     conversation_id,
-                    original_text
+                    original_text,
+                    source
                 )
             except Exception as emit_error:
                 self.logger.error(f"Error emitting execution result: {emit_error}")
@@ -174,7 +184,8 @@ class IntentRouterService(BaseService):
         result: Dict[str, Any],
         tool_call_id: Optional[str],
         conversation_id: Optional[str],
-        original_text: Optional[str]
+        original_text: Optional[str],
+        source: Optional[str] = None
     ) -> None:
         """
         Emit an intent execution result event for verbal feedback.
@@ -189,6 +200,7 @@ class IntentRouterService(BaseService):
             tool_call_id: Original tool call ID from OpenAI
             conversation_id: Conversation context ID
             original_text: Original text that triggered the intent
+            source: Provenance of the intent ("jev_fast_router", or None for a Claude tool call)
         """
         try:
             self.logger.info(f"Emitting execution result for intent: {intent_name}")
@@ -206,7 +218,8 @@ class IntentRouterService(BaseService):
                 error_message=error_message,
                 tool_call_id=tool_call_id,
                 original_text=original_text,
-                conversation_id=conversation_id
+                conversation_id=conversation_id,
+                source=source
             )
             
             # Emit the event

@@ -110,6 +110,14 @@ class IntentExecutionResultPayload(BaseEventPayload):
     original_text: Optional[str] = Field(
         None, description="The original text that triggered the intent"
     )
+    source: Optional[str] = Field(
+        None,
+        description=(
+            "Where the intent came from: 'jev_fast_router' for a fast-router dispatch, "
+            "None for a Claude tool call. Consumers use this to decide who owns the spoken "
+            "confirmation for the turn."
+        ),
+    )
 
 
 class ServiceStatusPayload(BaseEventPayload):
