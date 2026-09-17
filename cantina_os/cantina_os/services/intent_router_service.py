@@ -383,7 +383,20 @@ class IntentRouterService(BaseService):
         self.logger.info(f"Emitted CLI_COMMAND event for dj {subcommand}")
 
     async def _handle_next_track_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
-        """Handle the next_track intent by advancing the DJ-mode queue."""
+        """Handle the next_track intent by advancing the DJ-mode queue.
+
+        KNOWN LIMITATION, measured live 2026-09-17: outside DJ mode this does nothing useful.
+        `dj next` is the only skip capability in the system, and BrainService refuses it with
+        "Cannot skip track, DJ mode is not active". MusicControllerService itself understands
+        only two actions - "play" and "stop" (music_controller_service.py:574,577) - so there
+        is no track cursor to advance when DJ mode is off.
+
+        Deliberately not papered over here: faking a skip by re-issuing `music play` would pick
+        a track by the same path a fresh "play some music" does, which is not what "next" means
+        and would hide the gap. The fix belongs in MusicControllerService (a real playlist
+        cursor with a "next" action), not in the router. The user does at least get an accurate
+        error today rather than silence.
+        """
         try:
             await self._emit_dj_cli_command("next", conversation_id)
             return {
@@ -425,7 +438,13 @@ class IntentRouterService(BaseService):
         """Handle the set_eye_color intent."""
         try:
             color = parameters.get("color", "")
-            pattern = parameters.get("pattern", "solid")
+            # FIXED 2026-09-17: the default used to be "solid", which is not a member of
+            # EyePattern (idle/startup/engaged/listening/thinking/speaking/flash/happy/sad/
+            # angry/surprised/error/custom - eye_light_controller_service.py:48). The eye
+            # service's `EyePattern(pattern_name)` therefore raised ValueError and logged
+            # "Invalid eye pattern: solid" for every colour request. CUSTOM is the member
+            # documented at :62 as being "For custom patterns with specific colors".
+            pattern = parameters.get("pattern", "custom")
             intensity = parameters.get("intensity", 1.0)
             
             if not color:
@@ -437,17 +456,33 @@ class IntentRouterService(BaseService):
             
             self.logger.info(f"Setting eye color to {color} with pattern {pattern}")
             
-            # Create and emit eye command via CLI_COMMAND for unified processing
-            cli_payload = {
-                "command": "eye",
-                "subcommand": "pattern",
-                "args": [pattern, color] if color else [pattern],
-                "raw_input": f"eye pattern {pattern} {color}" if color else f"eye pattern {pattern}",
-                "conversation_id": conversation_id
+            # FIXED 2026-09-17: emit EYE_COMMAND directly instead of laundering this through
+            # CLI_COMMAND.
+            #
+            # The old route built `eye pattern <pattern> <color>` - two args - but the
+            # compound command "eye pattern" is registered with max_args=1 (main.py:349), so
+            # command_decorators.py:368 rejected every single colour request with
+            # "Command 'eye pattern' accepts at most 1 arguments, got 2". Observed live in a
+            # full-system run on 2026-09-17: "make your eyes red" dispatched in 209 ms and was
+            # then thrown away at the CLI arg check.
+            #
+            # Even had the arg count passed, EyeCliCommandPayload.from_cli_payload
+            # (eye_light_controller_service.py:89) only parses `pattern_name` - there is no
+            # colour slot in the CLI grammar at all, so the colour was discarded regardless.
+            #
+            # _handle_eye_command already accepts a plain dict with "pattern"/"color"/
+            # "intensity"/"duration" (eye_light_controller_service.py, dict branch) and passes
+            # all four straight to set_pattern(), which does take a colour. That is the path
+            # that can actually express this intent, so use it.
+            eye_payload = {
+                "pattern": pattern,
+                "color": color,
+                "intensity": intensity,
+                "conversation_id": conversation_id,
             }
-            
-            await self.emit(EventTopics.CLI_COMMAND, cli_payload)
-            self.logger.info(f"Emitted CLI_COMMAND event for eye pattern: {pattern} {color}")
+
+            await self.emit(EventTopics.EYE_COMMAND, eye_payload)
+            self.logger.info(f"Emitted EYE_COMMAND for pattern={pattern} color={color}")
             
             # Return success result
             return {
