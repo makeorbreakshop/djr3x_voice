@@ -422,9 +422,14 @@ class ClaudeService(BaseService):
                 self.logger.warning("Received empty payload in VOICE_LISTENING_STOPPED event")
                 return
 
+            # `has_transcript` is set by DeepgramDirectMicService; the `not transcript`
+            # fallback covers any other publisher. Either way an empty recording is not a
+            # turn: no Claude call, no reply, no conversation state touched.
             transcript = payload.get("transcript", "")
-            if not transcript:
-                self.logger.warning("Received empty transcript in VOICE_LISTENING_STOPPED event")
+            if payload.get("has_transcript") is False or not transcript:
+                self.logger.info(
+                    "Empty transcript in VOICE_LISTENING_STOPPED - no turn, no Claude call"
+                )
                 return
 
             self.logger.info(f"Processing final transcript from mouse click: {transcript}")

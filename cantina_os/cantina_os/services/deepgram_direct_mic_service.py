@@ -75,6 +75,12 @@ class DeepgramDirectMicService(BaseService):
         self._audio_running = False
 
         # State tracking
+        #: True between SPEECH_GENERATION_STARTED and SPEECH_GENERATION_COMPLETE. While R3X is
+        #: talking, opening the microphone records R3X - the Studio Display mic is in the same
+        #: room as the speaker. On 2026-09-17 10:56:21 a click did exactly that, and R3X's own
+        #: words ("Spin some beats and chant with") were buffered by the persistent WebSocket
+        #: and finalized into the *next* turn as if the user had said them.
+        self._speech_active = False
         self._is_listening = False
         self._current_transcription = ""
         self._start_time = None
@@ -122,6 +128,17 @@ class DeepgramDirectMicService(BaseService):
         await self.subscribe(
             EventTopics.MIC_RECORDING_START,
             self._handle_mic_recording_start
+        )
+
+        # R3X's own speech lifecycle, so the mic is never opened over it. Same pair
+        # EyeLightControllerService uses to drive its SPEAKING pattern.
+        await self.subscribe(
+            EventTopics.SPEECH_GENERATION_STARTED,
+            self._handle_speech_started
+        )
+        await self.subscribe(
+            EventTopics.SPEECH_GENERATION_COMPLETE,
+            self._handle_speech_ended
         )
         if self._logger:
             self._logger.info("✅ Subscribed to MIC_RECORDING_START")
@@ -484,8 +501,31 @@ class DeepgramDirectMicService(BaseService):
             self._logger.error(f"Deepgram error: {error_event}")
         self._metrics["errors_count"] += 1
 
+    async def _handle_speech_started(self, payload: Dict[str, Any]) -> None:
+        """R3X started talking: the microphone is closed for the duration."""
+        self._speech_active = True
+
+    async def _handle_speech_ended(self, payload: Dict[str, Any]) -> None:
+        """R3X finished talking, successfully or not. Either way there is no more audio.
+
+        Unconditional so an unpaired or failed completion releases the mic rather than
+        latching it shut - a stuck flag here would make R3X permanently deaf, which is far
+        worse than occasionally hearing itself.
+        """
+        self._speech_active = False
+
     async def _handle_mic_recording_start(self, event: Dict[str, Any]) -> None:
         """Handle recording start event - START MICROPHONE ONLY."""
+        if self._speech_active:
+            # Refusing is the least invasive of the three options: nothing is captured, so
+            # nothing has to be filtered out of the transcript stream afterwards.
+            if self._logger:
+                self._logger.warning(
+                    "Recording start ignored - R3X is still speaking; the mic would record "
+                    "R3X's own voice. Click again once it has finished."
+                )
+            return
+
         if self._logger:
             self._logger.info("Recording start - starting microphone (WebSocket already open)")
 
@@ -523,7 +563,13 @@ class DeepgramDirectMicService(BaseService):
             transcript = self._current_transcription.strip()
 
             if self._logger:
-                self._logger.info(f"Final transcript: {transcript}")
+                if transcript:
+                    self._logger.info(f"Final transcript: {transcript}")
+                else:
+                    self._logger.info(
+                        "Final transcript empty - no turn (nothing was said, or the audio "
+                        "was too short to transcribe)"
+                    )
 
             # FIXED 2026-09-17: carry this turn's conversation_id. It was minted in
             # _handle_mic_recording_start and put on VOICE_LISTENING_STARTED, but dropped here -
@@ -534,6 +580,11 @@ class DeepgramDirectMicService(BaseService):
                 {
                     "transcript": transcript,
                     "conversation_id": self._current_conversation_id,
+                    # Explicit, so consumers do not have to infer "no turn" from an empty
+                    # string. The event itself is still published unconditionally: the music
+                    # ducking and eye state opened on VOICE_LISTENING_STARTED have to be
+                    # closed whether or not anything was said.
+                    "has_transcript": bool(transcript),
                 },
             )
 
