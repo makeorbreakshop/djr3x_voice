@@ -58,6 +58,10 @@ class ActionTaken:
     confidence: float
     transcript: str
     at: float
+    #: True once the execution side has reported what actually happened (for ``play_music``,
+    #: the track that really started). Until then ``parameters`` holds only what was *asked
+    #: for*, which is not what R3X should be told it did.
+    outcome_known: bool = False
 
 
 class FastRouterGate:
@@ -66,6 +70,7 @@ class FastRouterGate:
     def __init__(self) -> None:
         self._futures: Dict[str, "asyncio.Future[Optional[ActionTaken]]"] = {}
         self._records: Dict[str, ActionTaken] = {}
+        self._outcome_futures: Dict[str, "asyncio.Future[Optional[ActionTaken]]"] = {}
         self._router_registered = False
 
     # -- router side ---------------------------------------------------------------------
@@ -80,6 +85,9 @@ class FastRouterGate:
         self._router_registered = False
         for key in list(self._futures):
             self._resolve(key, None)
+        for key, future in list(self._outcome_futures.items()):
+            if not future.done():
+                future.set_result(self._records.get(key))
         logger.info("Fast router unregistered from gate")
 
     def resolve(self, transcript: str, action: Optional[ActionTaken]) -> None:
@@ -92,6 +100,26 @@ class FastRouterGate:
             self._records[transcript] = action
             self._sweep()
         self._resolve(transcript, action)
+
+    def resolve_outcome(self, transcript: str, parameters: Dict[str, Any]) -> None:
+        """Publish what the dispatched action *actually did*, once the execution side knows.
+
+        The router dispatches on a request ("play some music") but the confirmation has to
+        describe the result ("Huttuk Cheeka is spinning"). ``IntentRouterService`` calls this
+        when the real outcome lands - for music, on ``MUSIC_PLAYBACK_STARTED``. The amended
+        parameters are what ``<action_already_taken>`` is rendered from.
+
+        A no-op when nothing was recorded for ``transcript`` (a Claude-owned tool call, or a
+        record already consumed), so it is always safe to call.
+        """
+        record = self._records.get(transcript)
+        if record is None:
+            return
+        record.parameters = {**(record.parameters or {}), **(parameters or {})}
+        record.outcome_known = True
+        future = self._outcome_futures.get(transcript)
+        if future is not None and not future.done():
+            future.set_result(record)
 
     # -- Claude side ---------------------------------------------------------------------
 
@@ -134,6 +162,38 @@ class FastRouterGate:
         finally:
             self._futures.pop(transcript, None)
 
+    async def wait_for_outcome(
+        self, transcript: str, timeout_s: float
+    ) -> Optional[ActionTaken]:
+        """Block up to ``timeout_s`` for the *outcome* of an already-dispatched action.
+
+        Returns the record with ``parameters`` amended by the execution side, or the
+        unamended record if the outcome does not arrive in time - never ``None`` for a
+        transcript that has a record, so the caller can always fold something in. Never raises.
+        """
+        record = self._records.get(transcript)
+        if record is None or record.outcome_known:
+            return record
+
+        future = self._outcome_futures.get(transcript)
+        if future is None or future.done():
+            future = asyncio.get_event_loop().create_future()
+            self._outcome_futures[transcript] = future
+
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            logger.info(
+                f"Action outcome not reported within {timeout_s:.2f}s; "
+                "confirming the request rather than the result"
+            )
+            return record
+        except Exception as exc:  # noqa: BLE001 — must never break the voice loop
+            logger.warning(f"Fast router outcome wait error: {exc}")
+            return record
+        finally:
+            self._outcome_futures.pop(transcript, None)
+
     def consume(self, transcript: str) -> Optional[ActionTaken]:
         """Take and remove the record for ``transcript``, if one is live.
 
@@ -163,6 +223,7 @@ class FastRouterGate:
     def reset(self) -> None:
         """Drop all state. For tests."""
         self._futures.clear()
+        self._outcome_futures.clear()
         self._records.clear()
         self._router_registered = False
 

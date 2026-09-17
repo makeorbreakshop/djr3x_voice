@@ -250,7 +250,11 @@ class ClaudeService(BaseService):
             # Ceiling on how long we wait for the Jev fast router's verdict before building the
             # prompt ourselves. Only applies when a router has registered on the gate; it must
             # exceed the router's own Jev timeout so a slow classifier resolves the gate first.
-            "FAST_ROUTER_WAIT_S": config.get("FAST_ROUTER_WAIT_S", 1.2)
+            "FAST_ROUTER_WAIT_S": config.get("FAST_ROUTER_WAIT_S", 1.2),
+            # How long to wait, after a verdict, for the execution side to report what the
+            # action actually did (for play_music: which track really started). Kept above
+            # IntentRouterService's own 0.8 s playback wait so the amended record is there.
+            "FAST_ROUTER_OUTCOME_WAIT_S": config.get("FAST_ROUTER_OUTCOME_WAIT_S", 1.2)
         }
 
     async def _initialize(self) -> None:
@@ -594,6 +598,15 @@ class ClaudeService(BaseService):
         if action is None:
             self.logger.info("Fast router took no action; Claude owns this turn's tool calls")
             return None
+
+        # The verdict says *what was dispatched*; the outcome says *what happened*. For
+        # play_music those differ almost always - a generic request dispatches no track and
+        # MusicControllerService picks - and it is the outcome R3X has to narrate. Without
+        # this wait the action block named the request, which on 2026-09-17 10:57:25 had R3X
+        # announcing "Cantina Band" over Huttuk Cheeka.
+        action = await FAST_ROUTER_GATE.wait_for_outcome(
+            user_input, timeout_s=self._config["FAST_ROUTER_OUTCOME_WAIT_S"]
+        ) or action
 
         # Consume it so a retry of the same transcript cannot suppress tools twice.
         FAST_ROUTER_GATE.consume(user_input)

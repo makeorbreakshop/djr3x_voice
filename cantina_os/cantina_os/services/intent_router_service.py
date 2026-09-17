@@ -16,10 +16,12 @@ DEPENDENCIES: Command dispatcher service integration, music library access
 
 import asyncio
 import logging
+import re
 from typing import Dict, Any, Optional, List
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
+from ..core.fast_router_gate import GATE
 from ..event_payloads import (
     IntentPayload,
     IntentExecutionResultPayload,
@@ -63,6 +65,18 @@ class IntentRouterService(BaseService):
             # Alias: the fast router's name for the same action as set_eye_color.
             "set_eye_animation": self._handle_set_eye_color_intent,
         }
+        #: Set by MUSIC_PLAYBACK_STARTED, cleared before each play dispatch. This is how the
+        #: execution result learns the track that *actually* started, which is rarely the one
+        #: that was requested: a generic "play some music" carries no track at all, and
+        #: MusicControllerService picks.
+        self._playback_started: Optional[asyncio.Event] = None
+        self._last_started_track: Optional[str] = None
+
+        #: How long a play dispatch waits for MUSIC_PLAYBACK_STARTED before confirming the
+        #: request instead of the result. Kept below ClaudeService's own outcome wait
+        #: (FAST_ROUTER_OUTCOME_WAIT_S, 1.2 s) so the amended record lands before Claude reads
+        #: it; VLC starts local files in single-digit milliseconds, so this is pure headroom.
+        self._playback_wait_s = float(self._config.get("PLAYBACK_CONFIRM_WAIT_S", 0.8))
         
     async def _start(self) -> None:
         """Start the service."""
@@ -88,7 +102,23 @@ class IntentRouterService(BaseService):
             EventTopics.INTENT_DETECTED,
             self._handle_intent
         ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.MUSIC_PLAYBACK_STARTED,
+            self._handle_music_playback_started
+        ))
         self.logger.info("Subscribed to INTENT_DETECTED events")
+
+    async def _handle_music_playback_started(self, payload: Dict[str, Any]) -> None:
+        """Record the track MusicControllerService actually started."""
+        track = (payload or {}).get("track") or {}
+        if not isinstance(track, dict):
+            return
+        name = track.get("title") or track.get("name")
+        if not name:
+            return
+        self._last_started_track = name
+        if self._playback_started is not None:
+            self._playback_started.set()
     
     async def _handle_intent(self, payload: Dict[str, Any]) -> None:
         """Handle an intent detection event."""
@@ -131,6 +161,13 @@ class IntentRouterService(BaseService):
                 # Handlers now return result information
                 result = await handler(parameters, conversation_id)
                 self.logger.info(f"Handler for intent {intent_name} completed with result: {result}")
+
+                # Tell the fast-router gate what actually happened, so the
+                # <action_already_taken> block ClaudeService builds describes the result
+                # rather than the request. Only meaningful for a fast-router dispatch; a
+                # Claude tool call has no gate record and this is a no-op.
+                if source == "jev_fast_router" and original_text and result.get("track"):
+                    GATE.resolve_outcome(original_text, {"track": result["track"]})
 
                 # Emit intent execution result for verbal feedback
                 # SKIP for analyze_scene - it handles its own response generation
@@ -230,125 +267,132 @@ class IntentRouterService(BaseService):
             self.logger.error(f"Error emitting intent execution result: {e}")
     
     async def _handle_play_music_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
-        """Handle the play_music intent."""
+        """Handle the play_music intent.
+
+        The result this returns is what R3X says out loud, so it must describe what happened,
+        not what was asked for. FIXED 2026-09-17: it used to report the *requested* track, and
+        with the old alias table that meant announcing "Cantina Band" while "Huttuk Cheeka" was
+        playing. It now waits briefly for MUSIC_PLAYBACK_STARTED and reports that.
+        """
         try:
-            track = parameters.get("track", "")
-            if not track:
-                self.logger.warning("No track specified in play_music intent")
-                return {"success": False, "message": "No track specified"}
-            
-            self.logger.info(f"Play music request received for: {track}")
-            
-            # Smart track selection
-            selected_track = await self._select_smart_track(track)
-            
-            if not selected_track:
-                self.logger.warning(f"Could not find a suitable track matching: {track}")
-                return {
-                    "success": False, 
-                    "message": f"Could not find a suitable track matching: {track}"
-                }
-                
-            self.logger.info(f"Smart track selection: '{track}' → '{selected_track}'")
-            
-            # Create and emit music command via CLI_COMMAND for unified processing
+            track = (parameters.get("track") or "").strip()
+
+            # Track selection. A generic request resolves to None, which dispatches a bare
+            # `play music` and lets MusicControllerService choose - it is the only component
+            # that knows the real library.
+            selected_track = await self._select_smart_track(track) if track else None
+            self.logger.info(f"Track selection: {track!r} → {selected_track!r}")
+
+            # Arm the confirmation latch *before* dispatching, so a playback event that lands
+            # in the same event-loop turn cannot be missed.
+            self._playback_started = asyncio.Event()
+            self._last_started_track = None
+
             cli_payload = {
                 "command": "play",
-                "subcommand": "music", 
-                "args": [selected_track],
-                "raw_input": f"play music {selected_track}",
+                "subcommand": "music",
+                "args": [selected_track] if selected_track else [],
+                "raw_input": f"play music {selected_track}" if selected_track else "play music",
                 "conversation_id": conversation_id
             }
-            
+
             await self.emit(EventTopics.CLI_COMMAND, cli_payload)
-            self.logger.info(f"Emitted CLI_COMMAND event for play music: {selected_track}")
-            
-            # Return success result with information about what was played
+            self.logger.info(f"Emitted CLI_COMMAND event for play music: {selected_track or '(any)'}")
+
+            started_track = await self._await_started_track()
+
+            if started_track:
+                return {
+                    "success": True,
+                    "track": started_track,
+                    "requested": track or None,
+                    "selected": selected_track,
+                    "action": "play",
+                    "message": f"Now playing: {started_track}"
+                }
+
+            # Nothing reported back. Say only what we know to be true.
+            self.logger.warning(
+                "No MUSIC_PLAYBACK_STARTED within "
+                f"{self._playback_wait_s:.2f}s; confirming the request, not a track name"
+            )
             return {
                 "success": True,
-                "track": selected_track,
-                "original_request": track,
+                "track": None,
+                "requested": track or None,
+                "selected": selected_track,
                 "action": "play",
-                "message": f"Now playing: {selected_track}"
+                "message": "Music playback requested"
             }
-        
+
         except Exception as e:
             self.logger.error(f"Error handling play_music intent: {e}")
             return {
                 "success": False,
                 "error": f"Failed to play music: {str(e)}"
             }
-    
-    async def _select_smart_track(self, track_request: str) -> Optional[str]:
-        """
-        Smart track selection based on the user's request.
-        
-        This function takes a natural language request like "cantina music" or "some jazz"
-        and attempts to find a suitable track in the music library.
-        
-        Args:
-            track_request: The user's track request
-            
-        Returns:
-            A valid track number or name, or None if no match found
-        """
+
+    async def _await_started_track(self) -> Optional[str]:
+        """Wait, briefly, for the track that actually started."""
+        latch = self._playback_started
+        if latch is None:
+            return None
         try:
-            # Get available tracks by sending a command to music_controller via unified flow
-            tracks_payload = {
-                "command": "list", 
-                "subcommand": "music", 
-                "args": [], 
-                "raw_input": "list music"
-            }
-            await self.emit(EventTopics.CLI_COMMAND, tracks_payload)
-            
-            # TODO: Ideally we would get the track list directly, but for now we'll use some defaults
-            # For testing we'll simulate some available tracks
-            available_tracks = [
-                "1", "2", "3",  # Track numbers
-                "cantina_band", "droid_march", "imperial_march", "jedi_rocks",  # Track names that might exist
-            ]
-            
-            # Check if the request is a valid track number
-            if track_request.isdigit() and track_request in available_tracks:
-                return track_request
-                
-            # Check for genre/theme words in the request
-            request_lower = track_request.lower()
-            
-            # Keywords mapping to specific tracks
-            keyword_mapping = {
-                "cantina": "cantina_band",
-                "imperial": "imperial_march",
-                "march": "imperial_march",
-                "droid": "droid_march",
-                "jedi": "jedi_rocks",
-                "rock": "jedi_rocks"
-            }
-            
-            # Check if any keywords match the request
-            for keyword, suggested_track in keyword_mapping.items():
-                if keyword in request_lower and suggested_track in available_tracks:
-                    return suggested_track
-            
-            # If it's a generic request, pick a default or random track
-            if any(word in request_lower for word in ["music", "song", "track", "anything", "some"]):
-                # Let's default to cantina music for generic requests
-                if "cantina_band" in available_tracks:
-                    return "cantina_band"
-                # Or pick the first available track
-                if available_tracks:
-                    return available_tracks[0]
-            
-            # Fall back to using the original request
-            # This allows requests like "track 1" to work
-            return track_request
-            
-        except Exception as e:
-            self.logger.error(f"Error in smart track selection: {e}")
-            # Fall back to the original request if something goes wrong
-            return track_request
-    
+            await asyncio.wait_for(latch.wait(), timeout=self._playback_wait_s)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._playback_started = None
+        return self._last_started_track
+
+    #: Words that carry no information about *which* track. A request made only of these is a
+    #: generic one, and the honest answer to "which track?" is "you pick".
+    _GENERIC_REQUEST_WORDS = {
+        "a", "ahead", "along", "an", "and", "any", "anything", "beat", "beats", "can",
+        "could", "do", "for", "go", "going", "hey", "i", "in", "it", "jam", "jams", "just",
+        "let", "lets", "like", "me", "music", "my", "now", "of", "ok", "okay", "on", "one",
+        "play", "playing", "please", "put", "r3x", "rex", "s", "shuffle", "some",
+        "something", "song", "songs", "sound", "sounds", "spin", "start", "the", "thing",
+        "to", "track", "tracks", "tune", "tunes", "up", "us", "want", "we", "would", "yeah",
+        "yes", "you",
+    }
+
+    async def _select_smart_track(self, track_request: str) -> Optional[str]:
+        """Reduce a spoken request to the words that identify a track, or None.
+
+        REWRITTEN 2026-09-17. The old implementation matched against a hard-coded list of
+        invented ids (`cantina_band`, `imperial_march`, `droid_march`, `jedi_rocks`) that
+        correspond to no file in `audio/music/` - the real cantina track is
+        "Cantina Song aka Mad About Mad About Me". Every generic request was therefore forced
+        to `cantina_band`, MusicControllerService logged "No matches found for 'cantina_band',
+        playing first track", and R3X announced a track nobody was hearing. It also emitted a
+        `list music` CLI command as a side effect, which dumped the library to the console
+        mid-turn.
+
+        There is exactly one matcher in this system that knows the real library:
+        `MusicControllerService._smart_play_track`. This method's only job is to decide whether
+        the user named anything at all, and to hand the naming words to that matcher.
+
+        Returns:
+            A track number, or the distinguishing words of the request, or None for a generic
+            request ("play some music") - which means "controller's choice".
+        """
+        request = (track_request or "").strip()
+        if not request:
+            return None
+
+        # An explicit track number is passed through untouched.
+        if request.isdigit():
+            return request
+
+        words = re.findall(r"[a-z0-9']+", request.lower())
+        meaningful = [w for w in words if w not in self._GENERIC_REQUEST_WORDS]
+
+        if not meaningful:
+            return None
+
+        return " ".join(meaningful)
+
     async def _handle_stop_music_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
         """Handle the stop_music intent."""
         try:
