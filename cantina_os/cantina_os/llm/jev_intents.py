@@ -36,6 +36,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..core.track_request import naming_phrase
+
 # --------------------------------------------------------------------------------------------
 # Intents
 # --------------------------------------------------------------------------------------------
@@ -227,9 +229,13 @@ def extract_parameters(intent: str, utterance: str) -> Optional[Dict[str, Any]]:
     outcome for something like "change your eyes" with no colour named.
     """
     if intent == "play_music":
-        # The raw utterance is handed to ``_select_smart_track``, which does its own fuzzy
-        # matching. This is exactly what the Claude path supplies today for generic requests.
-        return {"track": utterance.strip()}
+        # FIXED 2026-09-17: this used to pass the whole utterance through as ``track``,
+        # producing params={'track': 'Yeah. Go ahead and play some music for me.'} live. A
+        # sentence is not a track name, and the layer below did not "sort it out" - it turned
+        # it into `cantina_band`, which matches no file. ``track`` is now None unless the
+        # speaker named a track, artist or mood. A generic request still dispatches: playing
+        # *something* is exactly what was asked for.
+        return {"track": naming_phrase(utterance)}
 
     if intent in ("stop_music", "next_track", "dj_mode_on", "dj_mode_off"):
         return {}

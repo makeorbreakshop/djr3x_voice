@@ -305,9 +305,19 @@ def test_colour_matching_is_whole_word_only():
     assert jev_intents.extract_parameters("set_eye_animation", "redo that") is None
 
 
-def test_play_music_passes_the_utterance_for_fuzzy_track_matching():
+def test_play_music_passes_only_the_naming_words():
+    """CHANGED 2026-09-17: this used to assert the whole utterance was passed as `track`.
+
+    It was pinning the defect. Live, that produced
+    `params={'track': 'Yeah. Go ahead and play some music for me.'}`, which the router turned
+    into the non-existent `cantina_band`. See tests/test_jev_track_parameter.py.
+    """
     params = jev_intents.extract_parameters("play_music", "  play the cantina band song ")
-    assert params == {"track": "play the cantina band song"}
+    assert params == {"track": "cantina band"}
+
+
+def test_play_music_names_no_track_for_a_generic_request():
+    assert jev_intents.extract_parameters("play_music", "play some music") == {"track": None}
 
 
 def test_zero_parameter_intents():

@@ -16,12 +16,12 @@ DEPENDENCIES: Command dispatcher service integration, music library access
 
 import asyncio
 import logging
-import re
 from typing import Dict, Any, Optional, List
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
 from ..core.fast_router_gate import GATE
+from ..core.track_request import naming_phrase
 from ..event_payloads import (
     IntentPayload,
     IntentExecutionResultPayload,
@@ -345,18 +345,6 @@ class IntentRouterService(BaseService):
             self._playback_started = None
         return self._last_started_track
 
-    #: Words that carry no information about *which* track. A request made only of these is a
-    #: generic one, and the honest answer to "which track?" is "you pick".
-    _GENERIC_REQUEST_WORDS = {
-        "a", "ahead", "along", "an", "and", "any", "anything", "beat", "beats", "can",
-        "could", "do", "for", "go", "going", "hey", "i", "in", "it", "jam", "jams", "just",
-        "let", "lets", "like", "me", "music", "my", "now", "of", "ok", "okay", "on", "one",
-        "play", "playing", "please", "put", "r3x", "rex", "s", "shuffle", "some",
-        "something", "song", "songs", "sound", "sounds", "spin", "start", "the", "thing",
-        "to", "track", "tracks", "tune", "tunes", "up", "us", "want", "we", "would", "yeah",
-        "yes", "you",
-    }
-
     async def _select_smart_track(self, track_request: str) -> Optional[str]:
         """Reduce a spoken request to the words that identify a track, or None.
 
@@ -371,27 +359,15 @@ class IntentRouterService(BaseService):
 
         There is exactly one matcher in this system that knows the real library:
         `MusicControllerService._smart_play_track`. This method's only job is to decide whether
-        the user named anything at all, and to hand the naming words to that matcher.
+        the user named anything at all, and to hand the naming words to that matcher. The
+        decision itself lives in `core/track_request.py`, shared with
+        `llm.jev_intents.extract_parameters` so the two layers cannot disagree.
 
         Returns:
             A track number, or the distinguishing words of the request, or None for a generic
             request ("play some music") - which means "controller's choice".
         """
-        request = (track_request or "").strip()
-        if not request:
-            return None
-
-        # An explicit track number is passed through untouched.
-        if request.isdigit():
-            return request
-
-        words = re.findall(r"[a-z0-9']+", request.lower())
-        meaningful = [w for w in words if w not in self._GENERIC_REQUEST_WORDS]
-
-        if not meaningful:
-            return None
-
-        return " ".join(meaningful)
+        return naming_phrase(track_request)
 
     async def _handle_stop_music_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
         """Handle the stop_music intent."""
