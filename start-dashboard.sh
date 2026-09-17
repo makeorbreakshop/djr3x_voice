@@ -192,11 +192,25 @@ echo -e "${BLUE}Starting CantinaOS with Web Bridge...${NC}"
 if ! pgrep -f "cantina_os.main" > /dev/null; then
     cd cantina_os
     
-    # Install requirements if needed
-    if [ ! -f ".requirements_installed" ]; then
-        echo -e "${YELLOW}Installing CantinaOS dependencies...${NC}"
-        ../venv/bin/pip install -r requirements.txt
-        touch .requirements_installed
+    # Install requirements if needed.
+    #
+    # This used to be `if [ ! -f .requirements_installed ]`, which meant the very first run
+    # created the sentinel and every dependency change after that was silently skipped. That
+    # is why `anthropic` sat at 0.52.2 for months while requirements.txt asked for >=0.72.0.
+    # The guard now keys on a checksum of requirements.txt, so editing the file re-installs
+    # and an unchanged file still costs nothing.
+    REQ_STAMP=".requirements_installed"
+    REQ_HASH="$(shasum -a 256 requirements.txt | awk '{print $1}')"
+    if [ ! -f "$REQ_STAMP" ] || [ "$(cat "$REQ_STAMP" 2>/dev/null)" != "$REQ_HASH" ]; then
+        echo -e "${YELLOW}Installing CantinaOS dependencies (requirements.txt changed)...${NC}"
+        if ../venv/bin/pip install -r requirements.txt; then
+            echo "$REQ_HASH" > "$REQ_STAMP"
+        else
+            # Do not stamp a failed install - the next run must try again.
+            echo -e "${RED}❌ Dependency install failed; continuing with the existing venv${NC}"
+        fi
+    else
+        echo -e "${GREEN}✅ CantinaOS dependencies up to date${NC}"
     fi
     
     # Use virtual environment Python explicitly to ensure dependencies are available

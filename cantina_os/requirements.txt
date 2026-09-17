@@ -16,7 +16,15 @@ python-vlc>=3.0.20000  # VLC media player integration for music playback
 
 # LLM Integration
 openai>=2.6.0  # UPDATED 2025-10-20: GPT-4.1 family support with improved performance
-anthropic>=0.72.0  # UPDATED 2025-11-07: Latest stable SDK (0.72.0+) with fixed Anthropic client initialization
+# UPDATED 2026-09-17: upper bound added. The install guard in start-dashboard.sh had been
+# silently skipping every dependency change since Nov 2025, so this line never actually
+# installed and the venv stayed on 0.52.2. Now that the guard is fixed, an unbounded
+# `>=0.72.0` resolves to anthropic 1.x, which REMOVES the `temperature` parameter from
+# messages.create() with no **kwargs passthrough - every Claude call in claude_service,
+# vision_service and memory_service would raise TypeError on the next start. Verified:
+# `>=0.72.0,<1.0` resolves to 0.125.0, which keeps `temperature` and supports
+# `tool_choice={"type": "none"}`. Migrating to 1.x is a separate, deliberate piece of work.
+anthropic>=0.72.0,<1.0
 
 # Speech Synthesis
 elevenlabs>=2.17.0  # UPDATED 2025-10-20: Flash v2.5 model with 75ms latency, v3 with emotional range
