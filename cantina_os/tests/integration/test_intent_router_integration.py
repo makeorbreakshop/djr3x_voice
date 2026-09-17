@@ -11,7 +11,7 @@ import asyncio
 import json
 
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     TranscriptionTextPayload, 
     IntentPayload,

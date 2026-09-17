@@ -9,9 +9,9 @@ import pytest
 from typing import Dict, Any
 from unittest.mock import AsyncMock, MagicMock
 
-from cantina_os.debug_service import DebugService
+from cantina_os.services.debug_service import DebugService
 from cantina_os.base_service import BaseService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import LogLevel
 
 class TestService(BaseService):

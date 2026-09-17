@@ -3,7 +3,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from cantina_os.services.tool_executor_service import ToolExecutorService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     ToolRegistrationPayload,
     ToolExecutionRequestPayload,

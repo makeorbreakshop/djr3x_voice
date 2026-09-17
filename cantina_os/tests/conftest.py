@@ -82,19 +82,40 @@ def mock_external_apis():
     """
     Automatically mock external API clients for all tests.
     This prevents accidental API calls during testing.
+
+    FIXED 2026-09-17: this fixture used to patch ``openai.Client`` and ``deepgram.Deepgram``.
+    ``deepgram.Deepgram`` was removed in deepgram-sdk 4.x/5.x (the client is now
+    ``DeepgramClient``), so ``patch`` raised ``AttributeError`` at *setup* time. Because the
+    fixture is ``autouse=True``, that error aborted **every test in the suite** - the cause of
+    the long-standing "0 passed, 144 errors". ``openai`` is no longer a dependency at all
+    (nothing under ``cantina_os/`` imports it), so patching it is also gone.
+
+    We patch ``deepgram.DeepgramClient`` defensively (only if present) and stub out the
+    elevenlabs module, which is what the mocks in ``tests/mocks/`` actually stand in for.
     """
-    with patch("openai.Client") as mock_openai, \
-         patch("deepgram.Deepgram") as mock_deepgram:
-        
-        # Create a mock for elevenlabs (different approach since it doesn't have Client class)
-        mock_elevenlabs = Mock()
-        
+    patches = []
+
+    try:
+        import deepgram  # noqa: F401
+
+        patches.append(patch("deepgram.DeepgramClient"))
+    except Exception:  # pragma: no cover - deepgram not installed
+        pass
+
+    mock_elevenlabs = Mock()
+    mock_deepgram = Mock()
+    for pa in patches:
+        mock_deepgram = pa.start()
+
+    try:
         with patch.dict("sys.modules", {"elevenlabs": mock_elevenlabs}):
             yield {
-                "openai": mock_openai,
                 "elevenlabs": mock_elevenlabs,
-                "deepgram": mock_deepgram
+                "deepgram": mock_deepgram,
             }
+    finally:
+        for p in patches:
+            p.stop()
 
 @pytest.fixture
 def mock_sounddevice():

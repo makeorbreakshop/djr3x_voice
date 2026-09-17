@@ -10,7 +10,7 @@ import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 
 from cantina_os.services.command_dispatcher_service import CommandDispatcherService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     CliCommandPayload,
     CliResponsePayload,

@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch, AsyncMock, call, ANY
 from typing import Dict, Any
 
 from cantina_os.services import CLIService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     CliCommandPayload,
     CliResponsePayload,

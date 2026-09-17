@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from cantina_os.base_service import BaseService
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.yoda_mode_manager_service import YodaModeManagerService, SystemMode
 from cantina_os.services.cli_service import CLIService
 from cantina_os.services.command_dispatcher_service import CommandDispatcherService

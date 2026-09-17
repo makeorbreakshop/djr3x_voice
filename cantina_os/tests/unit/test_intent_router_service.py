@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, call
 import asyncio
 
 from cantina_os.services.intent_router_service import IntentRouterService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import IntentPayload, MusicCommandPayload, EyeCommandPayload
 from cantina_os.base_service import BaseService
 

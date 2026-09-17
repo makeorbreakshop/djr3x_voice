@@ -17,7 +17,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 import asyncio
 
 from cantina_os.services.mode_command_handler_service import ModeCommandHandlerService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     CliCommandPayload,
     CliResponsePayload,

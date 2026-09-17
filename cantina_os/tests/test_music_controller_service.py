@@ -17,7 +17,7 @@ from pyee.asyncio import AsyncIOEventEmitter
 
 from cantina_os.services.music_controller_service import MusicControllerService, MusicTrack
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     MusicCommandPayload,
     BaseEventPayload,

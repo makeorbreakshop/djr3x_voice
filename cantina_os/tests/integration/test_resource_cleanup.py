@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from pyee.asyncio import AsyncIOEventEmitter
 
 from cantina_os.base_service import BaseService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatus
 from cantina_os.services.music_controller_service import MusicControllerService
 from cantina_os.services.elevenlabs_service import ElevenLabsService

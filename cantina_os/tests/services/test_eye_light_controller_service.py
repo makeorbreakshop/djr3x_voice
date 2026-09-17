@@ -16,7 +16,7 @@ from cantina_os.event_payloads import (
     SentimentPayload,
     ServiceStatus
 )
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.eye_light_controller_service import (
     EyeLightControllerService,
     EyePattern,

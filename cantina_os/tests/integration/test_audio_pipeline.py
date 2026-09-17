@@ -6,7 +6,7 @@ import numpy as np
 import logging
 
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.music_controller_service import MusicControllerService
 from cantina_os.services.elevenlabs_service import ElevenLabsService
 from cantina_os.services.mic_input_service import MicInputService

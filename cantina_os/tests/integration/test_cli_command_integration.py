@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from cantina_os.services.cli_service import CLIService
 from cantina_os.services.yoda_mode_manager_service import YodaModeManagerService, SystemMode
 from cantina_os.services.music_controller_service import MusicControllerService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 
 from ..utils.event_synchronizer import EventSynchronizer
 from ..utils.retry_decorator import retry

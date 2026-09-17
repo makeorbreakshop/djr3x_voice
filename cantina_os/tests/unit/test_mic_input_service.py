@@ -11,7 +11,7 @@ import numpy as np
 from unittest.mock import patch
 
 from cantina_os.services.mic_input_service import MicInputService, AudioConfig, AudioChunkPayload
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import ServiceStatus
 
 @pytest.mark.asyncio

@@ -1,3 +1,12 @@
+"""SKIPPED 2026-09-17 - this module tests code that is dead at HEAD."""
+
+import pytest
+
+pytest.skip(
+    'Same as test_gpt_service.py - GPTService is never started. Its function-calling surface has been superseded by ClaudeService tool_use plus the Jev fast intent router.',
+    allow_module_level=True,
+)
+
 """
 Test suite for GPTService function calling capabilities.
 
@@ -11,7 +20,7 @@ import json
 import asyncio
 
 from cantina_os.services.gpt_service import GPTService
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.llm.command_functions import get_all_function_definitions
 
 @pytest.fixture

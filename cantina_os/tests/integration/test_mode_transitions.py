@@ -3,7 +3,7 @@ import pytest
 from typing import Dict, Any
 
 from cantina_os.event_bus import EventBus
-from cantina_os.event_topics import EventTopics
+from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.yoda_mode_manager_service import YodaModeManagerService, SystemMode
 from cantina_os.services.music_controller_service import MusicControllerService
 from cantina_os.services.eye_light_controller_service import EyeLightControllerService
