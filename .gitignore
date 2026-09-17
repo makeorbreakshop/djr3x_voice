@@ -119,3 +119,6 @@ Thumbs.db
 
 # Rolled-aside virtualenvs (see chore(deps) 2026-09-17)
 venv.old-*/
+
+# Runtime conversation memory (contains personal data; never commit)
+/cantina_os/memory_data/
