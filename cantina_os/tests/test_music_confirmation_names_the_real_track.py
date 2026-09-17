@@ -380,3 +380,44 @@ async def test_action_already_taken_block_names_the_started_track(claude_rig):
         f"the raw utterance is still presented as a track name: {block}"
     )
     assert "track='Huttuk Cheeka'" in block
+
+
+# ---------------------------------------------------------------------------------------
+# 5. "play music" with no track has to be a legal command
+# ---------------------------------------------------------------------------------------
+
+class TestGenericPlayCommand:
+    """Found by `scripts/system_smoke_run.py`, not by any unit test.
+
+    Once the router stopped inventing a track for a generic request, the bare `play music`
+    command it emits was rejected by the CLI arg validator:
+
+        dj-r3x> Error: Command 'play music' requires 1 arguments. Missing: track_name
+
+    The action dispatched in 483 ms and was then thrown away - the same class of bug as the
+    `eye pattern` arg-count rejection in Session 1. "Play some music" is a complete request,
+    and so is typing `p` at the prompt, so the command has to accept zero arguments.
+    """
+
+    async def test_no_arguments_plays_something_from_the_real_library(self, matcher):
+        # Exactly the payload IntentRouterService emits for a generic request.
+        await matcher.handle_play_music(
+            {"command": "play", "subcommand": "music", "args": [], "raw_input": "play music"}
+        )
+
+        assert len(matcher.played) == 1, (
+            f"`play music` with no arguments played nothing; errors="
+            f"{matcher._send_error.await_args_list}"
+        )
+        assert matcher.played[0] in REAL_LIBRARY
+
+    async def test_a_named_track_still_works(self, matcher):
+        await matcher.handle_play_music(
+            {
+                "command": "play",
+                "subcommand": "music",
+                "args": ["Turbulence"],
+                "raw_input": "play music Turbulence",
+            }
+        )
+        assert matcher.played == ["Turbulence"]

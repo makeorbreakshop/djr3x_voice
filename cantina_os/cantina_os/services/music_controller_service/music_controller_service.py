@@ -15,6 +15,7 @@ import time
 import uuid
 import glob
 import math
+import random
 
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
@@ -1006,14 +1007,41 @@ class MusicControllerService(BaseService):
         await self._list_tracks()
 
     @compound_command("play music")
-    @validate_compound_command(min_args=1, required_args=["track_name"])
+    # min_args=0 since 2026-09-17: "play some music" names no track, and neither does typing
+    # the `p` shortcut at the prompt. Requiring one argument meant the fast router's generic
+    # dispatch was rejected at the CLI arg check after landing in 483 ms - the same class of
+    # bug as the `eye pattern` arg-count rejection, and again only visible in
+    # scripts/system_smoke_run.py, because the command was emitted correctly and discarded
+    # afterwards.
+    @validate_compound_command(min_args=0, required_args=["track_name"])
     @command_error_handler
     async def handle_play_music(self, payload: dict) -> None:
-        """Handle 'play music <track>' command - plays specified track."""
+        """Handle 'play music [track]' command - plays the named track, or any track."""
         args = payload.get("args", [])
-        track_query = " ".join(args)
+        track_query = " ".join(args).strip()
+
+        if not track_query:
+            await self._play_any_track()
+            return
+
         self.logger.info(f"Playing music track: {track_query}")
         await self._smart_play_track(track_query)
+
+    async def _play_any_track(self, source: str = "cli") -> None:
+        """Play something. For when the request names no track.
+
+        Random rather than "the first one": a DJ asked for "some music" twice in a row should
+        not play Bai Tee Tee both times. Whichever track starts is reported back on
+        MUSIC_PLAYBACK_STARTED, which is what the spoken confirmation is built from, so the
+        randomness cannot desynchronise what R3X says from what is playing.
+        """
+        if not self.tracks:
+            await self._send_error("No music tracks available. Please install music first.")
+            return
+
+        track_name = random.choice(list(self.tracks.keys()))
+        self.logger.info(f"No track named; playing {track_name}")
+        await self._play_track_by_name(track_name, source)
 
     @compound_command("stop music")
     @command_error_handler
