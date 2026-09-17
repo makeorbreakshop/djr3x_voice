@@ -53,7 +53,15 @@ class IntentRouterService(BaseService):
             "play_music": self._handle_play_music_intent,
             "stop_music": self._handle_stop_music_intent,
             "set_eye_color": self._handle_set_eye_color_intent,
-            "analyze_scene": self._handle_analyze_scene_intent
+            "analyze_scene": self._handle_analyze_scene_intent,
+            # Intents reachable only from the Jev fast router. Claude has no tool schema for
+            # these (see the audit: "Claude literally cannot start DJ mode"), but the CLI
+            # commands they dispatch have existed all along.
+            "next_track": self._handle_next_track_intent,
+            "dj_mode_on": self._handle_dj_mode_on_intent,
+            "dj_mode_off": self._handle_dj_mode_off_intent,
+            # Alias: the fast router's name for the same action as set_eye_color.
+            "set_eye_animation": self._handle_set_eye_color_intent,
         }
         
     async def _start(self) -> None:
@@ -84,9 +92,16 @@ class IntentRouterService(BaseService):
     
     async def _handle_intent(self, payload: Dict[str, Any]) -> None:
         """Handle an intent detection event."""
+        # Bound before the try: the except block below reports on them, and an exception
+        # raised while unpacking the payload would otherwise hit an unbound local.
+        intent_name = ""
+        parameters: Dict[str, Any] = {}
+        conversation_id = None
+        original_text = ""
+        tool_call_id = None
         try:
             self.logger.debug(f"Received intent payload: {payload}")
-            
+
             intent_name = payload.get("intent_name", "")
             parameters = payload.get("parameters", {})
             conversation_id = payload.get("conversation_id", None)
@@ -94,7 +109,6 @@ class IntentRouterService(BaseService):
             
             # Get the tool call ID if available (from the original OpenAI tool call)
             # This allows us to link execution results back to the original call
-            tool_call_id = None
             tool_calls = payload.get("tool_calls", [])
             if tool_calls and len(tool_calls) > 0:
                 tool_call_id = tool_calls[0].get("id")
@@ -353,6 +367,60 @@ class IntentRouterService(BaseService):
                 "error": f"Failed to stop music: {str(e)}"
             }
     
+    async def _emit_dj_cli_command(
+        self,
+        subcommand: str,
+        conversation_id: Optional[str]
+    ) -> None:
+        """Emit a `dj <subcommand>` CLI_COMMAND, which the dispatcher routes to BrainService."""
+        await self.emit(EventTopics.CLI_COMMAND, {
+            "command": "dj",
+            "subcommand": subcommand,
+            "args": [],
+            "raw_input": f"dj {subcommand}",
+            "conversation_id": conversation_id
+        })
+        self.logger.info(f"Emitted CLI_COMMAND event for dj {subcommand}")
+
+    async def _handle_next_track_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
+        """Handle the next_track intent by advancing the DJ-mode queue."""
+        try:
+            await self._emit_dj_cli_command("next", conversation_id)
+            return {
+                "success": True,
+                "action": "next_track",
+                "message": "Skipping to the next track"
+            }
+        except Exception as e:
+            self.logger.error(f"Error handling next_track intent: {e}")
+            return {"success": False, "error": f"Failed to skip track: {str(e)}"}
+
+    async def _handle_dj_mode_on_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
+        """Handle the dj_mode_on intent."""
+        try:
+            await self._emit_dj_cli_command("start", conversation_id)
+            return {
+                "success": True,
+                "action": "dj_mode_on",
+                "message": "DJ mode starting"
+            }
+        except Exception as e:
+            self.logger.error(f"Error handling dj_mode_on intent: {e}")
+            return {"success": False, "error": f"Failed to start DJ mode: {str(e)}"}
+
+    async def _handle_dj_mode_off_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
+        """Handle the dj_mode_off intent."""
+        try:
+            await self._emit_dj_cli_command("stop", conversation_id)
+            return {
+                "success": True,
+                "action": "dj_mode_off",
+                "message": "DJ mode stopping"
+            }
+        except Exception as e:
+            self.logger.error(f"Error handling dj_mode_off intent: {e}")
+            return {"success": False, "error": f"Failed to stop DJ mode: {str(e)}"}
+
     async def _handle_set_eye_color_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
         """Handle the set_eye_color intent."""
         try:

@@ -33,7 +33,8 @@ from .services import (
     ModeChangeSoundService,
     MusicControllerService,
     MouseInputService,
-    IntentRouterService
+    IntentRouterService,
+    JevIntentService
 )
 from .services.vision_service import VisionService  # Vision service for scene understanding
 from .services.claude_service import ClaudeService  # Claude 3.5 Sonnet 4.5 LLM provider
@@ -216,6 +217,30 @@ class CantinaOS:
         else:
             self.logger.warning("ELEVENLABS_API_KEY not found in environment")
         
+        # Get Jev (typesafe.ai) API key for the fast intent router
+        typesafe_api_key = os.getenv("TYPESAFE_API_KEY")
+        if typesafe_api_key:
+            self._config["TYPESAFE_API_KEY"] = typesafe_api_key
+            self.logger.info("Using Jev (typesafe.ai) API key for the fast intent router")
+        else:
+            self.logger.warning(
+                "TYPESAFE_API_KEY not found in environment - fast intent router will be inactive"
+            )
+
+        # Fast-router tuning. Thresholds are deliberately configurable: 0.85 is a starting
+        # point from the 66-utterance benchmark, not a measured optimum for live STT output.
+        self._config["JEV_CONFIDENCE_THRESHOLD"] = float(
+            os.getenv("JEV_CONFIDENCE_THRESHOLD", "0.85")
+        )
+        self._config["JEV_COMMAND_THRESHOLD"] = float(os.getenv("JEV_COMMAND_THRESHOLD", "0.5"))
+        self._config["JEV_TIMEOUT_S"] = float(os.getenv("JEV_TIMEOUT_S", "0.8"))
+        self._config["JEV_SPECULATE"] = (
+            os.getenv("JEV_SPECULATE", "true").strip().lower() not in ("0", "false", "no")
+        )
+        self._config["JEV_ROUTER_ENABLED"] = (
+            os.getenv("JEV_ROUTER_ENABLED", "true").strip().lower() not in ("0", "false", "no")
+        )
+
         # Get OpenAI model
         openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         self._config["OPENAI_MODEL"] = openai_model
@@ -361,7 +386,10 @@ class CantinaOS:
             "vision",  # Add vision service early for startup scene capture
             "mouse_input",  # Keep mouse input service for click control
             "deepgram_direct_mic",  # New service for audio capture and transcription
-            "claude",  # Claude 3.5 Sonnet 4.5 LLM provider (faster latency than GPT-4.1-mini)
+            # Fast intent router: started before "claude" so it has claimed the fast-router
+            # gate before ClaudeService can handle its first transcript.
+            "jev_intent_service",  # Jev fast intent router (~190ms transcript -> action)
+            "claude",  # Claude Haiku 4.5 LLM provider (faster latency than GPT-4.1-mini)
             "intent_router",  # Add IntentRouterService to route LLM intents to hardware commands
             "brain_service",  # Add brain service to handle intents and generate plans
             "timeline_executor_service",  # Add timeline executor to handle layered plans
@@ -555,6 +583,7 @@ class CantinaOS:
             "music_controller": MusicControllerService,
             "mouse_input": MouseInputService,
             "intent_router": IntentRouterService,
+            "jev_intent_service": JevIntentService,
             "command_dispatcher": CommandDispatcherService,
             # Add the new services to the map
             "brain_service": BrainService,
@@ -602,6 +631,26 @@ class CantinaOS:
                 service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", False)
             # Enable streaming for Claude (better support than GPT)
             service_config["STREAMING"] = True
+            # How long ClaudeService waits for the fast router's verdict before proceeding on
+            # its own. Must exceed JEV_TIMEOUT_S so a Jev timeout resolves the gate first.
+            service_config["FAST_ROUTER_WAIT_S"] = float(
+                self._config.get("FAST_ROUTER_WAIT_S", 1.2)
+            )
+
+        elif service_name == "jev_intent_service":
+            # Jev fast intent router. Absent TYPESAFE_API_KEY the service starts but stays
+            # inactive, so every turn falls back to the Claude path.
+            if "TYPESAFE_API_KEY" not in service_config:
+                service_config["TYPESAFE_API_KEY"] = self._config.get("TYPESAFE_API_KEY", "")
+            service_config["JEV_CONFIDENCE_THRESHOLD"] = float(
+                self._config.get("JEV_CONFIDENCE_THRESHOLD", 0.85)
+            )
+            service_config["JEV_COMMAND_THRESHOLD"] = float(
+                self._config.get("JEV_COMMAND_THRESHOLD", 0.5)
+            )
+            service_config["JEV_TIMEOUT_S"] = float(self._config.get("JEV_TIMEOUT_S", 0.8))
+            service_config["JEV_ROUTER_ENABLED"] = self._config.get("JEV_ROUTER_ENABLED", True)
+            service_config["JEV_SPECULATE"] = self._config.get("JEV_SPECULATE", True)
 
         elif service_name == "elevenlabs":
             # Ensure ElevenLabs service has API key and other configuration

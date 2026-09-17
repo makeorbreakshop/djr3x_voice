@@ -19,6 +19,7 @@ from .debug_service import DebugService
 from .mouse_input_service import MouseInputService
 from .deepgram_direct_mic_service import DeepgramDirectMicService
 from .intent_router_service import IntentRouterService
+from .jev_intent_service import JevIntentService
 # Timeline services - now in the correct location
 from .brain_service import BrainService
 from .timeline_executor_service.timeline_executor_service import TimelineExecutorService
@@ -40,6 +41,7 @@ __all__ = [
     "MouseInputService",
     "DeepgramDirectMicService",
     "IntentRouterService",
+    "JevIntentService",
     "BrainService",
     "TimelineExecutorService",
     "NervousSystemService",
