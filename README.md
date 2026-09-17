@@ -156,6 +156,35 @@ The LLM is Claude Haiku 4.5, not GPT. Get a key at https://console.anthropic.com
 #### Deepgram API Key
 Streaming speech-to-text: https://console.deepgram.com/
 
+#### Anthropic API Key — or an OpenRouter key instead
+The conversational LLM is Claude Haiku 4.5. There are two ways to reach it, and the code
+picks between them on its own (`cantina_os/llm/anthropic_provider.py`):
+
+| Set this | What happens |
+|---|---|
+| `ANTHROPIC_API_KEY` | Direct to Anthropic. This wins whenever it is present. |
+| `OPENROUTER_API_KEY` only | The same `anthropic` SDK, pointed at OpenRouter's Anthropic-compatible `/v1/messages`. |
+| Neither | ClaudeService fails to initialise and every turn falls back to the fast router alone. |
+
+OpenRouter works because it speaks the Anthropic Messages format verbatim, and the official
+SDK is not bound to Anthropic's host: it sends `x-api-key` and `anthropic-version` to
+`{base_url}/v1/messages`. Streaming, `temperature`, `tools` and `tool_choice: {"type":
+"none"}` all behave identically — measured, see `scripts/claude_live_verify.py`.
+
+Two knobs, both optional:
+
+* `LLM_PROVIDER` — `anthropic`, `openrouter`, or `auto` (the default). A forced provider
+  whose key is missing is treated as unavailable; it does **not** fall through to the other.
+* `ANTHROPIC_BASE_URL` — overrides the host for whichever provider was chosen. For a local
+  proxy or another gateway.
+
+Model ids are translated at the client boundary, so configure `CLAUDE_MODEL` with the
+Anthropic id either way (`claude-haiku-4-5-20251001` becomes `anthropic/claude-haiku-4.5`).
+Note for anyone adding a provider: the SDK appends its own `/v1`, so the base URL is
+`https://openrouter.ai/api`, **not** `.../api/v1`.
+
+Pricing is the same on both for Haiku 4.5 — $1.00 / $5.00 per million input/output tokens.
+
 #### typesafe.ai API Key
 Powers the Jev fast intent router (see below). https://typesafe.ai
 **Optional** - without it the router is simply inactive and every turn takes the slower
@@ -166,7 +195,11 @@ Create a `.env` in the repo root. `env.example` is the template.
 
 ```
 # --- Required ---
+# One of these two. ANTHROPIC_API_KEY wins if both are set; see above.
 ANTHROPIC_API_KEY=...            # Claude Haiku 4.5 - the conversational LLM
+OPENROUTER_API_KEY=...           # same SDK, Anthropic-compatible gateway
+# LLM_PROVIDER=auto              # anthropic | openrouter | auto (default)
+# ANTHROPIC_BASE_URL=            # override the host for the chosen provider
 DEEPGRAM_API_KEY=...             # streaming speech-to-text
 ELEVENLABS_API_KEY=...           # speech synthesis
 ELEVENLABS_VOICE_ID=...

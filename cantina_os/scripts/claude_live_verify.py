@@ -82,6 +82,59 @@ TURNS = [
 ]
 
 
+
+def _wrap_usage(claude, sink: List[Dict[str, int]]) -> None:
+    """Record per-request token usage by observing the SDK, not by changing the service.
+
+    The service logs usage but stores none of it, and cost per turn is the one number a
+    provider switch has to answer. Wrapping the client here keeps that measurement in the
+    measurement script.
+    """
+    messages = claude._client.messages
+    real_stream = messages.stream
+    real_create = messages.create
+
+    def note(usage) -> None:
+        if usage is None:
+            return
+        sink.append(
+            {
+                "input": getattr(usage, "input_tokens", 0) or 0,
+                "output": getattr(usage, "output_tokens", 0) or 0,
+                "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+                "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            }
+        )
+
+    class _Wrapped:
+        def __init__(self, mgr):
+            self._mgr = mgr
+
+        def __enter__(self):
+            stream = self._mgr.__enter__()
+            real_final = stream.get_final_message
+
+            def get_final_message():
+                msg = real_final()
+                note(getattr(msg, "usage", None))
+                return msg
+
+            stream.get_final_message = get_final_message
+            return stream
+
+        def __exit__(self, *exc):
+            return self._mgr.__exit__(*exc)
+
+    messages.stream = lambda **kw: _Wrapped(real_stream(**kw))
+
+    def create(**kw):
+        msg = real_create(**kw)
+        note(getattr(msg, "usage", None))
+        return msg
+
+    messages.create = create
+
+
 class Recorder:
     def __init__(self) -> None:
         self.events: List[Dict[str, Any]] = []
@@ -147,9 +200,11 @@ async def run(args) -> int:
     print(f"  started ({len(started)}): {', '.join(started)}")
 
     claude = os_._services.get("claude")
+    usage_log: List[Dict[str, int]] = []
     if claude is not None:
         print(f"  claude model  : {claude._config['MODEL']}")
         print(f"  streaming     : {claude._config['STREAMING']}")
+        _wrap_usage(claude, usage_log)
     print()
 
     bus.emit(
@@ -166,6 +221,7 @@ async def run(args) -> int:
         print(f"TURN {key}: {label}")
         print(f'  transcript: "{transcript}"')
         t0 = time.monotonic()
+        usage_before = len(usage_log)
 
         bus.emit(
             EventTopics.VOICE_LISTENING_STARTED.value,
@@ -295,7 +351,15 @@ async def run(args) -> int:
         r["passed"] = all(ok for _, ok in checks)
         results.append(r)
 
+        turn_usage = usage_log[usage_before:]
+        r["requests"] = len(turn_usage)
+        for field in ("input", "output", "cache_read", "cache_write"):
+            r[field] = sum(u[field] for u in turn_usage)
         print(f'  reply ({r["reply_chars"]} chars, {r["chunk_count"]} chunks): {reply_text[:160]}')
+        print(
+            f"  tokens: {r['requests']} request(s), in={r['input']} out={r['output']} "
+            f"cache_read={r['cache_read']} cache_write={r['cache_write']}"
+        )
         print(f"  tool calls from Claude: {r['tool_call_names'] or 'none'}")
         print("  timings:")
         for name, v in (
@@ -334,6 +398,19 @@ async def run(args) -> int:
             f"{f(r['full_reply_ms']):>9}  {str(r['tool_call_names'] or 'none'):<18} "
             f"{'PASS' if r['passed'] else 'FAIL'}"
         )
+
+    # Haiku 4.5 costs $1.00 / $5.00 per million input/output tokens on Anthropic's own API
+    # and, at the time of writing, exactly the same on OpenRouter - OpenRouter's margin is
+    # taken on credit purchase, not per token. So the switch is cost-neutral per turn.
+    IN_PER_MTOK, OUT_PER_MTOK = 1.00, 5.00
+    tin = sum(r.get("input", 0) for r in results)
+    tout = sum(r.get("output", 0) for r in results)
+    cost = (tin * IN_PER_MTOK + tout * OUT_PER_MTOK) / 1_000_000
+    print()
+    print(
+        f"  tokens across {len(results)} turns: in={tin} out={tout}  "
+        f"cost at $1.00/$5.00 per MTok = ${cost:.5f}"
+    )
 
     print()
     print("Shutting down...")

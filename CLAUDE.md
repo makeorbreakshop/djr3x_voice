@@ -630,12 +630,49 @@ Higher-priority layers pause lower layers (e.g., DJ commentary pauses background
 
 ## 9. Configuration & Environment
 
+### 9a. Which LLM backend the Claude path uses
+
+`cantina_os/llm/anthropic_provider.py` is the single place this is decided, and all three
+Anthropic clients go through it - `ClaudeService`, `MemoryService`'s summariser, and
+`VisionService`.
+
+| Credential present | Result |
+|---|---|
+| `ANTHROPIC_API_KEY` | direct to Anthropic; **always wins** |
+| `OPENROUTER_API_KEY` only | the same `anthropic` SDK with `base_url="https://openrouter.ai/api"` |
+| neither | `resolve_provider()` returns `None`; the service treats the LLM as unavailable |
+
+`LLM_PROVIDER` (`anthropic`/`openrouter`/`auto`) forces the choice. A forced provider whose
+key is missing is **unavailable**, not a redirect to the other one - silent cross-provider
+fallback would make a misconfiguration look like a working system on someone else's bill.
+`ANTHROPIC_BASE_URL` overrides the host for whichever provider was chosen.
+
+Why it works at all: OpenRouter serves the Anthropic Messages format, and the SDK sends
+`x-api-key` + `anthropic-version` to `{base_url}/v1/messages` regardless of host. Streaming,
+`temperature`, `tools` and `tool_choice: {"type": "none"}` all behave identically - measured
+by `cantina_os/scripts/claude_live_verify.py`, not assumed.
+
+**Two traps.**
+
+1. The base URL is `https://openrouter.ai/api`, *not* `.../api/v1`. The SDK appends its own
+   `/v1`; the doubled prefix returns an HTML 404 that surfaces as `NotFoundError` with a
+   page of Next.js markup in the message.
+2. Model ids differ (`claude-haiku-4-5-20251001` vs `anthropic/claude-haiku-4.5`). They are
+   translated once, at client construction, and written back into `_config["MODEL"]` - so
+   every call site keeps using the Anthropic id and `CLAUDE_MODEL` stays portable. Add new
+   models to `OPENROUTER_MODEL_MAP`; an unmapped id passes through unchanged rather than
+   raising.
+
+`anthropic` is pinned `<1.0` because 1.x removed `temperature` from `messages.create()` and
+seven call sites pass it. That pin is unrelated to the provider choice.
+
 ### Configuration Sources
 
 1. **Environment Variables** (`.env` file):
-   - API keys: `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`,
-     `TYPESAFE_API_KEY` (the Jev fast intent router; optional - absent means the router is
-     simply inactive)
+   - API keys: `ANTHROPIC_API_KEY` **or** `OPENROUTER_API_KEY` (see below),
+     `ELEVENLABS_API_KEY`, `DEEPGRAM_API_KEY`, `TYPESAFE_API_KEY` (the Jev fast intent
+     router; optional - absent means the router is simply inactive)
+   - LLM provider: `LLM_PROVIDER` (`anthropic`/`openrouter`/`auto`), `ANTHROPIC_BASE_URL`
    - Fast router: `JEV_ROUTER_ENABLED`, `JEV_CONFIDENCE_THRESHOLD` (0.85),
      `JEV_COMMAND_THRESHOLD` (0.5), `JEV_TIMEOUT_S` (0.8), `JEV_SPECULATE`,
      `FAST_ROUTER_WAIT_S` (1.2)
@@ -769,7 +806,7 @@ python3 -m cantina_os.main # ❌ Will use system Python, not venv
 **Environment Requirements**:
 - Virtual environment at `/Users/brandoncullum/DJ-R3X Voice/venv/`
 - All dependencies installed via `pip install -r requirements.txt`
-- API keys loaded from `.env` file in project root (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
+- API keys loaded from `.env` file in project root (ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
 - Running from `cantina_os/` directory for correct module resolution
 - **Terminal**: Use Terminal.app, NOT Warp (Warp has known issues with macOS Accessibility permissions for mouse input via pynput)
 

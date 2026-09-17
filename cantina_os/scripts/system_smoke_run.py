@@ -53,6 +53,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(os.path.join(os.path.dirname(REPO), ".env"))
 
 from cantina_os.core.event_topics import EventTopics  # noqa: E402
+from cantina_os.llm.anthropic_provider import resolve_provider  # noqa: E402
 from cantina_os.main import CantinaOS  # noqa: E402
 
 # Services that need hardware or OS permissions this harness cannot provide.
@@ -87,7 +88,9 @@ TURNS: List[Tuple[str, str, List[str]]] = [
     ("dj mode on", "start dj mode", ["DJ_COMMAND"]),
     ("dj mode off", "stop dj mode", ["DJ_COMMAND"]),
     ("eye animation", "make your eyes red", ["EYE_COMMAND"]),
-    ("pure chat", "what is your favourite cantina band", []),
+    # An LLM reply is the whole point of this turn, so it is the requirement. This row
+    # read "n/a" for as long as there was no working LLM credential on the machine.
+    ("pure chat", "what is your favourite cantina band", ["LLM_RESPONSE"]),
 ]
 
 
@@ -115,9 +118,10 @@ async def run(args) -> int:
     print("CantinaOS system smoke run")
     print("=" * 78)
 
-    have_anthropic = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+    provider = resolve_provider()
     have_typesafe = bool(os.getenv("TYPESAFE_API_KEY", "").strip())
-    print(f"  ANTHROPIC_API_KEY present : {have_anthropic}")
+    print(f"  LLM provider             : {provider.provider if provider else 'NONE'}"
+          f"{f'  ({provider.base_url})' if provider and provider.base_url else ''}")
     print(f"  TYPESAFE_API_KEY present : {have_typesafe}  (Jev fast router)")
     print(f"  VLC app present          : {os.path.isdir('/Applications/VLC.app')}")
     print(f"  TTS enabled              : {args.with_tts}")
@@ -258,13 +262,19 @@ async def run(args) -> int:
     if tracker is not None:
         print()
         print("LatencyTrackerService (it recorded nothing at all before the")
-        print("conversation_id unification landed):")
+        print("conversation_id unification landed). Legs stay None here by")
+        print("construction: every leg is measured from transcription_complete,")
+        print("which needs TRANSCRIPTION_FINAL, and this harness cannot emit that")
+        print("without double-processing the turn - ClaudeService subscribes to it")
+        print("as well as to VOICE_LISTENING_STOPPED. Legs need the real mic path.")
         metrics = getattr(tracker, "_conversation_metrics", {})
         print(f"  conversations recorded : {len(metrics)}")
         for cid in list(metrics)[:8]:
             s = tracker.get_conversation_summary(cid)
             if s:
-                legs = {k: v for k, v in s.items() if isinstance(v, (int, float)) and v}
+                # Print every leg, not only the populated ones - a leg that is present and
+                # None is a different (and more useful) fact than a leg that is missing.
+                legs = {k: v for k, v in s.items() if k != "conversation_id"}
                 print(f"    {cid[:22]}...  {legs}")
 
     print()
@@ -280,7 +290,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--with-tts", action="store_true", help="also start ElevenLabs (paid, audible)")
     ap.add_argument("--hold", type=float, default=6.0, help="seconds to let music actually play")
-    ap.add_argument("--turn-timeout", type=float, default=6.0)
+    ap.add_argument("--turn-timeout", type=float, default=15.0)
     ap.add_argument("--settle", type=float, default=1.5)
     args = ap.parse_args()
     raise SystemExit(asyncio.run(run(args)))
