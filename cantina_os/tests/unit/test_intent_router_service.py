@@ -66,18 +66,21 @@ async def test_play_music_intent_routing(router_service, mock_event_bus):
 
     await router_service._handle_intent(intent_payload.dict())
 
-    # `_select_smart_track` itself emits a "list music" CLI_COMMAND as a side effect,
-    # plus the actual "play music" CLI_COMMAND, plus the INTENT_EXECUTION_RESULT: 3 total.
-    assert mock_event_bus.emit.call_count == 3
+    # CHANGED 2026-09-17: `_select_smart_track` no longer emits a `list music` CLI_COMMAND as
+    # a side effect (it dumped the library to the console mid-turn), so there are two emits:
+    # the `play music` command and the INTENT_EXECUTION_RESULT.
+    assert mock_event_bus.emit.call_count == 2
     cli_payloads = _emitted_payloads(mock_event_bus, EventTopics.CLI_COMMAND)
-    assert len(cli_payloads) == 2
+    assert len(cli_payloads) == 1
 
     cli_payload = next(p for p in cli_payloads if p.get("command") == "play")
     assert cli_payload is not None
     assert cli_payload.get("command") == "play"
     assert cli_payload.get("subcommand") == "music"
-    # Smart track selection maps "cantina" -> "cantina_band"
-    assert cli_payload.get("args") == ["cantina_band"]
+    # The naming word is handed to MusicControllerService, which owns the only matcher that
+    # knows the real library. It used to be mapped here to "cantina_band", a track id that
+    # matches no file - see tests/test_music_confirmation_names_the_real_track.py.
+    assert cli_payload.get("args") == ["cantina"]
     assert cli_payload.get("conversation_id") == "test_conv_123"
 
     result_payload = _emitted_payload(mock_event_bus, EventTopics.INTENT_EXECUTION_RESULT)
@@ -203,27 +206,31 @@ async def test_unknown_intent_handling(router_service, mock_event_bus):
     assert "No handler for intent" in result_payload.get("error_message", "")
 
 @pytest.mark.asyncio
-async def test_missing_required_parameters(router_service, mock_event_bus):
-    """Test that intents with missing required parameters are handled gracefully.
+async def test_play_music_without_a_track_still_plays(router_service, mock_event_bus):
+    """CHANGED 2026-09-17: a missing `track` is not a missing parameter.
 
-    The handler itself still runs (it's a known intent) and returns a
-    failure result; the router emits only the INTENT_EXECUTION_RESULT (no
-    CLI_COMMAND, since `_handle_play_music_intent` returns early without
-    emitting one when `track` is missing).
+    "Play some music" names no track on purpose, and the fast router now sends `track: None`
+    for exactly that case. This used to return {"success": False, "message": "No track
+    specified"} and play nothing. The command is dispatched with no arguments and
+    MusicControllerService - the only component that knows the real library - picks.
     """
     intent_payload = IntentPayload(
         intent_name="play_music",
-        parameters={},  # Missing track parameter
+        parameters={},  # No track named
         original_text="Play some music",
         conversation_id="test_conv_303"
     )
 
     await router_service._handle_intent(intent_payload.dict())
 
-    assert mock_event_bus.emit.call_count == 1
+    cli_payloads = _emitted_payloads(mock_event_bus, EventTopics.CLI_COMMAND)
+    assert len(cli_payloads) == 1
+    assert cli_payloads[0].get("command") == "play"
+    assert cli_payloads[0].get("args") == []
+
     result_payload = _emitted_payload(mock_event_bus, EventTopics.INTENT_EXECUTION_RESULT)
     assert result_payload is not None
-    assert result_payload.get("success") is False
+    assert result_payload.get("success") is True
 
 @pytest.mark.asyncio
 async def test_set_eye_color_missing_color(router_service, mock_event_bus):
@@ -244,18 +251,24 @@ async def test_set_eye_color_missing_color(router_service, mock_event_bus):
 
 @pytest.mark.asyncio
 async def test_event_subscription(router_service, mock_event_bus):
-    """Test that the service subscribes to INTENT_DETECTED events.
+    """Test that the service subscribes to the events it needs.
 
-    `_setup_subscriptions` fires the subscribe call via `asyncio.create_task`
-    rather than awaiting it directly, so the test must yield control back to
+    `_setup_subscriptions` fires the subscribe calls via `asyncio.create_task`
+    rather than awaiting them directly, so the test must yield control back to
     the event loop before asserting.
+
+    MUSIC_PLAYBACK_STARTED was added 2026-09-17: the play_music execution result has to
+    report the track that actually started, not the one that was requested.
     """
     with patch.object(BaseService, 'subscribe', autospec=True) as mock_subscribe:
         await router_service._setup_subscriptions()
-        # Let the scheduled task run
+        # Let the scheduled tasks run
         await asyncio.sleep(0)
 
-        mock_subscribe.assert_called_once_with(
+        subscribed_topics = [c.args[1] for c in mock_subscribe.call_args_list]
+        assert EventTopics.MUSIC_PLAYBACK_STARTED in subscribed_topics
+
+        mock_subscribe.assert_any_call(
             router_service,
             EventTopics.INTENT_DETECTED,
             router_service._handle_intent

@@ -400,8 +400,14 @@ class MusicControllerService(BaseService):
         self.logger.info(status_msg)
         await self._send_success(status_msg)
 
-    async def _load_music_library(self):
-        """Load available music tracks from the music directory."""
+    async def _load_music_library(self) -> int:
+        """Load available music tracks from the music directory.
+
+        Returns:
+            The number of tracks in the library - which is the number of *playable* tracks,
+            not the number of files found. Those differ when filenames parse to the same
+            title; see the duplicate warning below.
+        """
         try:
             # Get the absolute path to log where we're looking
             abs_music_dir = os.path.abspath(self.music_dir)
@@ -435,7 +441,7 @@ class MusicControllerService(BaseService):
             # Now that we've potentially updated self.music_dir, check it exists
             if not os.path.exists(self.music_dir):
                 self.logger.error(f"Could not find any valid music directory")
-                return
+                return 0
             
             # Clear existing local tracks
             self.libraries["local"].clear()
@@ -476,7 +482,18 @@ class MusicControllerService(BaseService):
                             provider="local"  # Mark as local file
                         )
 
-                        # Store in local library
+                        # Store in local library. The library is keyed by *title*, so two
+                        # files whose filenames parse to the same title collide and one
+                        # silently replaces the other - which is why the log used to print
+                        # "Loaded 22 music tracks" and "21 tracks loaded" 0 ms apart.
+                        # "Utinni.mp3" and "The Dusty Jawas - Utinni.mp3" are the real case.
+                        if title in self.libraries["local"]:
+                            self.logger.warning(
+                                f"Duplicate track title '{title}': "
+                                f"{os.path.basename(self.libraries['local'][title].path)} "
+                                f"is being replaced by {filename}. "
+                                "The library is keyed by title, so only one is playable."
+                            )
                         self.libraries["local"][title] = track
                         music_files_count += 1
 
@@ -487,8 +504,20 @@ class MusicControllerService(BaseService):
             # Update tracks alias to point to active source library
             self.tracks = self.libraries[self.active_source]
 
-            self.logger.info(f"Loaded {music_files_count} music tracks from {self.music_dir}")
-            
+            # Report the library size, not the file count: those differ whenever titles
+            # collide, and the library size is the number of tracks that can be played.
+            track_count = len(self.libraries["local"])
+            if music_files_count != track_count:
+                self.logger.info(
+                    f"Loaded {track_count} tracks from {music_files_count} files in "
+                    f"{self.music_dir} ({music_files_count - track_count} dropped to "
+                    "duplicate titles)"
+                )
+            else:
+                self.logger.info(
+                    f"Loaded {track_count} tracks from {self.music_dir}"
+                )
+
             # Alert if no music found
             if music_files_count == 0:
                 self.logger.warning("No music files found. Music playback will be unavailable.")
@@ -498,11 +527,13 @@ class MusicControllerService(BaseService):
             await self.emit(
                 EventTopics.MUSIC_LIBRARY_UPDATED,
                 {
-                    "track_count": music_files_count,
+                    "track_count": track_count,
                     "tracks": track_data
                 }
             )
-            
+
+            return track_count
+
         except Exception as e:
             self.logger.error(f"Error loading music library: {e}")
             await self._emit_status(
