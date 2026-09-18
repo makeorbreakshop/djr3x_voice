@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
 from ..core.fast_router_gate import GATE
+from ..core.music_search import parse_semantic_request
 from ..core.track_request import naming_phrase
 from ..event_payloads import (
     IntentPayload,
@@ -53,6 +54,7 @@ class IntentRouterService(BaseService):
         self._config = config or {}
         self._intent_handlers = {
             "play_music": self._handle_play_music_intent,
+            "search_music": self._handle_search_music_intent,
             "stop_music": self._handle_stop_music_intent,
             "set_eye_color": self._handle_set_eye_color_intent,
             "analyze_scene": self._handle_analyze_scene_intent,
@@ -332,6 +334,27 @@ class IntentRouterService(BaseService):
                 "error": f"Failed to play music: {str(e)}"
             }
 
+    async def _handle_search_music_intent(
+        self,
+        parameters: Dict[str, Any],
+        conversation_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Search the configured catalog and play its best result.
+
+        MusicControllerService owns both library matching and provider search, so this
+        tool deliberately follows the same command path as ``play_music``. Keeping one
+        execution path also preserves the playback-started confirmation contract.
+        """
+        query = (parameters.get("query") or "").strip()
+        if not query:
+            return {
+                "success": False,
+                "error": "A music search query is required",
+            }
+        return await self._handle_play_music_intent(
+            {"track": query}, conversation_id
+        )
+
     async def _await_started_track(self) -> Optional[str]:
         """Wait, briefly, for the track that actually started."""
         latch = self._playback_started
@@ -367,6 +390,10 @@ class IntentRouterService(BaseService):
             A track number, or the distinguishing words of the request, or None for a generic
             request ("play some music") - which means "controller's choice".
         """
+        # Jev has already reduced a long transcript to this bounded, transport-safe request.
+        # Running it through the generic word filter would erase the @semantic/@avoid markers.
+        if parse_semantic_request(track_request) is not None:
+            return track_request
         return naming_phrase(track_request)
 
     async def _handle_stop_music_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
@@ -576,4 +603,4 @@ class IntentRouterService(BaseService):
             return {
                 "success": False,
                 "error": f"Failed to analyze scene: {str(e)}"
-            } 
+            }

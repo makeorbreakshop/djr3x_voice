@@ -16,6 +16,8 @@ import uuid
 import glob
 import math
 import random
+import re
+from difflib import SequenceMatcher
 
 # Suppress VLC verbose logging to prevent Core Audio property listener errors
 # from flooding the console output
@@ -36,6 +38,10 @@ from cantina_os.event_payloads import (
     MusicSourceChangedPayload
 )
 from cantina_os.models.music_models import MusicTrack, MusicLibrary
+from cantina_os.core.music_search import (
+    looks_like_semantic_music_request,
+    parse_semantic_request,
+)
 from cantina_os.utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 
 # Import necessary Pydantic models from event_schemas
@@ -47,6 +53,7 @@ from cantina_os.core.event_schemas import (
 
 # Import music backends
 from .music_backends import MusicBackend, LocalMusicBackend, SpotifyMusicBackend
+from .semantic_music_search import SemanticMusicSearch
 
 # Use MusicTrack class from shared models instead
 # class MusicTrack(BaseModel):
@@ -71,6 +78,16 @@ class MusicControllerConfig(BaseModel):
     spotify_redirect_uri: str = Field(default="http://127.0.0.1:8888", description="OAuth redirect URI")
     spotify_device_name: Optional[str] = Field(default=None, description="Preferred Spotify device name")
     default_source: str = Field(default="local", description="Default music source: 'local' or 'spotify'")
+
+    # Local semantic search configuration
+    # Main enables this by default from ENABLE_SEMANTIC_MUSIC_SEARCH. Keeping the class-level
+    # fallback off prevents isolated service tests and embedded consumers from downloading a
+    # model merely because they constructed MusicControllerService directly.
+    enable_semantic_search: bool = Field(default=False, description="Enable CLAP search over local audio")
+    semantic_model: str = Field(default="laion/clap-htsat-unfused", description="Hugging Face CLAP model")
+    semantic_device: str = Field(default="cpu", description="Torch device for CLAP text/audio encoding")
+    semantic_cache_path: Optional[str] = Field(default=None, description="Persistent local embedding cache")
+    semantic_negative_weight: float = Field(default=0.5, ge=0.0, le=2.0)
 
 class MusicControllerService(BaseService):
     """
@@ -114,6 +131,8 @@ class MusicControllerService(BaseService):
             "local": {},
             "spotify": {}
         }
+        self._semantic_search: Optional[SemanticMusicSearch] = None
+        self._semantic_search_task: Optional[asyncio.Task[None]] = None
         
         # Create VLC instance with proper configuration to reduce verbose logging
         # and prevent Core Audio property listener errors
@@ -191,6 +210,10 @@ class MusicControllerService(BaseService):
         self.logger.debug("Loading music library")
         await self._load_music_library()
 
+        # CLAP takes several seconds to load, so keep it off both the event loop and the service
+        # startup critical path. Exact title/number playback is usable while it warms up.
+        self._start_semantic_search_initialization()
+
         # Auto-register compound commands using decorators
         register_service_commands(self, self._event_bus)
         self.logger.info("Auto-registered music commands using decorators")
@@ -203,6 +226,19 @@ class MusicControllerService(BaseService):
     async def stop(self):
         """Stop the music controller service and cleanup resources."""
         try:
+            semantic_task = getattr(self, "_semantic_search_task", None)
+            if semantic_task is not None:
+                if not semantic_task.done():
+                    semantic_task.cancel()
+                try:
+                    await semantic_task
+                except asyncio.CancelledError:
+                    pass
+                self._semantic_search_task = None
+
+            if self._semantic_search is not None:
+                await asyncio.to_thread(self._semantic_search.close)
+
             # Cancel track end timer first
             if self.track_end_timer and not self.track_end_timer.done():
                 self.track_end_timer.cancel()
@@ -286,6 +322,48 @@ class MusicControllerService(BaseService):
                 severity=LogLevel.ERROR
             )
             raise
+
+    def _start_semantic_search_initialization(self) -> None:
+        """Schedule semantic initialization without delaying service startup."""
+        if not self._config.enable_semantic_search:
+            self.logger.info("Local semantic music search disabled")
+            return
+        existing_task = getattr(self, "_semantic_search_task", None)
+        if existing_task is not None and not existing_task.done():
+            return
+        self._semantic_search_task = asyncio.create_task(
+            self._initialize_semantic_search(),
+            name="semantic-music-initialization",
+        )
+        self.logger.info("Semantic music search warming in background")
+
+    async def _initialize_semantic_search(self) -> None:
+        """Load the local CLAP index without blocking the CantinaOS event loop."""
+        if not self._config.enable_semantic_search:
+            self.logger.info("Local semantic music search disabled")
+            return
+        search = None
+        try:
+            search = SemanticMusicSearch(
+                model_id=self._config.semantic_model,
+                cache_path=self._config.semantic_cache_path,
+                device=self._config.semantic_device,
+                negative_weight=self._config.semantic_negative_weight,
+                logger=self.logger,
+            )
+            self._semantic_search = search
+            metrics = await asyncio.to_thread(search.initialize, self.libraries["local"])
+            source = "built" if metrics["indexed"] else "cached"
+            self.logger.info(
+                "Semantic music search ready: %d tracks, %s index, %.2fs",
+                int(metrics["track_count"]),
+                source,
+                metrics["total_seconds"],
+            )
+        except Exception as exc:
+            if self._semantic_search is search:
+                self._semantic_search = None
+            self.logger.warning("Semantic music search unavailable: %s", exc)
         
     def _parse_track_metadata(self, filename: str) -> tuple[str, str]:
         """
@@ -337,7 +415,10 @@ class MusicControllerService(BaseService):
                         self.libraries["spotify"] = spotify_library
                         self.logger.info(f"✓ Loaded {len(spotify_library)} Spotify tracks")
                     else:
-                        self.logger.warning("Spotify backend initialization failed (no devices found?)")
+                        # The backend logs the precise cause (revoked token, missing
+                        # device, network failure). Do not obscure it with a second,
+                        # speculative warning here.
+                        self.logger.debug("Spotify backend was not initialized")
             except Exception as e:
                 self.logger.warning(f"Spotify backend initialization failed: {e}")
         else:
@@ -452,7 +533,7 @@ class MusicControllerService(BaseService):
                 pattern = os.path.join(self.music_dir, f'*{ext}')
                 self.logger.debug(f"Searching for music files with pattern: {pattern}")
 
-                for filepath in glob.glob(pattern):
+                for filepath in sorted(glob.glob(pattern)):
                     try:
                         # Extract filename without extension for display
                         filename = os.path.basename(filepath)
@@ -470,32 +551,53 @@ class MusicControllerService(BaseService):
                             self.logger.warning(f"Could not get duration for {filepath}: {e}")
                             duration = None
 
-                        # Create MusicTrack with unique path for consistent identification
-                        # Use absolute path for reliable identification across services
+                        # Most commands address tracks by title. If two files share a
+                        # title, preserve the plain title for the generic "Cantina Band"
+                        # file and use an artist-qualified key for the other recording.
+                        library_key = title
+                        existing = self.libraries["local"].get(title)
+                        if existing is not None:
+                            disambiguated_key = library_key
+                            if artist == "Cantina Band" and existing.artist != "Cantina Band":
+                                existing_key = f"{existing.artist} - {title}"
+                                suffix = 2
+                                base_key = existing_key
+                                while existing_key in self.libraries["local"]:
+                                    existing_key = f"{base_key} ({suffix})"
+                                    suffix += 1
+                                del self.libraries["local"][title]
+                                existing.name = existing_key
+                                existing.track_id = existing_key
+                                self.libraries["local"][existing_key] = existing
+                                disambiguated_key = existing_key
+                            else:
+                                library_key = f"{artist} - {title}"
+                                base_key = library_key
+                                suffix = 2
+                                while library_key in self.libraries["local"]:
+                                    library_key = f"{base_key} ({suffix})"
+                                    suffix += 1
+                                disambiguated_key = library_key
+
+                            self.logger.info(
+                                "Disambiguated duplicate track title '%s' as '%s'",
+                                title,
+                                disambiguated_key,
+                            )
+
+                        # Use the unique library key consistently for commands and IDs.
                         abs_path = os.path.abspath(filepath)
                         track = MusicTrack(
-                            name=title,  # Use title as name
+                            name=library_key,
                             path=abs_path,
                             duration=duration,
-                            track_id=title,  # Use title as track_id for consistency
-                            title=title,  # Add title field for BrainService
-                            artist=artist,  # Add artist field from parsing
-                            provider="local"  # Mark as local file
+                            track_id=library_key,
+                            title=title,
+                            artist=artist,
+                            provider="local"
                         )
 
-                        # Store in local library. The library is keyed by *title*, so two
-                        # files whose filenames parse to the same title collide and one
-                        # silently replaces the other - which is why the log used to print
-                        # "Loaded 22 music tracks" and "21 tracks loaded" 0 ms apart.
-                        # "Utinni.mp3" and "The Dusty Jawas - Utinni.mp3" are the real case.
-                        if title in self.libraries["local"]:
-                            self.logger.warning(
-                                f"Duplicate track title '{title}': "
-                                f"{os.path.basename(self.libraries['local'][title].path)} "
-                                f"is being replaced by {filename}. "
-                                "The library is keyed by title, so only one is playable."
-                            )
-                        self.libraries["local"][title] = track
+                        self.libraries["local"][library_key] = track
                         music_files_count += 1
 
                         self.logger.debug(f"Loaded track: {title} by {artist} ({abs_path}), duration: {duration}s")
@@ -505,19 +607,8 @@ class MusicControllerService(BaseService):
             # Update tracks alias to point to active source library
             self.tracks = self.libraries[self.active_source]
 
-            # Report the library size, not the file count: those differ whenever titles
-            # collide, and the library size is the number of tracks that can be played.
             track_count = len(self.libraries["local"])
-            if music_files_count != track_count:
-                self.logger.info(
-                    f"Loaded {track_count} tracks from {music_files_count} files in "
-                    f"{self.music_dir} ({music_files_count - track_count} dropped to "
-                    "duplicate titles)"
-                )
-            else:
-                self.logger.info(
-                    f"Loaded {track_count} tracks from {self.music_dir}"
-                )
+            self.logger.info(f"Loaded {track_count} tracks from {self.music_dir}")
 
             # Alert if no music found
             if music_files_count == 0:
@@ -733,10 +824,29 @@ class MusicControllerService(BaseService):
         """
         try:
             self.logger.info(f"Smart track selection for query: '{track_query}'")
+
+            semantic_request = parse_semantic_request(track_query)
+            if semantic_request is not None:
+                if await self._search_local_semantic_and_play(
+                    semantic_request.query,
+                    source,
+                    negative_query=semantic_request.negative_query,
+                ):
+                    return
+                if await self._search_spotify_catalog_and_play(semantic_request.query, source):
+                    return
+                await self._send_error(
+                    f"No music found matching '{semantic_request.query}'"
+                )
+                return
             
-            # If tracks list is empty, return error
+            # An empty loaded library can still be satisfied by a provider catalog.
             if not self.tracks:
-                await self._send_error("No music tracks available. Please install music first.")
+                if await self._search_spotify_catalog_and_play(track_query, source):
+                    return
+                await self._send_error(
+                    f"No music found matching '{track_query}'"
+                )
                 return
                 
             # Check if it's a valid track number
@@ -760,36 +870,146 @@ class MusicControllerService(BaseService):
                 await self._play_track_by_name(track_query, source)
                 return
                 
-            # Try fuzzy matching by track name
-            matches = []
-            track_query_lower = track_query.lower()
-            
-            for name in self.tracks.keys():
-                name_lower = name.lower()
-                # Check for substring matches
-                if track_query_lower in name_lower:
-                    matches.append((name, 100 - (len(name_lower) - len(track_query_lower))))
-                # Check for partial word matches
-                elif any(track_query_lower in word for word in name_lower.split('_')):
-                    matches.append((name, 50))
-                
-            # Sort by match score (descending)
-            matches.sort(key=lambda x: x[1], reverse=True)
-            
-            if matches:
-                best_match = matches[0][0]
+            # Named requests stay deterministic. This includes conservative phonetic tolerance
+            # for ordinary STT errors such as "Java" -> "Jawas".
+            best_match = self._find_named_track(track_query)
+            if best_match:
                 self.logger.info(f"Found fuzzy match for '{track_query}': '{best_match}'")
                 await self._play_track_by_name(best_match, source)
                 return
+
+            # Typed commands and Claude tool calls do not carry Jev's structured marker. Route
+            # recognizable mood/style language through the same local semantic index.
+            if looks_like_semantic_music_request(track_query):
+                if await self._search_local_semantic_and_play(track_query, source):
+                    return
                 
-            # No matches found, default to first track
-            self.logger.warning(f"No matches found for '{track_query}', playing first track")
-            first_track = list(self.tracks.keys())[0]
-            await self._play_track_by_name(first_track, source)
+            # The loaded library has no match. Search the provider catalog rather than
+            # silently playing the first unrelated local file.
+            if await self._search_spotify_catalog_and_play(track_query, source):
+                return
+
+            self.logger.warning("No music found matching %r", track_query)
+            await self._send_error(f"No music found matching '{track_query}'")
                 
         except Exception as e:
             self.logger.error(f"Error in smart track selection: {e}")
             await self._send_error(f"Error selecting track: {str(e)}")
+
+    @staticmethod
+    def _normalized_music_words(value: str) -> List[str]:
+        if not isinstance(value, str):
+            return []
+        return re.findall(r"[a-z0-9]+", value.lower())
+
+    def _find_named_track(self, query: str) -> Optional[str]:
+        """Return a confident title/artist match without guessing from musical semantics."""
+        query_words = self._normalized_music_words(query)
+        if not query_words:
+            return None
+        normalized_query = " ".join(query_words)
+        best_name: Optional[str] = None
+        best_score = 0.0
+
+        for name, track in self.tracks.items():
+            candidates = [name, track.title or "", track.artist or ""]
+            for candidate in candidates:
+                candidate_words = self._normalized_music_words(candidate)
+                if not candidate_words:
+                    continue
+                normalized_candidate = " ".join(candidate_words)
+                if normalized_query in normalized_candidate:
+                    score = 1.0 + len(normalized_query) / max(len(normalized_candidate), 1)
+                elif len(query_words) == 1 and len(query_words[0]) >= 4:
+                    score = max(
+                        SequenceMatcher(None, query_words[0], word).ratio()
+                        for word in candidate_words
+                    )
+                    if score < 0.66:
+                        continue
+                else:
+                    score = SequenceMatcher(None, normalized_query, normalized_candidate).ratio()
+                    if score < 0.72:
+                        continue
+                if score > best_score:
+                    best_name = name
+                    best_score = score
+
+        return best_name
+
+    async def _search_local_semantic_and_play(
+        self,
+        query: str,
+        source: str,
+        *,
+        negative_query: Optional[str] = None,
+    ) -> bool:
+        """Search the cached local CLAP vectors and play the highest-ranked valid track."""
+        search = getattr(self, "_semantic_search", None)
+        if search is None or not search.ready:
+            self.logger.info("Local semantic music search unavailable for %r", query)
+            return False
+
+        matches = await asyncio.to_thread(
+            search.search,
+            query,
+            negative_query=negative_query,
+            limit=5,
+        )
+        if not matches:
+            return False
+
+        local_library = self.libraries.get("local", {})
+        winner = next((match for match in matches if match.track_name in local_library), None)
+        if winner is None:
+            self.logger.warning("Semantic index returned no currently loaded local track")
+            return False
+
+        self.logger.info(
+            "Semantic music search selected %s for %r (score=%.3f; top=%s)",
+            winner.track_name,
+            query,
+            winner.score,
+            ", ".join(f"{match.track_name}:{match.score:.3f}" for match in matches[:3]),
+        )
+        if self.active_source != "local":
+            if not await self._switch_source("local"):
+                return False
+        else:
+            self.tracks = local_library
+        await self._play_track_by_name(winner.track_name, source)
+        return True
+
+    async def _search_spotify_catalog_and_play(
+        self,
+        query: str,
+        source: str,
+    ) -> bool:
+        """Search Spotify for ``query`` and play the highest-ranked result."""
+        backend = self.backends.get("spotify")
+        if backend is None:
+            self.logger.info("Spotify catalog search unavailable for %r", query)
+            return False
+
+        results = await backend.search_tracks(query, limit=5)
+        if not results:
+            return False
+
+        track = results[0]
+        spotify_library = self.libraries.setdefault("spotify", {})
+        spotify_library[track.name] = track
+
+        if self.active_source != "spotify":
+            if not await self._switch_source("spotify"):
+                return False
+        else:
+            self.tracks = spotify_library
+
+        self.logger.info(
+            "Catalog search selected %s for %r", track.name, query
+        )
+        await self._play_track_by_name(track.name, source)
+        return True
 
     async def _play_track_by_name(self, track_name: str, source: str = "cli") -> None:
         """

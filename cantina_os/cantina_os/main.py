@@ -276,6 +276,15 @@ class CantinaOS:
             "SPOTIFY_REDIRECT_URI": os.getenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888"),
             "SPOTIFY_DEVICE_NAME": os.getenv("SPOTIFY_DEVICE_NAME"),
             "MUSIC_DEFAULT_SOURCE": os.getenv("MUSIC_DEFAULT_SOURCE", "local"),
+            "ENABLE_SEMANTIC_MUSIC_SEARCH": os.getenv("ENABLE_SEMANTIC_MUSIC_SEARCH", "true"),
+            "SEMANTIC_MUSIC_MODEL": os.getenv(
+                "SEMANTIC_MUSIC_MODEL", "laion/clap-htsat-unfused"
+            ),
+            "SEMANTIC_MUSIC_DEVICE": os.getenv("SEMANTIC_MUSIC_DEVICE", "cpu"),
+            "SEMANTIC_MUSIC_CACHE": os.getenv("SEMANTIC_MUSIC_CACHE", ""),
+            "SEMANTIC_MUSIC_NEGATIVE_WEIGHT": float(
+                os.getenv("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", "0.5")
+            ),
         }
         
         # Log loaded configuration (masking API keys for security)
@@ -722,6 +731,20 @@ class CantinaOS:
             service_config["spotify_redirect_uri"] = self._config.get("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888")
             service_config["spotify_device_name"] = self._config.get("SPOTIFY_DEVICE_NAME")
             service_config["default_source"] = self._config.get("MUSIC_DEFAULT_SOURCE", "local")
+            semantic_enabled = self._config.get("ENABLE_SEMANTIC_MUSIC_SEARCH", "true")
+            service_config["enable_semantic_search"] = str(semantic_enabled).lower() == "true"
+            service_config["semantic_model"] = self._config.get(
+                "SEMANTIC_MUSIC_MODEL", "laion/clap-htsat-unfused"
+            )
+            service_config["semantic_device"] = self._config.get(
+                "SEMANTIC_MUSIC_DEVICE", "cpu"
+            )
+            service_config["semantic_cache_path"] = (
+                self._config.get("SEMANTIC_MUSIC_CACHE") or None
+            )
+            service_config["semantic_negative_weight"] = float(
+                self._config.get("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", 0.5)
+            )
 
         elif service_name == "textual_dashboard":
             # Configure textual dashboard

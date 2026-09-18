@@ -44,9 +44,8 @@ from cantina_os.services.music_controller_service.music_controller_service impor
 
 #: The library as `MusicControllerService._load_music_library` actually keys it: the parsed
 #: *title* of every file in `audio/music/`, which is why "Elem Zadowz - Huttuk Cheeka.mp3"
-#: appears as "Huttuk Cheeka". 22 files, 21 distinct titles - "Utinni.mp3" and
-#: "The Dusty Jawas - Utinni.mp3" both parse to "Utinni" and collide on the same key. That is
-#: the same collision behind the "Loaded 22 music tracks" / "21 tracks loaded" pair in the log.
+#: appears as "Huttuk Cheeka". Duplicate titles are disambiguated with artist-qualified keys,
+#: so both "Utinni.mp3" and "The Dusty Jawas - Utinni.mp3" remain playable.
 REAL_LIBRARY = [
     "Bai Tee Tee",
     "Batuu Boogie",
@@ -66,6 +65,7 @@ REAL_LIBRARY = [
     "Turbulence",
     "Opening",
     "Utinni",
+    "The Dusty Jawas - Utinni",
     "Aloogahoo",
     "Yocola Ateema",
     "Goola Bukee",
@@ -80,10 +80,10 @@ def mock_external_apis():
     yield {}
 
 
-def test_the_real_library_has_21_distinct_titles():
+def test_the_real_library_has_22_distinct_keys():
     """Guards the fixture itself: if the library changes, the tests below must be revisited."""
-    assert len(REAL_LIBRARY) == 21
-    assert len(set(REAL_LIBRARY)) == 21
+    assert len(REAL_LIBRARY) == 22
+    assert len(set(REAL_LIBRARY)) == 22
 
 
 # ---------------------------------------------------------------------------------------
@@ -149,6 +149,7 @@ def matcher():
     svc.emit = AsyncMock()
     svc._send_success = AsyncMock()
     svc._send_error = AsyncMock()
+    svc.backends = {}
     svc.tracks = {title: MagicMock(name=title) for title in REAL_LIBRARY}
     svc.played: List[str] = []
 
@@ -166,10 +167,13 @@ class TestRealMatcher:
         await matcher._smart_play_track(selected or "")
         assert matcher.played == ["Cantina Song aka Mad About Mad About Me"]
 
-    async def test_the_old_alias_matched_nothing(self, matcher):
-        """Why the alias table was the bug: `cantina_band` falls through to the first track."""
+    async def test_an_unknown_name_never_plays_the_unrelated_first_track(self, matcher):
+        """A failed lookup must be honest when no remote catalog is available."""
         await matcher._smart_play_track("cantina_band")
-        assert matcher.played == ["Bai Tee Tee"]  # first key, not a cantina track
+        assert matcher.played == []
+        matcher._send_error.assert_awaited_once_with(
+            "No music found matching 'cantina_band'"
+        )
 
 
 # ---------------------------------------------------------------------------------------

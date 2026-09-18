@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..core.music_search import encode_semantic_request
 from ..core.track_request import naming_phrase
 
 # --------------------------------------------------------------------------------------------
@@ -146,9 +147,61 @@ INTENT_CHOICE: Dict[str, Any] = {
     },
 }
 
+MUSIC_REQUEST_KIND: Dict[str, Any] = {
+    "type": "choice",
+    "instructions": "What kind of music request is contained in this full utterance?",
+    "criteria": {
+        "named_catalog_item": (
+            "A particular song, artist, album, or title is named, including a close phonetic "
+            "or speech-to-text rendering."
+        ),
+        "semantic_vibe": (
+            "Music is requested using mood, energy, style, atmosphere, or exclusions, without "
+            "naming one particular catalog item."
+        ),
+        "generic_music": (
+            "Music is requested, but there is no name, mood, style, atmosphere, energy, or exclusion."
+        ),
+        "not_music": "There is no instruction to play music now.",
+    },
+}
+
+MUSIC_POSITIVE_VIBE: Dict[str, Any] = {
+    "type": "choice",
+    "instructions": "Which musical quality is the strongest positive request in the utterance?",
+    "criteria": {
+        "fun_upbeat_playful": "Fun, upbeat, playful, lively, party-like, or celebratory.",
+        "calm_relaxing": "Calm, relaxing, quiet, gentle, mellow, or background music.",
+        "dark_aggressive": "Dark, aggressive, heavy, angry, hard, or intense.",
+        "bright_uplifting": "Bright, optimistic, hopeful, cheerful, or uplifting.",
+        "quirky_robotic": "Quirky, robotic, electronic, strange, or droid-like.",
+        "cinematic_adventure": "Cinematic, dramatic, epic, space, or adventure music.",
+        "unspecified_or_other": "No positive musical quality is requested, or it is outside these choices.",
+    },
+}
+
+MUSIC_AVOID_HEAVY_AGGRESSIVE: Dict[str, Any] = _noul(
+    "Does the speaker explicitly ask to avoid heavy, aggressive, dark, angry, hard, or intense music?",
+    "They directly exclude one or more of those qualities.",
+    "They request one of those qualities, are neutral about them, or say nothing about them.",
+)
+
+MUSIC_VIBE_QUERIES = {
+    "fun_upbeat_playful": "fun upbeat playful party music",
+    "calm_relaxing": "calm relaxing gentle background music",
+    "dark_aggressive": "dark aggressive heavy intense music",
+    "bright_uplifting": "bright optimistic cheerful uplifting music",
+    "quirky_robotic": "quirky robotic electronic strange music",
+    "cinematic_adventure": "cinematic dramatic epic space adventure music",
+}
+MUSIC_NEGATIVE_HEAVY_QUERY = "heavy aggressive dark intense music"
+MUSIC_KIND_MIN_CONFIDENCE = 0.70
+MUSIC_VIBE_MIN_CONFIDENCE = 0.70
+MUSIC_AVOID_MIN_NOUL = 0.70
+
 
 def build_questions() -> Dict[str, Dict[str, Any]]:
-    """The full question set sent on every utterance — 8 questions, ~1.2K input tokens.
+    """The full question set sent on every utterance in one parallel Jev request.
 
     Jev answers them in parallel inside one request, so the extra questions cost tokens but
     almost no latency (the benchmark's sweep measured 184 ms for 3 questions and 228 ms for 12).
@@ -157,6 +210,9 @@ def build_questions() -> Dict[str, Dict[str, Any]]:
         "intent": INTENT_CHOICE,
         **TOOL_NOULS,
         "is_a_command": IS_A_COMMAND_NOUL,
+        "music_request_kind": MUSIC_REQUEST_KIND,
+        "music_positive_vibe": MUSIC_POSITIVE_VIBE,
+        "music_avoid_heavy_aggressive": MUSIC_AVOID_HEAVY_AGGRESSIVE,
     }
 
 
@@ -221,7 +277,11 @@ def _word_search(text: str, words: List[str]) -> Optional[str]:
     return None
 
 
-def extract_parameters(intent: str, utterance: str) -> Optional[Dict[str, Any]]:
+def extract_parameters(
+    intent: str,
+    utterance: str,
+    result: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
     """Build the ``parameters`` dict ``IntentRouterService`` expects for ``intent``.
 
     Returns ``None`` when the utterance does not carry a parameter the handler requires — the
@@ -235,7 +295,33 @@ def extract_parameters(intent: str, utterance: str) -> Optional[Dict[str, Any]]:
         # it into `cantina_band`, which matches no file. ``track`` is now None unless the
         # speaker named a track, artist or mood. A generic request still dispatches: playing
         # *something* is exactly what was asked for.
-        return {"track": naming_phrase(utterance)}
+        fallback = {"track": naming_phrase(utterance)}
+        if result is None:
+            return fallback
+
+        answers = getattr(result, "answers", {}) or {}
+        kind_answer = answers.get("music_request_kind")
+        kind = getattr(kind_answer, "choice", None)
+        kind_confidence = float(getattr(kind_answer, "confidence", 0.0) or 0.0)
+        if kind_confidence < MUSIC_KIND_MIN_CONFIDENCE:
+            return fallback
+        if kind == "generic_music":
+            return {"track": None}
+        if kind != "semantic_vibe":
+            return fallback
+
+        vibe_answer = answers.get("music_positive_vibe")
+        vibe = getattr(vibe_answer, "choice", None)
+        vibe_confidence = float(getattr(vibe_answer, "confidence", 0.0) or 0.0)
+        query = MUSIC_VIBE_QUERIES.get(vibe)
+        if not query or vibe_confidence < MUSIC_VIBE_MIN_CONFIDENCE:
+            return fallback
+        negative_query = (
+            MUSIC_NEGATIVE_HEAVY_QUERY
+            if result.noul("music_avoid_heavy_aggressive", 0.0) >= MUSIC_AVOID_MIN_NOUL
+            else None
+        )
+        return {"track": encode_semantic_request(query, negative_query)}
 
     if intent in ("stop_music", "next_track", "dj_mode_on", "dj_mode_off"):
         return {}
@@ -446,7 +532,7 @@ def decide(
         )
 
     # Gate 3: can we actually build a dispatchable command?
-    parameters = extract_parameters(choice, utterance)
+    parameters = extract_parameters(choice, utterance, result=result)
     if parameters is None:
         return declined(
             f"'{choice}' cleared its gate at {confidence:.2f} but required parameters are "

@@ -10,6 +10,11 @@ aiofiles>=23.2.1  # Async file I/O for logging service
 sounddevice>=0.4.6  # Audio capture and playback
 numpy>=1.24.0    # Audio data manipulation
 pyaudio>=0.2.14  # Audio recording and playback (requires PortAudio system dependency)
+# Local semantic music search. CLAP embeds the owned audio library once, then embeds only the
+# user's text request on the live path (~32 ms median on the Mac Studio CPU).
+torch>=2.6.0,<3.0
+transformers>=5.17.0,<6.0
+librosa>=0.11.0,<1.0
 # PINNED 2026-09-17: <6.0. deepgram-sdk 6.x and 7.x removed the `deepgram.extensions`
 # package entirely; the live service (services/deepgram_direct_mic_service.py:22, :326) needs
 # `deepgram.extensions.types.sockets.ListenV1ControlMessage`, which 6.1.1 and 7.9.0 do not have.
@@ -17,7 +22,7 @@ pyaudio>=0.2.14  # Audio recording and playback (requires PortAudio system depen
 # live STT path, which cannot be verified without a mic and a Deepgram key. Separate work.
 deepgram-sdk>=5.3.4,<6.0  # highest 5.x; verified to satisfy every live v5 idiom
 # REMOVED 2026-09-17: openai-whisper is imported nowhere under cantina_os/ (audit §4.2).
-# It pulled in torch (127 MB) and numba/llvmlite for no runtime benefit.
+# CLAP now uses torch directly for semantic music search; Whisper itself remains unnecessary.
 python-vlc>=3.0.20000  # VLC media player integration for music playback
 pydub>=0.25.1  # Lazy fallback decode path in elevenlabs_service.py:1070
 
