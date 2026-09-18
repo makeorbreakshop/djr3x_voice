@@ -89,8 +89,8 @@ class TestCLICommandIntegration:
         Use the real pyee.AsyncIOEventEmitter directly (not an async-wrapped facade).
         Production's BaseService.subscribe/emit call event_bus.on(...)/event_bus.emit(...)
         synchronously with no await (cantina_os/base_service.py:216-270; also
-        cli_service.py's direct `self._event_bus.emit(EventTopics.SYSTEM_SHUTDOWN, {})` on the
-        quit/exit path), matching AsyncIOEventEmitter's real (synchronous) interface. The
+        CLI service's event emissions), matching AsyncIOEventEmitter's real (synchronous)
+        interface. The
         previous EventBusWrapper made on()/emit() async, so those unawaited calls created
         coroutines that were silently dropped -- CLIService's subscriptions
         (CLI_RESPONSE, TRANSCRIPTION_*, etc.) and the quit-command shutdown emit never actually
@@ -346,8 +346,8 @@ class TestCLICommandIntegration:
         await asyncio.sleep(0.1)
 
         # Check that the error message was output
-        out, _err = capsys.readouterr()
-        assert "Test error message" in out
+        _out, err = capsys.readouterr()
+        assert "Test error message" in err
     
     @retry(max_attempts=3)
     @pytest.mark.asyncio
@@ -361,7 +361,7 @@ class TestCLICommandIntegration:
         """Test that the quit command emits system shutdown event."""
         # Create a mocked shutdown handler (AsyncIOEventEmitter.on is synchronous)
         shutdown_handler = AsyncMock()
-        event_bus.on(EventTopics.SYSTEM_SHUTDOWN, shutdown_handler)
+        event_bus.on(EventTopics.SYSTEM_SHUTDOWN_REQUESTED, shutdown_handler)
 
         # Send quit command through CLI
         await mock_io["input_queue"].put("quit")
@@ -371,9 +371,13 @@ class TestCLICommandIntegration:
         
         # Check that system shutdown was emitted
         shutdown_handler.assert_called_once()
+        assert shutdown_handler.call_args.args[0] == {
+            "reason": "CLI quit command",
+            "restart": False,
+        }
         
         # Force stop CLI service for this test
         await cli_service.stop()
         
         # Verify that the CLI service is stopped
-        assert cli_service._running == False 
+        assert cli_service._running is False

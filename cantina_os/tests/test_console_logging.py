@@ -12,10 +12,9 @@ file description, so stdout becomes non-blocking too. Any write large enough to 
 buffer then raises `BlockingIOError` - from the CLI's own writer, and from the logging
 `StreamHandler`, which is pointed at `sys.stdout`.
 
-The second half of the problem is volume: the console handler ran at INFO, and INTERACTIVE
-mode emits hundreds of lines a turn, so the `DJ-R3X>` prompt was buried even when nothing
-failed. Interactively the console defaults to WARNING; `LOG_LEVEL` still overrides it, and the
-file handler is untouched at DEBUG so nothing is lost from the diagnostics.
+The CLI now serializes responses and prompts through one writer, so INFO-level startup progress
+can remain visible without reintroducing duplicated command output. `LOG_LEVEL` still overrides
+the default, and the file handler remains at DEBUG for complete diagnostics.
 """
 
 import io
@@ -76,6 +75,23 @@ class AlwaysEagain(io.StringIO):
 
     def flush(self):  # type: ignore[override]
         pass
+
+
+class FlushEagainOnce(io.StringIO):
+    """Accept the write, then report EAGAIN while flushing it once.
+
+    A retry must flush the accepted text, not write the entire text a second time.
+    This is the shape the real terminal exposed with the multi-page help response.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_attempts = 0
+
+    def flush(self):  # type: ignore[override]
+        self.flush_attempts += 1
+        if self.flush_attempts == 1:
+            raise BlockingIOError(35, "write could not complete without blocking")
 
 
 class TestBlockingSafeStreamHandler:
@@ -162,9 +178,9 @@ class TestBlockingSafeStreamHandler:
 
 
 class TestDefaultConsoleLevel:
-    def test_interactive_defaults_to_warning(self):
-        """So `DJ-R3X>` is visible. The file handler still records everything."""
-        assert default_console_level(env={}, interactive=True) == logging.WARNING
+    def test_interactive_defaults_to_info(self):
+        """Interactive startup must show service progress and readiness information."""
+        assert default_console_level(env={}, interactive=True) == logging.INFO
 
     def test_non_interactive_keeps_info(self):
         """Piped or captured output is being read by a person or a script later, not raced
@@ -185,7 +201,7 @@ class TestDefaultConsoleLevel:
 
     def test_a_nonsense_log_level_falls_back_rather_than_raising(self):
         assert default_console_level(env={"LOG_LEVEL": "LOUD"}, interactive=True) == (
-            logging.WARNING
+            logging.INFO
         )
 
 
@@ -199,7 +215,7 @@ class TestBuildConsoleHandler:
     def test_it_builds_a_retrying_handler_at_the_default_level(self):
         handler = build_console_handler(stream=io.StringIO(), env={}, interactive=True)
         assert isinstance(handler, BlockingSafeStreamHandler)
-        assert handler.level == logging.WARNING
+        assert handler.level == logging.INFO
 
     def test_log_level_still_overrides(self):
         handler = build_console_handler(
@@ -225,3 +241,11 @@ class TestWriteWithRetry:
     def test_it_reports_failure_rather_than_raising(self):
         stream = AlwaysEagain()
         assert write_with_retry(stream, "x\n", max_retries=3, retry_delay_s=0.001) is False
+
+    def test_flush_retry_does_not_duplicate_an_accepted_write(self):
+        stream = FlushEagainOnce()
+
+        assert write_with_retry(
+            stream, "Available commands:\n", max_retries=3, retry_delay_s=0.001
+        ) is True
+        assert stream.getvalue() == "Available commands:\n"

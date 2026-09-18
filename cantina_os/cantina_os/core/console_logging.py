@@ -3,28 +3,30 @@ Console logging that survives a non-blocking stdout, at a level that leaves the 
 
 ## Why this module exists
 
-``CLIService._setup_stdin_reader`` calls ``os.set_blocking(sys.stdin.fileno(), False)`` so
-``loop.connect_read_pipe`` can drive stdin. On a terminal, stdin and stdout are two file
-descriptors onto the **same open file description**, and O_NONBLOCK lives on the description -
-so making stdin non-blocking makes stdout non-blocking too. Once the tty buffer fills, a write
-returns EAGAIN, which Python raises as ``BlockingIOError``. Observed live 2026-09-17 10:55:44:
+The original CLI connected asyncio directly to ``sys.stdin``. asyncio makes a read pipe
+non-blocking; on this terminal, that also left stdout able to raise EAGAIN once the tty buffer
+filled. Observed live 2026-09-17 10:55:44:
 
     cantina_os.cli - ERROR - Error writing output:
         [Errno 35] write could not complete without blocking
 
-Setting stdout blocking again is not available as a fix: it is the same description, so it
-would put stdin back into blocking mode and break the reader. Retrying the write is, and it is
-also the correct behaviour for a logging handler - the line is not unwriteable, just not
-writeable *yet*.
+The CLI now reopens the concrete terminal device as a separate file description for
+asynchronous input, which keeps normal stdout blocking. This writer remains defensive for
+redirected/non-blocking streams and for transient flush failures: a line is not unwriteable
+just because it is not writeable *yet*.
+Most importantly, accepted text is never submitted again merely because ``flush`` hit EAGAIN;
+that was the direct cause of the repeated ``help`` listings.
 
-The volume half of the problem is separate: the console handler ran at INFO while INTERACTIVE
-mode emits hundreds of lines per turn, so ``DJ-R3X>`` was buried even when nothing failed.
+The CLI now owns prompt ordering, so normal INFO-level service startup remains visible without
+reintroducing duplicated command output.
 """
 
 import logging
 import os
 import time
-from typing import Mapping, Optional
+from collections.abc import Mapping
+from io import UnsupportedOperation
+from typing import Optional
 
 #: Total patience for one log line: 100 attempts x 10 ms. A tty that cannot accept a line in
 #: a second is not going to, and a log line must never hold the process longer than that.
@@ -38,14 +40,59 @@ def write_with_retry(
     max_retries: int = DEFAULT_MAX_RETRIES,
     retry_delay_s: float = DEFAULT_RETRY_DELAY_S,
 ) -> bool:
-    """Write ``text`` to ``stream``, waiting out EAGAIN.
+    """Write ``text`` to ``stream`` exactly once, waiting out EAGAIN.
 
     Same reasoning as :class:`BlockingSafeStreamHandler`, for the plain writes
-    ``CLIService._output_processor`` does. Returns True if the text was written.
+    ``CLIService._output_processor`` does. File-descriptor streams use ``os.write`` so a
+    partial write can resume at the exact byte offset. File-like test streams keep write and
+    flush retries separate: once ``write`` accepts the text, a flush-time EAGAIN must never
+    cause the text to be submitted again.
+
+    Returns True if the entire text was written and flushed.
     """
+    try:
+        fd = stream.fileno()
+    except (AttributeError, OSError, UnsupportedOperation):
+        fd = None
+
+    if fd is not None and not os.get_blocking(fd):
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        data = text.encode(encoding, errors="replace")
+        offset = 0
+        retries = 0
+
+        while offset < len(data):
+            try:
+                written = os.write(fd, data[offset:])
+                if written <= 0:
+                    return False
+                offset += written
+                retries = 0
+            except BlockingIOError:
+                if retries >= max_retries:
+                    return False
+                retries += 1
+                time.sleep(retry_delay_s)
+        return True
+
+    write_accepted = False
     for attempt in range(max_retries + 1):
         try:
-            stream.write(text)
+            written = stream.write(text)
+            write_accepted = written is None or written == len(text)
+            if write_accepted:
+                break
+            return False
+        except BlockingIOError:
+            if attempt >= max_retries:
+                return False
+            time.sleep(retry_delay_s)
+
+    if not write_accepted:
+        return False
+
+    for attempt in range(max_retries + 1):
+        try:
             stream.flush()
             return True
         except BlockingIOError:
@@ -73,29 +120,25 @@ class BlockingSafeStreamHandler(logging.StreamHandler):
         self._max_retries = max_retries
         self._retry_delay_s = retry_delay_s
 
-    def emit(self, record: logging.LogRecord) -> None:  # noqa: D102 - inherited contract
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             message = self.format(record)
         except Exception:  # noqa: BLE001 - formatting failures use the standard path
             self.handleError(record)
             return
 
-        terminator = self.terminator
-        for attempt in range(self._max_retries + 1):
-            try:
-                self.stream.write(message + terminator)
-                self.flush()
+        try:
+            if write_with_retry(
+                self.stream,
+                message + self.terminator,
+                max_retries=self._max_retries,
+                retry_delay_s=self._retry_delay_s,
+            ):
                 return
-            except BlockingIOError:
-                if attempt >= self._max_retries:
-                    break
-                time.sleep(self._retry_delay_s)
-            except Exception:  # noqa: BLE001 - anything else is a real handler error
-                self.handleError(record)
-                return
+        except Exception:  # noqa: BLE001 - real handler errors use the standard path
+            self.handleError(record)
+            return
 
-        # Still blocked after the full retry budget. Report it the standard way rather than
-        # raising into whatever happened to be logging.
         self.handleError(record)
 
 
@@ -110,10 +153,8 @@ def default_console_level(
             stdout is a tty.
 
     Returns:
-        A ``logging`` level. ``LOG_LEVEL`` always wins, so nothing about diagnosing a problem
-        changes. Otherwise WARNING when interactive - the CLI prompt has to be visible, and the
-        file handler is recording everything at DEBUG regardless - and INFO when output is
-        being piped or captured, where there is no prompt to race against.
+        A ``logging`` level. ``LOG_LEVEL`` always wins. Otherwise INFO keeps startup progress
+        and service readiness visible in both interactive and captured output.
     """
     if env is None:
         env = os.environ
@@ -133,7 +174,7 @@ def default_console_level(
         except Exception:  # noqa: BLE001
             interactive = False
 
-    return logging.WARNING if interactive else logging.INFO
+    return logging.INFO
 
 
 def build_console_handler(

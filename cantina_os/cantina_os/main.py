@@ -263,6 +263,7 @@ class CantinaOS:
             "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
             "ANTHROPIC_BASE_URL": os.getenv("ANTHROPIC_BASE_URL", ""),
             "LLM_PROVIDER": os.getenv("LLM_PROVIDER", ""),
+            "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
@@ -547,14 +548,11 @@ class CantinaOS:
             self._event_bus.on(EventTopics.TRANSCRIPTION_FINAL, debug_transcription_handler)
             logger.info(f"Added debug monitor for TRANSCRIPTION_FINAL events - topic value: '{str(EventTopics.TRANSCRIPTION_FINAL)}'")
             
+            startup_sound_played = False
             if os.path.exists(startup_sound_path):
                 logger.info("Playing startup sound")
-                await play_audio_file(startup_sound_path, blocking=False)
-                # Emit a system event to notify about startup sound
-                self._event_bus.emit(
-                    EventTopics.SYSTEM_STARTUP,
-                    {"message": "System fully initialized, startup sound played"}
-                )
+                await play_audio_file(startup_sound_path, blocking=True)
+                startup_sound_played = True
             else:
                 logger.warning(f"Startup sound file not found: {startup_sound_path}")
                 # Try alternate path
@@ -566,14 +564,24 @@ class CantinaOS:
                 )
                 if os.path.exists(alternate_path):
                     logger.info("Playing startup sound (alternate path)")
-                    await play_audio_file(alternate_path, blocking=False)
-                    # Emit a system event to notify about startup sound
-                    self._event_bus.emit(
-                        EventTopics.SYSTEM_STARTUP,
-                        {"message": "System fully initialized, startup sound played"}
-                    )
+                    await play_audio_file(alternate_path, blocking=True)
+                    startup_sound_played = True
                 else:
                     logger.warning(f"Alternate startup sound file not found: {alternate_path}")
+
+            # Heavy post-startup work, including CLAP, listens for this event. Emit it after
+            # playback completes so it cannot starve the audio callback, and still emit when
+            # the optional sound file is missing so those services are not disabled forever.
+            self._event_bus.emit(
+                EventTopics.SYSTEM_STARTUP,
+                {
+                    "message": (
+                        "System fully initialized, startup sound played"
+                        if startup_sound_played
+                        else "System fully initialized without startup sound"
+                    )
+                },
+            )
             
             # Wait for shutdown signal
             await self._shutdown_event.wait()
@@ -647,8 +655,9 @@ class CantinaOS:
                 if key not in service_config:
                     service_config[key] = self._config.get(key, "")
             if "CLAUDE_MODEL" not in service_config:
-                # Use Claude Haiku 4.5 for best latency (fastest and most intelligent Haiku)
-                service_config["CLAUDE_MODEL"] = self._config.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+                service_config["CLAUDE_MODEL"] = self._config.get(
+                    "CLAUDE_MODEL", "claude-sonnet-5"
+                )
             # Pass interim streaming config flag (OPTIMIZATION: disabled by default to avoid extra API calls)
             if "ENABLE_INTERIM_STREAMING" not in service_config:
                 service_config["ENABLE_INTERIM_STREAMING"] = self._config.get("ENABLE_INTERIM_STREAMING", False)
@@ -843,4 +852,4 @@ def main() -> None:
     # to ensure all log messages are flushed before stopping
         
 if __name__ == "__main__":
-    main() 
+    main()

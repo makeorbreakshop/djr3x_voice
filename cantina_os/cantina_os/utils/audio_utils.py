@@ -42,9 +42,10 @@ async def play_audio_file(
         data, sample_rate = sf.read(file_path)
         
         if blocking:
-            # Play audio synchronously
+            # Start playback immediately, but wait off the event loop so other services and
+            # the CLI remain responsive until the audio device reports completion.
             sd.play(data, sample_rate)
-            sd.wait()
+            await asyncio.to_thread(sd.wait)
             logger.debug("Audio playback completed (sounddevice)")
             return
         else:
@@ -97,4 +98,4 @@ async def play_audio_file(
             )
             logger.debug("Audio playback started (system command)")
     except Exception as e:
-        raise RuntimeError(f"Failed to play audio: {e}") 
+        raise RuntimeError(f"Failed to play audio: {e}")

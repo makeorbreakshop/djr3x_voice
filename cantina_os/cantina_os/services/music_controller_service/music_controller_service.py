@@ -185,6 +185,10 @@ class MusicControllerService(BaseService):
 
         await self.subscribe(EventTopics.DJ_NEXT_TRACK, self._handle_dj_next_track)
 
+        # Heavy CLAP initialization begins only after the startup chime finishes. Starting it
+        # earlier can starve the audio callback and make the chime crackle on macOS.
+        await self.subscribe(EventTopics.SYSTEM_STARTUP, self._handle_system_startup)
+
         # FIX 1: Subscribe to cached speech completion for immediate unduck
         await self.subscribe(EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED, self._handle_cached_speech_completed)
         self.logger.debug("Subscribed to SPEECH_CACHE_PLAYBACK_COMPLETED events")
@@ -209,10 +213,6 @@ class MusicControllerService(BaseService):
         # Load the music library
         self.logger.debug("Loading music library")
         await self._load_music_library()
-
-        # CLAP takes several seconds to load, so keep it off both the event loop and the service
-        # startup critical path. Exact title/number playback is usable while it warms up.
-        self._start_semantic_search_initialization()
 
         # Auto-register compound commands using decorators
         register_service_commands(self, self._event_bus)
@@ -328,6 +328,9 @@ class MusicControllerService(BaseService):
         if not self._config.enable_semantic_search:
             self.logger.info("Local semantic music search disabled")
             return
+        semantic_search = getattr(self, "_semantic_search", None)
+        if semantic_search is not None and semantic_search.ready:
+            return
         existing_task = getattr(self, "_semantic_search_task", None)
         if existing_task is not None and not existing_task.done():
             return
@@ -336,6 +339,10 @@ class MusicControllerService(BaseService):
             name="semantic-music-initialization",
         )
         self.logger.info("Semantic music search warming in background")
+
+    async def _handle_system_startup(self, _payload: Any) -> None:
+        """Begin CLAP warm-up after latency-sensitive startup audio has completed."""
+        self._start_semantic_search_initialization()
 
     async def _initialize_semantic_search(self) -> None:
         """Load the local CLAP index without blocking the CantinaOS event loop."""

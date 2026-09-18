@@ -90,8 +90,8 @@ def test_negative_similarity_changes_the_winner():
 
 
 @pytest.mark.asyncio
-async def test_music_service_start_does_not_wait_for_semantic_model(monkeypatch):
-    """CLAP may warm for seconds, but the music service must become usable immediately."""
+async def test_semantic_model_waits_until_the_startup_chime_finishes(monkeypatch):
+    """CLAP must not compete with the startup chime for CPU or audio resources."""
     service = controller_with_tracks("Modal Notes")
     service._event_bus = AsyncIOEventEmitter()
     service._config = MagicMock(enable_semantic_search=True)
@@ -118,13 +118,15 @@ async def test_music_service_start_does_not_wait_for_semantic_model(monkeypatch)
 
     service._initialize_semantic_search = slow_semantic_initialization
 
-    start_task = asyncio.create_task(service.start())
+    await asyncio.wait_for(service.start(), timeout=0.05)
+    assert not initialization_started.is_set()
+
+    await service._handle_system_startup({})
     await asyncio.wait_for(initialization_started.wait(), timeout=0.1)
     try:
-        await asyncio.wait_for(asyncio.shield(start_task), timeout=0.05)
+        assert not service._semantic_search_task.done()
     finally:
         release_initialization.set()
-        await start_task
         await service._semantic_search_task
 
     assert service._semantic_search_task.done()
