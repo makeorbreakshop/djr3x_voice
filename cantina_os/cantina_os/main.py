@@ -193,61 +193,6 @@ class CantinaOS:
         # Load environment variables from .env file if present
         load_dotenv()
         
-        # Initialize config dictionary
-        self._config = {}
-        
-        # Get Deepgram API key
-        deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
-        if deepgram_api_key:
-            self._config["DEEPGRAM_API_KEY"] = deepgram_api_key
-            self.logger.info(f"Using Deepgram API key: {deepgram_api_key[:5]}...{deepgram_api_key[-5:]}")
-        else:
-            self.logger.warning("DEEPGRAM_API_KEY not found in environment")
-        
-        # Get OpenAI API key
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if openai_api_key:
-            self._config["OPENAI_API_KEY"] = openai_api_key
-            self.logger.info(f"Using OpenAI API key: {openai_api_key[:5]}...{openai_api_key[-5:]}")
-        else:
-            self.logger.warning("OPENAI_API_KEY not found in environment")
-        
-        # Get ElevenLabs API key
-        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
-        if elevenlabs_api_key:
-            self._config["ELEVENLABS_API_KEY"] = elevenlabs_api_key
-            self.logger.info(f"Using ElevenLabs API key: {elevenlabs_api_key[:5]}...{elevenlabs_api_key[-5:]}")
-        else:
-            self.logger.warning("ELEVENLABS_API_KEY not found in environment")
-        
-        # Get Jev (typesafe.ai) API key for the fast intent router
-        typesafe_api_key = os.getenv("TYPESAFE_API_KEY")
-        if typesafe_api_key:
-            self._config["TYPESAFE_API_KEY"] = typesafe_api_key
-            self.logger.info("Using Jev (typesafe.ai) API key for the fast intent router")
-        else:
-            self.logger.warning(
-                "TYPESAFE_API_KEY not found in environment - fast intent router will be inactive"
-            )
-
-        # Fast-router tuning. Thresholds are deliberately configurable: 0.85 is a starting
-        # point from the 66-utterance benchmark, not a measured optimum for live STT output.
-        self._config["JEV_CONFIDENCE_THRESHOLD"] = float(
-            os.getenv("JEV_CONFIDENCE_THRESHOLD", "0.85")
-        )
-        self._config["JEV_COMMAND_THRESHOLD"] = float(os.getenv("JEV_COMMAND_THRESHOLD", "0.5"))
-        self._config["JEV_TIMEOUT_S"] = float(os.getenv("JEV_TIMEOUT_S", "0.8"))
-        self._config["JEV_SPECULATE"] = (
-            os.getenv("JEV_SPECULATE", "true").strip().lower() not in ("0", "false", "no")
-        )
-        self._config["JEV_ROUTER_ENABLED"] = (
-            os.getenv("JEV_ROUTER_ENABLED", "true").strip().lower() not in ("0", "false", "no")
-        )
-
-        # Get OpenAI model
-        openai_model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-        self._config["OPENAI_MODEL"] = openai_model
-        
         # Set log level from environment or default to INFO
         log_level = os.getenv("LOG_LEVEL", "INFO")
         logging.getLogger("cantina_os").setLevel(log_level)
@@ -261,12 +206,26 @@ class CantinaOS:
             # is absent. LLM_PROVIDER ("anthropic"/"openrouter"/"auto") forces the choice
             # and ANTHROPIC_BASE_URL overrides the host. See llm/anthropic_provider.py.
             "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", ""),
+            "TYPESAFE_API_KEY": os.getenv("TYPESAFE_API_KEY", ""),
             "ANTHROPIC_BASE_URL": os.getenv("ANTHROPIC_BASE_URL", ""),
             "LLM_PROVIDER": os.getenv("LLM_PROVIDER", ""),
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
+            # Fast-router tuning. Thresholds are configuration, not constants inferred by
+            # the runtime, so preserve them in the final config dictionary.
+            "JEV_CONFIDENCE_THRESHOLD": float(
+                os.getenv("JEV_CONFIDENCE_THRESHOLD", "0.85")
+            ),
+            "JEV_COMMAND_THRESHOLD": float(
+                os.getenv("JEV_COMMAND_THRESHOLD", "0.5")
+            ),
+            "JEV_TIMEOUT_S": float(os.getenv("JEV_TIMEOUT_S", "0.8")),
+            "JEV_SPECULATE": os.getenv("JEV_SPECULATE", "true").strip().lower()
+            not in ("0", "false", "no"),
+            "JEV_ROUTER_ENABLED": os.getenv("JEV_ROUTER_ENABLED", "true").strip().lower()
+            not in ("0", "false", "no"),
             "AUDIO_SAMPLE_RATE": int(os.getenv("AUDIO_SAMPLE_RATE", "16000")),
             "AUDIO_CHANNELS": int(os.getenv("AUDIO_CHANNELS", "1")),
             "ENABLE_INTERIM_STREAMING": os.getenv("ENABLE_INTERIM_STREAMING", "false").lower() == "true",
@@ -288,25 +247,30 @@ class CantinaOS:
             ),
         }
         
-        # Log loaded configuration (masking API keys for security)
+        # Log only credential presence. Even masked fragments do not belong in terminal or
+        # persistent logs and add no operational value.
         self.logger.info("Loaded configuration from environment")
         if self._config["DEEPGRAM_API_KEY"]:
-            key = self._config["DEEPGRAM_API_KEY"]
-            self.logger.info(f"Using Deepgram API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+            self.logger.info("Deepgram credential available")
         else:
             self.logger.warning("No Deepgram API key found in environment")
         
         if self._config["OPENAI_API_KEY"]:
-            key = self._config["OPENAI_API_KEY"]
-            self.logger.info(f"Using OpenAI API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+            self.logger.info("OpenAI credential available")
         else:
             self.logger.warning("No OpenAI API key found in environment")
         
         if self._config["ELEVENLABS_API_KEY"]:
-            key = self._config["ELEVENLABS_API_KEY"]
-            self.logger.info(f"Using ElevenLabs API key: {key[:5]}...{key[-5:] if len(key) > 10 else ''}")
+            self.logger.info("ElevenLabs credential available")
         else:
             self.logger.warning("No ElevenLabs API key found in environment")
+
+        if self._config["TYPESAFE_API_KEY"]:
+            self.logger.info("Jev fast-router credential available")
+        else:
+            self.logger.warning(
+                "No Jev fast-router credential found; fast intent routing is inactive"
+            )
 
         # Log interim streaming mode
         mode = "ENABLED (low latency)" if self._config["ENABLE_INTERIM_STREAMING"] else "DISABLED (baseline)"
@@ -360,7 +324,7 @@ class CantinaOS:
         
         # Compound commands
         # Music commands
-        for cmd in ["play music", "stop music", "list music", "install music"]:
+        for cmd in ["play music", "stop music", "next music", "list music", "install music"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "music_controller", EventTopics.MUSIC_COMMAND)
         
@@ -477,6 +441,14 @@ class CantinaOS:
 
         # Stop the logging listener thread (only here, not in main())
         log_listener.stop()
+
+    async def _wait_for_startup_readiness(self) -> None:
+        """Wait for service-owned readiness boundaries before sounding the ready chime."""
+        music_controller = self._services.get("music_controller")
+        wait_until_ready = getattr(music_controller, "wait_until_ready", None)
+        if callable(wait_until_ready):
+            logger.info("Waiting for semantic music search readiness...")
+            await wait_until_ready()
         
     def _setup_signal_handlers(self) -> None:
         """Set up handlers for system signals."""
@@ -526,10 +498,10 @@ class CantinaOS:
             # Note: Vision startup scene capture now handled automatically
             # by VisionService unified monitoring loop (first frame trigger)
 
-            # Wait a bit for async services to fully connect (Arduino, camera, etc)
-            # This ensures the startup sound plays when everything is truly ready
-            logger.info("Waiting for hardware connections to stabilize...")
-            await asyncio.sleep(3.0)  # Give Arduino and camera time to fully initialize
+            # Each service's start() has already settled required connections. Await any
+            # explicitly background readiness work; optional failures degrade inside their
+            # service and still release this barrier.
+            await self._wait_for_startup_readiness()
 
             # Play startup sound once all services are initialized AND hardware is ready
             startup_sound_path = os.path.join(
@@ -538,15 +510,6 @@ class CantinaOS:
                 "startours_audio",
                 "startours_ding.mp3"
             )
-            
-            # Add debug event listener for TRANSCRIPTION_FINAL events (disabled to reduce logging overhead)
-            async def debug_transcription_handler(payload):
-                # Disabled: causes BlockingIOError due to excessive logging
-                # logger.info(f"DEBUG EVENT MONITOR - Received TRANSCRIPTION_FINAL event: {str(payload)[:200]}...")
-                pass
-            
-            self._event_bus.on(EventTopics.TRANSCRIPTION_FINAL, debug_transcription_handler)
-            logger.info(f"Added debug monitor for TRANSCRIPTION_FINAL events - topic value: '{str(EventTopics.TRANSCRIPTION_FINAL)}'")
             
             startup_sound_played = False
             if os.path.exists(startup_sound_path):
@@ -569,9 +532,8 @@ class CantinaOS:
                 else:
                     logger.warning(f"Alternate startup sound file not found: {alternate_path}")
 
-            # Heavy post-startup work, including CLAP, listens for this event. Emit it after
-            # playback completes so it cannot starve the audio callback, and still emit when
-            # the optional sound file is missing so those services are not disabled forever.
+            # SYSTEM_STARTUP is emitted after the ready chime so consumers can treat both the
+            # sound and event as the same final transition into an interactive system.
             self._event_bus.emit(
                 EventTopics.SYSTEM_STARTUP,
                 {

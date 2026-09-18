@@ -21,7 +21,7 @@ event is silently dropped anymore.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch, call
 import asyncio
 
 from cantina_os.services.intent_router_service import IntentRouterService
@@ -111,6 +111,26 @@ async def test_stop_music_intent_routing(router_service, mock_event_bus):
     result_payload = _emitted_payload(mock_event_bus, EventTopics.INTENT_EXECUTION_RESULT)
     assert result_payload is not None
     assert result_payload.get("success") is True
+
+
+@pytest.mark.asyncio
+async def test_stop_music_waits_for_real_playback_stop(router_service):
+    async def emit_and_confirm(topic, payload):
+        if topic == EventTopics.CLI_COMMAND:
+            await router_service._handle_music_playback_stopped(
+                {"track_name": "Modal Notes"}
+            )
+
+    router_service.emit = AsyncMock(side_effect=emit_and_confirm)
+
+    result = await router_service._handle_stop_music_intent({}, "turn-stop")
+
+    assert result == {
+        "success": True,
+        "action": "stop",
+        "track": "Modal Notes",
+        "message": "Music stopped: Modal Notes",
+    }
 
 @pytest.mark.asyncio
 async def test_set_eye_color_intent_routing(router_service, mock_event_bus):

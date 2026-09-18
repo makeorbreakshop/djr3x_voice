@@ -597,9 +597,15 @@ class CLIService(BaseService):
         """
         response_text = payload.get("text", "")
         conversation_id = payload.get("conversation_id")
+        is_complete = payload.get("is_complete", True)
 
         # Only show if it matches our current conversation
         if conversation_id != self._current_conversation_id:
+            return
+
+        # Streaming fragments are consumed by the speech/timeline path. Printing every one
+        # here duplicates the final answer and redraws the prompt repeatedly.
+        if not is_complete:
             return
 
         if response_text:

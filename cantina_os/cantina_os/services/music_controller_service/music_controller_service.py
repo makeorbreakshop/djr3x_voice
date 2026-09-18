@@ -133,6 +133,7 @@ class MusicControllerService(BaseService):
         }
         self._semantic_search: Optional[SemanticMusicSearch] = None
         self._semantic_search_task: Optional[asyncio.Task[None]] = None
+        self._last_semantic_candidates: List[str] = []
         
         # Create VLC instance with proper configuration to reduce verbose logging
         # and prevent Core Audio property listener errors
@@ -185,10 +186,6 @@ class MusicControllerService(BaseService):
 
         await self.subscribe(EventTopics.DJ_NEXT_TRACK, self._handle_dj_next_track)
 
-        # Heavy CLAP initialization begins only after the startup chime finishes. Starting it
-        # earlier can starve the audio callback and make the chime crackle on macOS.
-        await self.subscribe(EventTopics.SYSTEM_STARTUP, self._handle_system_startup)
-
         # FIX 1: Subscribe to cached speech completion for immediate unduck
         await self.subscribe(EventTopics.SPEECH_CACHE_PLAYBACK_COMPLETED, self._handle_cached_speech_completed)
         self.logger.debug("Subscribed to SPEECH_CACHE_PLAYBACK_COMPLETED events")
@@ -213,6 +210,10 @@ class MusicControllerService(BaseService):
         # Load the music library
         self.logger.debug("Loading music library")
         await self._load_music_library()
+
+        # Warm CLAP as soon as the local library exists. CantinaOS awaits this task before the
+        # startup chime, so the chime is a true ready signal and cannot crackle under model load.
+        self._start_semantic_search_initialization()
 
         # Auto-register compound commands using decorators
         register_service_commands(self, self._event_bus)
@@ -340,9 +341,11 @@ class MusicControllerService(BaseService):
         )
         self.logger.info("Semantic music search warming in background")
 
-    async def _handle_system_startup(self, _payload: Any) -> None:
-        """Begin CLAP warm-up after latency-sensitive startup audio has completed."""
-        self._start_semantic_search_initialization()
+    async def wait_until_ready(self) -> None:
+        """Wait until optional semantic search is ready or has explicitly degraded."""
+        task = getattr(self, "_semantic_search_task", None)
+        if task is not None:
+            await asyncio.shield(task)
 
     async def _initialize_semantic_search(self) -> None:
         """Load the local CLAP index without blocking the CantinaOS event loop."""
@@ -952,6 +955,9 @@ class MusicControllerService(BaseService):
         negative_query: Optional[str] = None,
     ) -> bool:
         """Search the cached local CLAP vectors and play the highest-ranked valid track."""
+        # A command can arrive while startup is still warming. Waiting here preserves the
+        # contract that requests made just before the ready chime still resolve correctly.
+        await self.wait_until_ready()
         search = getattr(self, "_semantic_search", None)
         if search is None or not search.ready:
             self.logger.info("Local semantic music search unavailable for %r", query)
@@ -967,7 +973,23 @@ class MusicControllerService(BaseService):
             return False
 
         local_library = self.libraries.get("local", {})
-        winner = next((match for match in matches if match.track_name in local_library), None)
+        self._last_semantic_candidates = [
+            match.track_name for match in matches if match.track_name in local_library
+        ]
+        current_track = getattr(self, "current_track", None)
+        current_name = current_track.name if current_track else None
+        winner = next(
+            (
+                match
+                for match in matches
+                if match.track_name in local_library and match.track_name != current_name
+            ),
+            None,
+        )
+        if winner is None:
+            winner = next(
+                (match for match in matches if match.track_name in local_library), None
+            )
         if winner is None:
             self.logger.warning("Semantic index returned no currently loaded local track")
             return False
@@ -1058,7 +1080,7 @@ class MusicControllerService(BaseService):
                 return
             
             # Otherwise, stop any current playback and play directly
-            await self._stop_playback()
+            await self._stop_playback(notify=False)
 
             # Use the active backend to play the track
             self.logger.info(f"Playing track: {track.name} ({track.path})")
@@ -1120,7 +1142,7 @@ class MusicControllerService(BaseService):
             self.logger.error(f"Error playing track {track_name}: {e}")
             await self._send_error(f"Error playing music: {str(e)}")
 
-    async def _stop_playback(self) -> None:
+    async def _stop_playback(self, *, notify: bool = True) -> None:
         """Stop music playback through the active backend.
 
         This used to gate on ``self.player`` and drive VLC directly. Playback moved to the
@@ -1136,7 +1158,12 @@ class MusicControllerService(BaseService):
         """
         try:
             if not self.current_track and not self.player:
-                await self._send_success("No music is currently playing")
+                if notify:
+                    await self.emit(
+                        EventTopics.MUSIC_PLAYBACK_STOPPED,
+                        {"track_name": None, "already_stopped": True},
+                    )
+                    await self._send_success("No music is currently playing")
                 return
             
             # Cancel track end timer
@@ -1184,7 +1211,8 @@ class MusicControllerService(BaseService):
             # Emit simple coordination event for timeline services
             await self.emit(EventTopics.TRACK_STOPPED, {})
             
-            await self._send_success("Stopped music playback")
+            if notify:
+                await self._send_success("Stopped music playback")
             
         except Exception as e:
             self.logger.error(f"Error stopping playback: {str(e)}", exc_info=True)
@@ -1266,7 +1294,11 @@ class MusicControllerService(BaseService):
             await self._send_error("No music tracks available. Please install music first.")
             return
 
-        track_name = random.choice(list(self.tracks.keys()))
+        choices = list(self.tracks.keys())
+        current_track = getattr(self, "current_track", None)
+        if current_track and len(choices) > 1:
+            choices = [name for name in choices if name != current_track.name]
+        track_name = random.choice(choices)
         self.logger.info(f"No track named; playing {track_name}")
         await self._play_track_by_name(track_name, source)
 
@@ -1276,6 +1308,28 @@ class MusicControllerService(BaseService):
         """Handle 'stop music' command - stops music playback."""
         self.logger.info("Stopping music playback")
         await self._stop_playback()
+
+    @compound_command("next music")
+    @command_error_handler
+    async def handle_next_music(self, payload: dict) -> None:
+        """Play the next ranked semantic result, or the next local library track."""
+        current_name = self.current_track.name if self.current_track else None
+        candidates = [
+            name
+            for name in getattr(self, "_last_semantic_candidates", [])
+            if name in self.tracks and name != current_name
+        ]
+        if not candidates:
+            names = list(self.tracks)
+            if not names:
+                await self._send_error("No music tracks available. Please install music first.")
+                return
+            if current_name in names and len(names) > 1:
+                index = (names.index(current_name) + 1) % len(names)
+                candidates = [names[index]]
+            else:
+                candidates = [next((name for name in names if name != current_name), names[0])]
+        await self._play_track_by_name(candidates[0], "cli")
 
     @compound_command("source music")
     @command_error_handler

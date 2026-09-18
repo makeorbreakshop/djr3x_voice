@@ -248,6 +248,25 @@ async def test_handle_response(cli_service, capsys):
     out, _err = capsys.readouterr()
     assert "Dict message" in out
 
+
+@pytest.mark.asyncio
+async def test_llm_stream_renders_only_the_complete_response_and_one_prompt(event_bus):
+    service = CLIService(event_bus)
+    service._current_conversation_id = "turn-1"
+    service._async_write_output = AsyncMock()
+
+    await service._handle_llm_response(
+        {"conversation_id": "turn-1", "text": "Hel", "is_complete": False}
+    )
+    await service._handle_llm_response(
+        {"conversation_id": "turn-1", "text": "Hello there", "is_complete": True}
+    )
+
+    assert service._async_write_output.await_args_list == [
+        call('🤖 R3X: "Hello there"'),
+        call("", show_prompt=True),
+    ]
+
 @pytest.mark.skip(
     reason=(
         "Stale contract, and it exercises a genuine production bug. (1) Empty input never "

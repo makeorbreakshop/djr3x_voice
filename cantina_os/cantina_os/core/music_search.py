@@ -53,6 +53,8 @@ SEMANTIC_MUSIC_WORDS = frozenset(
         "cheerful",
         "chill",
         "cinematic",
+        "crazy",
+        "craziest",
         "country",
         "dance",
         "dark",
@@ -85,12 +87,15 @@ SEMANTIC_MUSIC_WORDS = frozenset(
         "robotic",
         "rock",
         "sad",
+        "scary",
         "soft",
         "space",
+        "spooky",
         "strange",
         "synth",
         "uplifting",
         "upbeat",
+        "banger",
     }
 )
 

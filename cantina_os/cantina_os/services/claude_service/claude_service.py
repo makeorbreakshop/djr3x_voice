@@ -1451,9 +1451,16 @@ class ClaudeService(BaseService):
             # (analyze_scene adds vision result to conversation and re-runs Claude)
             vision_tools = {"analyze_scene"}
 
-            # Add tool response as a message (skip for visual-only tools)
+            # Add tool response as a message (skip for visual-only tools). Fast-router actions
+            # are folded into this same turn through <action_already_taken>; persisting a second
+            # generic tool-result message duplicates context and makes later turns noisier.
             if intent_name not in visual_only_tools and intent_name not in vision_tools:
-                if tool_call_id:
+                if source == "jev_fast_router":
+                    self.logger.debug(
+                        "Fast-router result is already represented in the active turn; "
+                        "skipping duplicate memory entry"
+                    )
+                elif tool_call_id:
                     self.logger.info(f"Adding tool response for tool_call_id: {tool_call_id}")
                     self._memory.add_message(
                         role="user",  # Claude uses "user" role for tool results
@@ -1480,8 +1487,7 @@ class ClaudeService(BaseService):
                 # later one cancels the earlier one mid-sentence. Measured live on 2026-09-17
                 # 10:57:25: "Now spinning up "Cantina Band" for you" started speaking and was
                 # cut off 467 ms later by "Oh YEAH! Now we're talking! Cantina Band is
-                # SPINNING". The tool result still goes into memory above - only the extra
-                # spoken reply is dropped.
+                # SPINNING". The main turn owns both the context and spoken reply.
                 if source == "jev_fast_router":
                     self.logger.info(
                         f"Fast router executed '{intent_name}'; the main turn owns this turn's "

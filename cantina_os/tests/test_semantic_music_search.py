@@ -90,8 +90,8 @@ def test_negative_similarity_changes_the_winner():
 
 
 @pytest.mark.asyncio
-async def test_semantic_model_waits_until_the_startup_chime_finishes(monkeypatch):
-    """CLAP must not compete with the startup chime for CPU or audio resources."""
+async def test_semantic_model_is_ready_before_the_startup_chime(monkeypatch):
+    """The readiness barrier must not return until CLAP has finished warming."""
     service = controller_with_tracks("Modal Notes")
     service._event_bus = AsyncIOEventEmitter()
     service._config = MagicMock(enable_semantic_search=True)
@@ -119,15 +119,14 @@ async def test_semantic_model_waits_until_the_startup_chime_finishes(monkeypatch
     service._initialize_semantic_search = slow_semantic_initialization
 
     await asyncio.wait_for(service.start(), timeout=0.05)
-    assert not initialization_started.is_set()
-
-    await service._handle_system_startup({})
     await asyncio.wait_for(initialization_started.wait(), timeout=0.1)
+    readiness = asyncio.create_task(service.wait_until_ready())
     try:
         assert not service._semantic_search_task.done()
+        assert not readiness.done()
     finally:
         release_initialization.set()
-        await service._semantic_search_task
+        await readiness
 
     assert service._semantic_search_task.done()
 
@@ -178,6 +177,105 @@ async def test_structured_vibe_request_plays_the_local_semantic_winner():
         "Mus Kat & Nalpak - Bright Suns", "cli"
     )
     service._send_error.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_repeated_semantic_request_excludes_the_current_track():
+    service = controller_with_tracks("Modal Notes", "Mus Kat & Nalpak - Bright Suns")
+    service.current_track = service.tracks["Modal Notes"]
+    semantic = MagicMock()
+    semantic.ready = True
+    semantic.search.return_value = [
+        SemanticMatch(
+            track_name="Modal Notes",
+            score=0.574,
+            positive_score=0.574,
+            negative_score=None,
+        ),
+        SemanticMatch(
+            track_name="Mus Kat & Nalpak - Bright Suns",
+            score=0.572,
+            positive_score=0.572,
+            negative_score=None,
+        ),
+    ]
+    service._semantic_search = semantic
+
+    played = await service._search_local_semantic_and_play("fun funky party music", "voice")
+
+    assert played is True
+    service._play_track_by_name.assert_awaited_once_with(
+        "Mus Kat & Nalpak - Bright Suns", "voice"
+    )
+
+
+@pytest.mark.asyncio
+async def test_next_music_reuses_ranked_semantic_candidates():
+    service = controller_with_tracks("Modal Notes", "Mus Kat & Nalpak - Bright Suns", "Goola Bukee")
+    service.current_track = service.tracks["Modal Notes"]
+    service._last_semantic_candidates = [
+        "Modal Notes",
+        "Mus Kat & Nalpak - Bright Suns",
+        "Goola Bukee",
+    ]
+
+    await service.handle_next_music(
+        {"command": "next", "subcommand": "music", "args": []}
+    )
+
+    service._play_track_by_name.assert_awaited_once_with(
+        "Mus Kat & Nalpak - Bright Suns", "cli"
+    )
+
+
+@pytest.mark.asyncio
+async def test_generic_music_does_not_randomly_replay_the_current_track(monkeypatch):
+    service = controller_with_tracks("Modal Notes", "Goola Bukee")
+    service.current_track = service.tracks["Modal Notes"]
+    chosen = []
+    monkeypatch.setattr(
+        music_controller_module.random,
+        "choice",
+        lambda choices: chosen.extend(choices) or choices[0],
+    )
+
+    await service._play_any_track("voice")
+
+    assert chosen == ["Goola Bukee"]
+    service._play_track_by_name.assert_awaited_once_with("Goola Bukee", "voice")
+
+
+@pytest.mark.asyncio
+async def test_internal_track_replacement_stops_quietly():
+    service = controller_with_tracks("Modal Notes")
+    service.current_track = service.tracks["Modal Notes"]
+    service.player = None
+    service.track_end_timer = None
+    service.is_ducking = False
+    service.emit = AsyncMock()
+    service._send_success = AsyncMock()
+    backend = MagicMock()
+    backend.stop_playback = AsyncMock(return_value=True)
+    service.backends = {"local": backend}
+
+    await service._stop_playback(notify=False)
+
+    backend.stop_playback.assert_awaited_once_with()
+    service._send_success.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_track_start_does_not_emit_a_spurious_stopped_event():
+    service = controller_with_tracks("Modal Notes")
+    service.current_track = None
+    service.player = None
+    service.emit = AsyncMock()
+    service._send_success = AsyncMock()
+
+    await service._stop_playback(notify=False)
+
+    service.emit.assert_not_awaited()
+    service._send_success.assert_not_awaited()
 
 
 @pytest.mark.asyncio

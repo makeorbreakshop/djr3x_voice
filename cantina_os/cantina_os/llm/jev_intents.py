@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ..core.music_search import encode_semantic_request
+from ..core.music_search import SEMANTIC_MUSIC_WORDS, encode_semantic_request
 from ..core.track_request import naming_phrase
 
 # --------------------------------------------------------------------------------------------
@@ -199,6 +199,27 @@ MUSIC_KIND_MIN_CONFIDENCE = 0.70
 MUSIC_VIBE_MIN_CONFIDENCE = 0.70
 MUSIC_AVOID_MIN_NOUL = 0.70
 
+_HEAVY_AGGRESSIVE_WORDS = {
+    "aggressive",
+    "angry",
+    "dark",
+    "hard",
+    "heavy",
+    "intense",
+}
+
+
+def _semantic_query_from_utterance(utterance: str, *, avoid_heavy: bool) -> str:
+    """Keep the speaker's musical descriptors while dropping unrelated rambling."""
+    descriptors = [
+        word
+        for word in re.findall(r"[a-z0-9']+", (utterance or "").lower())
+        if word in SEMANTIC_MUSIC_WORDS
+        and (not avoid_heavy or word not in _HEAVY_AGGRESSIVE_WORDS)
+    ]
+    # Preserve order but avoid weighting a repeated filler word multiple times.
+    return " ".join(dict.fromkeys(descriptors))
+
 
 def build_questions() -> Dict[str, Dict[str, Any]]:
     """The full question set sent on every utterance in one parallel Jev request.
@@ -313,14 +334,16 @@ def extract_parameters(
         vibe_answer = answers.get("music_positive_vibe")
         vibe = getattr(vibe_answer, "choice", None)
         vibe_confidence = float(getattr(vibe_answer, "confidence", 0.0) or 0.0)
-        query = MUSIC_VIBE_QUERIES.get(vibe)
-        if not query or vibe_confidence < MUSIC_VIBE_MIN_CONFIDENCE:
-            return fallback
-        negative_query = (
-            MUSIC_NEGATIVE_HEAVY_QUERY
-            if result.noul("music_avoid_heavy_aggressive", 0.0) >= MUSIC_AVOID_MIN_NOUL
-            else None
+        fallback_query = MUSIC_VIBE_QUERIES.get(vibe)
+        avoid_heavy = (
+            result.noul("music_avoid_heavy_aggressive", 0.0) >= MUSIC_AVOID_MIN_NOUL
         )
+        query = _semantic_query_from_utterance(utterance, avoid_heavy=avoid_heavy)
+        if not query:
+            if not fallback_query or vibe_confidence < MUSIC_VIBE_MIN_CONFIDENCE:
+                return fallback
+            query = fallback_query
+        negative_query = MUSIC_NEGATIVE_HEAVY_QUERY if avoid_heavy else None
         return {"track": encode_semantic_request(query, negative_query)}
 
     if intent in ("stop_music", "next_track", "dj_mode_on", "dj_mode_off"):

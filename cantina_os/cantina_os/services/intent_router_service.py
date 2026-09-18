@@ -73,6 +73,8 @@ class IntentRouterService(BaseService):
         #: MusicControllerService picks.
         self._playback_started: Optional[asyncio.Event] = None
         self._last_started_track: Optional[str] = None
+        self._playback_stopped: Optional[asyncio.Event] = None
+        self._last_stopped_track: Optional[str] = None
 
         #: How long a play dispatch waits for MUSIC_PLAYBACK_STARTED before confirming the
         #: request instead of the result. Kept below ClaudeService's own outcome wait
@@ -108,6 +110,10 @@ class IntentRouterService(BaseService):
             EventTopics.MUSIC_PLAYBACK_STARTED,
             self._handle_music_playback_started
         ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.MUSIC_PLAYBACK_STOPPED,
+            self._handle_music_playback_stopped,
+        ))
         self.logger.info("Subscribed to INTENT_DETECTED events")
 
     async def _handle_music_playback_started(self, payload: Dict[str, Any]) -> None:
@@ -121,6 +127,12 @@ class IntentRouterService(BaseService):
         self._last_started_track = name
         if self._playback_started is not None:
             self._playback_started.set()
+
+    async def _handle_music_playback_stopped(self, payload: Dict[str, Any]) -> None:
+        """Record that the music controller actually completed a stop."""
+        self._last_stopped_track = (payload or {}).get("track_name")
+        if self._playback_stopped is not None:
+            self._playback_stopped.set()
     
     async def _handle_intent(self, payload: Dict[str, Any]) -> None:
         """Handle an intent detection event."""
@@ -168,8 +180,13 @@ class IntentRouterService(BaseService):
                 # <action_already_taken> block ClaudeService builds describes the result
                 # rather than the request. Only meaningful for a fast-router dispatch; a
                 # Claude tool call has no gate record and this is a no-op.
-                if source == "jev_fast_router" and original_text and result.get("track"):
-                    GATE.resolve_outcome(original_text, {"track": result["track"]})
+                if source == "jev_fast_router" and original_text:
+                    outcome = {
+                        key: result[key]
+                        for key in ("success", "track", "action", "message")
+                        if key in result and result[key] is not None
+                    }
+                    GATE.resolve_outcome(original_text, outcome)
 
                 # Emit intent execution result for verbal feedback
                 # SKIP for analyze_scene - it handles its own response generation
@@ -400,6 +417,9 @@ class IntentRouterService(BaseService):
         """Handle the stop_music intent."""
         try:
             self.logger.info("Stopping music")
+
+            self._playback_stopped = asyncio.Event()
+            self._last_stopped_track = None
             
             # Create and emit music command via CLI_COMMAND for unified processing
             cli_payload = {
@@ -412,12 +432,17 @@ class IntentRouterService(BaseService):
             
             await self.emit(EventTopics.CLI_COMMAND, cli_payload)
             self.logger.info("Emitted CLI_COMMAND event for stop music")
-            
-            # Return success result
+
+            stopped_track = await self._await_stopped_track()
+            if stopped_track:
+                message = f"Music stopped: {stopped_track}"
+            else:
+                message = "Music is stopped"
             return {
                 "success": True,
                 "action": "stop",
-                "message": "Music stopped"
+                "track": stopped_track,
+                "message": message,
             }
         
         except Exception as e:
@@ -426,6 +451,22 @@ class IntentRouterService(BaseService):
                 "success": False,
                 "error": f"Failed to stop music: {str(e)}"
             }
+
+    async def _await_stopped_track(self) -> Optional[str]:
+        latch = self._playback_stopped
+        if latch is None:
+            return None
+        try:
+            await asyncio.wait_for(latch.wait(), timeout=self._playback_wait_s)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "No MUSIC_PLAYBACK_STOPPED within %.2fs; confirming the request only",
+                self._playback_wait_s,
+            )
+            return None
+        finally:
+            self._playback_stopped = None
+        return self._last_stopped_track
     
     async def _emit_dj_cli_command(
         self,
@@ -443,26 +484,27 @@ class IntentRouterService(BaseService):
         self.logger.info(f"Emitted CLI_COMMAND event for dj {subcommand}")
 
     async def _handle_next_track_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
-        """Handle the next_track intent by advancing the DJ-mode queue.
-
-        KNOWN LIMITATION, measured live 2026-09-17: outside DJ mode this does nothing useful.
-        `dj next` is the only skip capability in the system, and BrainService refuses it with
-        "Cannot skip track, DJ mode is not active". MusicControllerService itself understands
-        only two actions - "play" and "stop" (music_controller_service.py:574,577) - so there
-        is no track cursor to advance when DJ mode is off.
-
-        Deliberately not papered over here: faking a skip by re-issuing `music play` would pick
-        a track by the same path a fresh "play some music" does, which is not what "next" means
-        and would hide the gap. The fix belongs in MusicControllerService (a real playlist
-        cursor with a "next" action), not in the router. The user does at least get an accurate
-        error today rather than silence.
-        """
+        """Advance the music controller's real candidate/library cursor."""
         try:
-            await self._emit_dj_cli_command("next", conversation_id)
+            self._playback_started = asyncio.Event()
+            self._last_started_track = None
+            await self.emit(EventTopics.CLI_COMMAND, {
+                "command": "next",
+                "subcommand": "music",
+                "args": [],
+                "raw_input": "next music",
+                "conversation_id": conversation_id,
+            })
+            started_track = await self._await_started_track()
             return {
                 "success": True,
                 "action": "next_track",
-                "message": "Skipping to the next track"
+                "track": started_track,
+                "message": (
+                    f"Now playing: {started_track}"
+                    if started_track
+                    else "Next track requested"
+                ),
             }
         except Exception as e:
             self.logger.error(f"Error handling next_track intent: {e}")

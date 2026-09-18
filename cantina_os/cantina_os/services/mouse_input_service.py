@@ -18,19 +18,16 @@ DEPENDENCIES: pynput for mouse input detection, YodaModeManagerService integrati
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel
 from pynput import mouse
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
-from ..event_payloads import (
-    ServiceStatus,
-    LogLevel,
-    BaseEventPayload,
-    SystemModeChangePayload
-)
+from ..event_payloads import LogLevel, ServiceStatus
 from ..services.yoda_mode_manager_service import SystemMode
+
 
 class MouseInputServiceConfig(BaseModel):
     """Configuration for the MouseInputService."""
@@ -147,6 +144,15 @@ class MouseInputService(BaseService):
             EventTopics.SYSTEM_MODE_CHANGE,
             self._handle_mode_change
         ))
+
+        asyncio.create_task(self.subscribe(
+            EventTopics.VOICE_LISTENING_STARTED,
+            self._handle_voice_listening_started,
+        ))
+        asyncio.create_task(self.subscribe(
+            EventTopics.VOICE_LISTENING_STOPPED,
+            self._handle_voice_listening_stopped,
+        ))
         
         # Subscribe to service status updates to track web bridge connectivity
         if self._config.dashboard_aware:
@@ -162,6 +168,10 @@ class MouseInputService(BaseService):
             
     async def _setup_mouse_listener(self) -> None:
         """Set up the mouse click listener."""
+        if not self._config.enabled:
+            self.logger.info("Mouse click trigger is disabled in configuration")
+            return
+
         def on_click(x: int, y: int, button: mouse.Button, pressed: bool) -> None:
             """Handle mouse click events."""
             if button == mouse.Button.left and pressed:
@@ -181,7 +191,7 @@ class MouseInputService(BaseService):
             error_msg = f"Failed to initialize mouse listener: {str(e)}"
             self.logger.error(error_msg)
             raise
-    
+
     async def _handle_mode_change(self, payload: Dict[str, Any]) -> None:
         """Handle system mode change events.
         
@@ -270,17 +280,7 @@ class MouseInputService(BaseService):
                 self.logger.debug("Ignoring mouse click - web dashboard is active, deferring voice control to dashboard")
                 return
                 
-            # Toggle recording state
-            self._is_recording = not self._is_recording
-            
             if self._is_recording:
-                self.logger.info("Mouse click detected - starting recording (CLI mode)")
-                await self.emit(EventTopics.MIC_RECORDING_START, {})
-                await self._emit_status(
-                    ServiceStatus.RUNNING,
-                    "Recording started via mouse click (CLI mode)"
-                )
-            else:
                 self.logger.info("Mouse click detected - stopping recording (CLI mode)")
                 # Emit our new event for immediate eye pattern transition
                 await self.emit(EventTopics.MOUSE_RECORDING_STOPPED, {})
@@ -290,6 +290,9 @@ class MouseInputService(BaseService):
                     ServiceStatus.RUNNING,
                     "Recording stopped via mouse click (CLI mode)"
                 )
+            else:
+                self.logger.info("Mouse click detected - requesting recording start (CLI mode)")
+                await self.emit(EventTopics.MIC_RECORDING_START, {})
                 
         except Exception as e:
             error_msg = f"Error handling mouse click: {str(e)}"
@@ -299,6 +302,18 @@ class MouseInputService(BaseService):
                 error_msg,
                 severity=LogLevel.ERROR
             )
+
+    async def _handle_voice_listening_started(self, payload: Dict[str, Any]) -> None:
+        """Accept the microphone service's acknowledgement as recording truth."""
+        self._is_recording = True
+        await self._emit_status(
+            ServiceStatus.RUNNING,
+            "Recording started via mouse click (CLI mode)",
+        )
+
+    async def _handle_voice_listening_stopped(self, payload: Dict[str, Any]) -> None:
+        """Clear recording state only after the microphone actually stops."""
+        self._is_recording = False
     
     def _is_dashboard_context_active(self) -> bool:
         """Check if dashboard context should take precedence over mouse clicks.

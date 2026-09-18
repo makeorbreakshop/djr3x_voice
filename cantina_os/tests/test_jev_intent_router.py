@@ -349,8 +349,57 @@ def test_jev_turns_a_rambling_vibe_request_into_a_bounded_semantic_query():
     assert decision.should_execute
     request = parse_semantic_request(decision.parameters["track"])
     assert request is not None
-    assert request.query == "fun upbeat playful party music"
+    assert request.query == "fun"
     assert request.negative_query == "heavy aggressive dark intense music"
+
+
+def test_jev_preserves_distinctive_vibe_words_instead_of_collapsing_the_query():
+    utterance = "Hey, play the craziest funky fun party banger you have."
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="semantic_vibe", confidence=1.0
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="fun_upbeat_playful", confidence=1.0
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.01),
+        },
+    )
+
+    decision = jev_intents.decide(result, utterance)
+    request = parse_semantic_request(decision.parameters["track"])
+
+    assert request is not None
+    assert request.query == "craziest funky fun party banger"
+
+
+def test_jev_uses_supported_style_words_even_when_the_coarse_vibe_is_other():
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="semantic_vibe", confidence=1.0
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="unspecified_or_other", confidence=0.92
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.01),
+        },
+    )
+
+    decision = jev_intents.decide(result, "Play some funky jazz music.")
+    request = parse_semantic_request(decision.parameters["track"])
+
+    assert request is not None
+    assert request.query == "funky jazz"
 
 
 def test_named_music_request_stays_on_the_deterministic_title_path():
