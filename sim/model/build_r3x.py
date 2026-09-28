@@ -139,24 +139,34 @@ REPLICATE_X4 = ["B_M_D - x4", "B_SM - x4", "B_S_C - x4", "B_S_O - x4", "B_S_PO -
 
 # Material classes, first match wins. The web sim maps class -> colour.
 MATERIAL_RULES = [
+    # Paint as on the Oga's Cantina animatronic, taken from neutral-light references (the
+    # Hasbro Black Series figure, painted to match) - park photos are too tinted by the
+    # booth's amber stage lights to judge colour. Sources: ~/Desktop/DJ-R3X/Reference Photos.
+    # Weathered orange top/bottom rings and base; charcoal middle ring, top cap, pedestal
+    # and head shell; orange visor with cream chevrons; blue headphone cups; blue RX-24
+    # letters on a dark plate; light-grey arms with orange wrist cuffs.
     (r"^H_[LR]Eye_4$", "eye_lens"),
     (r"^H_[LR]Eye_", "metal_dark"),
     (r"^H_[LR]E_1$", "accent_blue"),          # headphone cups
     (r"^H_[LR]E_2$", "metal_dark"),
     (r"^H_HP_", "metal_dark"),                # headband
     (r"^H_M_1$", "metal_dark"),               # mouthpiece grille
-    (r"^H_", "metal_grey"),
-    (r"^RX-24$", "accent_blue"),
+    (r"^H_V_1$", "visor_stripes"),            # the brow / visor
+    (r"^H_", "paint_charcoal"),               # head shell
+    (r"^RX-24$", "metal_dark"),               # plate; its raised letters -> accent_blue (split_raised_letters)
     (r"_DNP$", "rubber"),                     # ribbed gasket rings (floor-mat material)
     (r"^TR_RR_Full$", "rubber"),
     (r"^(MS_P_[12]_Full)$", "metal_dark"),    # logic panels
-    (r"^(LS_M_Full|MS_Main_Full|TR_NR_Full|TR_N_1|TR_N_2)", "paint_orange"),
+    (r"^(LS_M_Full|TR_NR_Full)", "paint_orange"),
+    (r"^(MS_Main_Full|TR_N_[123])", "paint_charcoal"),
     (r"^(B_B_|B_S_[12]$|B_T_|B_M_D)", "paint_orange"),
     (r"^(B_MT_|B_SM|B_S_[COP])", "metal_dark"),
     (r"^P_", "metal_dark"),
     (r"^(TR[-_]|LS_|MS_)", "metal_grey"),
-    (r"^(PA_F_|TA_W_F|HA_[LRT]F_)", "metal_dark"),   # claw fingers
-    (r"^(HA_|TA_|PA_)", "metal_grey"),
+    # Arms: light grey paint, orange cuff at each wrist, bare metal on rods and pistons.
+    (r"^(HA_W_[12]|TA_W_[12]|PA_W_[12])$", "paint_orange"),
+    (r"^(HA_PS_|HA_P_1$|TA_B_|PA_W_3$)", "metal_grey"),
+    (r"^(HA_|TA_|PA_)", "paint_lightgrey"),
 ]
 
 # Parts kept as their own glTF node (the sim reads their positions).
@@ -514,6 +524,48 @@ def find_panel_lights(obj, step_mm=0.8):
     return lights
 
 
+def split_raised_letters(obj, letter_material, min_relief_mm=0.3):
+    """Give the raised letters of a plate (RX-24) their own material.
+
+    Fits the plate's plane (least-variance axis), finds the height of the plate face and of
+    the letter tops among faces parallel to it, and assigns every face above the midpoint
+    to `letter_material`. Works on the transformed mesh (Blender units = metres).
+    """
+    import numpy as np
+    me = obj.data
+    co = np.array([v.co[:] for v in me.vertices])
+    c = co.mean(0)
+    _w, vec = np.linalg.eigh(np.cov((co - c).T))
+    n = vec[:, 0]
+    # Outward = away from the droid's vertical axis (Blender Z).
+    radial = np.array([c[0], c[1], 0.0])
+    if np.dot(n, radial) < 0:
+        n = -n
+    heights, areas, idx = [], [], []
+    for f in me.polygons:
+        if abs(np.dot(np.array(f.normal[:]), n)) > 0.95:
+            heights.append(np.dot(np.array(f.center[:]) - c, n))
+            areas.append(f.area)
+            idx.append(f.index)
+    if not heights:
+        return 0
+    heights = np.array(heights)
+    top = heights.max()
+    below = heights < top - min_relief_mm / 1000.0
+    if not below.any():
+        return 0
+    plate = heights[below][np.argmax(np.array(areas)[below])]
+    cut = (top + plate) / 2.0
+    obj.data.materials.append(get_material(letter_material))
+    slot = len(obj.data.materials) - 1
+    moved = 0
+    for f in me.polygons:
+        if np.dot(np.array(f.center[:]) - c, n) > cut:
+            f.material_index = slot
+            moved += 1
+    return moved
+
+
 def world_verts(obj):
     return [obj.matrix_world @ v.co for v in obj.data.vertices]
 
@@ -607,6 +659,9 @@ def main():
     parts.append(("NECK", neck))
 
     by_name = {n: o for n, o in parts}
+    if "RX-24" in by_name:
+        n_letters = split_raised_letters(by_name["RX-24"], "accent_blue")
+        print(f"[r3x] RX-24: {n_letters} raised letter faces -> accent_blue")
 
     # Mass properties on the full-resolution meshes, before decimation.
     bl2y = YUP_TO_BL.to_3x3().inverted()

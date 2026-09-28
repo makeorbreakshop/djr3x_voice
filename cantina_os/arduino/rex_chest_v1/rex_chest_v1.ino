@@ -66,8 +66,9 @@ const CRGB DOT_COLORS[] = {
   CRGB(255, 20, 0), CRGB(255, 110, 0), CRGB(40, 255, 30), CRGB(255, 20, 0), CRGB(0, 120, 255)
 };
 const uint8_t NUM_DOT_COLORS = sizeof(DOT_COLORS) / sizeof(DOT_COLORS[0]);
+// Windows glow cyan / white / teal / pale blue, as on the Oga's Cantina droid.
 const CRGB WIN_COLORS[] = {
-  CRGB(255, 170, 60), CRGB(60, 140, 255), CRGB(255, 60, 20), CRGB(220, 230, 255)
+  CRGB(0, 210, 255), CRGB(225, 240, 255), CRGB(0, 175, 150), CRGB(110, 190, 255)
 };
 const uint8_t NUM_WIN_COLORS = sizeof(WIN_COLORS) / sizeof(WIN_COLORS[0]);
 const CRGB VU_GREEN(40, 255, 30), VU_AMBER(255, 110, 0), VU_RED(255, 20, 0);

@@ -36,7 +36,8 @@ type Mode = 'I' | 'E' | 'L' | 'T' | 'S';
 
 // Droid-panel palette: dots are indicator LEDs, windows are backlit readouts.
 const DOT_COLORS: RGB[] = [[255, 20, 0], [255, 110, 0], [40, 255, 30], [255, 20, 0], [0, 120, 255]];
-const WIN_COLORS: RGB[] = [[255, 170, 60], [60, 140, 255], [255, 60, 20], [220, 230, 255]];
+// Windows glow cyan / white / teal / pale blue on the real droid (reference photos).
+const WIN_COLORS: RGB[] = [[0, 210, 255], [225, 240, 255], [0, 175, 150], [110, 190, 255]];
 const OFF: RGB = [0, 0, 0];
 
 function scale(c: RGB, k: number): RGB {
@@ -64,14 +65,19 @@ export class ChestFirmware {
     this.pixels = specs.map(() => [0, 0, 0] as RGB);
     // Group by panel, ordered around the ring; dots bottom -> top.
     const angle = (s: ChestLightSpec) => Math.atan2(s.pos[0], s.pos[2]);
-    const byPanel = new Map<number, number[]>();
-    specs.forEach((s, i) => {
-      if (s.panel !== 'MS_P_1_Full') return;
-      const key = Math.round(THREE.MathUtils.radToDeg(angle(s)) / 20); // panels are ~30 deg apart
-      if (!byPanel.has(key)) byPanel.set(key, []);
-      byPanel.get(key)!.push(i);
-    });
-    this.panels = [...byPanel.entries()].sort((a, b) => a[0] - b[0]).map(([, idx]) => ({
+    // Panels are ~31 deg apart; a panel's own openings span < 12 deg. Cluster by gaps in
+    // angle (rounding to a grid split a panel that straddled a grid line).
+    const order = specs.map((_, i) => i).filter((i) => specs[i].panel === 'MS_P_1_Full')
+      .sort((a, b) => angle(specs[a]) - angle(specs[b]));
+    const groups: number[][] = [];
+    let prev = -Infinity;
+    for (const i of order) {
+      const deg = THREE.MathUtils.radToDeg(angle(specs[i]));
+      if (deg - prev > 15) groups.push([]);
+      groups[groups.length - 1].push(i);
+      prev = deg;
+    }
+    this.panels = groups.map((idx) => ({
       dots: idx.filter((i) => specs[i].kind === 'dot').sort((a, b) => specs[a].pos[1] - specs[b].pos[1]),
       windows: idx.filter((i) => specs[i].kind === 'window'),
     }));

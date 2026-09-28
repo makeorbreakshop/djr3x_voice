@@ -315,7 +315,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
 if (!new URLSearchParams(location.search).has('offline')) link.start();
 
 // Devtools: __r3x.fw.write('ST\n'), __r3x.actuation.command('head_pan', 40)
-Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; } } });
+Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; }, camera, controls } });
 
 // ------------------------------------------------------------------ frame loop
 let last = clock();

@@ -47,17 +47,47 @@ export interface Weathering {
 export interface MaterialClass {
   params: THREE.MeshPhysicalMaterialParameters;
   weather?: Weathering;
+  /**
+   * Painted bands in the part's own space (the visor's chevrons): band coordinate
+   * u = (mirrorX ? |x| : x) * dir[0] + z * dir[1]; a band covers `duty` of each period.
+   */
+  stripes?: { color: number; periodM: number; duty: number; dir: [number, number]; mirrorX: boolean };
 }
 
 const DUST = 0x8a7f70;
 const GRIME = 0x1f1810;
 
-// Oga's Cantina R-3X (ex Star Tours RX-24 pilot, repainted): semi-gloss burnt orange torso
-// and base, grey head and arms, dark gunmetal hardware, blue headphone cups and RX-24
-// plate. Chips show silver metal under the paint; dirt sits in the seams.
+// Oga's Cantina R-3X paint, from neutral-light references (the Hasbro Black Series figure,
+// painted to match; park photos are too tinted by the amber stage lights to judge colour -
+// ~/Desktop/DJ-R3X/Reference Photos): weathered orange top/bottom rings and base; charcoal
+// middle ring, top cap, pedestal and head shell; orange visor with cream bars; blue
+// headphone cups; blue RX-24 letters on a dark plate; light-grey arms with orange wrist
+// cuffs. Chips show silver metal under the paint; dirt sits in the seams.
+const PAINT_WEAR: Weathering = {
+  wear: 0.6, wearColor: 0xa9aaa6, wearRoughness: 0.38, wearMetalness: 0.85, primerColor: 0x6b675f,
+  grime: 0.8, grimeColor: GRIME, streaks: 0.35, dust: 0.3, variation: 0.15, fade: 0.15,
+  roughVar: 0.4, scuffs: 0.45,
+};
+
 export const CLASSES: Record<string, MaterialClass> = {
+  // Charcoal paint: middle ring, top cap, head shell.
+  paint_charcoal: {
+    params: { color: 0x3c3f44, roughness: 0.55, metalness: 0.15, clearcoat: 0.15, clearcoatRoughness: 0.5 },
+    weather: { ...PAINT_WEAR, wearColor: 0x9a9c9e, primerColor: 0x55575a, streaks: 0.25 },
+  },
+  // Light grey paint: the arms.
+  paint_lightgrey: {
+    params: { color: 0xa8a8a2, roughness: 0.55, metalness: 0.05, clearcoat: 0.15, clearcoatRoughness: 0.5 },
+    weather: { ...PAINT_WEAR, wear: 0.5, wearColor: 0xc4c6c8, primerColor: 0x7a7a74 },
+  },
+  // The visor: orange with parallel cream bars slanting across it (as on the figure).
+  visor_stripes: {
+    params: { color: 0xd0621f, roughness: 0.5, metalness: 0.0, clearcoat: 0.25, clearcoatRoughness: 0.45 },
+    weather: { ...PAINT_WEAR, wear: 0.55 },
+    stripes: { color: 0xe6dcc6, periodM: 0.03, duty: 0.28, dir: [0.94, 0.34], mirrorX: false },
+  },
   paint_orange: {
-    params: { color: 0xa9552b, roughness: 0.5, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.45 },
+    params: { color: 0xc55a1e, roughness: 0.5, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.45 },
     weather: {
       wear: 0.65, wearColor: 0xa9aaa6, wearRoughness: 0.38, wearMetalness: 0.85, primerColor: 0x6b675f,
       grime: 0.75, grimeColor: GRIME, streaks: 0.35, dust: 0.35, variation: 0.18, fade: 0.25,
@@ -90,7 +120,7 @@ export const CLASSES: Record<string, MaterialClass> = {
     },
   },
   accent_blue: {
-    params: { color: 0x2c5c96, roughness: 0.45, metalness: 0.1, clearcoat: 0.35, clearcoatRoughness: 0.4 },
+    params: { color: 0x2a67c8, roughness: 0.42, metalness: 0.1, clearcoat: 0.35, clearcoatRoughness: 0.4 },
     weather: {
       wear: 0.35, wearColor: 0xa9aaa6, wearRoughness: 0.35, wearMetalness: 0.85, primerColor: 0x5d5c58,
       grime: 0.7, grimeColor: GRIME, streaks: 0.2, dust: 0.3, variation: 0.12, fade: 0.2,
@@ -194,9 +224,15 @@ function weatherUniforms(w: Weathering, maps: WeatherMaps | null): WeatherUnifor
 }
 
 /** Inject the weathering layer into a MeshPhysicalMaterial. */
-export function applyWeathering(material: THREE.MeshPhysicalMaterial, w: Weathering, maps: WeatherMaps | null) {
+export function applyWeathering(material: THREE.MeshPhysicalMaterial, w: Weathering, maps: WeatherMaps | null,
+  stripes?: MaterialClass['stripes']) {
   const u = weatherUniforms(w, maps);
+  u.uStripeColor = { value: new THREE.Color(stripes?.color ?? 0) };
+  u.uStripePeriod = { value: stripes?.periodM ?? 1 };
+  u.uStripeDuty = { value: stripes?.duty ?? 0.5 };
+  u.uStripeDir = { value: new THREE.Vector2(...(stripes?.dir ?? [1, 0])) };
   const hasMaps = maps ? 1 : 0;
+  const stripeKey = stripes ? (stripes.mirrorX ? 'chevron' : 'bands') : '';
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
@@ -208,12 +244,20 @@ varying vec3 vWPos;
 varying vec3 vWNrm;
 uniform sampler2D uEdgeMap;
 uniform float uWear, uWearRough, uWearMetal, uPrimer, uGrime, uStreaks, uDust, uVariation, uFade, uRoughVar, uScuffs;
-uniform vec3 uWearColor, uPrimerColor, uGrimeColor, uDustColor;
+uniform vec3 uWearColor, uPrimerColor, uGrimeColor, uDustColor, uStripeColor;
+uniform float uStripePeriod, uStripeDuty;
+uniform vec2 uStripeDir;
 ${NOISE_GLSL}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
   // ---- weathering masks
   vec3 wP = vWPos;
   vec3 wN = normalize(vWNrm);
+${stripes ? `  // Painted bands (anti-aliased), under the weathering so grime and chips cross them.
+  float wU = (${stripes.mirrorX ? 'abs(wP.x)' : 'wP.x'} * uStripeDir.x + wP.z * uStripeDir.y) / uStripePeriod;
+  float wS = fract(wU);
+  float wSw = fwidth(wU) * 1.5;
+  float wBand = smoothstep(0.0, wSw, wS) * (1.0 - smoothstep(uStripeDuty - wSw, uStripeDuty, wS));
+  diffuseColor.rgb = mix(diffuseColor.rgb, uStripeColor, wBand);` : ''}
   float wOcc = 1.0;
   float wEdge = 0.0;
 #if defined( USE_AOMAP ) && ${hasMaps}
@@ -292,7 +336,7 @@ ${NOISE_GLSL}`)
   gl_FragColor = vec4(vec3(wDbg), 1.0);
 #endif`);
   };
-  material.customProgramCacheKey = () => `r3x-weather-${hasMaps}`;
+  material.customProgramCacheKey = () => `r3x-weather-${hasMaps}-${stripeKey}`;
 }
 
 
@@ -323,7 +367,7 @@ export function makeMaterial(name: string, maps: WeatherMaps | null): THREE.Mesh
       material.aoMap = maps.occlusion;
       material.aoMapIntensity = 1.0;
     }
-    applyWeathering(material, cls.weather, maps);
+    applyWeathering(material, cls.weather, maps, cls.stripes);
   }
   return material;
 }
