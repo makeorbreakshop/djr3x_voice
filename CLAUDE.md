@@ -50,7 +50,13 @@ The new architecture implements strict service decoupling with event-only inter-
 - `ClaudeService`: Transcription → Claude Haiku/Sonnet → Intent routing (replaces GPTService)
 - `GPTService`: Legacy OpenAI LLM (deprecated, ClaudeService preferred)
 - `ElevenLabsService`: LLM response → TTS synthesis with streaming playback
-- `EyeLightControllerService`: Arduino LED control via serial
+- `EyeLightControllerService`: Arduino LED control via serial (face: eyes + mouth)
+- `ChestLightControllerService`: second Arduino (`cantina_os/arduino/rex_chest_v1`) for the
+  chest logic panels - mirrors the eye states, speech amplitude, music tempo, and shows
+  machine status (boot sweep, per-subsystem health windows, fault alarm). Every command is
+  also emitted on `CHEST_COMMAND`. Fail-open to mock mode.
+- `SimBridgeService`: read-only websocket (127.0.0.1:8765) feeding the 3D digital twin in
+  `sim/` (see `sim/README.md`). Fail-open.
 - `MusicControllerService`: Music playback with mode-aware behavior and ducking
 - `YodaModeManagerService`: System mode transitions (IDLE, AMBIENT, INTERACTIVE)
 - `BrainService`: High-level orchestration for DJ mode planning
@@ -677,6 +683,13 @@ seven call sites pass it. That pin is unrelated to the provider choice.
      `JEV_COMMAND_THRESHOLD` (0.5), `JEV_TIMEOUT_S` (0.8), `JEV_SPECULATE`,
      `FAST_ROUTER_WAIT_S` (1.2)
    - Hardware: `ARDUINO_SERIAL_PORT`, `ARDUINO_BAUD_RATE`, `FORCE_MOCK_LED_CONTROLLER`
+   - Chest board: `CHEST_SERIAL_PORT` (set it, and `ARDUINO_SERIAL_PORT`, whenever both
+     Arduinos are plugged in - the face auto-detect takes the first Arduino it sees),
+     `CHEST_ENABLED`, `FORCE_MOCK_CHEST`, `CHEST_DEFAULT_BPM` (120), `CHEST_FAULT_HOLD_S` (60)
+   - 3D sim link: `SIM_BRIDGE_ENABLED`, `SIM_BRIDGE_HOST`, `SIM_BRIDGE_PORT`
+   - Launching CantinaOS from a Claude Code shell: that shell exports `ANTHROPIC_BASE_URL`,
+     which the provider honours - with an OpenRouter key it then 401s. `unset ANTHROPIC_BASE_URL`
+     first (this is why `system_smoke_run.py`'s pure-chat turn fails when run from an agent).
    - Music: `MUSIC_DEFAULT_SOURCE`, `ENABLE_SPOTIFY`, `SPOTIFY_CLIENT_ID`,
      `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`
 

@@ -19,6 +19,7 @@
  */
 
 import { RexFaceFirmware } from './firmware';
+import { ChestHost } from './chest';
 
 export type SystemMode = 'IDLE' | 'AMBIENT' | 'INTERACTIVE';
 export type Pattern = 'idle' | 'engaged' | 'listening' | 'thinking' | 'speaking' | 'flash';
@@ -159,4 +160,22 @@ export class TtsAmplitudeAgc {
   reset() {
     this.recent = [];
   }
+}
+
+/**
+ * Both boards from one event stream, as CantinaOS does (EyeLightControllerService and
+ * ChestLightControllerService subscribe to the same events). Call sites stay unchanged.
+ */
+export class DualHost {
+  constructor(readonly face: CantinaHostEmulator, readonly chest: ChestHost) {}
+  get mode() { return this.face.mode; }
+  get droppedMouthResets() { return this.face.droppedMouthResets; }
+  setMode(m: SystemMode) { this.face.setMode(m); this.chest.setMode(m); }
+  listeningStarted() { this.face.listeningStarted(); this.chest.listeningStarted(); }
+  listeningStopped() { this.face.listeningStopped(); this.chest.listeningStopped(); }
+  llmChunk() { this.face.llmChunk(); this.chest.llmChunk(); }
+  speechStarted() { this.face.speechStarted(); this.chest.speechStarted(); }
+  amplitude(a: number) { this.face.amplitude(a); this.chest.amplitudeIn(a); }
+  speechEnded() { this.face.speechEnded(); this.chest.speechEnded(); }
+  tick(nowMs: number) { this.face.tick(); this.chest.tick(nowMs); }
 }

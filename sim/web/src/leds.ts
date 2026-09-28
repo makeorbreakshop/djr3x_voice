@@ -103,6 +103,8 @@ class LitPart {
     glowAt: THREE.Vector3,
     glowSize: number,
     lightRange: number,
+    /** Emission gain: a diffusion bulb scatters the jewel's light through its whole body. */
+    private readonly gain = LED_GAIN,
   ) {
     if (diffuserMesh) {
       const { material, u } = makeDiffuser(diffuserMesh.material as THREE.Material, sigma);
@@ -130,12 +132,12 @@ class LitPart {
       ledColor(rgb, this.c);
       this.acc.add(this.c);
       if (this.u) {
-        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(LED_GAIN);
+        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(this.gain);
         this.u.uLedPos.value[i].copy(this.local[i]).applyMatrix4(this.anchor.matrixWorld);
       }
     });
     this.acc.multiplyScalar(1 / colors.length);
-    this.glowMat.color.copy(this.acc).multiplyScalar(0.9);
+    this.glowMat.color.copy(this.acc).multiplyScalar(0.9 * (this.gain / LED_GAIN));
     this.light.color.copy(this.acc);
     this.light.intensity = Math.min(1, Math.max(this.acc.r, this.acc.g, this.acc.b)) * 0.4;
   }
@@ -204,7 +206,9 @@ export class FaceLeds {
         const t = (k * Math.PI) / 3;
         pos.push(new THREE.Vector3(Math.sin(t) * JEWEL_RING_RADIUS, Math.cos(t) * JEWEL_RING_RADIUS, z));
       }
-      return new LitPart(a, pos, bulb, 0.0055, new THREE.Vector3(0, 0, front + 0.004), 0.045, 0.1);
+      // sigma ~ bulb depth: the frosted bulb glows through its whole body, as a real
+      // diffuser does, rather than only at the face nearest the jewel.
+      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.05, 0.1, LED_GAIN * 2.2);
     };
     const [first, second] = LEFT_EYE_IS_DROIDS_LEFT ? (['L', 'R'] as const) : (['R', 'L'] as const);
     this.left = eye(first);

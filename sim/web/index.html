@@ -62,6 +62,16 @@
       </section>
 
       <section>
+        <h2>Machine status <small>chest lights</small></h2>
+        <div class="row">
+          <button id="btn-boot" title="CantinaOS starting up: the boot sweep">Boot</button>
+          <button id="btn-sleep" title="Standby: windows breathe, one dot blinks">Sleep</button>
+        </div>
+        <p class="hint">Each chest window is a subsystem. Untick one to see it blink red; LLM or mic down is a fault.</p>
+        <div id="subsystems" class="subs"></div>
+      </section>
+
+      <section>
         <h2>Servos <small>what the controller is sent</small></h2>
         <select id="profile" aria-label="Hardware profile"></select>
         <label class="inline"><input id="plant" type="checkbox" checked /> Servo physics (deadband, lag, load, backlash)</label>
@@ -95,6 +105,7 @@
           <button data-cam="full">Full</button>
           <button data-cam="face">Face</button>
           <button data-cam="arms">Arms</button>
+          <button data-cam="chest">Chest</button>
         </div>
       </section>
     </aside>

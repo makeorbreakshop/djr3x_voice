@@ -59,6 +59,7 @@ from .services.latency_tracker_service import LatencyTrackerService
 # Import the textual dashboard service
 from .services.textual_dashboard_service import TextualDashboardService
 from .services.sim_bridge_service import SimBridgeService  # 3D sim live link (sim/web)
+from .services.chest_light_controller_service import ChestLightControllerService  # chest logic-panel lights (2nd Arduino)
 
 # Import the CLI formatter for enhanced output (using minimal version)
 from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
@@ -382,6 +383,7 @@ class CantinaOS:
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
+            "chest_light_controller",  # Chest logic-panel lights (2nd Arduino); after the face so it can skip that port
             "sim_bridge",  # Streams face/body events to the 3D sim (sim/web); fail-open
             "debug",  # Add debug service for LLM response logging
             "textual_dashboard",  # Add textual dashboard service for TUI monitoring (before CLI)
@@ -587,6 +589,7 @@ class CantinaOS:
             "vision": VisionService,
             "textual_dashboard": TextualDashboardService,
             "sim_bridge": SimBridgeService,
+            "chest_light_controller": ChestLightControllerService,
         }
         
         # Early return if service doesn't exist in map
@@ -770,6 +773,11 @@ class CantinaOS:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "chest_light_controller":
+                # Read-only query of the face board's port so the chest never probes it
+                service = service_class(self._event_bus, service_config,
+                                        self._services.get("eye_light_controller"))
                 return service
             elif service_name == "sim_bridge":
                 # Read-only mode query so a sim that connects late learns the current mode

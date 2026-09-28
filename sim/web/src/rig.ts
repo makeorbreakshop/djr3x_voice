@@ -17,6 +17,7 @@ export interface RigDoc {
   joints: JointSpec[];
   anchors: Record<string, number[]> & { mouth_kind?: string };
   dynamics: Record<string, JointDynamics>;
+  chest_lights?: import('./chest').ChestLightSpec[];
   triangles: number;
 }
 

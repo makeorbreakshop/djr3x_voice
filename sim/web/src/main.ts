@@ -2,52 +2,36 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { RexFaceFirmware, RGB, OUTPUT_BRIGHTNESS } from './firmware';
-import { CantinaHostEmulator, SystemMode, TtsAmplitudeAgc } from './host';
+import { CantinaHostEmulator, DualHost, SystemMode, TtsAmplitudeAgc } from './host';
 import { Rig, RigDoc } from './rig';
 import { FaceLeds } from './leds';
 import { Activity, Performer } from './behavior';
 import { SpeechAudio } from './audio';
 import { LiveEvent, LiveLink } from './link';
+import { ChestFirmware, ChestHost, ChestLights, WINDOW_SUBSYSTEMS } from './chest';
 import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
 import { MaestroScript, MaestroScriptError } from './actuation/maestro';
-
-// ------------------------------------------------------------------ palette
-// Oga's Cantina R-3X: weathered orange body, grey head and arms, blue headphone cups and
-// RX-24 plate. The model only carries material *classes*; tune colours here.
-const PALETTE: Record<string, THREE.MeshPhysicalMaterialParameters> = {
-  paint_orange: { color: 0xb65a22, roughness: 0.55, metalness: 0.12, clearcoat: 0.25, clearcoatRoughness: 0.5 },
-  metal_grey: { color: 0x8a8f96, roughness: 0.5, metalness: 0.6 },
-  metal_dark: { color: 0x3a3d43, roughness: 0.5, metalness: 0.6 },
-  rubber: { color: 0x141416, roughness: 0.92, metalness: 0 },
-  accent_blue: { color: 0x2f64a6, roughness: 0.42, metalness: 0.3, clearcoat: 0.3 },
-  // H_*Eye_4 'diffusion bulbs': frosted, lit from behind by the WS2812 jewel.
-  eye_lens: { color: 0x3a4048, roughness: 0.35, metalness: 0, clearcoat: 0.6 },
-  // Mic-Mouth-Split light pipe: translucent print, lit by the mouth V behind it.
-  light_pipe: { color: 0x2a2622, roughness: 0.55, metalness: 0 },
-};
+import { loadWeatherMaps, makeMaterial, setupBooth, tameHighlights } from './look';
 
 // ------------------------------------------------------------------ renderer / scene
+// The look - per-class materials with baked + procedural weathering, the cantina booth
+// lights, environment and tone mapping - lives in look.ts.
 const stage = document.getElementById('stage')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in r18x; soft edges via shadow.radius
 stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0d12);
-scene.fog = new THREE.Fog(0x0b0d12, 4, 9);
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.35;
+setupBooth(renderer, scene);
 
 const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.02, 30);
 camera.position.set(0.9, 0.85, 1.9);
@@ -56,27 +40,6 @@ controls.target.set(0, 0.5, 0);
 controls.enableDamping = true;
 controls.minDistance = 0.25;
 controls.maxDistance = 5;
-
-const key = new THREE.DirectionalLight(0xffe2c4, 1.9);
-key.position.set(1.6, 2.6, 2.0);
-key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.left = key.shadow.camera.bottom = -0.8;
-key.shadow.camera.right = key.shadow.camera.top = 0.8;
-key.shadow.bias = -0.0004;
-scene.add(key);
-const rim = new THREE.DirectionalLight(0x5aa0ff, 1.6);
-rim.position.set(-2, 1.5, -2);
-scene.add(rim);
-scene.add(new THREE.HemisphereLight(0x8090a8, 0x1a120c, 0.5));
-
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(4, 64),
-  new THREE.MeshStandardMaterial({ color: 0x15171d, roughness: 0.85, metalness: 0.1 }),
-);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -103,7 +66,14 @@ fitView();
 const t0 = performance.now();
 const fw = new RexFaceFirmware();
 const log: { dir: 'tx' | 'rx'; line: string; at: number }[] = [];
-const host = new CantinaHostEmulator(fw, (dir, line, at) => pushLog(dir, line, at));
+// Two boards, one event stream: the face (EyeLightControllerService port) and the chest
+// (ChestLightControllerService port). Live, the chest takes the real service's commands.
+let chestFw: ChestFirmware | null = null;
+let chestLights: ChestLights | null = null;
+const host = new DualHost(
+  new CantinaHostEmulator(fw, (dir, line, at) => pushLog(dir, line, at)),
+  new ChestHost((cmd) => chestFw?.write(cmd + '\n')),
+);
 const agc = new TtsAmplitudeAgc();
 const audio = new SpeechAudio();
 
@@ -137,10 +107,11 @@ const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 async function load() {
   const draco = new DRACOLoader().setDecoderPath('/draco/');
   const loader = new GLTFLoader().setDRACOLoader(draco);
-  const [gltf, doc, clipList] = await Promise.all([
+  const [gltf, doc, clipList, weatherMaps] = await Promise.all([
     loader.loadAsync('/model/r3x.glb'),
     fetch('/model/rig.json').then((r) => r.json() as Promise<RigDoc>),
     fetch('/sfx/index.json').then((r) => (r.ok ? r.json() : []), () => []),
+    loadWeatherMaps(renderer),
   ]);
   clips = clipList as string[];
 
@@ -152,7 +123,7 @@ async function load() {
     m.receiveShadow = true;
     const name = (m.material as THREE.Material).name;
     if (!mats.has(name)) {
-      mats.set(name, new THREE.MeshPhysicalMaterial({ name, ...(PALETTE[name] ?? PALETTE.metal_grey) }));
+      mats.set(name, makeMaterial(name, weatherMaps));
     }
     m.material = mats.get(name)!;
   });
@@ -161,6 +132,10 @@ async function load() {
   rig = new Rig(gltf.scene, doc);
   rigDoc = doc;
   leds = new FaceLeds(rig);
+  tameHighlights(gltf.scene);
+  chestFw = new ChestFirmware(doc.chest_lights ?? []);
+  host.chest.boot(fw.now); // the boot sweep, as when CantinaOS starts
+  chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
   setProfile(currentProfile);
   performer = new Performer(rig, (joint, value) => actuation?.command(joint, value));
   buildJointUi(rig);
@@ -297,12 +272,21 @@ function onLiveEvent(ev: LiveEvent) {
       host.speechEnded();
       setActivity(restingActivity());
       break;
+    case 'chest.command':
+      // The real ChestLightControllerService is running: mirror its exact commands.
+      if (typeof d.command === 'string') {
+        host.chest.muted = true;
+        chestFw?.write(d.command + '\n');
+      }
+      break;
     case 'music.playback.started':
       musicPlaying = true;
+      host.chest.music(true, bpm);
       if (!liveSpeaking) setActivity('dj');
       break;
     case 'music.playback.stopped':
       musicPlaying = false;
+      host.chest.music(false);
       if (!liveSpeaking) setActivity(restingActivity());
       break;
   }
@@ -322,6 +306,8 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
     if (!on) {
       liveSpeaking = false;
       musicPlaying = false;
+      host.chest.muted = false; // back to the offline port of the chest service
+      host.chest.resync();
     }
   },
 });
@@ -329,7 +315,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
 if (!new URLSearchParams(location.search).has('offline')) link.start();
 
 // Devtools: __r3x.fw.write('ST\n'), __r3x.actuation.command('head_pan', 40)
-Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; } } });
+Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; } } });
 
 // ------------------------------------------------------------------ frame loop
 let last = clock();
@@ -352,7 +338,7 @@ function frame() {
   }
 
   // Firmware runs on its own simulated millis(); the host's 60 Hz loop rides on it.
-  host.tick();
+  host.tick(fw.now);
   fw.advanceTo((performance.now() - t0));
   for (const line of fw.readLines()) pushLog('rx', line, fw.now);
 
@@ -372,6 +358,10 @@ function frame() {
     for (const j of rig.joints.keys()) if (!values.has(j)) values.set(j, posed.get(j) ?? 0);
     rig.apply(values);
     leds.update(fw);
+    if (chestFw && chestLights) {
+      chestFw.update(fw.now);
+      chestLights.update(chestFw.pixels);
+    }
     updateJointReadout();
     updateServoTable();
   }
@@ -428,6 +418,7 @@ $('btn-mic').onclick = async (e) => {
 $('btn-dj').onclick = (e) => {
   djOn = !djOn;
   (e.currentTarget as HTMLElement).classList.toggle('on', djOn);
+  host.chest.dj(djOn, bpm);
   if (djOn) {
     if (host.mode === 'IDLE') host.setMode('AMBIENT');
     setActivity('dj');
@@ -438,6 +429,8 @@ $('btn-dj').onclick = (e) => {
 $<HTMLInputElement>('bpm').oninput = (e) => {
   bpm = Number((e.target as HTMLInputElement).value);
   $('bpm-out').textContent = String(bpm);
+  if (djOn) host.chest.dj(true, bpm);
+  else if (musicPlaying) host.chest.music(true, bpm);
 };
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => {
@@ -462,6 +455,7 @@ const sendSerial = () => {
   const v = serialIn.value.trim();
   if (!v) return;
   fw.write(v + '\n');
+  chestFw?.write(v + '\n');
   pushLog('tx', v, fw.now);
   serialIn.value = '';
 };
@@ -491,6 +485,8 @@ const CAMS: Record<string, [THREE.Vector3, THREE.Vector3]> = {
   full: [new THREE.Vector3(0.9, 0.85, 1.9), new THREE.Vector3(0, 0.5, 0)],
   face: [new THREE.Vector3(0.16, 0.84, 0.9), new THREE.Vector3(0, 0.77, 0.08)],
   arms: [new THREE.Vector3(0.1, 0.6, 1.2), new THREE.Vector3(0, 0.5, 0.1)],
+  // The logic panels sit on the droid's right-front quarter of the middle ring.
+  chest: [new THREE.Vector3(-0.55, 0.5, 0.42), new THREE.Vector3(-0.1, 0.45, 0.06)],
 };
 document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) => {
   b.onclick = () => {
@@ -749,4 +745,27 @@ function drawLeds() {
   lctx.fillText('R eye 7-13', 8, 90);
   lctx.fillText('mouth 0-7', vx - 24, 92);
   lctx.fillText('L eye 0-6', W - 62, 90);
+}
+
+// ------------------------------------------------------------------ machine status (chest)
+// Offline stand-ins for what CantinaOS reports: service health and system state.
+{
+  const box = document.getElementById('subsystems')!;
+  WINDOW_SUBSYSTEMS.forEach(([label, services], i) => {
+    const row = document.createElement('label');
+    row.className = 'inline sub';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.onchange = () => host.chest.serviceStatus(services[0], cb.checked ? 'running' : 'error');
+    const panel = Math.floor(i / 3) + 1;
+    row.append(cb, `${label}`);
+    row.title = `Panel ${panel}, window ${(i % 3) + 1}: ${services.join(' / ')}`;
+    box.appendChild(row);
+  });
+  document.getElementById('btn-boot')!.onclick = () => host.chest.boot(fw.now);
+  document.getElementById('btn-sleep')!.onclick = (e) => {
+    host.chest.sleeping = !host.chest.sleeping;
+    (e.currentTarget as HTMLElement).classList.toggle('on', host.chest.sleeping);
+  };
 }

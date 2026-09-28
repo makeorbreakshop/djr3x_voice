@@ -21,6 +21,8 @@ millimetres), so no part is hand-placed here. What this script adds:
   and the hero-arm piston rod, oriented so local +Z is outward.
 * Material *classes* (paint_orange, metal_grey, ...); the web sim owns actual colours.
 * Collapse decimation to a triangle budget, then Draco-compressed GLB.
+* Visual only: a shared UV atlas and two baked weathering masks (occlusion, exposed
+  edges) for the web sim's paint shader - see bake_weathering(). --no-bake skips it.
 
 It also writes rig.json - the joint list (pivot, axis, limits) in final metres - which the
 web sim loads so the joint table has one source of truth.
@@ -69,6 +71,9 @@ MOUTH_PARTS = {"Grill": ("H_MOUTH_GRILL", "metal_dark"), "LightPipe": ("H_MOUTH_
 # matches H_M_1 exactly (both 83.5 mm tall): y' = MOUTH_FLIP_Y - y, z' = -z.
 MOUTH_FLIP_Y = 1471.3
 PREVIEW = "--preview" in argv
+# Weathering bake (UVs + occlusion/edge masks for the web sim's paint shader). --no-bake
+# skips it; the sim then falls back to procedural-only wear.
+BAKE = "--no-bake" not in argv
 
 # --------------------------------------------------------------------------------------
 # Frames. Source = kit coordinates (mm, Y-up). Final = metres, Y-up, front = +Z.
@@ -124,7 +129,9 @@ SKIP = [
     r"/MS_DB",                   # interior light diffusers behind the logic panels
     r"/MS_L - x4",
     r"/LED_B_1x9",
-    r"Midsection - Middle/MS_P_[12]\.stl$",  # use the Logic Panels/*_Full versions
+    # Duplicates of Logic Panels/MS_P_*_Full, stored one folder up. Loading both put two
+    # identical panels in the same place - z-fighting ("flicker") on the chest.
+    r"Midsection - Middle/STLs/MS_P_[12]\.stl$",
 ]
 
 # Exported once by the kit, printed four times, spaced 90 deg about the vertical axis.
@@ -424,6 +431,89 @@ def get_material(cls):
 # Auto pivots for claw fingers
 # --------------------------------------------------------------------------------------
 
+def find_panel_lights(obj, step_mm=0.8):
+    """Openings in a logic panel that light can shine through: windows and LED dots.
+
+    Casts radial rays (the panels sit on the middle ring, whose axis is +Y) on a fine grid
+    over the panel's footprint. Cells whose ray misses the panel are see-through; connected
+    see-through regions that are enclosed by panel on all sides are openings. Returns
+    [{kind, pos, normal, w, h}] in final coordinates (metres); dots are the small round
+    holes of the 8-LED rows, windows the square cut-outs over the diffuser blocks.
+    """
+    from mathutils.bvhtree import BVHTree
+    import numpy as np
+    bvh = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+    bl2y = YUP_TO_BL.to_3x3().inverted()
+    pts = np.array([list(bl2y @ p) for p in world_verts(obj)]) * 1000.0  # mm, final
+    theta = np.arctan2(pts[:, 0], pts[:, 2])
+    rad = np.hypot(pts[:, 0], pts[:, 2])
+    t0, t1 = theta.min(), theta.max()
+    y0, y1 = pts[:, 1].min(), pts[:, 1].max()
+    r_out, r_in = rad.max() + 20.0, rad.min() - 1.0
+    r_mean = rad.mean()
+    nt = int((t1 - t0) * r_mean / step_mm) + 1
+    ny = int((y1 - y0) / step_mm) + 1
+    hit_r = np.full((nt, ny), np.nan)
+    for i in range(nt):
+        th = t0 + (t1 - t0) * i / max(1, nt - 1)
+        d = Vector((-math.sin(th), 0.0, -math.cos(th)))
+        for j in range(ny):
+            y = y0 + (y1 - y0) * j / max(1, ny - 1)
+            o = Vector((math.sin(th) * r_out, y, math.cos(th) * r_out)) / 1000.0
+            loc, _n, _i, dist = bvh.ray_cast(YUP_TO_BL.to_3x3() @ o, YUP_TO_BL.to_3x3() @ d,
+                                             (r_out - r_in) / 1000.0)
+            if loc is not None:
+                hit_r[i, j] = r_out - dist * 1000.0
+    miss = np.isnan(hit_r)
+    # Flood-fill see-through components; drop any touching the footprint border.
+    seen = np.zeros_like(miss)
+    lights = []
+    for i in range(nt):
+        for j in range(ny):
+            if not miss[i, j] or seen[i, j]:
+                continue
+            stack, cells, border = [(i, j)], [], False
+            seen[i, j] = True
+            while stack:
+                a, b = stack.pop()
+                cells.append((a, b))
+                if a in (0, nt - 1) or b in (0, ny - 1):
+                    border = True
+                for da, db in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    u, v = a + da, b + db
+                    if 0 <= u < nt and 0 <= v < ny and miss[u, v] and not seen[u, v]:
+                        seen[u, v] = True
+                        stack.append((u, v))
+            if border:
+                continue
+            ci = np.array(cells)
+            w = (ci[:, 0].max() - ci[:, 0].min() + 1) * step_mm
+            h = (ci[:, 1].max() - ci[:, 1].min() + 1) * step_mm
+            # LED holes are ~2.5 mm, windows 12-15 mm; 6-8 mm openings are fastener holes.
+            if max(w, h) < 1.5 or max(w, h) > 45 or (3.5 < max(w, h) and min(w, h) < 10):
+                continue
+            # Front face radius from the panel around the opening.
+            ring = []
+            for a, b in cells:
+                for da, db in ((2, 0), (-2, 0), (0, 2), (0, -2)):
+                    u, v = a + da, b + db
+                    if 0 <= u < nt and 0 <= v < ny and not miss[u, v]:
+                        ring.append(hit_r[u, v])
+            r_front = float(np.median(ring)) if ring else r_mean
+            th = t0 + (t1 - t0) * ci[:, 0].mean() / max(1, nt - 1)
+            y = y0 + (y1 - y0) * ci[:, 1].mean() / max(1, ny - 1)
+            kind = "dot" if max(w, h) <= 3.5 else "window"
+            depth = 2.0 if kind == "dot" else 4.0  # LED / diffuser just behind the face
+            r = r_front - depth
+            lights.append({
+                "kind": kind,
+                "pos": [round(math.sin(th) * r / 1000, 5), round(y / 1000, 5), round(math.cos(th) * r / 1000, 5)],
+                "normal": [round(math.sin(th), 4), 0.0, round(math.cos(th), 4)],
+                "w": round(w / 1000, 4), "h": round(h / 1000, 4),
+            })
+    return lights
+
+
 def world_verts(obj):
     return [obj.matrix_world @ v.co for v in obj.data.vertices]
 
@@ -526,6 +616,22 @@ def main():
         m, com_bl = mass_properties(o, density)
         parts_info.append((assign_joint(n), m, bl2y @ com_bl))
     print(f"[r3x] estimated printed mass {sum(m for _, m, _ in parts_info):.2f} kg")
+
+    # Chest logic-panel openings (before decimation, which would blur the small holes).
+    chest_lights = []
+    for n in ("MS_P_1_Full", "MS_P_2_Full"):
+        if n in by_name:
+            found = find_panel_lights(by_name[n])
+            for L in found:
+                L["panel"] = n
+            chest_lights += found
+    print(f"[r3x] chest panels: {sum(L['kind'] == 'window' for L in chest_lights)} windows, "
+          f"{sum(L['kind'] == 'dot' for L in chest_lights)} LED dots")
+
+    # UVs on the clean full-resolution meshes: decimation keeps seams and interpolates
+    # UVs, whereas unwrapping the decimated meshes shatters them into ~100k islands.
+    if BAKE:
+        unwrap([o for _, o in parts])
 
     # Decimate to budget (small parts untouched).
     total = sum(tri_count(o) for _, o in parts)
@@ -638,6 +744,8 @@ def main():
         obj.matrix_parent_inverse = obj.parent.matrix_world.inverted()
 
     OUT.mkdir(parents=True, exist_ok=True)
+    if BAKE:
+        bake_weathering([o for o in bpy.data.objects if o.type == "MESH"], OUT)
     glb = OUT / "r3x.glb"
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.export_scene.gltf(
@@ -645,6 +753,7 @@ def main():
         export_yup=True, export_normals=True, export_materials="EXPORT",
         export_draco_mesh_compression_enable=True, export_draco_mesh_compression_level=6,
         export_draco_position_quantization=14, export_draco_normal_quantization=10,
+        export_draco_texcoord_quantization=13,
         export_extras=False,
     )
     dynamics = joint_dynamics(
@@ -656,6 +765,7 @@ def main():
             "note": "Estimate from STL volume at 45% of solid PLA; servos/hardware not included.",
         },
         "dynamics": dynamics,
+        "chest_lights": chest_lights,
         "units": "metres, Y-up, droid front = +Z",
         "source": "DJ R3X - v2 printable kit (Patrick Gray & David Ferreira), Large Cut STLs",
         "joints": rig,
@@ -668,6 +778,164 @@ def main():
 
     if PREVIEW:
         render_previews()
+
+
+# --------------------------------------------------------------------------------------
+# Weathering masks (visual only: nothing here changes joints, anchors or rig.json)
+# --------------------------------------------------------------------------------------
+
+BAKE_OCCLUSION_RES = 2048
+BAKE_EDGE_RES = 4096
+
+
+def edit_all(objs):
+    """Enter multi-object edit mode on `objs` with everything selected."""
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+
+
+def unwrap(objs):
+    """One Smart-UV unwrap over every part (islands scaled by true 3D area)."""
+    import time
+    t = time.time()
+    for o in objs:
+        while o.data.uv_layers:
+            o.data.uv_layers.remove(o.data.uv_layers[0])
+        o.data.uv_layers.new(name="UVMap")
+    edit_all(objs)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.0,
+                             area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    print(f"[r3x] bake: smart UV over {len(objs)} parts in {time.time() - t:.1f}s")
+
+
+def bake_weathering(objs, out_dir):
+    """Bake the masks the web sim's paint shader weathers with.
+
+    STL meshes have no UVs and big flat faces are a few long triangles, so per-vertex data
+    can't hold an edge mask. Instead: one shared Smart-UV atlas over every part, then two
+    Cycles emission bakes of shader-computed masks, stored as greyscale JPEGs:
+
+    * r3x_occlusion.jpg - ambient occlusion: broad (12 cm, other parts count) x crevice
+      (1.5 cm). Drives grime and ambient darkening.
+    * r3x_edges.jpg - exposed edges: 1 - N_bevel . N from Cycles' Bevel node (4 mm),
+      i.e. how much a small round-over would bend the normal. Convex and concave edges
+      both light up; the sim gates wear by occlusion so only exposed edges chip.
+    """
+    import time
+    t = time.time()
+    scene = bpy.context.scene
+    edit_all(objs)
+    # Re-pack the whole droid into one atlas now the parts are decimated and joined.
+    bpy.ops.uv.pack_islands(udim_source="CLOSEST_UDIM", rotate=True, scale=True,
+                            margin_method="FRACTION", margin=0.0005, shape_method="CONCAVE")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    print(f"[r3x] bake: packed UV atlas over {len(objs)} meshes in {time.time() - t:.1f}s")
+
+    scene.render.engine = "CYCLES"
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        prefs.compute_device_type = "METAL"
+        prefs.get_devices()
+        for d in prefs.devices:
+            d.use = d.type == "METAL"
+        scene.cycles.device = "GPU"
+        print(f"[r3x] bake: devices {[(d.name, d.type) for d in prefs.devices]}")
+    except Exception as e:  # no Metal: CPU works, just slower
+        print(f"[r3x] bake: GPU unavailable ({e}); using CPU")
+        scene.cycles.device = "CPU"
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = False
+    scene.render.bake.margin_type = "EXTEND"
+
+    mat = bpy.data.materials.new("r3x_bake")
+    if mat.node_tree is None:  # Blender < 5 creates materials without a node tree
+        mat.use_nodes = True
+    nt = mat.node_tree
+    N, L = nt.nodes, nt.links
+    N.clear()
+    out = N.new("ShaderNodeOutputMaterial")
+    emit = N.new("ShaderNodeEmission")
+    L.new(emit.outputs["Emission"], out.inputs["Surface"])
+
+    def math_node(op, a, b=None, clamp=False):
+        m = N.new("ShaderNodeMath")
+        m.operation = op
+        m.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                m.inputs[i].default_value = v
+            else:
+                L.new(v, m.inputs[i])
+        return m.outputs[0]
+
+    def ao(distance, samples):
+        n = N.new("ShaderNodeAmbientOcclusion")
+        n.samples = samples
+        n.only_local = False
+        n.inputs["Distance"].default_value = distance
+        return n.outputs["AO"]
+
+    occlusion = math_node("MULTIPLY", math_node("POWER", ao(0.12, 16), 0.8), ao(0.015, 16))
+    bevel = N.new("ShaderNodeBevel")
+    bevel.samples = 8
+    bevel.inputs["Radius"].default_value = 0.004
+    geo = N.new("ShaderNodeNewGeometry")
+    dot = N.new("ShaderNodeVectorMath")
+    dot.operation = "DOT_PRODUCT"
+    L.new(bevel.outputs["Normal"], dot.inputs[0])
+    L.new(geo.outputs["Normal"], dot.inputs[1])
+    edge = math_node("MULTIPLY", math_node("SUBTRACT", 1.0, dot.outputs["Value"]), 5.0, clamp=True)
+    tex = N.new("ShaderNodeTexImage")
+    N.active = tex
+
+    # Bake one joined copy: Cycles re-syncs the whole scene per baked object, so baking
+    # 35 objects separately costs ~35x the scene setup. The UVs are one shared atlas, so
+    # the result is identical. Originals are hidden from rays meanwhile.
+    bpy.ops.object.select_all(action="DESELECT")
+    copies = []
+    for o in objs:
+        c = o.copy()
+        c.data = o.data.copy()
+        c.parent = None
+        c.matrix_world = o.matrix_world.copy()
+        scene.collection.objects.link(c)
+        c.data.materials.clear()
+        c.data.materials.append(mat)
+        copies.append(c)
+        o.hide_render = True
+    for c in copies:
+        c.select_set(True)
+    bpy.context.view_layer.objects.active = copies[0]
+    bpy.ops.object.join()
+    baker = bpy.context.view_layer.objects.active
+    try:
+        for name, socket, res, margin in (("occlusion", occlusion, BAKE_OCCLUSION_RES, 4),
+                                          ("edges", edge, BAKE_EDGE_RES, 6)):
+            t = time.time()
+            img = bpy.data.images.new(f"r3x_{name}", res, res, alpha=False)
+            img.colorspace_settings.name = "Non-Color"
+            tex.image = img
+            L.new(socket, emit.inputs["Color"])
+            bpy.ops.object.bake(type="EMIT", margin=margin, use_clear=True,
+                                target="IMAGE_TEXTURES")
+            path = out_dir / f"r3x_{name}.jpg"
+            img.filepath_raw = str(path)
+            img.file_format = "JPEG"
+            img.save(quality=85)
+            print(f"[r3x] bake: {path.name} {res}px in {time.time() - t:.1f}s "
+                  f"({path.stat().st_size / 1e6:.1f} MB)")
+    finally:
+        bpy.data.objects.remove(baker)
+        for o in objs:
+            o.hide_render = False
+        bpy.data.materials.remove(mat)
 
 
 def render_previews():

@@ -97,3 +97,6 @@ table.servos td.bad { color: #ff6b6b; }
 .joint { grid-template-columns: 96px 1fr 34px 30px; }
 .joint i { font: normal 10px ui-monospace, Menlo, monospace; color: #5b6170; }
 .joint.posable span { color: #5b6170; }
+
+.subs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.subs label.sub { margin: 2px 0; font-size: 12px; }

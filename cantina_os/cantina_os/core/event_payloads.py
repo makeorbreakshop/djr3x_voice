@@ -171,3 +171,10 @@ class SpeechAmplitudePayload(BaseModel):
     timestamp_offset: float = Field(..., description="Offset from speech start in seconds")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     event_id: str = Field(default_factory=lambda: f"amp_{datetime.now().timestamp()}")
+
+
+class ChestCommandPayload(BaseModel):
+    """A command written (or, in mock mode, that would be written) to the chest-lights board."""
+    command: str = Field(..., description="Serial command without newline, e.g. 'SS', 'M128', 'H1FF'")
+    connected: bool = Field(..., description="True if it actually went to hardware")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())

@@ -99,6 +99,7 @@ class EventTopics(str, Enum):
     LED_COMMAND_SUCCESS = "led.command.success"  # Added back
     LED_COMMAND_FAILURE = "led.command.failure"  # Added back
     LED_RESPONSE = "led.response"  # Added back
+    CHEST_COMMAND = "chest.command"  # Every command sent to the chest-lights board (mirrored by the 3D sim)
     LED_PATTERN_STARTED = "led.pattern.started"  # Added back
     LED_PATTERN_STOPPED = "led.pattern.stopped"  # Added back
     LED_ERROR = "led.error"  # Added back

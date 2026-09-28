@@ -45,6 +45,7 @@ FORWARDED_TOPICS = [
     EventTopics.MUSIC_PLAYBACK_STOPPED,
     EventTopics.DJ_MODE_CHANGED,
     EventTopics.INTENT_DETECTED,
+    EventTopics.CHEST_COMMAND,  # the exact bytes sent to the chest board
 ]
 
 MAX_STRING = 400  # keep chatty payloads (LLM text) small on the wire

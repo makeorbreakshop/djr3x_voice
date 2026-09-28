@@ -8,6 +8,10 @@ firmware logic and the real servo layout, and it can mirror a running CantinaOS 
   the hinge and gear geometry.
 - **Face**: a line-for-line emulation of `cantina_os/arduino/rex_face_v3_clean`. Eye
   jewels light the diffusion bulbs; the mouth V lights the light pipe behind the slots.
+- **Chest lights**: the build finds the logic panels' openings itself: 3 panels × (8 LED
+  holes + 3 windows). `web/src/chest.ts` is the reference for the planned Nano +
+  addressable-LED controller. It speaks the face's serial words (`SI…SS`, `Mnnn`) plus
+  `Bnnn` for tempo, so one command stream can drive both boards.
 - **Servos**: the R-3X Animation build's mechanics (8 servos) on our own custom
   controller. Behaviour becomes jerk-limited trajectories, then 1 µs pulse frames, then a
   servo physics model, then the 3D joints. That pipeline is the reference implementation
@@ -36,8 +40,25 @@ The script reads three inputs:
   (`MOB/Projects/DJ-R3X/`), when they are synced;
 - optional flags: `--mouth <dir>`, `--budget <tris>`, `--preview`.
 
-It writes `web/public/model/r3x.glb` (Draco, about 2 MB) and `rig.json`. The rig file holds
-the joints, the LED anchors and the mass/torque/inertia model.
+It writes `web/public/model/r3x.glb` (Draco, about 3 MB) and `rig.json`. The rig file holds
+the joints, the LED anchors and the mass/torque/inertia model. It also bakes two
+weathering masks into a shared UV atlas, `r3x_occlusion.jpg` and `r3x_edges.jpg`, in about
+20 s. Pass `--no-bake` to skip them; the sim then uses procedural wear only.
+
+## The look
+
+`web/src/look.ts` owns the materials, the lights and the environment. The target is the
+Oga's Cantina animatronic: semi-gloss burnt-orange body, grey head and arms, blue cups and
+RX-24 plate. The paint is worn to silver on exposed edges and dirty in the seams. It sits
+in a dim booth under a warm tungsten spot, with teal and magenta practicals behind it.
+
+- **Weathering:** comes from the baked masks plus 3D noise in each part's own space, so the
+  wear moves with the part. It covers chips (a primer rim around bare metal), crevice
+  grime, streaks, scuffs, dust on the tops and patchy fading. There are no texture
+  downloads; the cantina environment is procedural.
+- **LEDs:** lit surfaces pass through a soft knee below 1.0, so only the LEDs cross the bloom
+  threshold.
+- **Debugging:** `?look=occ|edge|wear|grime` shows one mask.
 
 ## Run
 
