@@ -16,26 +16,22 @@ DEPENDENCIES: stdin/stdout for command line interaction, keyboard input
 
 import asyncio
 import logging
-import sys
 import os
-from typing import Dict, Optional, Any, List, Callable
-from datetime import datetime
+import sys
+import time
 import uuid
-import signal
-import time  # Added import for time module
+from typing import Any, Callable, Dict, List, Optional
 
 from pyee.asyncio import AsyncIOEventEmitter
 
 from ..base_service import BaseService
-from ..core.event_topics import EventTopics
 from ..core.console_logging import write_with_retry
+from ..core.event_topics import EventTopics
 from ..event_payloads import (
     CliCommandPayload,
     CliResponsePayload,
-    ServiceStatus,
     LogLevel,
-    SystemModeChangePayload,
-    DebugCommandPayload
+    ServiceStatus,
 )
 
 # Import the CLI formatter for enhanced output (using minimal version)
@@ -114,7 +110,11 @@ class CLIService(BaseService):
         
         # Stdin/stdout reader/writer
         self._stdin_reader: Optional[asyncio.StreamReader] = None
+        self._stdin_transport = None
+        self._stdin_pipe = None
         self._stdout_writer: Optional[asyncio.StreamWriter] = None
+        self._output_stream = None
+        self._error_stream = None
         
         # Output queue to prevent blocking
         self._output_queue = asyncio.Queue()
@@ -164,23 +164,20 @@ class CLIService(BaseService):
         # Start output processor task
         self._output_task = asyncio.create_task(self._output_processor())
         
-        # Display startup message with minimal formatting
+        # The output processor is the sole owner of terminal writes. Keeping the banner and
+        # prompt in one queued item prevents the prompt from racing ahead of the banner.
         if FORMATTER_AVAILABLE:
-            await self._async_write_output(cli_formatter.print_separator())
-            await self._async_write_output("DJ R3X Voice Control")
-            await self._async_write_output("Type 'help' for available commands")
-            await self._async_write_output(cli_formatter.print_separator() + "\n")
+            startup_message = "\n".join(
+                [
+                    cli_formatter.print_separator(),
+                    "DJ R3X Voice Control",
+                    "Type 'help' for available commands",
+                    cli_formatter.print_separator(),
+                ]
+            )
         else:
-            await self._async_write_output("\nDJ R3X Voice Control")
-            await self._async_write_output("Type 'help' for available commands\n")
-
-        # Explicitly display initial prompt - ensure it's on a new line and properly flushed
-        loop = asyncio.get_running_loop()
-        if FORMATTER_AVAILABLE:
-            prompt = cli_formatter.format_prompt()
-            await loop.run_in_executor(None, lambda: print(prompt, end="", flush=True))
-        else:
-            await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
+            startup_message = "DJ R3X Voice Control\nType 'help' for available commands"
+        await self._async_write_output(startup_message, show_prompt=True)
         
         # Start the async input processing task
         self._input_task = asyncio.create_task(self._process_input())
@@ -192,8 +189,7 @@ class CLIService(BaseService):
     async def _setup_stdin_reader(self) -> None:
         """Set up the stdin reader using asyncio streams."""
         loop = asyncio.get_running_loop()
-        
-        # Create stdin reader
+
         if sys.platform == 'win32':
             # Windows-specific handling
             self.logger.info("Setting up Windows console input")
@@ -203,19 +199,27 @@ class CLIService(BaseService):
             # Instead we'll use run_in_executor, but in a more efficient way
             self._stdin_reader = None
         else:
-            # Unix-like systems can use asyncio streams
-            self.logger.info("Setting up Unix stdin reader")
+            # asyncio makes a connected read pipe non-blocking. Terminal stdin/stdout can be
+            # duplicate descriptors for the same open file description, so changing the
+            # original stdin flags can also make stdout non-blocking. Reopening the concrete
+            # terminal device gives the reader its own file description while preserving
+            # selector-driven shutdown. macOS kqueue cannot watch the /dev/tty alias itself,
+            # so use the concrete path returned by ttyname.
             reader = asyncio.StreamReader()
             protocol = asyncio.StreamReaderProtocol(reader)
-            
-            # Get file descriptor for stdin
-            fd = sys.stdin.fileno()
-            
-            # Set stdin to non-blocking mode
-            os.set_blocking(fd, False)
-            
-            # Create connection to stdin
-            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+            read_pipe = sys.stdin
+            if sys.stdin.isatty():
+                self.logger.info("Setting up isolated Unix terminal reader")
+                terminal_path = os.ttyname(sys.stdin.fileno())
+                self._stdin_pipe = open(terminal_path, "rb", buffering=0)
+                read_pipe = self._stdin_pipe
+            else:
+                self.logger.info("Setting up Unix stdin reader")
+
+            self._stdin_transport, _ = await loop.connect_read_pipe(
+                lambda: protocol, read_pipe
+            )
             self._stdin_reader = reader
             
     async def _stop(self) -> None:
@@ -240,6 +244,13 @@ class CLIService(BaseService):
                 await self._output_task
             except asyncio.CancelledError:
                 self.logger.info("Output processing task cancelled")
+
+        if self._stdin_transport is not None:
+            self._stdin_transport.close()
+            self._stdin_transport = None
+        if self._stdin_pipe is not None:
+            self._stdin_pipe.close()
+            self._stdin_pipe = None
         
     async def _process_input(self) -> None:
         """Process input from stdin asynchronously."""
@@ -266,16 +277,12 @@ class CLIService(BaseService):
                             # Process the command directly in the event loop
                             await self._process_command(user_input)
                             
-                        # Check for quit
+                        # Check for quit. Non-empty commands get their next prompt with the
+                        # response so response and prompt stay atomically ordered.
                         if user_input and user_input.strip().lower() in ['quit', 'exit', 'q'] and not self._is_recording:
                             break
-                        else:
-                            # Display prompt for next command - ensure it's properly flushed
-                            if not self._is_recording:
-                                if FORMATTER_AVAILABLE:
-                                    print(cli_formatter.format_prompt(), end="", flush=True)
-                                else:
-                                    print("DJ-R3X> ", end="", flush=True)
+                        elif not user_input and not self._is_recording:
+                            await self._queue_prompt()
                             
                     except (EOFError, KeyboardInterrupt):
                         self.logger.info("Input processing received quit signal")
@@ -292,6 +299,9 @@ class CLIService(BaseService):
                     # Read a line asynchronously - The prompt is already displayed from _start or _handle_response
                     try:
                         line = await self._stdin_reader.readline()
+                        if not line:
+                            await self._process_command("quit")
+                            break
                         user_input = line.decode().strip()
                         
                         # Important: Log what we received and current recording state
@@ -304,16 +314,12 @@ class CLIService(BaseService):
                             # Process the command directly
                             await self._process_command(user_input)
                             
-                        # Check for quit
+                        # Check for quit. Non-empty commands get their next prompt with the
+                        # response so response and prompt stay atomically ordered.
                         if user_input and user_input.strip().lower() in ['quit', 'exit', 'q'] and not self._is_recording:
                             break
-                        else:
-                            # Display prompt for next command - ensure it's properly flushed
-                            if not self._is_recording:
-                                if FORMATTER_AVAILABLE:
-                                    print(cli_formatter.format_prompt(), end="", flush=True)
-                                else:
-                                    print("DJ-R3X> ", end="", flush=True)
+                        elif not user_input and not self._is_recording:
+                            await self._queue_prompt()
                             
                     except (EOFError, KeyboardInterrupt):
                         self.logger.info("Input processing received quit signal")
@@ -369,7 +375,10 @@ class CLIService(BaseService):
                 
             # Handle quit command
             if command in ['quit', 'exit']:
-                self._event_bus.emit(EventTopics.SYSTEM_SHUTDOWN, {})
+                await self.emit(
+                    EventTopics.SYSTEM_SHUTDOWN_REQUESTED,
+                    {"reason": "CLI quit command", "restart": False},
+                )
                 return
             
             # Handle 'done' command to stop recording
@@ -389,14 +398,19 @@ class CLIService(BaseService):
                     return
                 else:
                     self.logger.info("'done' command received but no recording is active")
-                    await self._async_write_output("No recording is currently active.")
+                    await self._async_write_output(
+                        "No recording is currently active.", show_prompt=True
+                    )
                     return
                 
             # Handle record command
             if command == 'record':
                 if self._mic_recording_active:
                     self.logger.info("Recording already active")
-                    await self._async_write_output("Recording is already active. Type 'done' when finished.")
+                    await self._async_write_output(
+                        "Recording is already active. Type 'done' when finished.",
+                        show_prompt=True,
+                    )
                     return
                 
                 self.logger.info("Activating microphone recording")
@@ -414,7 +428,10 @@ class CLIService(BaseService):
                     "conversation_id": conversation_id,
                     "timestamp": time.time()
                 })
-                await self._async_write_output("[Microphone recording active - type 'done' when finished speaking]")
+                await self._async_write_output(
+                    "[Microphone recording active - type 'done' when finished speaking]",
+                    show_prompt=True,
+                )
                 return
                 
             # Handle all other commands by emitting to CLI_COMMAND
@@ -436,14 +453,11 @@ class CLIService(BaseService):
         except Exception as e:
             self.logger.error(f"Error processing command '{user_input}': {e}")
             error_msg = f"Error: {str(e)}"
-            await self._async_write_error(error_msg)
-            
-            # Emit error response
+            # Emit one error response. Writing here as well made exception messages appear
+            # twice when the CLI consumed its own CLI_RESPONSE event.
             payload = CliResponsePayload(
                 message=error_msg,
-                success=False,
-                timestamp=time.time(),
-                severity=LogLevel.ERROR
+                is_error=True,
             )
             await self.emit_error_response(EventTopics.CLI_RESPONSE, payload)
             
@@ -460,28 +474,17 @@ class CLIService(BaseService):
             formatted_message = cli_formatter.format_cli_response(
                 message, is_error, command_context if command_context != "N/A" else None
             )
-            # Write directly with formatting already applied
-            await self._output_queue.put((formatted_message, False))
+            await self._queue_output(
+                formatted_message, is_error=is_error, show_prompt=True
+            )
         else:
             if is_error:
-                # Format error message
-                await self._async_write_error(message)
+                await self._async_write_error(message, show_prompt=True)
             else:
-                await self._async_write_output(message)
-
-        # Display prompt again after response - make sure it's properly flushed
-        if not self._is_recording and not self._mic_recording_active:
-            # Use run_in_executor for potentially blocking operation
-            loop = asyncio.get_running_loop()
-            if FORMATTER_AVAILABLE:
-                prompt = cli_formatter.format_prompt()
-                await loop.run_in_executor(None, lambda: print(prompt, end="", flush=True))
-            else:
-                await loop.run_in_executor(None, lambda: print("DJ-R3X> ", end="", flush=True))
+                await self._async_write_output(message, show_prompt=True)
             
         # Set service status to RUNNING
         self._status = ServiceStatus.RUNNING
-        await self._emit_status(ServiceStatus.RUNNING, "CLI service ready")
         
     def _add_to_history(self, command: str) -> None:
         """Add a command to the history.
@@ -563,9 +566,7 @@ class CLIService(BaseService):
             self._last_interim_text = text
             # Clear previous line and show interim (use \r to overwrite)
             interim_display = f"\r🎤 You: {text}..."
-            # Write directly without newline so it can be overwritten
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: print(interim_display, end="", flush=True))
+            await self._queue_output(interim_display, add_newline=False)
 
     async def _handle_transcription_final(self, payload: Dict[str, Any]) -> None:
         """
@@ -596,50 +597,85 @@ class CLIService(BaseService):
         """
         response_text = payload.get("text", "")
         conversation_id = payload.get("conversation_id")
+        is_complete = payload.get("is_complete", True)
 
         # Only show if it matches our current conversation
         if conversation_id != self._current_conversation_id:
+            return
+
+        # Streaming fragments are consumed by the speech/timeline path. Printing every one
+        # here duplicates the final answer and redraws the prompt repeatedly.
+        if not is_complete:
             return
 
         if response_text:
             # Format as assistant response with robot emoji
             assistant_display = f"🤖 R3X: \"{response_text}\""
             await self._async_write_output(assistant_display)
-            await self._async_write_output("")  # Blank line for spacing
+            await self._async_write_output("", show_prompt=True)  # Blank line and prompt
 
-    async def _async_write_output(self, message: str) -> None:
+    async def _queue_output(
+        self,
+        message: str,
+        *,
+        is_error: bool = False,
+        show_prompt: bool = False,
+        add_newline: bool = True,
+    ) -> None:
+        # Capture the destination with the message. Test capture layers and embedding hosts
+        # may replace sys.stdout between enqueue and the executor thread actually writing.
+        if is_error:
+            stream = self._error_stream or sys.stderr
+        else:
+            stream = self._output_stream or sys.stdout
+        await self._output_queue.put(
+            (message, stream, show_prompt, add_newline)
+        )
+
+    async def _queue_prompt(self) -> None:
+        await self._queue_output("", show_prompt=True, add_newline=False)
+
+    async def _async_write_output(
+        self, message: str, *, show_prompt: bool = False
+    ) -> None:
         """Non-blocking output function that respects asyncio principles.
         
         Args:
             message: The message to output
         """
-        await self._output_queue.put((message, False))
+        await self._queue_output(message, show_prompt=show_prompt)
         
-    async def _async_write_error(self, message: str) -> None:
+    async def _async_write_error(
+        self, message: str, *, show_prompt: bool = False
+    ) -> None:
         """Non-blocking error output function that respects asyncio principles.
         
         Args:
             message: The error message to output
         """
-        await self._output_queue.put((message, True))
+        await self._queue_output(message, is_error=True, show_prompt=show_prompt)
         
     async def _output_processor(self) -> None:
         """Process output messages from the queue to avoid blocking."""
         try:
             while self._running:
-                message, is_error = await self._output_queue.get()
+                message, stream, show_prompt, add_newline = await self._output_queue.get()
                 try:
                     # Use loop.run_in_executor for potentially blocking operations.
                     #
-                    # write_with_retry, not a bare write: _setup_stdin_reader puts stdin into
-                    # non-blocking mode and on a tty stdout shares that file description, so a
-                    # full terminal buffer raises BlockingIOError. That is what discarded a
-                    # `help` listing on 2026-09-17 10:55:44 ("Error writing output: [Errno 35]
-                    # write could not complete without blocking"). The stream is momentarily
-                    # full, not broken, so the right answer is to wait rather than drop.
+                    # write_with_retry tracks partial non-blocking writes and retries flushes
+                    # without submitting already-accepted text a second time. That prevents a
+                    # transient EAGAIN from duplicating an entire help listing.
                     loop = asyncio.get_running_loop()
-                    stream = sys.stderr if is_error else sys.stdout
-                    text = str(message) + '\n'
+                    text = str(message)
+                    if add_newline:
+                        text += '\n'
+                    if show_prompt and not self._is_recording and not self._mic_recording_active:
+                        text += (
+                            cli_formatter.format_prompt()
+                            if FORMATTER_AVAILABLE
+                            else "DJ-R3X> "
+                        )
                     written = await loop.run_in_executor(
                         None, lambda: write_with_retry(stream, text)
                     )

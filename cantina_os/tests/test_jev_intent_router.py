@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 import pytest
 
 from cantina_os.core.fast_router_gate import GATE, ActionTaken, FastRouterGate
+from cantina_os.core.music_search import parse_semantic_request
 from cantina_os.llm import jev_intents
 from cantina_os.llm.jev_client import JevAnswer, JevResult
 
@@ -320,6 +321,110 @@ def test_play_music_names_no_track_for_a_generic_request():
     assert jev_intents.extract_parameters("play_music", "play some music") == {"track": None}
 
 
+def test_jev_turns_a_rambling_vibe_request_into_a_bounded_semantic_query():
+    """The audio search must not embed unrelated transcript chatter."""
+    utterance = (
+        "We finally got everything working after a long day and I was telling Sam about "
+        "the wiring. Hey, play some music and make it pretty fun, but please do not make "
+        "it heavy or aggressive. Then remind me to check the lights later."
+    )
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="semantic_vibe", confidence=1.0
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="fun_upbeat_playful", confidence=1.0
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.97),
+        },
+    )
+
+    decision = jev_intents.decide(result, utterance)
+
+    assert decision.should_execute
+    request = parse_semantic_request(decision.parameters["track"])
+    assert request is not None
+    assert request.query == "fun"
+    assert request.negative_query == "heavy aggressive dark intense music"
+
+
+def test_jev_preserves_distinctive_vibe_words_instead_of_collapsing_the_query():
+    utterance = "Hey, play the craziest funky fun party banger you have."
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="semantic_vibe", confidence=1.0
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="fun_upbeat_playful", confidence=1.0
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.01),
+        },
+    )
+
+    decision = jev_intents.decide(result, utterance)
+    request = parse_semantic_request(decision.parameters["track"])
+
+    assert request is not None
+    assert request.query == "craziest funky fun party banger"
+
+
+def test_jev_uses_supported_style_words_even_when_the_coarse_vibe_is_other():
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="semantic_vibe", confidence=1.0
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="unspecified_or_other", confidence=0.92
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.01),
+        },
+    )
+
+    decision = jev_intents.decide(result, "Play some funky jazz music.")
+    request = parse_semantic_request(decision.parameters["track"])
+
+    assert request is not None
+    assert request.query == "funky jazz"
+
+
+def test_named_music_request_stays_on_the_deterministic_title_path():
+    result = JevResult(
+        model="x",
+        answers={
+            "intent": JevAnswer(type="choice", choice="play_music", confidence=0.99),
+            "play_music": JevAnswer(type="noul", noul=0.99),
+            "is_a_command": JevAnswer(type="noul", noul=0.99),
+            "music_request_kind": JevAnswer(
+                type="choice", choice="named_catalog_item", confidence=0.61
+            ),
+            "music_positive_vibe": JevAnswer(
+                type="choice", choice="unspecified_or_other", confidence=0.89
+            ),
+            "music_avoid_heavy_aggressive": JevAnswer(type="noul", noul=0.02),
+        },
+    )
+
+    decision = jev_intents.decide(result, "Play the Java music.")
+
+    assert decision.should_execute
+    assert decision.parameters == {"track": "java"}
+
+
 def test_zero_parameter_intents():
     for intent in ("stop_music", "next_track", "dj_mode_on", "dj_mode_off"):
         assert jev_intents.extract_parameters(intent, "whatever") == {}
@@ -357,6 +462,9 @@ def test_questions_include_a_noul_per_tool_plus_the_gate():
     for intent in jev_intents.TOOL_INTENTS:
         assert questions[intent]["type"] == "noul"
     assert questions["is_a_command"]["type"] == "noul"
+    assert questions["music_request_kind"]["type"] == "choice"
+    assert questions["music_positive_vibe"]["type"] == "choice"
+    assert questions["music_avoid_heavy_aggressive"]["type"] == "noul"
 
 
 def test_choice_offers_both_no_tool_escapes():

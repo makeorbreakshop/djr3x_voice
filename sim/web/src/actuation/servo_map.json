@@ -1,0 +1,62 @@
+{
+  "_doc": "Actuation profiles. The printable kit is static; 'r3x_animation' is the mechanics of the motorised build in Drive MOB/Projects/DJ-R3X/R-3X Animation (parts list '07 - r3x hardware.txt', sample show '08 - r3x maestro sample script.txt'): 8 servos, channel numbers as that script uses them. That build used a Pololu Maestro; ours will be a custom controller, so the controller here is 'custom' - the sim's pipeline (calibration, soft limits, jerk-limited follower, pulse output) is the reference for its firmware (sim/docs/motion-control.md section 8). 'extended' keeps those 8 and adds arm/claw servos on the Maestro's spare channels. Ring gear ratios are measured from the ring-animation STLs (inner-gear sector pitch radius / servo gear). Anything marked calibration 'assumed' (centreUs, invert, neck and lift gearing) must be set on the bench: jog each servo to the model's rest pose and record the pulse. Motion limits are ~70% of loaded capability (sim/docs/motion-control.md). Joints without a channel are posable only.",
+  "default": "r3x_animation",
+  "profiles": {
+    "r3x_animation": {
+      "label": "R-3X Animation mechanics (8 servos, custom controller)",
+      "controller": { "type": "custom", "channels": 18, "frameHz": 50, "resolutionUs": 1 },
+      "supplyVolts": 6.0,
+      "channels": [
+        { "ch": 0, "name": "neck", "servo": "SERVO_35KG_270", "gear": 1.5, "joints": { "head_pan": 1 },
+          "centerUs": 1490, "margin": 4, "vMax": 150, "aMax": 600, "jMax": 4000,
+          "calibration": "assumed", "note": "Script centre 5961 qus = 1490 us. Neck-gear ratio not yet measured (1.5 assumed)." },
+        { "ch": 1, "name": "headlift", "servo": "SERVO_60KG_270", "gear": 1.0, "joints": { "head_lift": 1 },
+          "mmPerDeg": 0.21, "centerUs": 1500, "centerValue": 0, "margin": 1, "vMax": 40, "aMax": 300, "jMax": 4000,
+          "calibration": "assumed", "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = kit pose (0 mm), 800-2200 us = +/-20 mm." },
+        { "ch": 2, "name": "headtilt", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "head_tilt": 1 },
+          "centerUs": 1124, "margin": 4, "vMax": 100, "aMax": 400, "jMax": 3000, "calibration": "assumed" },
+        { "ch": 3, "name": "visor", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "visor": 1 },
+          "centerUs": 1239, "invert": true, "margin": 3, "vMax": 150, "aMax": 900, "jMax": 8000, "calibration": "assumed",
+          "note": "Push-rod linkage treated as 1:1. Script flaps 4956 <-> 5297 qus (~11 deg)." },
+        { "ch": 4, "name": "elbow", "servo": "DS3218_DUAL", "gear": 1.0, "joints": { "hero_shoulder": 1 },
+          "centerUs": 1840, "margin": 5, "vMax": 120, "aMax": 500, "jMax": 3000, "calibration": "assumed",
+          "note": "20 kg double-shaft servo in the hero-arm elbow disc. Script 'up' 7361 qus = model pose." },
+        { "ch": 5, "name": "hand", "servo": "SERVO_7KG", "gear": 1.0, "joints": { "hero_wrist": 1 },
+          "centerUs": 1504, "margin": 4, "vMax": 180, "aMax": 900, "jMax": 6000, "calibration": "assumed" },
+        { "ch": 6, "name": "lowarm", "servo": "SERVO_35KG_270", "gear": 3.8, "joints": { "torso_lower": 1 },
+          "centerUs": 1504, "margin": 3, "vMax": 40, "aMax": 120, "jMax": 800,
+          "note": "Lower ring: 22T-class servo gear into a ~98 deg internal sector (~3.8:1), carries the poker arm." },
+        { "ch": 7, "name": "heroarm", "servo": "SERVO_35KG_270", "gear": 4.4, "joints": { "torso_top": 1 },
+          "centerUs": 1511, "margin": 3, "vMax": 40, "aMax": 120, "jMax": 800,
+          "note": "Top ring: servo gear into a ~61 deg internal sector (~4.4:1), carries the hero arm." }
+      ]
+    },
+    "extended": {
+      "label": "Extended (17 servos: + arms, claws, middle ring; custom controller)",
+      "controller": { "type": "custom", "channels": 18, "frameHz": 50, "resolutionUs": 1 },
+      "supplyVolts": 6.0,
+      "inherit": "r3x_animation",
+      "channels": [
+        { "ch": 8, "name": "hero_claw", "servo": "SG90", "gear": 1.0,
+          "joints": { "hero_claw_l": 1, "hero_claw_r": 1, "hero_claw_t": 1 },
+          "margin": 3, "vMax": 300, "aMax": 2000, "jMax": 15000, "note": "One servo opens all three fingers." },
+        { "ch": 9, "name": "throttle_shoulder", "servo": "DS3218", "gear": 1.0, "joints": { "throttle_shoulder": 1 },
+          "margin": 5, "vMax": 120, "aMax": 500, "jMax": 3000 },
+        { "ch": 10, "name": "throttle_elbow", "servo": "MG996R", "gear": 1.0, "joints": { "throttle_elbow": 1 },
+          "margin": 4, "vMax": 150, "aMax": 700, "jMax": 5000 },
+        { "ch": 11, "name": "throttle_wrist", "servo": "MG90S", "gear": 1.0, "joints": { "throttle_wrist": 1 },
+          "margin": 4, "vMax": 180, "aMax": 900, "jMax": 6000 },
+        { "ch": 12, "name": "throttle_claw", "servo": "SG90", "gear": 1.0,
+          "joints": { "throttle_claw_a": 1, "throttle_claw_b": 1 }, "margin": 3, "vMax": 300, "aMax": 2000, "jMax": 15000 },
+        { "ch": 13, "name": "poker_shoulder", "servo": "MG996R", "gear": 1.0, "joints": { "poker_shoulder": 1 },
+          "margin": 5, "vMax": 120, "aMax": 500, "jMax": 3000 },
+        { "ch": 14, "name": "poker_wrist", "servo": "MG90S", "gear": 1.0, "joints": { "poker_wrist": 1 },
+          "margin": 4, "vMax": 180, "aMax": 900, "jMax": 6000 },
+        { "ch": 15, "name": "poker_claw", "servo": "SG90", "gear": 1.0,
+          "joints": { "poker_claw_upper": 1, "poker_claw_lower": 1 }, "margin": 3, "vMax": 300, "aMax": 2000, "jMax": 15000 },
+        { "ch": 16, "name": "middle_ring", "servo": "SERVO_35KG_270", "gear": 3.8, "joints": { "torso_middle": 1 },
+          "margin": 3, "vMax": 40, "aMax": 120, "jMax": 800, "note": "Same gear sector design as the lower ring." }
+      ]
+    }
+  }
+}

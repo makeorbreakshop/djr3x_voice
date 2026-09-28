@@ -18,6 +18,17 @@ class PlayMusicParams(BaseModel):
         description="The song or music track to play. Can be a specific song name or a general genre."
     )
 
+class SearchMusicParams(BaseModel):
+    """Parameters for finding and playing music from the streaming catalog."""
+    query: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "A song, artist, genre, mood, era, or natural-language description "
+            "of the music to find and play."
+        ),
+    )
+
 class StopMusicParams(BaseModel):
     """Parameters for stopping music."""
     pass  # No parameters needed
@@ -58,9 +69,27 @@ def create_play_music_function() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "play_music",
-            "description": "Play a specific song or music genre",
+            "description": (
+                "Play a song from the loaded library. If the requested song, artist, "
+                "genre, mood, era, or description is not loaded, search the configured "
+                "streaming catalog and play the best result."
+            ),
             "parameters": PlayMusicParams.schema()
         }
+    }
+
+def create_search_music_function() -> Dict[str, Any]:
+    """Create the explicit catalog-search-and-play tool definition."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "search_music",
+            "description": (
+                "Search the configured music catalog for a song, artist, genre, mood, "
+                "era, or description and immediately play the best matching result."
+            ),
+            "parameters": SearchMusicParams.schema(),
+        },
     }
 
 def create_stop_music_function() -> Dict[str, Any]:
@@ -99,6 +128,7 @@ def create_analyze_scene_function() -> Dict[str, Any]:
 # Collection of all available functions
 AVAILABLE_FUNCTIONS = [
     create_play_music_function(),
+    create_search_music_function(),
     create_stop_music_function(),
     create_set_eye_color_function(),
     create_analyze_scene_function()
@@ -112,7 +142,8 @@ def function_name_to_model_map() -> Dict[str, Any]:
     """Get a mapping of function names to their parameter models for validation."""
     return {
         "play_music": PlayMusicParams,
+        "search_music": SearchMusicParams,
         "stop_music": StopMusicParams,
         "set_eye_color": SetEyeColorParams,
         "analyze_scene": AnalyzeSceneParams
-    } 
+    }

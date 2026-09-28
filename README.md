@@ -225,10 +225,19 @@ ENABLE_SPOTIFY=false
 SPOTIFY_CLIENT_ID=
 SPOTIFY_CLIENT_SECRET=
 SPOTIFY_REDIRECT_URI=
+ENABLE_SEMANTIC_MUSIC_SEARCH=true # CLAP search over the local audio library
+SEMANTIC_MUSIC_DEVICE=cpu         # steadier tail latency than MPS on the Mac Studio
+SEMANTIC_MUSIC_NEGATIVE_WEIGHT=0.5
 
 # --- Personality ---
 DJ_R3X_PERSONA_FILE=dj_r3x-persona.txt
 ```
+
+On the first start, semantic music search downloads the CLAP model and indexes three
+ten-second excerpts from every local track. The resulting vectors are cached under
+`~/.cache/dj-r3x/`; later starts load the cache. Named requests still use title/artist matching,
+while requests such as `play music fun and upbeat` use the audio index. Voice requests are
+first reduced by Jev, so unrelated conversation in a long transcript is not sent to CLAP.
 
 Note: `ARDUINO_SERIAL_PORT` in `.env` **overrides** the `serial_port` passed to
 `EyeLightControllerService` in code (`eye_light_controller_service.py:258-266`). That is by
@@ -540,4 +549,4 @@ See "Running the tests" above. 274 passing, 55 explicitly skipped.
 
 ## License
 
-This project is for personal use and entertainment purposes. Star Wars and DJ R3X are trademarks of Disney/Lucasfilm. 
+This project is for personal use and entertainment purposes. Star Wars and DJ R3X are trademarks of Disney/Lucasfilm.

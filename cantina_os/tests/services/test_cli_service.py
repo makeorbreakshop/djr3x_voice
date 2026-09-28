@@ -234,18 +234,12 @@ async def test_handle_response(cli_service, capsys):
     out, _err = capsys.readouterr()
     assert "Success" in out
 
-    # Test error response. NOTE: _handle_response's FORMATTER_AVAILABLE branch
-    # (cli_service.py:456-462) hardcodes `await self._output_queue.put((formatted_message, False))`
-    # regardless of the real `is_error` value, so formatted error responses are written to
-    # stdout, not stderr -- only the "Error: " text prefix (from cli_formatter) distinguishes
-    # them. This looks like a genuine production bug (error responses never reach stderr), left
-    # unfixed here since it's out of scope for this batch; asserting stdout matches actual
-    # behavior.
+    # Formatted errors belong on stderr, while successful responses belong on stdout.
     error_payload = CliResponsePayload(message="Error occurred", is_error=True)
     await cli_service._handle_response(error_payload.model_dump())
     await asyncio.sleep(0.05)
-    out, _err = capsys.readouterr()
-    assert "Error occurred" in out
+    _out, err = capsys.readouterr()
+    assert "Error occurred" in err
 
     # Test dict payload
     dict_payload = {"message": "Dict message", "is_error": False}
@@ -253,6 +247,25 @@ async def test_handle_response(cli_service, capsys):
     await asyncio.sleep(0.05)
     out, _err = capsys.readouterr()
     assert "Dict message" in out
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_renders_only_the_complete_response_and_one_prompt(event_bus):
+    service = CLIService(event_bus)
+    service._current_conversation_id = "turn-1"
+    service._async_write_output = AsyncMock()
+
+    await service._handle_llm_response(
+        {"conversation_id": "turn-1", "text": "Hel", "is_complete": False}
+    )
+    await service._handle_llm_response(
+        {"conversation_id": "turn-1", "text": "Hello there", "is_complete": True}
+    )
+
+    assert service._async_write_output.await_args_list == [
+        call('🤖 R3X: "Hello there"'),
+        call("", show_prompt=True),
+    ]
 
 @pytest.mark.skip(
     reason=(
@@ -296,27 +309,22 @@ async def test_error_handling(cli_service, event_bus):
 
 @pytest.mark.asyncio
 async def test_shutdown_handling(cli_service, event_bus):
-    """Test shutdown command handling.
-
-    CLIService._process_command's quit/exit branch (cantina_os/services/cli_service.py:365-368)
-    now emits EventTopics.SYSTEM_SHUTDOWN with an empty payload directly via
-    `self._event_bus.emit(...)` -- not EventTopics.SYSTEM_SHUTDOWN_REQUESTED with a reason.
-    """
+    """Test quit and exit request the shutdown topic consumed by the app."""
     event_bus.emit.reset_mock()
 
     # Test quit command
     await cli_service._process_command("quit")
     assert event_bus.emit.call_args_list[0] == call(
-        EventTopics.SYSTEM_SHUTDOWN,
-        {}
+        EventTopics.SYSTEM_SHUTDOWN_REQUESTED.value,
+        {"reason": "CLI quit command", "restart": False}
     )
 
     # Test exit command
     event_bus.emit.reset_mock()
     await cli_service._process_command("exit")
     assert event_bus.emit.call_args_list[0] == call(
-        EventTopics.SYSTEM_SHUTDOWN,
-        {}
+        EventTopics.SYSTEM_SHUTDOWN_REQUESTED.value,
+        {"reason": "CLI quit command", "restart": False}
     )
 
 @pytest.mark.skip(
@@ -349,4 +357,4 @@ async def test_input_loop_error_handling(event_bus, mock_io):
         for call in event_bus.emit.mock_calls
     )
 
-    await service.stop() 
+    await service.stop()

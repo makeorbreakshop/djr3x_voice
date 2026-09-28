@@ -9,7 +9,7 @@ allowing the system to seamlessly switch between different music sources
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import vlc
 
 try:
@@ -72,6 +72,10 @@ class MusicBackend(ABC):
     async def load_library(self) -> Dict[str, MusicTrack]:
         """Load and return the music library for this backend."""
         pass
+
+    async def search_tracks(self, query: str, limit: int = 5) -> List[MusicTrack]:
+        """Search a remote catalog when the backend supports it."""
+        return []
 
     @property
     def current_track(self) -> Optional[MusicTrack]:
@@ -364,6 +368,54 @@ class SpotifyMusicBackend(MusicBackend):
             self.logger.error(f"Error playing Spotify track: {e}")
             self.device_id = await self._discover_device(self.config.get("device_name"))
             return False
+
+    async def search_tracks(self, query: str, limit: int = 5) -> List[MusicTrack]:
+        """Search Spotify's track catalog and return directly playable results."""
+        cleaned_query = (query or "").strip()
+        if not cleaned_query or not self.sp:
+            return []
+
+        bounded_limit = max(1, min(int(limit), 10))
+        try:
+            response = await asyncio.to_thread(
+                self.sp.search,
+                q=cleaned_query,
+                type="track",
+                limit=bounded_limit,
+            )
+            items = (response or {}).get("tracks", {}).get("items", [])
+            results: List[MusicTrack] = []
+            for item in items:
+                track_id = item.get("id")
+                title = item.get("name")
+                uri = item.get("uri")
+                if not track_id or not title or not uri:
+                    continue
+
+                artists = item.get("artists") or []
+                artist = artists[0].get("name", "Unknown") if artists else "Unknown"
+                duration_ms = item.get("duration_ms") or 0
+                results.append(
+                    MusicTrack(
+                        name=f"{artist} - {title}",
+                        path=uri,
+                        duration=duration_ms / 1000.0 if duration_ms else None,
+                        track_id=track_id,
+                        title=title,
+                        artist=artist,
+                        album=(item.get("album") or {}).get("name", "Unknown"),
+                    )
+                )
+
+            self.logger.info(
+                "Spotify catalog search for %r returned %d track(s)",
+                cleaned_query,
+                len(results),
+            )
+            return results
+        except Exception as exc:
+            self.logger.warning("Spotify catalog search failed for %r: %s", cleaned_query, exc)
+            return []
 
     async def stop_playback(self) -> bool:
         """Stop Spotify playback."""
