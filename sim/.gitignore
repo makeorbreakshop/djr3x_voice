@@ -1,0 +1,9 @@
+# Built from the DJ R3X v2 printable kit, which is group-only (CC BY-NC) and must not be
+# redistributed. This repo is public: regenerate locally with sim/model/build.sh.
+web/public/model/
+web/public/sfx/
+
+web/node_modules/
+web/dist/
+web/public/draco/
+web/public/shows/

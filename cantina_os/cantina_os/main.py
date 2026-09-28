@@ -58,6 +58,7 @@ from .services.latency_tracker_service import LatencyTrackerService
 
 # Import the textual dashboard service
 from .services.textual_dashboard_service import TextualDashboardService
+from .services.sim_bridge_service import SimBridgeService  # 3D sim live link (sim/web)
 
 # Import the CLI formatter for enhanced output (using minimal version)
 from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
@@ -381,6 +382,7 @@ class CantinaOS:
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
+            "sim_bridge",  # Streams face/body events to the 3D sim (sim/web); fail-open
             "debug",  # Add debug service for LLM response logging
             "textual_dashboard",  # Add textual dashboard service for TUI monitoring (before CLI)
             "cli"
@@ -583,7 +585,8 @@ class CantinaOS:
             "debug": DebugService,
             "latency_tracker": LatencyTrackerService,
             "vision": VisionService,
-            "textual_dashboard": TextualDashboardService
+            "textual_dashboard": TextualDashboardService,
+            "sim_bridge": SimBridgeService,
         }
         
         # Early return if service doesn't exist in map
@@ -767,6 +770,11 @@ class CantinaOS:
                     self.logger.error("Cannot create mode_command_handler: yoda_mode_manager not found")
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
+                return service
+            elif service_name == "sim_bridge":
+                # Read-only mode query so a sim that connects late learns the current mode
+                service = service_class(self._event_bus, service_config,
+                                        self._services.get("yoda_mode_manager"))
                 return service
             elif service_name == "claude":
                 # ClaudeService needs a reference to MemoryService for person profiles

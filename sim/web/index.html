@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DJ R3X Sim</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="loading">Loading R3X&hellip;</div>
+    <div id="caption" hidden><div id="cap-heard"></div><div id="cap-said"></div></div>
+
+    <aside id="panel">
+      <header>
+        <h1>DJ R3X <span>sim</span></h1>
+        <div class="status">
+          <span id="st-live" class="pill live" title="Run CantinaOS (python -m cantina_os.main) to go live">OFFLINE</span>
+          <span id="st-mode" class="pill">IDLE</span>
+          <span id="st-fw" class="pill fw">IDLE</span>
+        </div>
+      </header>
+
+      <section>
+        <h2>Show</h2>
+        <div class="row">
+          <button id="btn-converse" class="primary" title="Listen, think, answer with a random R3X line">Demo conversation</button>
+          <button id="btn-line" title="Speak a random R3X clip">Say a line</button>
+        </div>
+        <div class="row">
+          <button id="btn-mic" title="Your mic drives R3X's mouth (analysed only, not played)">Talk as R3X (mic)</button>
+          <button id="btn-dj" title="Dance to a metronome">DJ mode</button>
+        </div>
+        <label class="inline">BPM <input id="bpm" type="range" min="80" max="150" value="118" /><output id="bpm-out">118</output></label>
+        <p class="hint">Drop any audio file on the droid to have him say it.</p>
+      </section>
+
+      <section>
+        <h2>CantinaOS events <small>host emulator</small></h2>
+        <div class="row wrap">
+          <button data-mode="IDLE">Mode IDLE</button>
+          <button data-mode="AMBIENT">Mode AMBIENT</button>
+          <button data-mode="INTERACTIVE">Mode INTERACTIVE</button>
+        </div>
+        <div class="row wrap">
+          <button data-ev="listen">Listening started</button>
+          <button data-ev="stop">Listening stopped</button>
+          <button data-ev="speak">Speech started</button>
+          <button data-ev="end">Speech ended</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Face LEDs <small>firmware frame buffer</small></h2>
+        <canvas id="ledview" width="300" height="96"></canvas>
+        <div class="row">
+          <input id="serial-in" placeholder="Raw serial: SI SE SL ST SS SF M128 R ?" autocomplete="off" spellcheck="false" />
+          <button id="serial-send">Send</button>
+        </div>
+        <ol id="serial-log"></ol>
+        <p id="warn-reset" class="warn" hidden></p>
+      </section>
+
+      <section>
+        <h2>Servos <small>what the controller is sent</small></h2>
+        <select id="profile" aria-label="Hardware profile"></select>
+        <label class="inline"><input id="plant" type="checkbox" checked /> Servo physics (deadband, lag, load, backlash)</label>
+        <p id="servo-summary" class="hint"></p>
+        <table class="servos">
+          <thead><tr><th>ch</th><th>name</th><th>servo</th><th>us</th><th>load</th></tr></thead>
+          <tbody id="servo-body"></tbody>
+        </table>
+        <p id="servo-warn" class="warn" hidden></p>
+        <div class="row"><button id="export-frames" title="Last 60 s of controller frames as JSONL, for replay on hardware">Export frame log</button></div>
+      </section>
+
+      <section>
+        <h2>Show script <small>Maestro script format</small></h2>
+        <textarea id="script-text" rows="6" spellcheck="false" placeholder="Paste a Pololu Maestro script (e.g. the R-3X Animation sample show)"></textarea>
+        <div class="row"><button id="script-run">Run script</button></div>
+        <p id="script-status" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>Joints <small>servo model</small></h2>
+        <label class="inline"><input id="manual" type="checkbox" /> Manual control</label>
+        <label class="inline"><input id="look" type="checkbox" checked /> Look at camera</label>
+        <label class="inline"><input id="axes" type="checkbox" /> Show pivots</label>
+        <div id="joints"></div>
+      </section>
+
+      <section>
+        <h2>Camera</h2>
+        <div class="row">
+          <button data-cam="full">Full</button>
+          <button data-cam="face">Face</button>
+          <button data-cam="arms">Arms</button>
+        </div>
+      </section>
+    </aside>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
