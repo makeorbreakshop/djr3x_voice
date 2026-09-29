@@ -240,8 +240,9 @@ class MouseInputService(BaseService):
             service_name = payload.get("service_name", "")
             service_status = payload.get("status", "")
             
-            # Track web bridge service status for dashboard awareness
-            if service_name == "web_bridge":
+            # Track dashboard status: "control_panel" is reported by SimBridgeService while
+            # the sim/web panel is connected ("web_bridge" was the retired Next.js bridge).
+            if service_name in ("web_bridge", "control_panel"):
                 self._web_bridge_active = service_status == "RUNNING"
                 
                 # Log dashboard connectivity changes

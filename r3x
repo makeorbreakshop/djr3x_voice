@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Start the whole DJ R3X: the CantinaOS backend plus the control panel (3D R3X, push-to-talk,
+# logs, controls) in the browser. Ctrl-C stops both.
+#
+#   ./r3x               backend + panel, opens the browser
+#   ./r3x --no-open     don't open a browser tab
+#   ./r3x --panel-only  just the panel (it runs its own demo until a backend connects)
+#
+# The terminal keeps the CantinaOS CLI, so typed commands still work here too.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$ROOT/venv/bin/python"
+WEB="$ROOT/sim/web"
+PANEL_PORT="${R3X_PANEL_PORT:-5391}"
+BRIDGE_PORT="${SIM_BRIDGE_PORT:-8765}"
+PANEL_URL="http://localhost:$PANEL_PORT/"
+OPEN=1
+BACKEND=1
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-open) OPEN=0 ;;
+    --panel-only) BACKEND=0 ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+say() { printf '\033[38;5;208m[r3x]\033[0m %s\n' "$*"; }
+die() { printf '\033[31m[r3x]\033[0m %s\n' "$*" >&2; exit 1; }
+port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------- preflight
+command -v npm >/dev/null || die "npm not found - install Node.js first"
+if [ "$BACKEND" = 1 ]; then
+  [ -x "$PY" ] || die "no virtualenv at $ROOT/venv - create it and pip install -r requirements.txt"
+  [ -f "$ROOT/.env" ] || die "no .env at $ROOT/.env (API keys)"
+  if port_busy "$BRIDGE_PORT"; then
+    die "port $BRIDGE_PORT is taken - is CantinaOS already running? (lsof -iTCP:$BRIDGE_PORT)"
+  fi
+fi
+if [ ! -d "$WEB/node_modules" ]; then
+  say "installing panel dependencies (first run)"
+  npm --prefix "$WEB" install --silent
+fi
+[ -f "$WEB/public/model/r3x.glb" ] || say "no 3D model yet - the panel works, but build R3X with sim/model/build.sh to see him"
+mkdir -p "$ROOT/logs"
+
+# ---------------------------------------------------------------- panel
+PANEL_PID=""
+cleanup() {
+  trap - EXIT INT TERM
+  if [ -n "$PANEL_PID" ]; then
+    pkill -P "$PANEL_PID" 2>/dev/null || true
+    kill "$PANEL_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if port_busy "$PANEL_PORT"; then
+  say "panel already running on $PANEL_URL - reusing it"
+else
+  npm --prefix "$WEB" run dev -- --port "$PANEL_PORT" --strictPort >"$ROOT/logs/panel.log" 2>&1 &
+  PANEL_PID=$!
+  for _ in $(seq 1 60); do
+    port_busy "$PANEL_PORT" && break
+    kill -0 "$PANEL_PID" 2>/dev/null || die "panel failed to start - see logs/panel.log"
+    sleep 0.25
+  done
+  port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
+fi
+say "panel: $PANEL_URL"
+[ "$OPEN" = 1 ] && open "$PANEL_URL"
+
+# ---------------------------------------------------------------- backend
+if [ "$BACKEND" = 0 ]; then
+  say "panel only - Ctrl-C to stop"
+  wait "$PANEL_PID"
+  exit 0
+fi
+
+say "starting CantinaOS (full log: logs/dj_r3x_*.log) - Ctrl-C stops everything"
+cd "$ROOT/cantina_os"
+set +e
+"$PY" -m cantina_os.main
+status=$?
+set -e
+say "CantinaOS exited ($status)"
+exit "$status"

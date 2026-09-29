@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -15,6 +16,7 @@ import { FaceLeds } from './leds';
 import { Activity, Performer } from './behavior';
 import { SpeechAudio } from './audio';
 import { LiveEvent, LiveLink } from './link';
+import { ControlPanel } from './panel';
 import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
 import { MaestroScript, MaestroScriptError } from './actuation/maestro';
 
@@ -89,7 +91,9 @@ composer.addPass(new OutputPass());
 function fitView() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const panel = w > 720 ? 364 : 0;
+  const panelEl = document.getElementById('panel');
+  const panel = w > 720 && panelEl ? panelEl.offsetWidth + 24 : 0;
+  document.documentElement.style.setProperty('--panel-space', `${panel}px`);
   camera.aspect = w / h;
   camera.setViewOffset(w, h, panel / 2, 0, w, h);
   camera.updateProjectionMatrix();
@@ -136,7 +140,9 @@ const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 // ------------------------------------------------------------------ load model
 async function load() {
   const draco = new DRACOLoader().setDecoderPath('/draco/');
-  const loader = new GLTFLoader().setDRACOLoader(draco);
+  // A model packed with KTX2 (Basis) textures needs the transcoder; harmless otherwise.
+  const ktx2 = new KTX2Loader().setTranscoderPath('/basis/').detectSupport(renderer);
+  const loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2);
   const [gltf, doc, clipList] = await Promise.all([
     loader.loadAsync('/model/r3x.glb'),
     fetch('/model/rig.json').then((r) => r.json() as Promise<RigDoc>),
@@ -311,8 +317,8 @@ function onLiveEvent(ev: LiveEvent) {
 
 const liveEl = document.getElementById('st-live')!;
 const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
-  onHello(mode) {
-    host.setMode(liveMode(mode));
+  onHello(hello) {
+    host.setMode(liveMode(hello.mode));
     setActivity(restingActivity());
   },
   onEvent: onLiveEvent,
@@ -325,6 +331,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
     }
   },
 });
+new ControlPanel(link);
 // ?offline keeps a tab on the built-in demo even while CantinaOS is running.
 if (!new URLSearchParams(location.search).has('offline')) link.start();
 

@@ -8,6 +8,11 @@ import os
 import sys
 import pytest
 from anthropic import Anthropic
+from pyee.asyncio import AsyncIOEventEmitter
+
+# Imported at collection time, not inside the tests: conftest's autouse fixture swaps
+# sys.modules['elevenlabs'] for a Mock during each test, which breaks this import chain.
+from cantina_os.services.claude_service.claude_service import ClaudeService, SessionMemory
 
 
 class TestClaudeAPIIntegration:
@@ -30,7 +35,7 @@ class TestClaudeAPIIntegration:
         """Test 1: API key authentication works"""
         try:
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=50,
                 messages=[
                     {"role": "user", "content": "Say 'Hello from Claude API' and nothing else"}
@@ -47,7 +52,7 @@ class TestClaudeAPIIntegration:
         chunks = []
         try:
             with client.messages.stream(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=100,
                 messages=[
                     {"role": "user", "content": "Count to 5"}
@@ -70,7 +75,7 @@ class TestClaudeAPIIntegration:
             # First turn
             messages.append({"role": "user", "content": "My favorite color is blue"})
             response1 = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=50,
                 messages=messages
             )
@@ -79,7 +84,7 @@ class TestClaudeAPIIntegration:
             # Second turn - ask about the previous context
             messages.append({"role": "user", "content": "What color did I just say?"})
             response2 = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=50,
                 messages=messages
             )
@@ -108,7 +113,7 @@ class TestClaudeAPIIntegration:
 
         try:
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=100,
                 tools=tools,
                 messages=[
@@ -127,7 +132,7 @@ class TestClaudeAPIIntegration:
         """Test 5: Response format matches expected structure"""
         try:
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-5",
                 max_tokens=50,
                 messages=[
                     {"role": "user", "content": "Say hello"}
@@ -158,11 +163,9 @@ class TestClaudeServiceWithAPI:
             pytest.skip("ANTHROPIC_API_KEY not set")
         return key
 
-    def test_claude_service_initialization(self, api_key):
+    async def test_claude_service_initialization(self, api_key):
         """Test that ClaudeService initializes with real API key"""
         try:
-            from cantina_os.services.claude_service.claude_service import ClaudeService
-            from pyee.asyncio import AsyncIOEventEmitter
 
             event_bus = AsyncIOEventEmitter()
             config = {
@@ -171,18 +174,16 @@ class TestClaudeServiceWithAPI:
             }
 
             service = ClaudeService(event_bus=event_bus, config=config)
-            service._initialize()
+            await service._initialize()
 
-            assert service.client is not None, "Client should be initialized"
+            assert service._client is not None, "Client should be initialized"
             print(f"✓ ClaudeService initialization works")
         except Exception as e:
             pytest.fail(f"ClaudeService initialization failed: {str(e)}")
 
-    def test_claude_service_api_call(self, api_key):
+    async def test_claude_service_api_call(self, api_key):
         """Test that ClaudeService can make real API calls"""
         try:
-            from cantina_os.services.claude_service.claude_service import ClaudeService, SessionMemory
-            from pyee.asyncio import AsyncIOEventEmitter
 
             event_bus = AsyncIOEventEmitter()
             config = {
@@ -191,15 +192,15 @@ class TestClaudeServiceWithAPI:
             }
 
             service = ClaudeService(event_bus=event_bus, config=config)
-            service._initialize()
+            await service._initialize()
             service.memory = SessionMemory()
 
             # Add a message
             service.memory.add_message("user", "Say hello")
 
             # Make an API call using the service's client
-            response = service.client.messages.create(
-                model="claude-3-5-haiku-20241022",
+            response = service._client.messages.create(
+                model="claude-haiku-4-5",
                 max_tokens=50,
                 system="You are a helpful assistant",
                 messages=service.memory.get_messages_for_api()

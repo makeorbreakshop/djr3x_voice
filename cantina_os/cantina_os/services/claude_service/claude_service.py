@@ -125,6 +125,22 @@ def _response_text(response: Any) -> str:
     )
 
 
+#: Model families that still accept a non-default ``temperature``. Everything newer
+#: (Sonnet 5/5.5, Opus 4.7+, Fable) returns 400 "`temperature` is deprecated for this model"
+#: on the direct API. OpenRouter silently drops the field instead, which is how every call
+#: site below survived the move to Sonnet 5.5 unnoticed. Matched on the Anthropic id and on
+#: OpenRouter's namespaced/dotted form alike.
+_TEMPERATURE_MODEL_PREFIXES = (
+    "claude-haiku-", "claude-sonnet-4", "claude-opus-4-5", "claude-opus-4-6", "claude-3",
+)
+
+
+def _temperature_kwargs(model: str, temperature: float) -> Dict[str, Any]:
+    """``{"temperature": t}`` when ``model`` accepts it, otherwise ``{}``."""
+    bare = model.split("/")[-1].replace(".", "-")
+    return {"temperature": temperature} if bare.startswith(_TEMPERATURE_MODEL_PREFIXES) else {}
+
+
 class ClaudeService(BaseService):
     """
     Service for natural language processing using Claude 3.5 Sonnet 4.5.
@@ -680,7 +696,7 @@ class ClaudeService(BaseService):
                 max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
-                temperature=self._config["TEMPERATURE"],
+                **_temperature_kwargs(self._config["MODEL"], self._config["TEMPERATURE"]),
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
             )
             if suppress_tools:
@@ -784,7 +800,7 @@ class ClaudeService(BaseService):
                 max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
-                temperature=self._config["TEMPERATURE"],
+                **_temperature_kwargs(self._config["MODEL"], self._config["TEMPERATURE"]),
                 tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
             )
             if suppress_tools:
@@ -1204,7 +1220,7 @@ class ClaudeService(BaseService):
                 max_tokens=150,  # Limit draft responses to be brief
                 system=self._config["SYSTEM_PROMPT"],
                 messages=messages,
-                temperature=self._config["TEMPERATURE"]
+                **_temperature_kwargs(self._config["MODEL"], self._config["TEMPERATURE"]),
             )
 
             return _response_text(response)
@@ -1226,7 +1242,7 @@ class ClaudeService(BaseService):
                 max_tokens=150,  # Limit draft responses to be brief
                 system=self._config["SYSTEM_PROMPT"],
                 messages=messages,
-                temperature=self._config["TEMPERATURE"]
+                **_temperature_kwargs(self._config["MODEL"], self._config["TEMPERATURE"]),
             ) as stream:
                 for text in stream.text_stream:
                     if text:
@@ -1550,7 +1566,7 @@ class ClaudeService(BaseService):
                 max_tokens=200,
                 system=verbal_feedback_persona,
                 messages=messages,
-                temperature=0.7
+                **_temperature_kwargs(self._config["MODEL"], 0.7),
             )
 
             verbal_response = _response_text(response) or "Action completed successfully."
@@ -1742,7 +1758,7 @@ Keep it energetic!
                 max_tokens=150,
                 system=persona,
                 messages=[{"role": "user", "content": user_prompt}],
-                temperature=0.8
+                **_temperature_kwargs(self._config["MODEL"], 0.8),
             )
 
             commentary_text = _response_text(response)
@@ -1824,7 +1840,7 @@ Keep it energetic!
                         "content": "hi"
                     }
                 ],
-                temperature=0.1,
+                **_temperature_kwargs(self._config["MODEL"], 0.1),
                 timeout=5  # Short timeout for warmup
             )
 
