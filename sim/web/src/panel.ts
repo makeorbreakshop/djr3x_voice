@@ -1,12 +1,18 @@
 /**
- * The control panel around the 3D droid: push-to-talk, typed turns, the conversation,
- * music / DJ / eye / mode controls, a CLI, service health, and the live log + event stream.
+ * The control panel around the 3D droid: operating mode, push-to-talk, typed turns, the
+ * conversation, the Drive panel (brain/autonomy/freeze, alive layers, emotes, outputs),
+ * music / DJ, an advanced console, service health, and the live log + event stream.
  *
- * Everything here goes through the LiveLink to SimBridgeService, which turns each action
- * into the same bus event the terminal, mouse or capture service would have emitted.
+ * Every action is a typed command to the r3x gateway and waits for its ack; state comes from
+ * the gateway's retained state. The SimBridge LiveLink is only read here, for CantinaOS's own
+ * log lines (the 3D view still follows it until the performer moves in, Phase 3).
  */
 
-import { Ack, Hello, LiveEvent, LiveLink, LogRecord, ServiceState } from './link';
+import { GatewayClient, gatewayUrl } from './gateway';
+import type { Ack, Command, Event as R3xEvent, EventMeta, Hello, RetainedState } from './gateway';
+import type { Engagement } from './generated/Engagement';
+import type { OperatingMode } from './generated/OperatingMode';
+import { accessToken, LiveLink, LogRecord } from './link';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -15,12 +21,13 @@ const clockTime = (epochS: number) =>
 
 const EYE_PATTERNS = ['idle', 'engaged', 'listening', 'thinking', 'speaking', 'happy', 'sad', 'angry', 'surprised', 'flash', 'startup', 'error'];
 /** Too chatty for the event feed by default. */
-const NOISY_TOPICS = new Set(['speech.synthesis.amplitude', 'llm.response.chunk']);
+const NOISY_TOPICS = new Set(['conversation.reply_delta', 'conversation.transcript']);
 const MAX_LOG_ROWS = 1500;
-/** BaseEventPayload bookkeeping: present on every event, rarely what you are looking for. */
-const PAYLOAD_NOISE = new Set(['timestamp', 'event_id', 'schema_version']);
-const compact = (d: Record<string, unknown>) =>
-  Object.fromEntries(Object.entries(d).filter(([k, v]) => !PAYLOAD_NOISE.has(k) && v !== null && v !== undefined));
+const topicOf = (e: R3xEvent) => `${e.domain}.${e.type}`;
+const ok = (a: Ack) => a.status === 'accepted';
+const reason = (a: Ack) => (a.status === 'rejected' ? a.reason : '');
+/** tracing's level names for the panel's DEBUG/INFO/WARNING/ERROR select. */
+const TRACING_LEVEL: Record<string, string> = { DEBUG: 'debug', INFO: 'info', WARNING: 'warn', ERROR: 'error' };
 
 type Phase = 'offline' | 'idle' | 'engaging' | 'listening' | 'thinking' | 'speaking';
 
@@ -40,8 +47,10 @@ interface Turn {
 }
 
 export class ControlPanel {
+  readonly gw: GatewayClient;
   private connected = false;
   private mode = 'IDLE';
+  private emotes: string[] = [];
   private phase: Phase = 'offline';
   private listening = false;
   private pttDownAt = 0;
@@ -53,7 +62,6 @@ export class ControlPanel {
   private lastTurn: Turn | null = null;
 
   private library: string[] = [];
-  private services: Record<string, ServiceState> = {};
   private logPaused = false;
   private logKinds = new Set(['log', 'event']);
   private errCount = 0;
@@ -61,19 +69,38 @@ export class ControlPanel {
   private cliHistory: string[] = [];
   private cliIndex = -1;
 
-  constructor(private readonly link: LiveLink) {
-    link.subscribe({
+  constructor(link: LiveLink) {
+    this.gw = new GatewayClient(gatewayUrl(accessToken()));
+    this.gw.subscribe({
       onHello: (h) => this.onHello(h),
-      onEvent: (e) => this.onEvent(e),
+      onState: (s) => this.render(s),
+      onEvent: (e, m) => this.onEvent(e, m),
       onStatus: (on) => this.onStatus(on),
+      onLog: (l, wall) => this.addLog({ t: wall, level: l.level, name: l.target, msg: l.message }),
+    });
+    // CantinaOS's own log lines (SimBridge); read-only.
+    link.subscribe({
+      onHello: (h) => {
+        for (const r of h.logs ?? []) this.addLog(r, true);
+        this.scrollLog();
+      },
       onLog: (r) => this.addLog(r),
     });
     this.bindTabs();
     this.bindTalk();
     this.bindControls();
+    this.bindDrive();
     this.bindLogs();
     this.renderEyes();
     this.setPhase('offline');
+    if (!new URLSearchParams(location.search).has('offline')) this.gw.start();
+  }
+
+  /** Send a typed command; a rejection is shown where the operator is looking. */
+  private async cmd(c: Command): Promise<Ack> {
+    const a = await this.gw.send(c);
+    if (!ok(a)) this.toast(reason(a));
+    return a;
   }
 
   // ------------------------------------------------------------------ link
@@ -83,117 +110,71 @@ export class ControlPanel {
     document.body.classList.toggle('live', on);
     $('offline-note').hidden = on;
     for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !on;
+    const pill = $('st-gw');
+    pill.textContent = on ? 'R3X' : 'NO R3X';
+    pill.classList.toggle('on', on);
     if (!on) {
       this.listening = false;
       this.pttToggled = false;
       this.setPhase('offline');
-      this.addLog({ t: Date.now() / 1000, level: 'WARNING', name: 'panel', msg: 'Lost connection to CantinaOS - retrying every 2 s' });
-    } else {
-      this.setPhase('idle');
+      this.addLog({ t: Date.now() / 1000, level: 'WARNING', name: 'panel', msg: 'Lost connection to the r3x gateway - retrying every 2 s' });
     }
   }
 
   private onHello(h: Hello) {
-    this.setMode(h.mode ?? 'IDLE');
-    this.listening = Boolean(h.listening);
-    if (h.services) this.services = { ...h.services };
-    this.renderServices();
-    if (h.music) {
-      this.library = h.music.tracks ?? [];
-      this.renderLibrary();
-      this.setNowPlaying(h.music.playing ? h.music.current : null);
-    }
-    this.setDj(Boolean(h.dj_active));
-    if (h.log_level) ($('log-level') as HTMLSelectElement).value = h.log_level;
-    // Replay history so a refresh keeps the recent past.
-    $('log').innerHTML = '';
-    const history: { t: number; row: () => void }[] = [];
-    for (const r of h.logs ?? []) history.push({ t: r.t, row: () => this.addLog(r, true) });
-    for (const e of h.events ?? []) history.push({ t: e.wall ?? 0, row: () => this.addEventRow(e, true) });
-    history.sort((a, b) => a.t - b.t).forEach((x) => x.row());
-    this.scrollLog();
-    for (const e of h.events ?? []) this.trackConversation(e, true);
-    this.setPhase(this.listening ? 'listening' : 'idle');
+    this.emotes = h.profile?.emotes ?? [];
+    this.render(h.state);
   }
 
-  private onEvent(e: LiveEvent) {
-    const d = e.data;
-    switch (e.topic) {
-      case 'system.mode.change':
-        this.setMode(String(d.new_mode ?? this.mode));
-        break;
-      case 'voice.listening.started':
-        this.listening = true;
-        this.setPhase('listening');
-        break;
-      case 'voice.listening.stopped':
-        this.listening = false;
-        this.pttToggled = false;
-        this.setPhase('thinking');
-        break;
-      case 'mouse.recording.stopped':
-        this.setPhase('thinking');
-        break;
-      case 'llm.response':
-        // A turn that ends without speech (TTS off or failed, an action with no reply)
-        // must not leave the panel stuck on "thinking".
-        if (d.is_complete) {
-          clearTimeout(this.thinkingTimer);
-          this.thinkingTimer = window.setTimeout(() => {
-            if (this.phase === 'thinking') this.setPhase('idle');
-          }, 6000);
-        }
-        break;
-      case 'speech.generation.started':
-      case 'speech.synthesis.started':
-        this.setPhase('speaking');
-        break;
-      case 'speech.generation.complete':
-      case 'speech.synthesis.ended':
-        if (this.phase === 'speaking') this.setPhase('idle');
-        break;
-      case 'music.playback.started': {
-        const t = d.track as Record<string, unknown> | string | undefined;
-        this.setNowPlaying((typeof t === 'object' && t ? String(t.name ?? t.title ?? '') : String(t ?? '')) || 'Unknown track');
-        break;
-      }
-      case 'music.playback.stopped':
-        this.setNowPlaying(null);
-        break;
-      case 'music.library.updated': {
-        const tracks = d.tracks;
-        if (tracks && typeof tracks === 'object') {
-          this.library = (Array.isArray(tracks) ? tracks.map(String) : Object.keys(tracks)).sort();
-          this.renderLibrary();
-        }
-        break;
-      }
-      case 'dj.mode.changed':
-        this.setDj(Boolean(d.is_active));
-        break;
-      case 'cli.response':
-        this.addCliOut(String(d.message ?? ''), Boolean(d.is_error));
-        break;
-      case 'service_status':
-      case 'service.status.update': {
-        const name = String(d.service_name ?? d.service ?? '');
-        if (name) {
-          this.services[name] = { status: String(d.status ?? '').split('.').pop()!, message: String(d.message ?? ''), t: Date.now() / 1000 };
-          this.renderServices();
-        }
-        break;
-      }
+  /** Everything the panel shows about state comes from here. */
+  private render(s: RetainedState) {
+    this.setMode(s.engagement.engagement);
+    this.setStage(s);
+    const listening = s.conversation.phase === 'listening';
+    if (listening !== this.listening) {
+      this.listening = listening;
+      if (!listening) this.pttToggled = false;
     }
-    this.trackConversation(e, false);
-    if (!NOISY_TOPICS.has(e.topic)) this.addEventRow(e);
+    if (this.phase !== 'engaging' || listening) this.setPhase(s.conversation.phase);
+    if (s.music.library.join('\n') !== this.library.join('\n')) {
+      this.library = s.music.library;
+      this.renderLibrary();
+    }
+    this.setNowPlaying(s.music.playing ? s.music.track?.title || 'Unknown track' : null);
+    this.setDj(s.dj.active);
+    this.renderServices(s);
+    this.renderDrive(s);
+  }
+
+  private onEvent(e: R3xEvent, m: EventMeta) {
+    if (e.domain === 'conversation' && e.type === 'reply') {
+      // A turn that ends without speech (TTS off or failed) must not stay on "thinking".
+      clearTimeout(this.thinkingTimer);
+      this.thinkingTimer = window.setTimeout(() => {
+        if (this.phase === 'thinking') this.setPhase('idle');
+      }, 6000);
+    }
+    if (e.domain === 'ops' && e.type === 'console') this.addCliOut(e.message, e.is_error);
+    this.trackConversation(e, m);
+    if (!NOISY_TOPICS.has(topicOf(e))) this.addEventRow(e, m);
   }
 
   // ------------------------------------------------------------------ state
 
-  private setMode(m: string) {
+  /** Engagement (STARTUP/IDLE/AMBIENT/INTERACTIVE). */
+  private setMode(m: Engagement) {
     this.mode = m.toUpperCase();
-    document.querySelectorAll<HTMLButtonElement>('[data-mode-btn]').forEach((b) =>
-      b.classList.toggle('on', b.dataset.modeBtn === this.mode));
+    document.querySelectorAll<HTMLButtonElement>('[data-engage]').forEach((b) =>
+      b.classList.toggle('on', b.dataset.engage === m));
+  }
+
+  /** Operating mode (Show/Bench/Studio). */
+  private setStage(s: RetainedState) {
+    document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
+      b.classList.toggle('on', b.dataset.stageMode === s.stage.mode));
+    const brainOff = !s.stage.brain;
+    $('brain-off').hidden = !brainOff || !this.connected;
+    for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
   }
 
   private setPhase(p: Phase) {
@@ -296,7 +277,7 @@ export class ControlPanel {
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
-      this.flash(await this.link.send({ action: 'say', text }));
+      this.flash(await this.gw.send({ class: 'intent', type: 'say', text }));
     };
 
     $('conv-clear').onclick = () => {
@@ -341,9 +322,9 @@ export class ControlPanel {
     if (this.pttBusy) return;
     this.pttBusy = true;
     if (!this.listening) this.setPhase('engaging');
-    const ack = await this.link.send({ action: 'ptt', state: 'start' });
+    const ack = await this.gw.send({ class: 'intent', type: 'ptt_start' });
     this.pttBusy = false;
-    if (!ack.ok && ack.message !== 'released before the mic started') {
+    if (!ok(ack) && reason(ack) !== 'released before the mic started') {
       this.pttToggled = false;
       this.flash(ack);
       if (!this.listening) this.setPhase('idle');
@@ -352,8 +333,8 @@ export class ControlPanel {
 
   private async pttStop() {
     this.pttToggled = false;
-    const ack = await this.link.send({ action: 'ptt', state: 'stop' });
-    if (!ack.ok) this.flash(ack);
+    const ack = await this.gw.send({ class: 'intent', type: 'ptt_stop' });
+    if (!ok(ack)) this.flash(ack);
     if (!this.listening && this.phase === 'engaging') this.setPhase('idle');
   }
 
@@ -361,11 +342,11 @@ export class ControlPanel {
   private thinkingTimer?: number;
   private flash(a: Ack) {
     const el = $('ptt-msg');
-    if (a.ok) {
+    if (ok(a)) {
       el.hidden = true;
       return;
     }
-    el.textContent = a.message;
+    el.textContent = reason(a);
     el.hidden = false;
     clearTimeout(this.flashTimer);
     this.flashTimer = window.setTimeout(() => (el.hidden = true), 6000);
@@ -402,74 +383,62 @@ export class ControlPanel {
     return turn.rex;
   }
 
-  private trackConversation(e: LiveEvent, replay: boolean) {
-    const d = e.data;
-    const id = typeof d.conversation_id === 'string' ? d.conversation_id : null;
-    const at = e.wall ?? Date.now() / 1000;
+  private trackConversation(e: R3xEvent, m: EventMeta) {
+    if (e.domain !== 'conversation') return;
+    const id = m.conversationId;
+    const at = m.wall;
+    const known = () => (id && this.turns.get(id)) || this.lastTurn;
     let turn: Turn | null = null;
 
-    switch (e.topic) {
-      case 'voice.listening.started':
+    switch (e.type) {
+      case 'listening_started':
         if (!id) return;
         turn = this.turnFor(id, at);
-        turn.you.textContent = d.source === 'panel' ? '' : 'listening…';
+        turn.you.textContent = 'listening…';
         break;
-      case 'transcription.interim':
-      case 'transcription.final': {
-        turn = (id && this.turns.get(id)) || this.lastTurn;
-        if (turn && typeof d.text === 'string' && d.text && turn.you.classList.contains('pending')) turn.you.textContent = d.text;
+      case 'transcript':
+        turn = known();
+        if (turn && e.text && turn.you.classList.contains('pending')) turn.you.textContent = e.text;
         break;
-      }
-      case 'voice.listening.stopped':
+      case 'listening_stopped':
         if (!id) return;
         turn = this.turnFor(id, at);
         turn.stoppedAt = at;
         turn.you.classList.remove('pending');
-        turn.you.textContent = typeof d.transcript === 'string' && d.transcript ? d.transcript : '(nothing heard)';
-        if (d.source === 'panel') turn.you.classList.add('typed');
+        turn.you.textContent = e.transcript || '(nothing heard)';
         break;
-      case 'intent.detected':
-        turn = (id && this.turns.get(id)) || this.lastTurn;
-        if (turn && d.intent_name) turn.actions.push(String(d.intent_name));
+      case 'intent_detected':
+        turn = known();
+        if (turn) turn.actions.push(e.tool);
         break;
-      case 'llm.response': {
-        turn = (id && this.turns.get(id)) || this.lastTurn;
+      case 'reply_delta': {
+        turn = known();
         if (!turn) return;
-        const text = typeof d.text === 'string' ? d.text : '';
-        const tools = Array.isArray(d.tool_calls) ? d.tool_calls : [];
-        for (const t of tools) {
-          const call = (t ?? {}) as Record<string, unknown>;
-          const fn = call.function as Record<string, unknown> | undefined;
-          const name = typeof call.name === 'string' ? call.name : typeof fn?.name === 'string' ? fn.name : null;
-          if (name) turn.actions.push(name);
-        }
         turn.firstReplyAt ??= at;
-        if (!d.is_complete) {
-          const bubble = this.rexBubble(turn, turn.finalized);
-          turn.finalized = false;
-          turn.streamed += text;
-          bubble.textContent = turn.streamed;
-        } else if (text) {
-          const bubble = this.rexBubble(turn, turn.finalized);
-          bubble.textContent = text;
-          turn.streamed = '';
-          turn.finalized = true;
-        }
+        const bubble = this.rexBubble(turn, turn.finalized);
+        turn.finalized = false;
+        turn.streamed += e.text;
+        bubble.textContent = turn.streamed;
         break;
       }
-      case 'speech.generation.started':
-      case 'speech.synthesis.started':
-        turn = (id && this.turns.get(id)) || this.lastTurn;
+      case 'reply':
+        turn = known();
+        if (!turn || !e.text) return;
+        turn.firstReplyAt ??= at;
+        this.rexBubble(turn, turn.finalized).textContent = e.text;
+        turn.streamed = '';
+        turn.finalized = true;
+        break;
+      case 'speech_started':
+        turn = known();
         if (turn) turn.speechAt ??= at;
         break;
       default:
         return;
     }
     if (turn) this.renderMeta(turn);
-    if (!replay) {
-      const conv = $('conv');
-      conv.scrollTop = conv.scrollHeight;
-    }
+    const conv = $('conv');
+    conv.scrollTop = conv.scrollHeight;
   }
 
   private renderMeta(t: Turn) {
@@ -484,14 +453,23 @@ export class ControlPanel {
 
   private bindControls() {
     document.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-cli]');
+      const el = e.target as HTMLElement;
+      const b = el.closest<HTMLButtonElement>('[data-cli],[data-engage],[data-stage-mode],[data-music],[data-dj],[data-play]');
       if (!b) return;
-      void this.runCli(b.dataset.cli!);
+      const d = b.dataset;
+      if (d.cli) void this.runCli(d.cli);
+      else if (d.engage) void this.cmd({ class: 'stage', type: 'set_engagement', engagement: d.engage as Engagement });
+      else if (d.stageMode) void this.cmd({ class: 'stage', type: 'set_mode', mode: d.stageMode as OperatingMode });
+      else if (d.music === 'play') void this.cmd({ class: 'intent', type: 'music', action: 'play' });
+      else if (d.music === 'stop') void this.cmd({ class: 'intent', type: 'music', action: 'stop' });
+      else if (d.music === 'next') void this.cmd({ class: 'intent', type: 'music', action: 'next' });
+      else if (d.play) void this.cmd({ class: 'intent', type: 'music', action: 'play', query: d.play });
+      else if (d.dj) void this.cmd({ class: 'intent', type: 'dj', active: d.dj === 'start' });
     });
     $<HTMLFormElement>('music-form').onsubmit = (e) => {
       e.preventDefault();
       const q = $<HTMLInputElement>('music-q').value.trim();
-      void this.runCli(q ? `play music ${q}` : 'play music');
+      void this.cmd({ class: 'intent', type: 'music', action: 'play', ...(q ? { query: q } : {}) });
     };
     $<HTMLInputElement>('music-q').oninput = () => this.renderLibrary();
 
@@ -517,10 +495,62 @@ export class ControlPanel {
     };
   }
 
+  /** The legacy console (CantinaOS commands with no typed equivalent). */
   private async runCli(line: string) {
     this.addCliOut(`> ${line}`, false, true);
-    const ack = await this.link.send({ action: 'cli', text: line });
-    if (!ack.ok) this.addCliOut(ack.message, true);
+    const ack = await this.gw.send({ class: 'intent', type: 'console', line });
+    if (!ok(ack)) this.addCliOut(reason(ack), true);
+  }
+
+  private toastTimer?: number;
+  private toast(msg: string) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.hidden = false;
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => (el.hidden = true), 5000);
+  }
+
+  // ------------------------------------------------------------------ drive
+
+  private bindDrive() {
+    $('drive').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      const s = this.gw.state?.stage;
+      if (!b || !s) return;
+      const d = b.dataset;
+      if (d.toggle === 'brain') void this.cmd({ class: 'stage', type: 'set_brain', enabled: !s.brain });
+      else if (d.toggle === 'autonomy') void this.cmd({ class: 'stage', type: 'set_autonomy', enabled: !s.autonomy });
+      else if (d.toggle === 'freeze') void this.cmd({ class: 'stage', type: 'freeze', on: !s.frozen });
+      else if (d.layer) void this.cmd({ class: 'stage', type: 'set_layer', layer: d.layer, enabled: !s.layers[d.layer] });
+      else if (d.output) void this.cmd({ class: 'stage', type: 'set_output', output: d.output, enabled: !s.outputs[d.output] });
+      else if (d.emote) void this.cmd({ class: 'perf', type: 'emote', slot: Number(d.emote) });
+      else if (d.outputs) {
+        const enabled = d.outputs === 'on';
+        for (const output of Object.keys(s.outputs)) {
+          if (s.outputs[output] !== enabled) void this.cmd({ class: 'stage', type: 'set_output', output, enabled });
+        }
+      }
+    });
+  }
+
+  private renderDrive(s: RetainedState) {
+    const st = s.stage;
+    const chip = (attr: string, value: string, label: string, on: boolean, title = '') =>
+      `<button class="chip${on ? ' on' : ''}" data-${attr}="${esc(value)}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+    $('drive-toggles').innerHTML = [
+      chip('toggle', 'brain', 'Brain (voice + LLM)', st.brain, 'Accept spoken and typed turns'),
+      chip('toggle', 'autonomy', 'Autonomy (idle + DJ)', st.autonomy, 'Idle policy and DJ autonomy'),
+      chip('toggle', 'freeze', st.frozen ? 'Frozen - release' : 'Freeze motion', st.frozen, 'Stop every run and refuse new ones'),
+    ].join('');
+    $('drive-layers').innerHTML = Object.keys(st.layers).map((l) => chip('layer', l, l.replace(/_/g, ' '), st.layers[l])).join('')
+      || '<span class="hint">No alive layers in the profile.</span>';
+    $('drive-emotes').innerHTML = this.emotes.map((cue, i) => `<button class="chip" data-emote="${i}" title="slot ${i + 1}">${esc(cue.replace(/_/g, ' '))}</button>`).join('')
+      || '<span class="hint">No emotes in the profile.</span>';
+    const outs = Object.keys(st.outputs);
+    $('drive-outputs').innerHTML = outs.map((o) => chip('output', o, o, st.outputs[o])).join('');
+    $('drive-out-summary').textContent = `${outs.filter((o) => st.outputs[o]).length} of ${outs.length} on`;
+    for (const b of Array.from($('drive-emotes').querySelectorAll('button'))) (b as HTMLButtonElement).disabled = st.frozen;
   }
 
   private renderEyes() {
@@ -531,7 +561,7 @@ export class ControlPanel {
     const q = $<HTMLInputElement>('music-q').value.trim().toLowerCase();
     const hits = q ? this.library.filter((t) => t.toLowerCase().includes(q)) : this.library;
     $('library').innerHTML = hits.slice(0, 200).map((t) =>
-      `<li><button class="track" data-cli="play music ${esc(t)}" title="Play ${esc(t)}">${esc(t)}</button></li>`).join('');
+      `<li><button class="track" data-play="${esc(t)}" title="Play ${esc(t)}">${esc(t)}</button></li>`).join('');
     $('library-count').textContent = this.library.length
       ? `${hits.length} of ${this.library.length} tracks${q && !hits.length ? ' - Play still tries a semantic search' : ''}`
       : 'Library not loaded yet.';
@@ -548,14 +578,15 @@ export class ControlPanel {
     out.scrollTop = out.scrollHeight;
   }
 
-  private renderServices() {
-    const names = Object.keys(this.services).sort();
-    const bad = names.filter((n) => /ERROR|DEGRADED/.test(this.services[n].status));
+  private renderServices(s: RetainedState) {
+    const svc = s.services.services;
+    const names = Object.keys(svc).sort();
+    const bad = names.filter((n) => svc[n].status === 'error' || svc[n].status === 'degraded');
     $('svc-summary').textContent = names.length ? `${names.length} reporting${bad.length ? `, ${bad.length} unhealthy` : ''}` : '';
     $('services').innerHTML = names.map((n) => {
-      const s = this.services[n];
-      const cls = /ERROR/.test(s.status) ? 'bad' : /DEGRADED|STOPP/.test(s.status) ? 'meh' : /RUNNING/.test(s.status) ? 'ok' : '';
-      return `<li title="${esc(s.message)}"><span class="dot ${cls}"></span>${esc(n)}<small>${esc(s.status)}</small></li>`;
+      const h = svc[n];
+      const cls = h.status === 'error' ? 'bad' : h.status === 'degraded' || h.status === 'stopped' ? 'meh' : h.status === 'running' ? 'ok' : '';
+      return `<li title="${esc(h.detail ?? '')}"><span class="dot ${cls}"></span>${esc(n.replace(/^cantina\//, ''))}<small>${esc(h.status)}</small></li>`;
     }).join('') || '<li class="empty">No status reports yet.</li>';
   }
 
@@ -574,8 +605,8 @@ export class ControlPanel {
     $<HTMLInputElement>('log-filter').oninput = () => this.applyLogFilter();
     $<HTMLSelectElement>('log-level').onchange = async (e) => {
       const level = (e.target as HTMLSelectElement).value;
-      const ack = await this.link.send({ action: 'log_level', level });
-      this.addLog({ t: Date.now() / 1000, level: ack.ok ? 'INFO' : 'WARNING', name: 'panel', msg: ack.message });
+      const ack = await this.gw.send({ class: 'telemetry', type: 'set_log_level', level: TRACING_LEVEL[level] ?? level });
+      this.addLog({ t: Date.now() / 1000, level: ok(ack) ? 'INFO' : 'WARNING', name: 'panel', msg: ok(ack) ? `r3x logs at ${level} and above` : reason(ack) });
     };
     $('log-pause').onclick = (e) => {
       this.logPaused = !this.logPaused;
@@ -603,13 +634,15 @@ export class ControlPanel {
     }
   }
 
-  private addEventRow(e: LiveEvent, replay = false) {
+  private addEventRow(e: R3xEvent, m: EventMeta) {
     const li = document.createElement('li');
     li.className = 'k-event';
-    const summary = JSON.stringify(compact(e.data));
-    li.innerHTML = `<time>${e.wall ? clockTime(e.wall) : ''}</time><b>EVT</b><i>${esc(e.topic)}</i><span>${esc(summary.length > 400 ? summary.slice(0, 400) + '…' : summary)}</span>`;
-    li.dataset.text = `${e.topic} ${summary}`.toLowerCase();
-    this.appendLogRow(li, replay);
+    const topic = topicOf(e);
+    const { domain: _d, type: _t, ...rest } = e as Record<string, unknown>;
+    const summary = JSON.stringify(rest);
+    li.innerHTML = `<time>${clockTime(m.wall)}</time><b>EVT</b><i>${esc(topic)}</i><span>${esc(summary.length > 400 ? summary.slice(0, 400) + '…' : summary)}</span>`;
+    li.dataset.text = `${topic} ${summary}`.toLowerCase();
+    this.appendLogRow(li, false);
   }
 
   private appendLogRow(li: HTMLLIElement, replay: boolean) {

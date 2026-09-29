@@ -80,10 +80,11 @@ async fn main() -> anyhow::Result<()> {
     let mut waiting: Option<String> = None;
     let mut next_id = 0u64;
     let mut input_done = false;
+    let mut hello_seen = false;
 
     loop {
         tokio::select! {
-            line = lines.recv(), if waiting.is_none() && !input_done => {
+            line = lines.recv(), if hello_seen && waiting.is_none() && !input_done => {
                 let Some(line) = line else { input_done = true; continue };
                 match parse(&line, &emotes) {
                     Parsed::Empty => {}
@@ -118,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 match env.body {
                     Body::Hello(h) => {
+                        hello_seen = true;
                         emotes = h.profile.map(|p| p.emotes).unwrap_or_default();
                         state = h.state;
                     }

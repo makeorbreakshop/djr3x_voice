@@ -16,14 +16,23 @@
       <header>
         <h1>DJ R3X <span>control</span></h1>
         <div class="status">
-          <span id="st-live" class="pill live" title="Start everything with ./r3x from the repo root">OFFLINE</span>
+          <span id="st-gw" class="pill live" title="r3x gateway (typed commands); start r3x-runtime --bridge">NO R3X</span>
+          <span id="st-live" class="pill live" title="CantinaOS SimBridge feed for the 3D view; start everything with ./r3x">OFFLINE</span>
           <span id="st-mode" class="pill">IDLE</span>
           <span id="st-fw" class="pill fw" title="Face firmware state">IDLE</span>
         </div>
       </header>
 
+      <div class="row seg stage-modes" role="radiogroup" aria-label="Operating mode">
+        <button data-stage-mode="show" title="Brain, alive layers, idle policy and every output on">Show</button>
+        <button data-stage-mode="bench" title="Everything off; enable one output at a time">Bench</button>
+        <button data-stage-mode="studio" title="Virtual preview; enable outputs to send to the robot">Studio</button>
+      </div>
+      <p id="toast" class="hint warn-line" hidden></p>
+
       <nav class="tabs" role="tablist">
         <button role="tab" data-tab="talk" aria-selected="true">Talk</button>
+        <button role="tab" data-tab="drive">Drive</button>
         <button role="tab" data-tab="control">Control</button>
         <button role="tab" data-tab="logs">Logs <span id="err-count" class="count" hidden></span></button>
         <button role="tab" data-tab="sim">Sim</button>
@@ -32,9 +41,10 @@
       <!-- ================================================================ Talk -->
       <div class="tab-body" data-body="talk">
         <p id="offline-note" class="note">
-          CantinaOS isn't connected, so this page is running its own demo.
+          The r3x gateway isn't connected, so this page is running its own demo.
           Start everything with <code>./r3x</code> from the repo root.
         </p>
+        <p id="brain-off" class="note" hidden>The brain is off in this mode. Turn it on in Drive, or switch to Show.</p>
 
         <button id="ptt" class="ptt" data-state="idle" disabled>
           <span class="ptt-dot"></span>
@@ -49,13 +59,35 @@
         </form>
 
         <div class="row seg" id="mode-buttons">
-          <button data-cli="idle" data-mode-btn="IDLE">Idle</button>
-          <button data-cli="ambient" data-mode-btn="AMBIENT">Ambient</button>
-          <button data-cli="engage" data-mode-btn="INTERACTIVE">Interactive</button>
+          <button data-engage="idle">Idle</button>
+          <button data-engage="ambient">Ambient</button>
+          <button data-engage="interactive">Interactive</button>
         </div>
 
         <h2>Conversation <button id="conv-clear" class="link">clear</button></h2>
         <ol id="conv" class="conv"><li class="empty">Nothing yet. Hold the button and talk.</li></ol>
+      </div>
+
+      <!-- ================================================================ Drive -->
+      <div class="tab-body" data-body="drive" id="drive" hidden>
+        <section class="first">
+          <h2>Autonomy</h2>
+          <div class="chips" id="drive-toggles"></div>
+        </section>
+        <section>
+          <h2>Alive layers <small>procedural motion</small></h2>
+          <div class="chips" id="drive-layers"></div>
+        </section>
+        <section>
+          <h2>Emotes</h2>
+          <div class="chips" id="drive-emotes"></div>
+        </section>
+        <section>
+          <h2>Outputs <small id="drive-out-summary"></small></h2>
+          <p class="hint">Gate drivers, not layers. Bench starts with every output off.</p>
+          <div class="chips" id="drive-outputs"></div>
+          <div class="row"><button data-outputs="on">All on</button><button data-outputs="off">All off</button></div>
+        </section>
       </div>
 
       <!-- ================================================================ Control -->
@@ -64,9 +96,9 @@
           <h2>Music</h2>
           <p class="now"><span id="now-state" class="dot"></span><span id="now-track">Nothing playing</span></p>
           <div class="row">
-            <button data-cli="play music" class="primary">Play random</button>
-            <button data-cli="stop music">Stop</button>
-            <button data-cli="next music">Next</button>
+            <button data-music="play" class="primary">Play random</button>
+            <button data-music="stop">Stop</button>
+            <button data-music="next">Next</button>
           </div>
           <form id="music-form" class="row">
             <input id="music-q" placeholder="Search the library, or describe a vibe&hellip;" autocomplete="off" />
@@ -79,13 +111,14 @@
         <section>
           <h2>DJ mode <span id="dj-state" class="pill">off</span></h2>
           <div class="row">
-            <button data-cli="dj start">Start</button>
-            <button data-cli="dj stop">Stop</button>
-            <button data-cli="dj next">Next track</button>
-            <button data-cli="dj queue">Queue</button>
+            <button data-dj="start">Start</button>
+            <button data-dj="stop">Stop</button>
+            <button data-music="next">Next track</button>
           </div>
         </section>
 
+        <details class="advanced">
+        <summary>Advanced: eye override, CantinaOS console</summary>
         <section>
           <h2>Eyes <small>LED pattern override</small></h2>
           <div class="chips" id="eye-patterns"></div>
@@ -102,10 +135,10 @@
             <button data-cli="help">Help</button>
             <button data-cli="debug latency">Latency report</button>
             <button data-cli="eye status">Eye status</button>
-            <button data-cli="reset">Reset</button>
           </div>
           <ol id="cli-out" class="cli-out"></ol>
         </section>
+        </details>
 
         <section>
           <h2>Services <small id="svc-summary"></small></h2>

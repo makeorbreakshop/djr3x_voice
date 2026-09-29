@@ -252,3 +252,12 @@ h2 .pill.on { color: #57d38c; border-color: #1f5a3a; }
 }
 
 .count[hidden] { display: none; }
+
+/* ---- r3x gateway: operating mode, drive, advanced */
+.stage-modes { margin: 0 0 6px; }
+.stage-modes button { flex: 1; }
+.warn-line { color: var(--warn); margin: 0 0 6px; }
+.warn-line[hidden] { display: none; }
+details.advanced { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+details.advanced > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details.advanced > section:first-of-type { border-top: 0; }
