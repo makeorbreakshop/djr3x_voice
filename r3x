@@ -80,8 +80,28 @@ if [ "$BACKEND" = 0 ]; then
   exit 0
 fi
 
-say "starting CantinaOS (full log: logs/dj_r3x_*.log) - Ctrl-C stops everything"
 cd "$ROOT/cantina_os"
+
+# Reinstall Python deps only when cantina_os/requirements.txt changes (checksum stamp). A
+# sentinel that never expired is how `anthropic` once sat months behind requirements.txt.
+REQ_STAMP=".requirements_installed"
+REQ_HASH="$(shasum -a 256 requirements.txt | awk '{print $1}')"
+if [ "$(cat "$REQ_STAMP" 2>/dev/null)" != "$REQ_HASH" ]; then
+  say "installing CantinaOS dependencies (requirements.txt changed)"
+  if "$ROOT/venv/bin/pip" install -q -r requirements.txt; then
+    echo "$REQ_HASH" > "$REQ_STAMP"
+  else
+    say "dependency install failed - continuing with the existing venv"  # unstamped: retried next run
+  fi
+fi
+
+# python-vlc loads libvlc from VLC.app; without these MusicControllerService can't find it.
+if [ -d /Applications/VLC.app ]; then
+  export VLC_PLUGIN_PATH="/Applications/VLC.app/Contents/MacOS/plugins"
+  export DYLD_LIBRARY_PATH="/Applications/VLC.app/Contents/MacOS/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+fi
+
+say "starting CantinaOS (full log: logs/dj_r3x_*.log) - Ctrl-C stops everything"
 set +e
 "$PY" -m cantina_os.main
 status=$?

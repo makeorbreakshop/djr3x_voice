@@ -16,24 +16,27 @@ DJ-R3X Voice Assistant is a Python application that creates an interactive Star 
 The runtime is the event-driven **CantinaOS** architecture: one event bus, 22 services,
 started in a fixed order by `cantina_os/cantina_os/main.py`.
 
-## 🎛️ Web Dashboard
+## 🎛️ Control Panel
 
-**Quick Start Dashboard:**
 ```bash
-./start-dashboard.sh    # Start everything
-./stop-dashboard.sh     # Stop everything
+./r3x                # CantinaOS + control panel; opens http://localhost:5391
+./r3x --no-open      # don't open a browser tab
+./r3x --panel-only   # just the panel (its offline demo runs until a backend connects)
 ```
 
-**Dashboard URL:** http://localhost:3000
+`./setup-dj-r3x-command.sh` installs a `dj-r3x` command that runs `./r3x` from anywhere.
+Ctrl-C stops everything; the terminal keeps the CantinaOS CLI.
 
-The dashboard provides real-time monitoring and control with:
-- **MONITOR**: Service status, audio spectrum, transcription feed
-- **VOICE**: Recording controls, processing pipeline status
-- **MUSIC**: Library browser, playback controls, queue management  
-- **DJ MODE**: Auto-transitions, commentary monitoring, crossfade control
-- **SYSTEM**: Service health, event logs, performance metrics
+The panel is `sim/web` - the 3D R3X - with four tabs:
+- **Talk**: push-to-talk (hold the button, click to toggle, or hold Space), typed turns, mode
+  buttons, and the conversation with per-turn reply/voice latency
+- **Control**: music library and playback, DJ mode, eye patterns, the CLI, service health
+- **Logs**: the backend's log records and bus events, live, filterable by level and text
+- **Sim**: the digital twin's own tools - show system, puppeteer, LEDs, servos, cameras
 
-See [DASHBOARD_SETUP.md](DASHBOARD_SETUP.md) for detailed setup instructions.
+It talks to `SimBridgeService` on `ws://127.0.0.1:8765`. Everything the panel does is
+emitted as the same bus event the mouse, the capture services or the terminal would emit.
+While a panel is connected, global mouse clicks no longer toggle the mic.
 
 ## Hardware Configuration
 
@@ -113,11 +116,11 @@ python3.11 -m venv venv
 ```
 
 `cantina_os/requirements.txt` is the single source of truth - it is the file
-`start-dashboard.sh` installs, and the root `requirements.txt` now just defers to it with
+`./r3x` installs, and the root `requirements.txt` now just defers to it with
 `-r`. (Until 2026-09-17 these were two independent lists that disagreed with each other,
 and this README pointed at the wrong one.)
 
-`start-dashboard.sh` installs dependencies automatically, keyed on a SHA-256 of
+`./r3x` installs dependencies automatically, keyed on a SHA-256 of
 `cantina_os/requirements.txt`, so editing that file triggers a reinstall on the next start
 and an unchanged file costs nothing.
 
@@ -268,13 +271,14 @@ cd cantina_os
 
 ### 6. Run the Program
 
-Everything - CantinaOS, dependency install and the Next.js dashboard - starts from one
-script:
+Everything - dependency install, CantinaOS and the control panel - starts from one script:
 
 ```bash
-./start-dashboard.sh     # CantinaOS + dashboard on http://localhost:3000
-./stop-dashboard.sh
+./r3x                    # CantinaOS + control panel on http://localhost:5391
 ```
+
+It reinstalls Python dependencies only when `cantina_os/requirements.txt` changes (a
+checksum stamp), and points python-vlc at `/Applications/VLC.app`.
 
 CantinaOS alone, with its CLI on stdin:
 
@@ -283,8 +287,8 @@ cd cantina_os
 ../venv/bin/python -m cantina_os.main
 ```
 
-Then type `engage` to enter interactive voice mode. The trigger is a **left mouse click**
-(click once to start recording, click again to stop) - there is no wake word in the live
+Then type `engage` to enter interactive voice mode. Without the panel the trigger is a
+**left mouse click** (click once to start recording, click again to stop) - there is no wake word in the live
 loop, despite the Porcupine model and `test_wake_word.py` still being on disk. On macOS the
 click trigger needs Accessibility permission, and it must be granted to **Terminal.app** -
 Warp does not work.
@@ -511,8 +515,9 @@ ones are `engage` / `ambient` / `disengage`, `play music`, `stop music`, `list m
 - `cantina_os/cantina_os/llm/`: the Jev client, its question catalogue, and the Claude prompt
   assembly
 - `cantina_os/scripts/system_smoke_run.py`: drive a real CantinaOS with hardware mocked
-- `start-dashboard.sh` / `stop-dashboard.sh`: the supported way to start and stop everything
-- `dj-r3x-dashboard/`: Next.js dashboard
+- `r3x`: the supported way to start everything (CantinaOS + control panel)
+- `sim/web/`: the control panel and 3D digital twin
+- `dj-r3x-dashboard/`: the retired Next.js dashboard (nothing starts it)
 - `audio/music/`: the local music library MusicControllerService plays from
 - `arduino/`: the LED firmware
 
