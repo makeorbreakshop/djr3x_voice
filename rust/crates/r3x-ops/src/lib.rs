@@ -56,6 +56,10 @@ impl LogHub {
     pub fn subscribe(&self) -> broadcast::Receiver<LogLine> {
         self.tx.subscribe()
     }
+
+    pub fn sender(&self) -> broadcast::Sender<LogLine> {
+        self.tx.clone()
+    }
 }
 
 /// Install the global subscriber: stderr + a [`LogHub`], both behind one reloadable filter.

@@ -307,3 +307,54 @@ async fn recv_opt<T: Clone>(rx: &mut Option<broadcast::Receiver<T>>) -> Result<T
         None => std::future::pending().await,
     }
 }
+
+/// Local token files: `~/.config/dj-r3x/<name>`, created 0600 with a random value on first use
+/// (the same scheme and directory as CantinaOS's tap token).
+pub mod tokens {
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    pub fn config_dir() -> PathBuf {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        home.join(".config/dj-r3x")
+    }
+
+    /// `env_var` if set and non-empty, else the file (created if missing).
+    pub fn load_or_create(env_var: &str, path: PathBuf) -> std::io::Result<String> {
+        if let Ok(t) = std::env::var(env_var) {
+            if !t.trim().is_empty() {
+                return Ok(t.trim().to_string());
+            }
+        }
+        if let Ok(t) = std::fs::read_to_string(&path) {
+            if !t.trim().is_empty() {
+                return Ok(t.trim().to_string());
+            }
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let token = random_token()?;
+        let mut f = open_private(&path)?;
+        writeln!(f, "{token}")?;
+        Ok(token)
+    }
+
+    fn random_token() -> std::io::Result<String> {
+        use std::io::Read;
+        let mut b = [0u8; 32];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+        Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+    }
+
+    #[cfg(unix)]
+    fn open_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)
+    }
+
+    #[cfg(not(unix))]
+    fn open_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+        std::fs::File::create(path)
+    }
+}
