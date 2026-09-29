@@ -1520,8 +1520,23 @@
             "type": "string"
           }
         },
+        "paused": {
+          "type": "boolean",
+          "default": false
+        },
         "playing": {
           "type": "boolean"
+        },
+        "position_s": {
+          "description": "Position (s) in `track` at bus time `position_t` (`t_mono`); extrapolate while\n`playing`. With `track.bpm`/`first_beat_s` this is the performer's beat clock anchor.",
+          "type": "number",
+          "format": "double",
+          "default": 0.0
+        },
+        "position_t": {
+          "type": "number",
+          "format": "double",
+          "default": 0.0
         },
         "track": {
           "anyOf": [

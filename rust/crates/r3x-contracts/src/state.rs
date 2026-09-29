@@ -95,6 +95,14 @@ pub struct MusicState {
     pub ducked: bool,
     /// Track titles in the local library, sorted.
     pub library: Vec<String>,
+    /// Position (s) in `track` at bus time `position_t` (`t_mono`); extrapolate while
+    /// `playing`. With `track.bpm`/`first_beat_s` this is the performer's beat clock anchor.
+    #[serde(default)]
+    pub position_s: f64,
+    #[serde(default)]
+    pub position_t: f64,
+    #[serde(default)]
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
