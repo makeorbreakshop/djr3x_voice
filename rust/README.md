@@ -7,12 +7,28 @@ crates/
   r3x-contracts   Envelope, Source/Tier, Command/Ack, Event, retained state, Frames, RobotProfile
   r3x-bus         typed bus: broadcast per event domain, watch per state domain,
                   mpsc + oneshot Ack per command class, seq/clock stamping, JSONL session log
+  r3x-gateway     axum WS, protocol v1: token + Origin on every bind, stamped source, class/tier gates
+  r3x-ops         health -> state.services, runtime log fan-out, log-level control
+  r3x-stage       StageManager: Show/Bench/Studio, outputs, alive layers, brain, autonomy, freeze, engagement
+  r3x-runtime     the binary; --bridge drives a running CantinaOS through its bus tap
+  r3x-cli         terminal gateway client (CantinaOS command set + shortcuts, history)
   r3x-performer-core, ...   see the plan, section 5
 contracts-schema/ generated JSON Schema (do not edit)
 ```
 
 Generated TypeScript lives in `sim/web/src/generated/` (do not edit). The robot profile is
 `profiles/r3x/robot.json` at the repo root.
+
+## Run (Phase 1, bridged to CantinaOS)
+
+```bash
+cargo run -p r3x-runtime -- --bridge      # gateway on 127.0.0.1:8780, tap at ws://127.0.0.1:8766/
+cargo run -p r3x-cli                      # or: cargo run -p r3x-cli -- -c "mode bench" -c "emote greet"
+```
+
+Tokens: the panel uses the shared local token (`R3X_TAP_TOKEN` or `~/.config/dj-r3x/tap_token`,
+opened as `#token=`); the CLI uses `~/.config/dj-r3x/cli_token`. Origins: the panel dev
+servers plus `R3X_ALLOWED_ORIGINS`.
 
 ## Build and test
 
