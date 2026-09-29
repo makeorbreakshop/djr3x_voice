@@ -507,14 +507,11 @@ class ElevenLabsService(BaseService):
                         self._speech_request_queue.task_done()
                         continue
                     
-                    # Emit event that we're starting audio generation
-                    self._post_emit(EventTopics.SPEECH_GENERATION_STARTED, {
-                        "conversation_id": conversation_id,
-                        "text": text,
-                        # How the show player knows its own `speak` line left the queue.
-                        "clip_id": clip_id,
-                    })
-                    
+                    # SPEECH_GENERATION_STARTED is emitted below, at the first audio write:
+                    # every listener (eyes, mic lock-out, show tags, latency) means "R3X is
+                    # audibly speaking now", and the ElevenLabs round trip used to sit between
+                    # this point and the first sound - cues fired ~0.3 s before the words.
+
                     # Get audio stream from ElevenLabs
                     # Build voice settings - v3 doesn't support speed parameter
                     voice_settings = {
@@ -625,6 +622,14 @@ class ElevenLabsService(BaseService):
                                     # Play chunk immediately (true streaming, no accumulation!)
                                     if audio_t0 is None:
                                         audio_t0 = time.time()
+                                        self._post_emit(EventTopics.SPEECH_GENERATION_STARTED, {
+                                            "conversation_id": conversation_id,
+                                            "text": text,
+                                            # How the show player knows its own `speak` line started.
+                                            "clip_id": clip_id,
+                                            # Wall clock of the first sample; show tags anchor here.
+                                            "audio_t0": audio_t0,
+                                        })
                                     stream.write(samples)
 
                                     if alignment:

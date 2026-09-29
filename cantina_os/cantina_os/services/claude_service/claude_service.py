@@ -311,7 +311,9 @@ class ClaudeService(BaseService):
             # the repo's show/). Tag timing: char offset / this = seconds after speech start.
             "SHOW_DIR": config.get("SHOW_DIR"),
             "SHOW_TAG_CHARS_PER_SEC": config.get(
-                "SHOW_TAG_CHARS_PER_SEC", os.environ.get("SHOW_TAG_CHARS_PER_SEC", 19.0)  # measured: ~190 chars in ~9.7 s of R3X speech, 2026-09-28
+                # Fallback pace when no alignment arrives. v4 Turbo measured ~12-14 chars/s on
+                # R3X's voice 2026-09-29 (Flash at 1.1x was ~19); alignment corrects it anyway.
+                "SHOW_TAG_CHARS_PER_SEC", os.environ.get("SHOW_TAG_CHARS_PER_SEC", 13.0)
             ),
         }
 
@@ -466,6 +468,11 @@ class ClaudeService(BaseService):
         asyncio.create_task(self.subscribe(
             EventTopics.SPEECH_GENERATION_STARTED,
             self._handle_speech_started_for_show_tags
+        ))
+        # ...and land on their word once ElevenLabs' character timing arrives.
+        asyncio.create_task(self.subscribe(
+            EventTopics.SPEECH_ALIGNMENT,
+            self._handle_speech_alignment_for_show_tags
         ))
 
 
@@ -1477,6 +1484,12 @@ class ClaudeService(BaseService):
             self._show_tags.on_speech_started(payload or {})
         except Exception as e:
             self.logger.warning(f"Could not schedule show tags: {e}")
+
+    async def _handle_speech_alignment_for_show_tags(self, payload: Dict[str, Any]) -> None:
+        try:
+            self._show_tags.on_alignment(payload or {})
+        except Exception as e:
+            self.logger.warning(f"Could not refine show tag timing: {e}")
 
     def _perform_show_tag(self, item_id: str, conversation_id: Optional[str]) -> None:
         """Fired by the tag scheduler at the tag's moment in the speech."""

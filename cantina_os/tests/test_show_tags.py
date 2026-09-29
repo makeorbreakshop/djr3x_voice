@@ -98,6 +98,40 @@ async def test_scheduler_fires_after_speech_start_at_offset_over_chars_per_sec()
     assert sched.on_speech_started({"conversation_id": "turn-1"}) == []  # fires once
 
 
+async def test_alignment_moves_a_tag_onto_its_word():
+    # The linear estimate says 2 s (way off); ElevenLabs' timing says the word starts 0.1 s in.
+    fired = []
+    t0 = time.monotonic()
+    sched = SpeechTagScheduler(lambda i, c: fired.append((time.monotonic() - t0, i)), chars_per_sec=3)
+    clean, tags, _ = extract_tags("Hello {clip:nod} world", VALID)  # tag at index 6 ("w")
+    sched.register("turn-1", clean, tags)
+    sched.on_speech_started({"conversation_id": "turn-1"})
+    wall0 = time.time()
+    # first chunk covers "Hello " - the tag isn't in it
+    assert sched.on_alignment({"conversation_id": "turn-1", "chars": list("Hello "),
+                               "char_start_ms": [0, 10, 20, 30, 40, 50], "audio_t0": wall0}) == []
+    # second chunk covers "world": "w" starts 100 ms after the audio began
+    moved = sched.on_alignment({"conversation_id": "turn-1", "chars": list("world"),
+                                "char_start_ms": [100, 110, 120, 130, 140], "audio_t0": wall0})
+    assert [i for i, _ in moved] == ["nod"]
+    await asyncio.sleep(0.3)
+    assert [i for _, i in fired] == ["nod"]
+    assert fired[0][0] < 0.25  # not the 2 s linear guess
+
+
+async def test_alignment_never_fires_a_tag_twice():
+    fired = []
+    sched = SpeechTagScheduler(lambda i, c: fired.append(i), chars_per_sec=1000)
+    clean, tags, _ = extract_tags("{clip:nod}Hi", VALID)
+    sched.register("t", clean, tags)
+    sched.on_speech_started({"conversation_id": "t"})
+    await asyncio.sleep(0.05)  # linear fallback already fired it
+    assert sched.on_alignment({"conversation_id": "t", "chars": ["H", "i"],
+                               "char_start_ms": [0, 50], "audio_t0": time.time()}) == []
+    await asyncio.sleep(0.1)
+    assert fired == ["nod"]
+
+
 # ---------------------------------------------------------------------------- ClaudeService
 
 def _show_dir(tmp_path):

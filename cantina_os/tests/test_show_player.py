@@ -403,3 +403,29 @@ async def test_cli_show_reaches_the_timeline_through_the_real_dispatcher(rig):
         assert rec.of("SHOW_MOTION")[0][1]["clip"] == "listen_up"
     finally:
         await dispatcher.stop()
+
+
+# ---------------------------------------------------------------------------- one voice
+
+async def test_a_show_claude_starts_performs_but_does_not_speak(rig):
+    # Claude's reply is the turn's voice. crowd_hype's "Make some noise!" used to queue in
+    # front of the reply, so R3X said two unrelated things back to back (2026-09-29).
+    bus, svc, rec = rig
+    use(svc, [seq("hype", [
+        {"at": 0, "do": "speak", "text": "Make some noise!"},
+        sfx(0.05, "airhorn"),
+    ])])
+    rec.reset()
+    perform(bus, "hype", source="claude")
+    assert await until(lambda: rec.of("SHOW_ENDED"))
+    assert rec.of("TTS_GENERATE_REQUEST") == []
+    assert rec.times("SHOW_SFX", "id", "airhorn")  # the rest of the show still runs
+
+
+async def test_a_show_started_from_the_panel_or_cli_still_speaks(rig):
+    bus, svc, rec = rig
+    use(svc, [seq("hype", [{"at": 0, "do": "speak", "text": "Make some noise!"}])])
+    rec.reset()
+    perform(bus, "hype", source="cli")
+    assert await until(lambda: rec.of("TTS_GENERATE_REQUEST"))
+    assert rec.of("TTS_GENERATE_REQUEST")[0][1]["text"] == "Make some noise!"

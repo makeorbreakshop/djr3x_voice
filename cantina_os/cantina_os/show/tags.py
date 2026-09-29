@@ -8,8 +8,10 @@ Flow (see CLAUDE.md "Show system"):
 2. The complete reply is parsed once more (same algorithm, so identical offsets) to get
    each tag's character offset into the clean text; the tags are registered with the
    :class:`SpeechTagScheduler` under the turn's ``conversation_id``.
-3. On ``SPEECH_GENERATION_STARTED`` for that conversation the scheduler fires
-   ``show.perform {source: "claude"}`` for each tag at its offset converted to seconds.
+3. On ``SPEECH_GENERATION_STARTED`` (emitted at the first audible sample) the scheduler
+   arms each tag at an estimated time; each ``speech.alignment`` chunk then moves the tags
+   it covers onto their character's real start. ``show.perform {source: "claude"}`` fires
+   when the word is heard.
 
 The conversion is a :class:`TagTimer`. Today it is :class:`LinearCharTimer`
 (``char_offset / chars_per_sec``) because ElevenLabs is called without timestamps. The seam
@@ -181,6 +183,16 @@ class _Pending:
     created: float
 
 
+@dataclass
+class _Scheduled:
+    """One tag of a reply that is being spoken: its fallback timer until alignment refines it."""
+    tag: Tag
+    index: int  # character index into the text ElevenLabs is speaking
+    handle: Optional[asyncio.TimerHandle] = None
+    fired: bool = False
+    refined: bool = False
+
+
 class SpeechTagScheduler:
     """Holds a turn's tags until its speech starts, then fires them on a timer.
 
@@ -194,7 +206,8 @@ class SpeechTagScheduler:
         self.chars_per_sec = float(chars_per_sec)
         self._ttl = ttl_s
         self._pending: Dict[str, _Pending] = {}
-        self._handles: List[asyncio.TimerHandle] = []
+        #: Replies being spoken: their tags, and how many aligned characters have arrived.
+        self._active: Dict[str, Tuple[List[_Scheduled], List[int]]] = {}
         self._log = log or logger
 
     def register(self, conversation_id: Optional[str], clean_text: str, tags: List[Tag]) -> None:
@@ -209,7 +222,12 @@ class SpeechTagScheduler:
         return conversation_id in self._pending
 
     def on_speech_started(self, payload: dict) -> List[Tuple[str, float]]:
-        """Schedule the tags for this speech. Returns ``[(item_id, delay_s)]``."""
+        """Schedule the tags for this speech. Returns ``[(item_id, delay_s)]``.
+
+        ElevenLabsService emits speech-started at the first audible sample, so the fallback
+        estimate is measured from real sound. :meth:`on_alignment` then moves each tag onto
+        the actual start of its character as the timing arrives.
+        """
         cid = (payload or {}).get("conversation_id")
         pending = self._pending.pop(cid, None) if cid else None
         if pending is None:
@@ -218,23 +236,71 @@ class SpeechTagScheduler:
         lead = len(pending.clean_text) - len(pending.clean_text.lstrip())
         timer = timer_for_speech(payload, self.chars_per_sec)
         loop = asyncio.get_running_loop()
-        scheduled = []
+        scheduled: List[_Scheduled] = []
+        report = []
         for tag in pending.tags:
-            delay = timer.seconds_at(tag.offset - lead)
-            self._handles.append(loop.call_later(delay, self._fire, tag.id, cid))
-            scheduled.append((tag.id, delay))
-        self._log.info(f"Scheduled {len(scheduled)} show tag(s) for {cid}: "
-                       + ", ".join(f"{i}@{d:.2f}s" for i, d in scheduled))
-        return scheduled
+            item = _Scheduled(tag, max(0, tag.offset - lead))
+            delay = timer.seconds_at(item.index)
+            item.handle = loop.call_later(delay, self._fire_scheduled, item, cid)
+            scheduled.append(item)
+            report.append((tag.id, delay))
+        self._active[cid] = (scheduled, [0])
+        self._log.info(f"Scheduled {len(report)} show tag(s) for {cid}: "
+                       + ", ".join(f"{i}@{d:.2f}s" for i, d in report))
+        return report
+
+    def on_alignment(self, payload: dict) -> List[Tuple[str, float]]:
+        """Refine pending tags with one chunk of ElevenLabs character timing.
+
+        ``payload`` is a ``speech.alignment`` event: ``chars`` covered by this chunk, their
+        ``char_start_ms`` from the start of the reply's audio, and ``audio_t0`` (wall clock of
+        the first sample). Returns ``[(item_id, new_delay_s)]`` for the tags it moved.
+        """
+        cid = (payload or {}).get("conversation_id")
+        active = self._active.get(cid) if cid else None
+        if active is None:
+            return []
+        items, seen = active
+        chars = payload.get("chars") or []
+        starts = payload.get("char_start_ms") or []
+        t0 = payload.get("audio_t0")
+        moved = []
+        if t0 is not None:
+            loop = asyncio.get_running_loop()
+            for item in items:
+                i = item.index - seen[0]
+                if item.fired or item.refined or not (0 <= i < min(len(chars), len(starts))):
+                    continue
+                delay = max(0.0, float(t0) + float(starts[i]) / 1000.0 - time.time())
+                if item.handle is not None:
+                    item.handle.cancel()
+                item.handle = loop.call_later(delay, self._fire_scheduled, item, cid)
+                item.refined = True
+                moved.append((item.tag.id, delay))
+        seen[0] += len(chars)
+        if moved:
+            self._log.info(f"Show tag timing from speech alignment for {cid}: "
+                           + ", ".join(f"{i}@+{d:.2f}s" for i, d in moved))
+        return moved
 
     def cancel_all(self) -> None:
-        for h in self._handles:
-            h.cancel()
-        self._handles.clear()
+        for items, _ in self._active.values():
+            for item in items:
+                if item.handle is not None:
+                    item.handle.cancel()
+        self._active.clear()
         self._pending.clear()
 
+    def _fire_scheduled(self, item: _Scheduled, conversation_id: Optional[str]) -> None:
+        if item.fired:
+            return
+        item.fired = True
+        active = self._active.get(conversation_id)
+        if active and all(i.fired for i in active[0]):
+            self._active.pop(conversation_id, None)
+        self._fire(item.tag.id, conversation_id)
+
     def _fire(self, item_id: str, conversation_id: Optional[str]) -> None:
-        self._handles = [h for h in self._handles if not h.cancelled() and h.when() > asyncio.get_running_loop().time()]
         try:
             self._perform(item_id, conversation_id)
         except Exception as e:  # a tag must never break the voice loop

@@ -75,6 +75,9 @@ SOURCE_MAX_TIER: Dict[str, str] = {
     "cli": "show",
 }
 
+#: Sources whose shows never speak: the reply that triggered them already is the voice.
+VOICELESS_SOURCES = frozenset({"claude"})
+
 #: How long a ``wait`` for someone else's speech may hold a run.
 FOREIGN_SPEECH_WAIT_S = 30.0
 #: How long a ``wait`` holds for the run's own line to start when nothing at all is speaking
@@ -560,7 +563,13 @@ class ShowPlayer:
         elif do == "sfx":
             self._emit(EventTopics.SHOW_SFX, ShowSfxPayload(id=a.id))
         elif do == "speak":
-            self._speak(run, a.text)
+            if run.source in VOICELESS_SOURCES:
+                # Claude's own reply is this turn's voice. A show line queued beside it made
+                # R3X say two unrelated things back to back ("Make some noise!" then the
+                # reply, 2026-09-29), so a Claude-started show performs silently.
+                self.log.info(f"show {run.id!r} ({run.source}): skipped speak {a.text!r}; the reply is the voice")
+            else:
+                self._speak(run, a.text)
         elif do == "duck":
             self._emit_dict(EventTopics.AUDIO_DUCKING_START,
                             {"level": self._ducking_level, "fade_ms": self._ducking_fade_ms})
