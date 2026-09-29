@@ -37,6 +37,7 @@ Generated TypeScript lives in `sim/web/src/generated/` (do not edit). The robot 
 ```bash
 ./r3x                                     # repo root: runtime (background, logs/r3x-runtime.log) + panel + r3x-cli here
 ./r3x --logs                              # follow the runtime log instead of the CLI
+./r3x --click-anywhere                    # also a global left click toggles push-to-talk
 ./r3x -- --no-vision                      # extra runtime flags after --
 ./r3x --legacy                            # CantinaOS instead, until the live check retires it
 cargo run -p r3x-runtime                  # just the runtime (= --standalone)
@@ -50,6 +51,21 @@ the gateway the panel talks to. Stage modes gate it (§4): Show = brain + DJ aut
 Bench/Studio = brain off, no DJ transitions. `--no-voice`, `--no-vision`, `--brain`, `--music`
 override one part; `--mouse` (feature `mouse`) = global click push-to-talk; `--audio null` =
 no sound device (silent mic, `R3X_NULL_AUDIO_SPEED`).
+
+**Push-to-talk.** The panel's talk button toggles: click to talk, click again to send. Space
+held down is hold-to-talk (keydown starts, keyup sends; auto-repeat and typing in a field are
+ignored). The button shows listening / thinking / speaking, and "(nothing heard)" after an
+empty transcript. One owner at a time (`state.conversation.ptt_owner`): only the client that
+started a turn can stop it, so the CLI's `done` cannot end the panel's turn and vice versa.
+The global "click anywhere" source (`r3x-voice` `mouse`) is off in `./r3x` by default;
+`./r3x --click-anywhere` turns it on (it passes `--mouse`). It then waits 250 ms after a click
+and stands down if the panel's start/stop arrived with it (the panel sends on pointerdown), so
+a click on the talk button no longer toggles twice. That double toggle was the 2026-09-29
+"click to talk didn't work": each panel click also started or stopped a `mouse` turn. A turn
+stopped before any audio reached Deepgram now ends at once (Deepgram never answers a
+`Finalize` with nothing buffered; that was the 1.5 s "no finalize result within the bound"),
+and a turn shorter than the 200 ms remote-audio grace keeps its audio. Normal finalizes take
+140-190 ms, so the 1.5 s bound stays.
 
 No paid calls: `R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice` replays Claude,
 Jev, ElevenLabs audio and the recorded picks; STT is scripted (typed turns). With `--audio
@@ -71,6 +87,25 @@ corpus through push-to-talk, compares every turn with the CantinaOS recording
 cached commentary, and prints the latency legs against the Phase 0 baseline turns.
 
 Live check before `cantina_os/` is archived: `docs/plans/live-check.md`.
+
+## Testing DJ mode without waiting a track
+
+```text
+music seek <s|m:ss|-s>     jump in the current track (-30 = 30 s before the end)
+dj test                    DJ mode on the current (else a random) track, no intro, then a jump
+                           to 8 s before its ending-soon mark: a full transition within ~40 s
+dj transition now          run the next transition immediately (cached line if ready)
+```
+
+In the CLI, or the panel's Control -> DJ section (buttons, plus now / next / line status /
+time to the transition / the running plan step, from `state.dj`). `dj test` needs Show mode
+(DJ transitions are autonomy). With real keys it spends one short Claude commentary call and
+one ElevenLabs line; later transitions in that DJ session are crossfades without a line until
+`dj stop`. Offline: `R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice cargo run -p
+r3x-runtime -- --audio null --no-vision`, then `dj test`: the recorded picks give Bai Tee Tee ->
+Aloogahoo with its recorded line. Acceptance (`#[ignore]`d, ~15 s):
+`cargo test -p r3x-runtime --test dj_test_acceptance -- --ignored --nocapture` checks
+seek -> ending soon -> duck -> commentary -> crossfade -> next track -> unduck in the session log.
 
 ## Run (Phase 1, bridged to CantinaOS)
 
@@ -249,6 +284,7 @@ and before the live check):
 
 ```bash
 cargo test -p r3x-runtime --test standalone_acceptance -- --ignored --nocapture   # ~90 s
+cargo test -p r3x-runtime --test dj_test_acceptance -- --ignored --nocapture      # ~15 s
 ```
 
 ## Regenerate TS types and JSON Schema

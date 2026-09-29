@@ -56,8 +56,8 @@
 
         <button id="ptt" class="ptt" data-state="idle" disabled>
           <span class="ptt-dot"></span>
-          <span class="ptt-label">Hold to talk</span>
-          <small class="ptt-hint">or hold Space &middot; click to toggle</small>
+          <span class="ptt-label">Click to talk</span>
+          <small class="ptt-hint">click to talk, click again to send &middot; or hold Space</small>
         </button>
         <p id="ptt-msg" class="hint" hidden></p>
 
@@ -73,7 +73,7 @@
         </div>
 
         <h2>Conversation <button id="conv-clear" class="link">clear</button></h2>
-        <ol id="conv" class="conv"><li class="empty">Nothing yet. Hold the button and talk.</li></ol>
+        <ol id="conv" class="conv"><li class="empty">Nothing yet. Click the button (or hold Space) and talk.</li></ol>
       </div>
 
       <!-- ================================================================ Drive -->
@@ -123,6 +123,21 @@
             <button data-dj="stop">Stop</button>
             <button data-music="next">Next track</button>
           </div>
+          <dl id="dj-info" class="dj-info" hidden>
+            <dt>Now</dt><dd id="dj-now">-</dd>
+            <dt>Next</dt><dd id="dj-next">-</dd>
+            <dt>Line</dt><dd id="dj-line">-</dd>
+            <dt>Transition</dt><dd id="dj-when">-</dd>
+          </dl>
+          <h3>Test a transition</h3>
+          <div class="row wrap">
+            <button data-cli="dj test" data-cli-out="dj-msg" title="DJ mode on the current (or a random) track, then jump to ~8 s before its transition">DJ test (~40 s)</button>
+            <button data-cli="dj transition now" data-cli-out="dj-msg" title="Run the next transition immediately">Transition now</button>
+            <button data-cli="music seek -40" data-cli-out="dj-msg" title="Jump to 40 s before the end of the track">Seek to end &minus;40 s</button>
+          </div>
+          <p id="dj-msg" class="hint"></p>
+          <p class="hint">With real keys a DJ test spends one short Claude line and one ElevenLabs line;
+            later transitions crossfade without a line until DJ Stop. Needs Show mode (DJ transitions are autonomy).</p>
         </section>
 
         <details class="advanced">

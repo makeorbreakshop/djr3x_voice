@@ -24,7 +24,7 @@ pub use messages::{
 };
 pub use profile::{ProfileError, RobotProfile};
 pub use state::{
-    ConversationPhase, ConversationState, DjState, Engagement, EngagementState, LightsState,
+    CommentaryStatus, ConversationPhase, ConversationState, DjState, Engagement, EngagementState, LightsState,
     MusicState, OperatingMode, PerfState, RetainedState, RunInfo, ServiceHealth, ServiceStatus,
     ServicesState, StageState, StateUpdate, Track,
 };

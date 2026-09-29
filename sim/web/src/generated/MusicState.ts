@@ -14,4 +14,9 @@ library: Array<string>,
  * Position (s) in `track` at bus time `position_t` (`t_mono`); extrapolate while
  * `playing`. With `track.bpm`/`first_beat_s` this is the performer's beat clock anchor.
  */
-position_s: number, position_t: number, paused: boolean, };
+position_s: number, position_t: number, paused: boolean, 
+/**
+ * Position (s) in `track` where `music.track_ending_soon` fires (the DJ's transition
+ * point); none for a track shorter than the threshold.
+ */
+ending_at_s?: number | null, };

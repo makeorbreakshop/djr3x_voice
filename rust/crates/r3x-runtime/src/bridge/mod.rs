@@ -325,9 +325,10 @@ impl Bridge {
             }
             IntentCommand::Say { text } => self.say(text.trim()).await,
             IntentCommand::PttStart if self.voice.is_some() => self.voice_ptt_start(source).await,
-            IntentCommand::PttStop if self.voice.is_some() => self.voice_ptt_stop().await,
+            IntentCommand::PttStop if self.voice.is_some() => self.voice_ptt_stop(source).await,
             IntentCommand::PttStart => self.ptt_start(source).await,
             IntentCommand::PttStop => self.ptt_stop().await,
+            IntentCommand::Music(MusicCommand::Seek { .. }) => Ack::rejected("music seek needs the Rust music engine (--music rust)"),
             IntentCommand::Music(m) => {
                 let line = match m {
                     MusicCommand::Play { query: Some(q) } if !q.trim().is_empty() => format!("play music {}", q.trim()),
@@ -336,6 +337,7 @@ impl Bridge {
                     // `next music` does nothing outside DJ mode (CLAUDE.md 3b); `dj next` does.
                     MusicCommand::Next if self.bus.get::<DjState>().active => "dj next".into(),
                     MusicCommand::Next => "next music".into(),
+                    MusicCommand::Seek { .. } => unreachable!("refused above"),
                 };
                 self.console(&line).await
             }
@@ -414,8 +416,9 @@ impl Bridge {
         self.voice.as_ref().expect("guarded").ptt_start(&owner).await
     }
 
-    async fn voice_ptt_stop(&self) -> Ack {
-        self.voice.as_ref().expect("guarded").ptt_stop(None).await
+    async fn voice_ptt_stop(&self, source: Source) -> Ack {
+        let owner = format!("{source:?}").to_ascii_lowercase();
+        self.voice.as_ref().expect("guarded").ptt_stop(Some(&owner)).await
     }
 
     async fn ptt_start(&self, source: Source) -> Ack {

@@ -8,11 +8,19 @@
 //! turn's outcome depended on the poll phase). At `track_ending_soon`: a transition plan with
 //! the cached line (duck, speak, crossfade under it, unduck), else urgent caching and a 3 s
 //! grace, else an emergency pick with a crossfade-only plan.
+//!
+//! Testing without waiting a track: `dj test` starts DJ mode on what plays (or a random
+//! track, no intro) and seeks to [`DJ_TEST_LEAD_S`] before the ending-soon mark; its budget is
+//! one transition line, later transitions are crossfades until `dj stop`. `dj transition now`
+//! runs the ending-soon path at once.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use r3x_contracts::{Command, ConversationEvent, DjEvent, DjState as DjRetained, Event, MusicEvent, MusicState, PerfCommand, PerfLayer, Source, StopTarget, Track};
+use r3x_contracts::{
+    CommentaryStatus, Command, ConversationEvent, DjEvent, DjState as DjRetained, Event, MusicEvent, MusicState, PerfCommand, PerfLayer,
+    Source, StageState, StopTarget, Track,
+};
 use r3x_llm::MessagesRequest;
 
 use crate::plan::{Plan, Step};
@@ -22,6 +30,8 @@ pub const INTRO_LOCAL: &str = include_str!("prompts/intro_local.txt");
 pub const INTRO_SPOTIFY: &str = include_str!("prompts/intro_spotify.txt");
 pub const TRANSITION_LOCAL: &str = include_str!("prompts/transition_local.txt");
 pub const TRANSITION_SPOTIFY: &str = include_str!("prompts/transition_spotify.txt");
+/// `dj test` lands this long before the ending-soon mark: time to write and cache the line.
+pub const DJ_TEST_LEAD_S: f64 = 8.0;
 const FALLBACK_PROMPT: &str = "Generate a brief DJ commentary for the music. Keep it energetic and in character as DJ R3X, 2-3 sentences max.";
 
 #[derive(Debug, Clone)]
@@ -64,6 +74,10 @@ pub struct DjState {
     requests: HashMap<String, Request>,
     /// Plans the DJ submitted (failure recovery applies only to these).
     plans: Vec<String>,
+    /// Transition lines still allowed (`dj test`: one); `None` = no limit.
+    lines_left: Option<u32>,
+    /// The running DJ plan's step (`state.dj.step`).
+    step: Option<String>,
 }
 
 impl DjState {
@@ -77,6 +91,20 @@ impl DjState {
 
     fn next_requested(&self) -> bool {
         self.next.as_ref().is_some_and(|n| self.requests.values().any(|r| r.context == Context::Transition && &r.track == n))
+    }
+
+    /// Where the transition line into `next` is.
+    fn commentary(&self) -> CommentaryStatus {
+        let Some(next) = &self.next else { return CommentaryStatus::None };
+        let lines = self.requests.values().filter(|r| r.context == Context::Transition && &r.track == next);
+        lines
+            .map(|r| match (r.ready, &r.cache_key) {
+                (true, _) => CommentaryStatus::Ready,
+                (false, Some(_)) => CommentaryStatus::Synthesizing,
+                (false, None) => CommentaryStatus::Writing,
+            })
+            .max_by_key(|s| *s as u8)
+            .unwrap_or(CommentaryStatus::None)
     }
 }
 
@@ -110,12 +138,40 @@ impl Brain {
         self.inner.bus.get::<MusicState>().library
     }
 
-    fn sync_retained(&self) {
-        let (active, current, next) = {
+    pub(crate) fn sync_retained(&self) {
+        let state = {
             let d = self.inner.dj.lock().unwrap();
-            (d.active, d.current.clone(), d.next.clone())
+            DjRetained {
+                active: d.active,
+                current: d.current.as_deref().map(track),
+                next: d.next.as_deref().map(track),
+                commentary: d.commentary(),
+                step: d.step.clone(),
+            }
         };
-        self.inner.bus.set(Source::Timeline, DjRetained { active, current: current.map(|t| track(&t)), next: next.map(|t| track(&t)) });
+        self.inner.bus.set(Source::Timeline, state);
+    }
+
+    /// Mirror the executor's step for DJ plans into `state.dj.step`.
+    pub(crate) async fn dj_step_loop(self) {
+        let mut steps = self.inner.exec.steps();
+        loop {
+            let step = {
+                let running = steps.borrow_and_update();
+                let d = self.inner.dj.lock().unwrap();
+                d.plans.iter().rev().find_map(|p| running.get(p).cloned())
+            };
+            let changed = {
+                let mut d = self.inner.dj.lock().unwrap();
+                std::mem::replace(&mut d.step, step.clone()) != step
+            };
+            if changed {
+                self.sync_retained();
+            }
+            if steps.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     /// Random pick avoiding recent tracks; history clears once everything was recent.
@@ -152,13 +208,19 @@ impl Brain {
     }
 
     pub async fn dj_start(&self) -> (String, bool) {
+        self.dj_begin(None, true)
+    }
+
+    /// Start DJ mode. `playing`: the track already playing (kept, not restarted); `intro`: the
+    /// `dj_intro` sequence and the intro line (`dj test` skips both: one paid line, not three).
+    fn dj_begin(&self, playing: Option<String>, intro: bool) -> (String, bool) {
         if self.inner.dj.lock().unwrap().active {
             return ("DJ mode is already active".into(), false);
         }
         if self.library().is_empty() {
             return ("Error: No music tracks available. Please ensure music files are loaded.".into(), true);
         }
-        let Some(first) = self.pick_track() else {
+        let Some(first) = playing.clone().or_else(|| self.pick_track()) else {
             return ("Error: No music tracks available. Please ensure music files are loaded.".into(), true);
         };
         {
@@ -171,16 +233,70 @@ impl Brain {
         self.persist("dj_mode_active", serde_json::json!(true));
         self.inner.bus.publish(Source::Timeline, None, Event::Dj(DjEvent::Started));
         self.sync_retained();
-        self.inner.bus.publish(Source::Timeline, None, Event::Music(MusicEvent::Play { query: Some(first.clone()) }));
-        // The dj_intro show sequence, if it exists: `show` layer, so replies neither pause nor
-        // cancel it; optional, so a missing file is skipped quietly.
-        let intro = Step::Sequence { id: "dj_intro".into(), params: None, wait_for_completion: false, optional: true };
-        let mut plan = Plan::new("show", vec![intro]);
-        plan.plan_id = format!("dj-intro-{}", &plan.plan_id[..8]);
-        self.submit_dj(plan);
-        self.request_commentary(Context::Intro, &first, None);
+        if playing.is_none() {
+            self.inner.bus.publish(Source::Timeline, None, Event::Music(MusicEvent::Play { query: Some(first.clone()) }));
+        }
+        if intro {
+            // The dj_intro show sequence, if it exists: `show` layer, so replies neither pause nor
+            // cancel it; optional, so a missing file is skipped quietly.
+            let intro = Step::Sequence { id: "dj_intro".into(), params: None, wait_for_completion: false, optional: true };
+            let mut plan = Plan::new("show", vec![intro]);
+            plan.plan_id = format!("dj-intro-{}", &plan.plan_id[..8]);
+            self.submit_dj(plan);
+            self.request_commentary(Context::Intro, &first, None);
+        }
         self.dj_cache_tick();
         ("DJ mode activated...".into(), false)
+    }
+
+    /// `dj test`: DJ mode on the current (else a random) track, then seek to
+    /// [`DJ_TEST_LEAD_S`] before its ending-soon mark, so a full transition runs within ~40 s.
+    pub async fn dj_test(&self) -> (String, bool) {
+        let bus = &self.inner.bus;
+        if !bus.get::<StageState>().autonomy {
+            return ("dj test: DJ transitions are autonomy - switch to Show mode (or autonomy on) first".into(), true);
+        }
+        let music = bus.get::<MusicState>();
+        let playing = music.track.filter(|_| music.playing).map(|t| t.title);
+        if !self.inner.dj.lock().unwrap().active {
+            let (msg, err) = self.dj_begin(playing.clone(), false);
+            if err {
+                return (msg, err);
+            }
+        }
+        {
+            // One transition line for the test; later transitions are crossfades.
+            let mut d = self.inner.dj.lock().unwrap();
+            d.lines_left = Some(if d.next_requested() { 0 } else { 1 });
+        }
+        self.dj_cache_tick();
+        let mut w = bus.watch::<MusicState>();
+        // Clone out of the `Ref` at once: holding it would block the bus's writers.
+        let ready = tokio::time::timeout(Duration::from_secs(10), async { w.wait_for(|m| m.playing && m.track.is_some()).await.map(|m| m.clone()) }).await;
+        let Ok(Ok(m)) = ready else { return ("dj test: no track started within 10 s".into(), true) };
+        let title = m.track.map(|t| t.title).unwrap_or_default();
+        let Some(mark) = m.ending_at_s else {
+            return (format!("dj test: {title} is too short for an ending-soon mark; try `dj transition now`"), true);
+        };
+        let to = (mark - DJ_TEST_LEAD_S).max(0.0);
+        bus.publish(Source::Timeline, None, Event::Music(MusicEvent::Seek { seconds: to, from_end: false }));
+        let lead = mark - to;
+        (format!("DJ test: {title} jumps to {:.0} s; the transition starts in ~{lead:.0} s (one commentary line, then crossfades until `dj stop`)", to), false)
+    }
+
+    /// `dj transition now`: the ending-soon path immediately (the cached line if ready, else a
+    /// short wait for it, else a crossfade).
+    pub async fn dj_transition_now(&self) -> (String, bool) {
+        if !self.inner.dj.lock().unwrap().active {
+            return ("Error: DJ mode is not active (dj start or dj test)".into(), true);
+        }
+        let running = self.inner.exec.running();
+        if self.inner.dj.lock().unwrap().plans.iter().any(|p| running.get("ambient") == Some(p)) {
+            return ("A DJ transition is already running".into(), true);
+        }
+        let me = self.clone();
+        tokio::spawn(async move { me.dj_track_ending_soon().await });
+        ("Transition starting...".into(), false)
     }
 
     pub async fn dj_stop(&self) -> (String, bool) {
@@ -265,7 +381,21 @@ impl Brain {
     fn request_commentary(&self, context: Context, current: &str, next: Option<&str>) {
         let id = uuid::Uuid::new_v4().to_string();
         let lead = next.unwrap_or(current).to_string();
-        self.inner.dj.lock().unwrap().requests.insert(id.clone(), Request { context, track: lead, cache_key: None, ready: false });
+        {
+            let mut d = self.inner.dj.lock().unwrap();
+            if context == Context::Transition {
+                match &mut d.lines_left {
+                    Some(0) => {
+                        tracing::info!(next = lead, "DJ test: line budget spent; this transition is a crossfade");
+                        return;
+                    }
+                    Some(n) => *n -= 1,
+                    None => {}
+                }
+            }
+            d.requests.insert(id.clone(), Request { context, track: lead, cache_key: None, ready: false });
+        }
+        self.sync_retained();
         let prompt = commentary_prompt(context, &track(current), next.map(track).as_ref());
         let me = self.clone();
         tokio::spawn(async move {
@@ -280,6 +410,7 @@ impl Brain {
             };
             if text.trim().is_empty() {
                 me.inner.dj.lock().unwrap().requests.remove(&id);
+                me.sync_retained();
                 return;
             }
             let key = match context {
@@ -294,6 +425,7 @@ impl Brain {
                     _ => return, // DJ stopped meanwhile
                 }
             }
+            me.sync_retained();
             me.inner.bus.publish(Source::Timeline, None, Event::Conversation(ConversationEvent::CacheSpeech { key, text }));
         });
     }
@@ -305,6 +437,7 @@ impl Brain {
             r.ready = true;
             r.context == Context::Intro
         };
+        self.sync_retained();
         if intro {
             let steps = vec![
                 Step::MusicDuck { duck_level: crate::plan::DUCK_LEVEL, fade_duration_ms: crate::plan::DUCK_FADE_MS },
@@ -318,8 +451,8 @@ impl Brain {
 
     pub(crate) fn dj_speech_cache_failed(&self, key: &str, error: &str) {
         tracing::error!(key, error, "DJ commentary could not be cached");
-        let mut d = self.inner.dj.lock().unwrap();
-        d.requests.retain(|_, r| r.cache_key.as_deref() != Some(key));
+        self.inner.dj.lock().unwrap().requests.retain(|_, r| r.cache_key.as_deref() != Some(key));
+        self.sync_retained();
     }
 
     pub(crate) fn dj_track_started(&self, title: &str) {

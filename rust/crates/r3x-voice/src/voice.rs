@@ -3,7 +3,10 @@
 //!
 //! - The turn id is minted here, at capture, and carried by every event of the turn.
 //! - `state.conversation.ptt_owner` is the single owner of push-to-talk (replaces the
-//!   "panel announces itself so the mouse yields" handshake). Another owner is refused.
+//!   "panel announces itself so the mouse yields" handshake). Another owner can neither start
+//!   nor stop the turn.
+//! - The global click source ([`Voice::click`]) waits a moment and stands down when another
+//!   client's start/stop arrived around the click: that click was on the panel's talk button.
 //! - A start is refused while R3X speaks (the mic would record R3X). Outside INTERACTIVE it
 //!   asks for INTERACTIVE first, then waits (bounded) for STT to connect; refused only if
 //!   engaging is refused or STT does not come up.
@@ -93,8 +96,12 @@ struct ActiveTurn {
     id: String,
     owner: String,
     remote: Arc<AtomicBool>,
-    pump: Option<JoinHandle<()>>,
+    /// The local mic pump and its stop signal (it flushes the held-back audio, then ends).
+    pump: Option<(JoinHandle<()>, tokio::sync::oneshot::Sender<()>)>,
 }
+
+/// How long [`Voice::ptt_stop`] waits for the mic pump to flush.
+const PUMP_FLUSH: Duration = Duration::from_millis(250);
 
 struct Inner {
     bus: Bus,
@@ -106,6 +113,8 @@ struct Inner {
     /// Remote PCM not yet a whole 20 ms chunk.
     remote_rest: Mutex<Vec<i16>>,
     events: broadcast::Sender<VoiceEvent>,
+    /// The last push-to-talk request (owner, when), for [`Voice::click`].
+    last_request: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 /// The voice service. Cheap to clone.
@@ -140,6 +149,7 @@ impl Voice {
                 turn: tokio::sync::Mutex::new(None),
                 remote_rest: Mutex::default(),
                 events: events.clone(),
+                last_request: Mutex::default(),
             }),
         };
         let mut t = stt.subscribe();
@@ -191,7 +201,12 @@ impl Voice {
         self.inner.turn.lock().await.as_ref().map(|t| (t.id.clone(), t.owner.clone()))
     }
 
+    fn requested(&self, owner: &str) {
+        *self.inner.last_request.lock().unwrap() = Some((owner.to_owned(), std::time::Instant::now()));
+    }
+
     pub async fn ptt_start(&self, owner: &str) -> Ack {
+        self.requested(owner);
         let inner = &self.inner;
         let mut turn = inner.turn.lock().await;
         if let Some(t) = turn.as_ref() {
@@ -220,7 +235,10 @@ impl Voice {
         let remote = Arc::new(AtomicBool::new(false));
         inner.remote_rest.lock().unwrap().clear();
         let pump = inner.mic.as_ref().and_then(|m| match m.open() {
-            Ok(mic) => Some(tokio::spawn(pump(mic, inner.stt.clone(), remote.clone(), inner.opts.remote_grace))),
+            Ok(mic) => {
+                let (stop, stopped) = tokio::sync::oneshot::channel();
+                Some((tokio::spawn(pump(mic, inner.stt.clone(), remote.clone(), inner.opts.remote_grace, stopped)), stop))
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "local mic did not open; waiting for remote audio");
                 None
@@ -237,6 +255,9 @@ impl Voice {
 
     /// Release push-to-talk. `owner: None` releases whoever holds it.
     pub async fn ptt_stop(&self, owner: Option<&str>) -> Ack {
+        if let Some(o) = owner {
+            self.requested(o);
+        }
         let inner = &self.inner;
         let t = {
             let mut turn = inner.turn.lock().await;
@@ -248,8 +269,13 @@ impl Voice {
                 Some(_) => turn.take().expect("checked"),
             }
         };
-        if let Some(p) = &t.pump {
-            p.abort(); // drops the mic stream and closes the device
+        if let Some((mut task, stop)) = t.pump {
+            // Flush what the pump still holds back (a short turn is all grace), then it ends
+            // and drops the mic stream, closing the device.
+            let _ = stop.send(());
+            if tokio::time::timeout(PUMP_FLUSH, &mut task).await.is_err() {
+                task.abort();
+            }
         }
         let rest = std::mem::take(&mut *inner.remote_rest.lock().unwrap());
         if !rest.is_empty() {
@@ -261,6 +287,21 @@ impl Voice {
         tracing::info!(turn = %t.id, %transcript, "turn transcript");
         let _ = inner.events.send(VoiceEvent::ListeningStopped { turn: t.id, transcript });
         Ack::Accepted
+    }
+
+    /// A global click at `pressed` (the "click anywhere" source): after `settle`, toggle -
+    /// unless another client asked to start/stop around the click, i.e. the click was on its
+    /// talk button (the panel sends on pointerdown, the same instant). `None` = stood down.
+    pub async fn click(&self, owner: &str, pressed: std::time::Instant, settle: Duration) -> Option<Ack> {
+        tokio::time::sleep(settle).await;
+        let other = self.inner.last_request.lock().unwrap().as_ref().is_some_and(|(o, at)| {
+            o != owner && at.saturating_duration_since(pressed) < settle && pressed.saturating_duration_since(*at) < settle
+        });
+        if other {
+            tracing::info!("click landed on another client's talk control; ignored");
+            return None;
+        }
+        Some(self.toggle(owner).await)
     }
 
     /// Toggle for a click-style trigger (the global mouse). Honours ownership.
@@ -290,14 +331,25 @@ impl Voice {
 }
 
 /// Forward local mic audio, held back for `grace` in case the turn turns out to be remote.
-async fn pump(mut mic: MicStream, stt: Stt, remote: Arc<AtomicBool>, grace: Duration) {
+/// On `stop`, what is held back and buffered goes out (unless the turn is remote), then it ends.
+async fn pump(mut mic: MicStream, stt: Stt, remote: Arc<AtomicBool>, grace: Duration, mut stop: tokio::sync::oneshot::Receiver<()>) {
     let until = Instant::now() + grace;
     let mut held: Vec<Vec<i16>> = Vec::new();
-    while let Some(chunk) = mic.chunks.recv().await {
+    loop {
+        let chunk = tokio::select! {
+            c = mic.chunks.recv() => c,
+            _ = &mut stop => {
+                while let Ok(c) = mic.chunks.try_recv() {
+                    held.push(c);
+                }
+                None
+            }
+        };
         if remote.load(Ordering::SeqCst) {
             tracing::debug!("remote audio took the turn; closing the local mic");
             return;
         }
+        let Some(chunk) = chunk else { break };
         if Instant::now() < until {
             held.push(chunk);
             continue;
@@ -306,6 +358,9 @@ async fn pump(mut mic: MicStream, stt: Stt, remote: Arc<AtomicBool>, grace: Dura
             stt.audio(c);
         }
         stt.audio(chunk);
+    }
+    for c in held {
+        stt.audio(c);
     }
 }
 
@@ -458,6 +513,7 @@ mod tests {
         assert!(voice.ptt_start("panel").await.is_accepted());
         assert!(!voice.ptt_start("mouse").await.is_accepted(), "one owner");
         assert!(!voice.toggle("mouse").await.is_accepted());
+        assert!(!voice.ptt_stop(Some("mouse")).await.is_accepted(), "another owner cannot stop the turn");
         assert_eq!(bus.get::<ConversationState>().ptt_owner.as_deref(), Some("panel"));
 
         voice.remote_audio("panel", &vec![5i16; 800]).await; // 50 ms from a browser
@@ -483,6 +539,44 @@ mod tests {
         assert!(!ack.is_accepted(), "mic refuses while R3X speaks: {ack:?}");
         voice.speaker().speaking().wait_for(|s| !*s).await.unwrap();
         assert!(voice.ptt_start("mouse").await.is_accepted(), "released on completion");
+    }
+
+    #[tokio::test]
+    async fn click_anywhere_stands_down_for_the_talk_button_and_short_turns_keep_their_audio() {
+        let (port, dg_bytes) = mock_deepgram().await;
+        let bus = Bus::default();
+        bus.set(Source::System, EngagementState { engagement: Engagement::Interactive });
+        let mut cfg = DeepgramConfig::new("k");
+        cfg.url = format!("ws://127.0.0.1:{port}/v1/listen");
+        let stt = Stt::spawn(cfg, interactive(&bus));
+        stt.connected().wait_for(|u| *u).await.unwrap();
+        let speaker = Speaker::spawn(Arc::new(Beep), Arc::new(NullSink::new(1.0)), 30.0);
+        let mic = Arc::new(FakeMic(Arc::new(AtomicBool::new(false))));
+        let voice = Voice::new(bus.clone(), stt, speaker, Some(mic), VoiceOptions::default());
+        let settle = Duration::from_millis(100);
+
+        // Pressing the panel's button is also a global click: the panel's start arrives with it.
+        let pressed = std::time::Instant::now();
+        let (click, start) = tokio::join!(voice.click("mouse", pressed, settle), voice.ptt_start("ui"));
+        assert_eq!((click, start), (None, Ack::Accepted), "the click stood down; the panel owns the turn");
+        let pressed = std::time::Instant::now();
+        let stop = async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            voice.ptt_stop(Some("ui")).await
+        };
+        let (click, stop) = tokio::join!(voice.click("mouse", pressed, settle), stop);
+        assert_eq!((click, stop), (None, Ack::Accepted), "and its stop click did not start a new turn");
+        assert!(voice.listening().await.is_none());
+        // That turn was shorter than the remote grace: its held-back audio still reached STT.
+        assert!(dg_bytes.load(Ordering::SeqCst) > 0, "held-back mic audio flushed on stop");
+
+        // A click anywhere else (later) toggles.
+        tokio::time::sleep(settle).await;
+        let click = voice.click("mouse", std::time::Instant::now(), settle).await;
+        assert_eq!(click, Some(Ack::Accepted));
+        assert_eq!(bus.get::<ConversationState>().ptt_owner.as_deref(), Some("mouse"));
+        assert_eq!(voice.click("mouse", std::time::Instant::now(), settle).await, Some(Ack::Accepted));
+        assert!(voice.listening().await.is_none());
     }
 
     /// A StageManager stand-in: engagement requests succeed unless `allow` is false.

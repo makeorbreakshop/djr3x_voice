@@ -29,10 +29,16 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
 pub const HELP: &str = "\
 r3x commands:
   engage | ambient | disengage | idle      engagement (e, a, d)
-  record | done                            push-to-talk on/off (rec; engages if needed)
+  record | done                            push-to-talk on/off (rec; engages if needed; only the
+                                           client that started a turn can stop it)
   say <text>                               a typed turn
   list music | play music [n|query] | stop music | next music     (l, p, s)
-  dj start | dj stop | dj next
+  music seek <s|m:ss|-s>                   jump in the track: to s (or m:ss), or s before the end (-30)
+  dj start | dj stop | dj next             dj next = skip now (the cached line if ready)
+  dj test                                  DJ on the current (else a random) track, jump to ~8 s before
+                                           its transition: a full cycle in ~40 s. Live: one Claude line
+                                           + one ElevenLabs line; later transitions crossfade until dj stop
+  dj transition now                        run the next transition immediately
   show list | show <id> [intensity] [speed] | show stop [id|show|gesture|all]
   freeze | unfreeze
   eye pattern <pattern> | eye status       idle engaged listening thinking speaking flash ...
@@ -123,12 +129,20 @@ pub fn parse(line: &str, emotes: &[String]) -> Parsed {
         },
         (Some("stop"), Some("music")) => intent(IntentCommand::Music(MusicCommand::Stop)),
         (Some("next"), Some("music" | "track")) => intent(IntentCommand::Music(MusicCommand::Next)),
+        (Some("music" | "seek"), _) if w(0) == Some("seek") || w(1) == Some("seek") => {
+            let arg = if w(0) == Some("seek") { w(1) } else { w(2) };
+            match arg.and_then(seek_arg) {
+                Some((seconds, from_end)) => intent(IntentCommand::Music(MusicCommand::Seek { seconds, from_end })),
+                None => Parsed::Error("usage: music seek <seconds|m:ss|-seconds from the end>".into()),
+            }
+        }
         (Some("install"), Some("music")) => Parsed::Reply("the library is MUSIC_DIR; add files there and restart".into()),
         (Some("dj"), Some("start" | "on")) if words.len() == 2 => intent(IntentCommand::Dj { active: true }),
         (Some("dj"), Some("stop" | "off")) if words.len() == 2 => intent(IntentCommand::Dj { active: false }),
-        (Some("dj"), Some("next")) => pass(),
+        (Some("dj"), Some("next" | "test")) if words.len() == 2 => pass(),
+        (Some("dj"), Some("transition")) if w(2) == Some("now") && words.len() == 3 => pass(),
         (Some("dj"), Some("queue")) => Parsed::Reply("dj queue is not available; DJ mode picks the next track itself".into()),
-        (Some("dj"), _) => Parsed::Error("usage: dj start|stop|next".into()),
+        (Some("dj"), _) => Parsed::Error("usage: dj start|stop|next|test | dj transition now".into()),
         (Some("freeze"), None) => stage(StageCommand::Freeze { on: true }),
         (Some("unfreeze"), None) => stage(StageCommand::Freeze { on: false }),
         (Some("show"), None | Some("list")) => Parsed::ShowList,
@@ -195,6 +209,16 @@ pub fn parse(line: &str, emotes: &[String]) -> Parsed {
         (Some("debug"), _) => Parsed::Error("usage: debug latency | debug level <level>".into()),
         _ => Parsed::Error(format!("unknown command '{line}' - `help` lists them")),
     }
+}
+
+/// `95`, `1:35` -> (95, false); `-30` -> (30, true).
+fn seek_arg(s: &str) -> Option<(f64, bool)> {
+    let (from_end, s) = s.strip_prefix('-').map_or((false, s), |r| (true, r));
+    let secs = match s.split_once(':') {
+        Some((m, sec)) => m.parse::<u32>().ok()? as f64 * 60.0 + sec.parse::<f64>().ok().filter(|v| (0.0..60.0).contains(v))?,
+        None => s.parse::<f64>().ok()?,
+    };
+    (secs.is_finite() && secs >= 0.0).then_some((secs, from_end))
 }
 
 /// What the console owner does with a line.
@@ -325,6 +349,11 @@ mod tests {
         assert_eq!(send("eye pattern Thinking"), Command::Perf(PerfCommand::Eyes { pattern: "thinking".into(), duration: None }));
         assert_eq!(send("eye pattern happy red"), Command::Perf(PerfCommand::Eyes { pattern: "happy".into(), duration: None }));
         assert_eq!(send("debug level WARNING"), Command::Telemetry(TelemetryCommand::SetLogLevel { level: "warn".into() }));
+        let seek = |seconds, from_end| Command::Intent(IntentCommand::Music(MusicCommand::Seek { seconds, from_end }));
+        assert_eq!(send("music seek 95"), seek(95.0, false));
+        assert_eq!(send("music seek 1:35"), seek(95.0, false));
+        assert_eq!(send("music seek -30"), seek(30.0, true));
+        assert_eq!(send("seek -0:40"), seek(40.0, true));
     }
 
     #[test]
@@ -342,10 +371,17 @@ mod tests {
         ] {
             assert_eq!(parse(line, &[]), p, "{line}");
         }
-        for (line, to) in [("debug latency", "debug latency"), ("dj next", "dj next"), ("r", "reset"), ("camera list", "camera list")] {
+        for (line, to) in [
+            ("debug latency", "debug latency"),
+            ("dj next", "dj next"),
+            ("dj test", "dj test"),
+            ("DJ Transition Now", "dj transition now"),
+            ("r", "reset"),
+            ("camera list", "camera list"),
+        ] {
             assert_eq!(parse(line, &[]), Parsed::Pass(to.into()), "{line}");
         }
-        for line in ["mode loud", "show wave loud", "eye", "frobnicate", "dj dance"] {
+        for line in ["mode loud", "show wave loud", "eye", "frobnicate", "dj dance", "dj transition", "music seek", "music seek soon", "music seek 1:75"] {
             assert!(matches!(parse(line, &[]), Parsed::Error(_)), "{line}");
         }
     }
@@ -355,7 +391,7 @@ mod tests {
     fn everything_help_lists_is_understood() {
         for line in [
             "engage", "ambient", "disengage", "idle", "record", "done", "say hi", "list music", "play music", "play music 2",
-            "stop music", "next music", "dj start", "dj stop", "dj next", "show list", "show wave", "show stop", "freeze",
+            "stop music", "next music", "music seek -30", "dj start", "dj stop", "dj next", "dj test", "dj transition now", "show list", "show wave", "show stop", "freeze",
             "unfreeze", "eye pattern thinking", "eye status", "emote yes", "mode show", "brain on", "autonomy off",
             "output face on", "layer breath off", "log debug", "debug level info", "status", "state", "debug latency",
             "reset", "camera status", "help", "quit",

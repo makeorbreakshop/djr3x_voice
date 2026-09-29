@@ -67,6 +67,12 @@ pub enum MusicCommand {
     },
     Stop,
     Next,
+    /// Jump in the current track: to `seconds`, or `seconds` before the end with `from_end`.
+    Seek {
+        seconds: f64,
+        #[serde(default)]
+        from_end: bool,
+    },
 }
 
 /// Performance layer a run occupies.
@@ -400,6 +406,12 @@ pub enum MusicEvent {
     Stop,
     /// Music owns `next` (plan 7b); DJ mode layers its own transition on top.
     Next,
+    /// Jump in the current track (see [`MusicCommand::Seek`]).
+    Seek {
+        seconds: f64,
+        #[serde(default)]
+        from_end: bool,
+    },
     /// Crossfade to `track` (library title) over `duration_s`; `CrossfadeComplete{id}` follows.
     Crossfade { track: String, duration_s: f64, id: String },
     /// Duck to `level` (0..1) over `fade_ms`.

@@ -41,6 +41,8 @@ struct Shared {
 pub struct MusicStream {
     shared: Arc<Shared>,
     rate: u32,
+    /// Where in the file this stream started (a seek).
+    start_s: f64,
     info: FileInfo,
     path: PathBuf,
 }
@@ -49,7 +51,12 @@ impl MusicStream {
     /// Open `path` for the mixer (`rate`, `channels`). Blocks until the first
     /// [`PREFILL_SECS`] are decoded: call it off the async runtime.
     pub fn open(path: &Path, rate: u32, channels: usize) -> Result<(MusicStream, MusicSource)> {
-        let mut dec = PlanarStream::open(path, rate, 2)?;
+        Self::open_at(path, rate, channels, 0.0)
+    }
+
+    /// [`Self::open`] from `start_s` into the file (a seek; `position_s` counts from there).
+    pub fn open_at(path: &Path, rate: u32, channels: usize, start_s: f64) -> Result<(MusicStream, MusicSource)> {
+        let (mut dec, start_s) = PlanarStream::open_at(path, rate, 2, start_s)?;
         let info = dec.info();
         let cap = ((rate as f64 * RING_SECS) as usize).max(4096) * channels;
         let (mut tx, rx) = rtrb::RingBuffer::<f32>::new(cap);
@@ -116,7 +123,7 @@ impl MusicStream {
                 return Err(anyhow!(e));
             }
         }
-        let stream = MusicStream { shared: shared.clone(), rate, info, path: path.to_owned() };
+        let stream = MusicStream { shared: shared.clone(), rate, start_s, info, path: path.to_owned() };
         Ok((stream, MusicSource { rx, shared, channels }))
     }
 
@@ -128,15 +135,15 @@ impl MusicStream {
         self.info
     }
 
-    /// Seconds of this file the mixer has played (paused time excluded).
+    /// Position in the file: the start plus what the mixer has played (paused time excluded).
     pub fn position_s(&self) -> f64 {
-        self.shared.played.load(Ordering::Relaxed) as f64 / self.rate as f64
+        self.start_s + self.shared.played.load(Ordering::Relaxed) as f64 / self.rate as f64
     }
 
     /// Duration: the container's, else what the decoder found once it reached the end.
     pub fn duration_s(&self) -> Option<f64> {
         self.info.duration_s.or_else(|| {
-            self.shared.eof.load(Ordering::Acquire).then(|| self.shared.decoded.load(Ordering::Relaxed) as f64 / self.rate as f64)
+            self.shared.eof.load(Ordering::Acquire).then(|| self.start_s + self.shared.decoded.load(Ordering::Relaxed) as f64 / self.rate as f64)
         })
     }
 
@@ -266,6 +273,16 @@ mod tests {
         assert!(sb.is_finished());
         assert!((sb.position_s() - 2.0).abs() < 0.01, "{}", sb.position_s());
         assert_eq!(sb.duration_s(), Some(2.0));
+
+        // Seek: open b 1.5 s in; the position counts from there and the file ends 0.5 s later.
+        let (sc, src) = MusicStream::open_at(&b, 8000, 2, 1.5).unwrap();
+        assert!((sc.position_s() - 1.5).abs() < 0.01, "{}", sc.position_s());
+        h.add(BusId::Music, Box::new(src));
+        for _ in 0..5 {
+            render(&mut m, 2000);
+        }
+        assert!(sc.is_finished());
+        assert!((sc.position_s() - 2.0).abs() < 0.01, "{}", sc.position_s());
         std::fs::remove_dir_all(dir).ok();
     }
 }

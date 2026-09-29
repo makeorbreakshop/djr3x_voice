@@ -10,7 +10,7 @@ use r3x_brain::dj::{commentary_prompt, Context};
 use r3x_brain::{Brain, BrainConfig, BrainDeps, Chooser};
 use r3x_bus::{Bus, Received};
 use r3x_contracts::{
-    Ack, Body, Command, ConversationEvent, DjState, Domain, Envelope, Event, IntentCommand, MessageClass, MusicEvent, MusicState, OpsEvent,
+    Ack, Body, Command, CommentaryStatus, ConversationEvent, DjState, Domain, Envelope, Event, IntentCommand, MessageClass, MusicEvent, MusicState, OpsEvent,
     Source, StageState, Track,
 };
 use r3x_intent::{IntentRouter, JevClient, RouterConfig};
@@ -38,8 +38,11 @@ fn fixtures() -> std::path::PathBuf {
     dir
 }
 
-#[tokio::test(start_paused = true)]
-async fn dj_start_transition_fallback_and_stop() {
+type Rec = Arc<Mutex<Vec<Arc<Envelope>>>>;
+
+/// A brain on stubs: speech cache (4 s lines), music engine (tracks of 200 s, ending-soon
+/// mark at 170 s; seeks recorded), performer.
+fn setup() -> (Bus, Rec, Brain) {
     let bus = Bus::default();
     bus.update(Source::System, |s: &mut StageState| {
         s.brain = true;
@@ -83,7 +86,10 @@ async fn dj_start_transition_fallback_and_stop() {
                 b.publish(Source::System, None, Event::Music(MusicEvent::TrackStarted { track: t(title) }));
             };
             match &e.body {
-                Body::Event(Event::Music(MusicEvent::Play { query: Some(q) })) => started(q),
+                Body::Event(Event::Music(MusicEvent::Play { query: Some(q) })) => {
+                    b.update(Source::System, |m: &mut MusicState| m.ending_at_s = Some(170.0));
+                    started(q)
+                }
                 Body::Event(Event::Music(MusicEvent::Crossfade { track, id, .. })) => {
                     started(track);
                     b.publish(Source::System, None, Event::Music(MusicEvent::CrossfadeComplete { id: id.clone() }));
@@ -108,17 +114,50 @@ async fn dj_start_transition_fallback_and_stop() {
         ptt: None,
         chooser: first,
     };
-    let _brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
-    let console = |line: &str| Command::Intent(IntentCommand::Console { line: line.into() });
+    let brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+    (bus, rec, brain)
+}
+
+fn console(line: &str) -> Command {
+    Command::Intent(IntentCommand::Console { line: line.into() })
+}
+
+/// The music requests and cached lines, in order.
+fn music_log(rec: &Rec) -> Vec<String> {
+    rec.lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match &e.body {
+            Body::Event(Event::Music(m)) => match m {
+                MusicEvent::Play { query } => Some(format!("play {}", query.clone().unwrap_or_default())),
+                MusicEvent::Crossfade { track, .. } => Some(format!("xfade {track}")),
+                MusicEvent::Duck { .. } => Some("duck".into()),
+                MusicEvent::Unduck { .. } => Some("unduck".into()),
+                MusicEvent::Stop => Some("stop".into()),
+                MusicEvent::Seek { seconds, from_end } => Some(format!("seek {seconds}{}", if *from_end { " from end" } else { "" })),
+                _ => None,
+            },
+            Body::Event(Event::Conversation(ConversationEvent::PlayCached { .. })) => Some("say cached".into()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn dj_start_transition_fallback_and_stop() {
+    let (bus, rec, _brain) = setup();
 
     assert!(bus.command(Source::Cli, None, console("dj start")).await.is_accepted());
     tokio::time::sleep(Duration::from_secs(8)).await;
-    assert_eq!(bus.get::<DjState>(), DjState { active: true, current: Some(t("A")), next: Some(t("B")) });
+    let dj = bus.get::<DjState>();
+    assert_eq!((dj.active, dj.current, dj.next), (true, Some(t("A")), Some(t("B"))));
+    assert_eq!((dj.commentary, dj.step), (CommentaryStatus::Ready, None), "the A -> B line is cached ahead");
 
     bus.publish(Source::System, None, Event::Music(MusicEvent::TrackEndingSoon { remaining_s: 30.0 }));
     tokio::time::sleep(Duration::from_secs(12)).await;
     // A and B were played recently, so the lookahead after the transition picks C
-    assert_eq!(bus.get::<DjState>(), DjState { active: true, current: Some(t("B")), next: Some(t("C")) });
+    let dj = bus.get::<DjState>();
+    assert_eq!((dj.active, dj.current, dj.next), (true, Some(t("B")), Some(t("C"))));
 
     // B -> C commentary has no fixture: urgent caching fails, 3 s grace, crossfade only
     bus.publish(Source::System, None, Event::Music(MusicEvent::TrackEndingSoon { remaining_s: 30.0 }));
@@ -129,22 +168,8 @@ async fn dj_start_transition_fallback_and_stop() {
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(!bus.get::<DjState>().active);
 
+    let music = music_log(&rec);
     let log = rec.lock().unwrap();
-    let music: Vec<String> = log
-        .iter()
-        .filter_map(|e| match &e.body {
-            Body::Event(Event::Music(m)) => match m {
-                MusicEvent::Play { query } => Some(format!("play {}", query.clone().unwrap_or_default())),
-                MusicEvent::Crossfade { track, .. } => Some(format!("xfade {track}")),
-                MusicEvent::Duck { .. } => Some("duck".into()),
-                MusicEvent::Unduck { .. } => Some("unduck".into()),
-                MusicEvent::Stop => Some("stop".into()),
-                _ => None,
-            },
-            Body::Event(Event::Conversation(ConversationEvent::PlayCached { .. })) => Some("say cached".into()),
-            _ => None,
-        })
-        .collect();
     assert_eq!(
         music,
         ["play A", "duck", "say cached", "unduck", "duck", "say cached", "xfade B", "unduck", "xfade C", "stop"],
@@ -160,4 +185,33 @@ async fn dj_start_transition_fallback_and_stop() {
     assert!(plans[0].0.starts_with("dj-intro-") && plans[0].1 == "show");
     assert!(log.iter().any(|e| matches!(&e.body, Body::Command(Command::Perf(r3x_contracts::PerfCommand::Play { id, .. })) if id == "dj_intro")));
     assert!(log.iter().any(|e| matches!(&e.body, Body::Event(Event::Ops(OpsEvent::Console { message, .. })) if message == "DJ mode deactivated")));
+}
+
+/// `dj test`: no intro (no dj_intro, no intro line), a seek to 8 s before the ending-soon mark,
+/// one transition line cached ahead; `dj transition now` runs it with the plan step in
+/// `state.dj`; after it the line budget is spent, so the next transition would be a crossfade.
+#[tokio::test(start_paused = true)]
+async fn dj_test_seeks_before_the_mark_and_transition_now_runs_one_line() {
+    let (bus, rec, _brain) = setup();
+    assert!(bus.command(Source::Cli, None, console("dj transition now")).await.is_accepted());
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert!(music_log(&rec).is_empty(), "transition now outside DJ mode does nothing");
+
+    assert!(bus.command(Source::Cli, None, console("dj test")).await.is_accepted());
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(music_log(&rec), ["play A", "seek 162"]);
+    let dj = bus.get::<DjState>();
+    assert_eq!((dj.current, dj.next, dj.commentary), (Some(t("A")), Some(t("B")), CommentaryStatus::Ready));
+
+    assert!(bus.command(Source::Cli, None, console("dj transition now")).await.is_accepted());
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let step = bus.get::<DjState>().step.expect("a transition step while the plan runs");
+    assert!(step.ends_with("/7)"), "{step}");
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(music_log(&rec), ["play A", "seek 162", "duck", "say cached", "xfade B", "unduck"]);
+    let dj = bus.get::<DjState>();
+    assert_eq!((dj.current, dj.next, dj.commentary, dj.step), (Some(t("B")), Some(t("C")), CommentaryStatus::None, None));
+    let lines = rec.lock().unwrap().iter().filter(|e| matches!(e.body, Body::Event(Event::Conversation(ConversationEvent::CacheSpeech { .. })))).count();
+    assert_eq!(lines, 1, "one paid line for the whole test");
+    assert!(!rec.lock().unwrap().iter().any(|e| matches!(&e.body, Body::Command(Command::Perf(r3x_contracts::PerfCommand::Play { id, .. })) if id == "dj_intro")));
 }

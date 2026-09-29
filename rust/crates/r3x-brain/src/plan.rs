@@ -158,6 +158,8 @@ struct Inner {
     /// cache_key -> finished flag of its latest playback.
     cached: Mutex<HashMap<String, watch::Receiver<bool>>>,
     music_playing: watch::Receiver<bool>,
+    /// plan id -> the step it is on, e.g. `music_duck (1/7)`.
+    steps: watch::Sender<HashMap<String, String>>,
 }
 
 /// Cheap to clone.
@@ -169,7 +171,13 @@ impl Executor {
     pub fn new(bus: Bus, kinds: HashMap<String, Kind>) -> Self {
         let music_playing = watch_music(&bus);
         let paused = LAYERS.iter().map(|(l, _)| (*l, watch::Sender::new(false))).collect();
-        Self(Arc::new(Inner { bus, kinds, running: Mutex::default(), paused, cached: Mutex::default(), music_playing }))
+        let steps = watch::Sender::new(HashMap::new());
+        Self(Arc::new(Inner { bus, kinds, running: Mutex::default(), paused, cached: Mutex::default(), music_playing, steps }))
+    }
+
+    /// The step each running plan is on (plan id -> `step_type (i/n)`).
+    pub fn steps(&self) -> watch::Receiver<HashMap<String, String>> {
+        self.0.steps.subscribe()
     }
 
     pub fn music_playing(&self) -> bool {
@@ -253,6 +261,9 @@ impl Executor {
     }
 
     fn ended(&self, plan_id: &str, layer: &str, status: &str) {
+        if status != "paused" {
+            self.0.steps.send_if_modified(|m| m.remove(plan_id).is_some());
+        }
         self.0.bus.publish(
             Source::Timeline,
             None,
@@ -261,9 +272,14 @@ impl Executor {
     }
 
     async fn run(&self, plan: &Plan, layer: &'static str) -> &'static str {
-        for step in &plan.steps {
+        for (i, step) in plan.steps.iter().enumerate() {
             let mut paused = self.0.paused[layer].subscribe();
             let _ = paused.wait_for(|p| !*p).await;
+            let kind = serde_json::to_value(step).ok().and_then(|v| v["step_type"].as_str().map(str::to_owned)).unwrap_or_default();
+            let label = format!("{kind} ({}/{})", i + 1, plan.steps.len());
+            self.0.steps.send_modify(|m| {
+                m.insert(plan.plan_id.clone(), label);
+            });
             let (ok, detail) = self.step(step, &plan.plan_id).await;
             if !ok {
                 tracing::warn!(plan = plan.plan_id, ?step, %detail, "plan step failed");

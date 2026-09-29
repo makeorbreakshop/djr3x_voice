@@ -68,11 +68,24 @@ pub struct Status {
     pub duck_level: f32,
     pub dj_active: bool,
     pub crossfading: bool,
+    /// Where in `track` `EndingSoon` fires (none: shorter than the threshold).
+    pub ending_at_s: Option<f64>,
 }
 
 impl Default for Status {
     fn default() -> Self {
-        Self { playing: false, paused: false, track: None, position_s: 0.0, at: Instant::now(), ducked: false, duck_level: 1.0, dj_active: false, crossfading: false }
+        Self {
+            playing: false,
+            paused: false,
+            track: None,
+            position_s: 0.0,
+            at: Instant::now(),
+            ducked: false,
+            duck_level: 1.0,
+            dj_active: false,
+            crossfading: false,
+            ending_at_s: None,
+        }
     }
 }
 
@@ -88,6 +101,7 @@ enum Cmd {
     Stop,
     Pause(bool),
     Next { source: String },
+    Seek { seconds: f64, from_end: bool },
     Crossfade { track: String, secs: f64, id: String, source: String },
     Duck(Option<f32>),
     Unduck,
@@ -175,6 +189,12 @@ impl Engine {
         self.ask(Cmd::Next { source: source.into() }).await
     }
 
+    /// Jump to `seconds` into the current track, or `seconds` before its end (`from_end`).
+    /// Landing past the ending-soon mark fires `EndingSoon` on the next tick.
+    pub async fn seek(&self, seconds: f64, from_end: bool) -> Reply {
+        self.ask(Cmd::Seek { seconds, from_end }).await
+    }
+
     /// Crossfade to `track` over `secs`; completion arrives as `CrossfadeComplete{id}`.
     pub async fn crossfade(&self, track: &str, secs: f64, id: &str, source: &str) -> Reply {
         self.ask(Cmd::Crossfade { track: track.into(), secs, id: id.into(), source: source.into() }).await
@@ -208,6 +228,11 @@ impl Engine {
     pub fn set_picker(&self, p: Picker) {
         self.tell(Cmd::SetPicker(p));
     }
+}
+
+fn mmss(s: f64) -> String {
+    let s = s.max(0.0).round() as u64;
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 fn seed() -> u64 {
@@ -271,6 +296,8 @@ impl Actor {
             Some(c) => (Some(c.track.clone()), c.stream.position_s(), c.stream.is_paused()),
             None => (None, 0.0, false),
         };
+        let threshold = self.cfg.ending_threshold_s;
+        let ending_at_s = self.current.as_ref().and_then(|c| c.stream.duration_s()).filter(|d| *d > threshold).map(|d| d - threshold);
         let st = Status {
             playing: track.is_some() && !paused,
             paused,
@@ -281,13 +308,15 @@ impl Actor {
             duck_level: self.ducked.unwrap_or(1.0),
             dj_active: self.dj,
             crossfading: self.crossfading.is_some(),
+            ending_at_s,
         };
         self.status.send_if_modified(|s| {
             // Position moves every tick; only republish when something else changed or the
             // anchor drifted (the bus state is extrapolated between updates).
             let drift = (s.position_s + st.at.duration_since(s.at).as_secs_f64() * if s.playing { 1.0 } else { 0.0 } - st.position_s).abs();
             let changed = s.playing != st.playing || s.paused != st.paused || s.track != st.track || s.ducked != st.ducked
-                || s.duck_level != st.duck_level || s.dj_active != st.dj_active || s.crossfading != st.crossfading || drift > 0.05;
+                || s.duck_level != st.duck_level || s.dj_active != st.dj_active || s.crossfading != st.crossfading
+                || s.ending_at_s != st.ending_at_s || drift > 0.05;
             if changed {
                 *s = st.clone();
             }
@@ -330,6 +359,7 @@ impl Actor {
                 None => Err("No music is currently playing".into()),
             },
             Cmd::Next { source } => self.next(&source).await,
+            Cmd::Seek { seconds, from_end } => self.seek(seconds, from_end).await,
             Cmd::Crossfade { track, secs, id, source } => self.crossfade(&track, secs, id, &source).await,
             Cmd::Duck(level) => {
                 let level = level.unwrap_or(self.cfg.duck_level).clamp(0.0, 1.0);
@@ -518,9 +548,36 @@ impl Actor {
         self.play_key(&key, source).await
     }
 
+    async fn seek(&mut self, seconds: f64, from_end: bool) -> Reply {
+        if self.crossfading.is_some() {
+            return Err("A crossfade is running; seek after it".into());
+        }
+        let Some(c) = &self.current else { return Err("No music is currently playing".into()) };
+        let duration = c.stream.duration_s();
+        let target = match (from_end, duration) {
+            (true, Some(d)) => d - seconds.abs(),
+            (true, None) => return Err(format!("{}: length unknown, cannot seek from the end", c.track.title)),
+            (false, _) => seconds,
+        };
+        // Never past the end: at least a moment of the track still plays.
+        let target = target.clamp(0.0, duration.map_or(f64::MAX, |d| (d - 1.0).max(0.0)));
+        let (track, paused) = (c.track.clone(), c.stream.is_paused());
+        let (stream, src) = self.open_at(&track, target).await?;
+        stream.set_paused(paused);
+        self.mixer.crossfade(BusId::Music, Box::new(src), 0.03); // click-free
+        tracing::info!(track = %track.key, to_s = target, "seek");
+        let reply = format!("{} at {}", track.title, mmss(target));
+        self.current = Some(Current { track, stream, ending_sent: false });
+        Ok(reply)
+    }
+
     async fn open(&self, t: &LibTrack) -> Result<(MusicStream, r3x_audio::music::MusicSource), String> {
+        self.open_at(t, 0.0).await
+    }
+
+    async fn open_at(&self, t: &LibTrack, start_s: f64) -> Result<(MusicStream, r3x_audio::music::MusicSource), String> {
         let (path, rate, ch) = (t.path.clone(), self.mixer.sample_rate(), self.mixer.channels());
-        tokio::task::spawn_blocking(move || MusicStream::open(&path, rate, ch))
+        tokio::task::spawn_blocking(move || MusicStream::open_at(&path, rate, ch, start_s))
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| format!("Failed to play track: {} ({e})", t.key))

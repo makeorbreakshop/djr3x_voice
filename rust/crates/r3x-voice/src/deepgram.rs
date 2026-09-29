@@ -6,7 +6,8 @@
 //!   is down ([`Stt::begin`] errors);
 //! - audio goes out in 20 ms chunks as it is captured;
 //! - stop sends `Finalize` and waits (bounded) for the result flagged `from_finalize`,
-//!   instead of a fixed 100 ms sleep.
+//!   instead of a fixed 100 ms sleep. A turn that sent no audio has nothing to finalize
+//!   (Deepgram never answers it), so it ends at once with an empty transcript.
 //!
 //! Results that arrive outside a turn are dropped, so a late final can never leak into the
 //! next turn.
@@ -142,6 +143,8 @@ impl Stt {
 struct Turn {
     id: String,
     finals: Vec<String>,
+    /// Any audio sent in this turn (else there is nothing to `Finalize`).
+    audio: bool,
     finish: Option<(oneshot::Sender<String>, Instant)>,
 }
 
@@ -266,16 +269,22 @@ async fn session(
                     if let Some(old) = turn.take() {
                         old.done();
                     }
-                    *turn = Some(Turn { id, finals: Vec::new(), finish: None });
+                    *turn = Some(Turn { id, finals: Vec::new(), audio: false, finish: None });
                     let _ = reply.send(Ok(()));
                 }
                 Some(Cmd::Audio(chunk)) => {
-                    if turn.as_ref().is_some_and(|t| t.finish.is_none()) {
+                    if let Some(t) = turn.as_mut().filter(|t| t.finish.is_none()) {
+                        t.audio = true;
                         let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
                         tx.send(Message::Binary(bytes.into())).await?;
                     }
                 }
                 Some(Cmd::Finish(reply)) => match turn.as_mut() {
+                    Some(t) if !t.audio => {
+                        tracing::info!(turn = %t.id, "deepgram: no audio in this turn; nothing to finalize");
+                        t.finish = Some((reply, Instant::now()));
+                        if let Some(t) = turn.take() { t.done(); }
+                    }
                     Some(t) => {
                         t.finish = Some((reply, Instant::now() + cfg.finalize_timeout));
                         tx.send(Message::Text(json!({"type": "Finalize"}).to_string().into())).await?;
@@ -438,6 +447,34 @@ mod tests {
         assert_eq!(server.await.unwrap(), 1280);
     }
 
+    /// A turn stopped before any audio went out (a click-click) ends at once: Deepgram never
+    /// answers a `Finalize` with nothing buffered, which used to cost the whole bound.
+    #[tokio::test]
+    async fn a_turn_without_audio_ends_at_once_without_finalize() {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (s, _) = l.accept().await.unwrap();
+            let mut ws = accept_async(s).await.unwrap();
+            let mut finalizes = 0;
+            while let Some(Ok(m)) = ws.next().await {
+                if matches!(m, Message::Text(ref t) if t.contains("Finalize")) {
+                    finalizes += 1;
+                }
+            }
+            finalizes
+        });
+        let (_e, engaged) = watch::channel(true);
+        let stt = Stt::spawn(cfg(port), engaged);
+        stt.connected().wait_for(|u| *u).await.unwrap();
+        stt.begin("t").await.unwrap();
+        let t0 = std::time::Instant::now();
+        assert_eq!(stt.finish().await, "");
+        assert!(t0.elapsed() < Duration::from_millis(100), "no bounded wait");
+        drop(stt);
+        assert_eq!(server.await.unwrap(), 0);
+    }
+
     #[tokio::test]
     async fn reconnects_and_refuses_only_while_down() {
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -469,6 +506,7 @@ mod tests {
         go_tx.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(3), up.wait_for(|u| *u)).await.unwrap().unwrap();
         stt.begin("t2").await.unwrap();
+        stt.audio(vec![0; 320]);
         let t0 = std::time::Instant::now();
         assert_eq!(stt.finish().await, "");
         assert!(t0.elapsed() >= Duration::from_millis(290), "bounded wait");
@@ -480,7 +518,7 @@ mod tests {
         let (tx, _) = broadcast::channel(8);
         let mut turn = None;
         assert!(!on_message(&results("stale", true, false).into_text().unwrap(), &mut turn, &tx));
-        turn = Some(Turn { id: "a".into(), finals: vec![], finish: None });
+        turn = Some(Turn { id: "a".into(), finals: vec![], audio: false, finish: None });
         on_message(&results("hi", true, false).into_text().unwrap(), &mut turn, &tx);
         assert_eq!(turn.unwrap().text(), "hi");
     }

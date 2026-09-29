@@ -307,6 +307,32 @@
         }
       ]
     },
+    "CommentaryStatus": {
+      "description": "Where the DJ's next transition line is.",
+      "oneOf": [
+        {
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "writing",
+          "description": "Claude is writing it.",
+          "type": "string"
+        },
+        {
+          "const": "synthesizing",
+          "description": "Written; the speech cache is synthesising it.",
+          "type": "string"
+        },
+        {
+          "const": "ready",
+          "description": "Cached audio, ready to play.",
+          "type": "string"
+        }
+      ]
+    },
     "ConversationEvent": {
       "description": "Turn lifecycle. The turn id rides on the envelope's `conversation_id`.",
       "oneOf": [
@@ -744,6 +770,11 @@
         "active": {
           "type": "boolean"
         },
+        "commentary": {
+          "$ref": "#/$defs/CommentaryStatus",
+          "default": "none",
+          "description": "The transition line into `next`."
+        },
         "current": {
           "anyOf": [
             {
@@ -762,6 +793,14 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "step": {
+          "default": null,
+          "description": "The running transition plan's step, e.g. `music_crossfade (5/7)`; none between them.",
+          "type": [
+            "string",
+            "null"
           ]
         }
       },
@@ -1400,6 +1439,28 @@
             "action"
           ],
           "type": "object"
+        },
+        {
+          "description": "Jump in the current track: to `seconds`, or `seconds` before the end with `from_end`.",
+          "properties": {
+            "action": {
+              "const": "seek",
+              "type": "string"
+            },
+            "from_end": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seconds": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "action",
+            "seconds"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -1524,6 +1585,28 @@
           "type": "object"
         },
         {
+          "description": "Jump in the current track (see [`MusicCommand::Seek`]).",
+          "properties": {
+            "from_end": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seconds": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "seek",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seconds"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Crossfade to `track` (library title) over `duration_s`; `CrossfadeComplete{id}` follows.",
           "properties": {
             "duration_s": {
@@ -1611,6 +1694,15 @@
       "properties": {
         "ducked": {
           "type": "boolean"
+        },
+        "ending_at_s": {
+          "default": null,
+          "description": "Position (s) in `track` where `music.track_ending_soon` fires (the DJ's transition\npoint); none for a track shorter than the threshold.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "library": {
           "description": "Track titles in the local library, sorted.",

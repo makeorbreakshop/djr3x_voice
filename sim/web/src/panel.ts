@@ -14,6 +14,7 @@ import type { Engagement } from './generated/Engagement';
 import type { OperatingMode } from './generated/OperatingMode';
 import { accessToken, LiveLink, LogRecord } from './link';
 import { mountCalibrate } from './calibrate';
+import * as Ptt from './ptt';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -53,11 +54,11 @@ export class ControlPanel {
   private mode = 'IDLE';
   private emotes: string[] = [];
   private phase: Phase = 'offline';
-  private listening = false;
-  private pttDownAt = 0;
-  private pttToggled = false;
-  private pttBusy = false;
-  private spaceDown = false;
+  private ptt: Ptt.PttState = Ptt.initial();
+  /** Where `music.position_s` was, by the page clock (for the DJ countdown). */
+  private musicAnchor = { pos: 0, at: 0, t: -1 };
+  /** Element that shows the next console reply (a DJ test button's outcome). */
+  private consoleTo: string | null = null;
 
   private turns = new Map<string, Turn>();
   private lastTurn: Turn | null = null;
@@ -95,6 +96,7 @@ export class ControlPanel {
     this.bindLogs();
     this.renderEyes();
     this.setPhase('offline');
+    this.pttInput({ kind: 'link', connected: false });
     if (!new URLSearchParams(location.search).has('offline')) this.gw.start();
   }
 
@@ -115,9 +117,8 @@ export class ControlPanel {
     const pill = $('st-gw');
     pill.textContent = on ? 'R3X' : 'NO R3X';
     pill.classList.toggle('on', on);
+    this.pttInput({ kind: 'link', connected: on });
     if (!on) {
-      this.listening = false;
-      this.pttToggled = false;
       this.setPhase('offline');
       this.addLog({ t: Date.now() / 1000, level: 'WARNING', name: 'panel', msg: 'Lost connection to the r3x gateway - retrying every 2 s' });
     }
@@ -132,18 +133,14 @@ export class ControlPanel {
   private render(s: RetainedState) {
     this.setMode(s.engagement.engagement);
     this.setStage(s);
-    const listening = s.conversation.phase === 'listening';
-    if (listening !== this.listening) {
-      this.listening = listening;
-      if (!listening) this.pttToggled = false;
-    }
-    if (this.phase !== 'engaging' || listening) this.setPhase(s.conversation.phase);
+    this.pttInput({ kind: 'server', phase: s.conversation.phase, owner: s.conversation.ptt_owner ?? null });
+    this.setPhase(this.ptt.pending === 'start' && s.conversation.phase !== 'listening' ? 'engaging' : s.conversation.phase);
     if (s.music.library.join('\n') !== this.library.join('\n')) {
       this.library = s.music.library;
       this.renderLibrary();
     }
     this.setNowPlaying(s.music.playing ? s.music.track?.title || 'Unknown track' : null);
-    this.setDj(s.dj.active);
+    this.setDj(s);
     this.renderServices(s);
     this.renderDrive(s);
   }
@@ -153,10 +150,20 @@ export class ControlPanel {
       // A turn that ends without speech (TTS off or failed) must not stay on "thinking".
       clearTimeout(this.thinkingTimer);
       this.thinkingTimer = window.setTimeout(() => {
-        if (this.phase === 'thinking') this.setPhase('idle');
+        if (this.phase !== 'thinking') return;
+        this.setPhase('idle');
+        this.pttInput({ kind: 'server', phase: 'idle', owner: this.ptt.owner });
       }, 6000);
     }
-    if (e.domain === 'ops' && e.type === 'console') this.addCliOut(e.message, e.is_error);
+    if (e.domain === 'ops' && e.type === 'console') {
+      this.addCliOut(e.message, e.is_error);
+      if (this.consoleTo) {
+        const el = $(this.consoleTo);
+        el.textContent = e.message;
+        el.classList.toggle('err', e.is_error);
+        this.consoleTo = null;
+      }
+    }
     this.trackConversation(e, m);
     if (!NOISY_TOPICS.has(topicOf(e))) this.addEventRow(e, m);
   }
@@ -177,6 +184,7 @@ export class ControlPanel {
     const brainOff = !s.stage.brain;
     $('brain-off').hidden = !brainOff || !this.connected;
     for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
+    if (this.ptt.enabled === brainOff) this.pttInput({ kind: 'enabled', enabled: !brainOff });
   }
 
   private setPhase(p: Phase) {
@@ -189,16 +197,28 @@ export class ControlPanel {
     const badge = $('state-badge');
     badge.dataset.state = p;
     badge.textContent = labels[p];
-    const ptt = $('ptt');
-    ptt.dataset.state = p;
-    const label = ptt.querySelector('.ptt-label')!;
-    label.textContent =
-      p === 'listening' ? (this.pttToggled ? 'Listening… click to send' : 'Listening… release to send')
-      : p === 'engaging' ? 'Starting the mic…'
-      : p === 'thinking' ? 'Thinking…'
-      : p === 'speaking' ? 'R3X is talking'
-      : p === 'offline' ? 'R3X offline'
-      : 'Hold to talk';
+  }
+
+  /** Feed the push-to-talk machine; send what it asks for. True when a key event was ours. */
+  private pttInput(i: Ptt.PttInput): boolean {
+    const r = Ptt.step(this.ptt, i);
+    this.ptt = r.state;
+    if (r.send) void this.pttSend(r.send);
+    const v = Ptt.view(this.ptt);
+    const b = $('ptt');
+    b.dataset.state = v.look;
+    b.querySelector('.ptt-label')!.textContent = v.label;
+    b.querySelector('.ptt-hint')!.textContent = v.hint;
+    return !!r.handled;
+  }
+
+  private async pttSend(type: Ptt.PttSend) {
+    if (type === 'ptt_start') this.setPhase('engaging');
+    const ack = await this.gw.send({ class: 'intent', type });
+    // A stop's ack can land after "(nothing heard)": only a start clears the message.
+    if (!ok(ack) || type === 'ptt_start') this.flash(ack);
+    this.pttInput({ kind: 'ack', of: type === 'ptt_start' ? 'start' : 'stop', ok: ok(ack) });
+    if (this.phase === 'engaging' && this.gw.state) this.setPhase(this.gw.state.conversation.phase);
   }
 
   private setNowPlaying(track: string | null) {
@@ -206,10 +226,39 @@ export class ControlPanel {
     $('now-state').classList.toggle('on', Boolean(track));
   }
 
-  private setDj(on: boolean) {
+  private setDj(s: RetainedState) {
+    const { dj, music } = s;
     const el = $('dj-state');
-    el.textContent = on ? 'on' : 'off';
-    el.classList.toggle('on', on);
+    el.textContent = dj.active ? 'on' : 'off';
+    el.classList.toggle('on', dj.active);
+    // A new anchor only when the engine published one (other domains re-render with the old).
+    if (music.position_t !== this.musicAnchor.t) this.musicAnchor = { pos: music.position_s, at: performance.now(), t: music.position_t };
+    $('dj-info').hidden = !dj.active;
+    $('dj-now').textContent = dj.current?.title ?? '-';
+    $('dj-next').textContent = dj.next?.title ?? 'not picked yet';
+    const lines: Record<string, string> = { none: 'none', writing: 'Claude is writing it…', synthesizing: 'synthesising…', ready: 'cached, ready' };
+    $('dj-line').textContent = lines[dj.commentary] ?? dj.commentary;
+    $('dj-line').classList.toggle('on', dj.commentary === 'ready');
+    this.renderDjCountdown();
+  }
+
+  /** Time until the ending-soon mark (the transition), or the running plan step. */
+  private renderDjCountdown() {
+    const s = this.gw.state;
+    if (!s?.dj.active) return;
+    const el = $('dj-when');
+    if (s.dj.step) {
+      el.textContent = `running: ${s.dj.step.replace(/_/g, ' ')}`;
+      return;
+    }
+    const m = s.music;
+    if (!m.playing || m.ending_at_s == null) {
+      el.textContent = m.playing ? 'track too short for a transition mark' : 'nothing playing';
+      return;
+    }
+    const pos = this.musicAnchor.pos + (m.paused ? 0 : (performance.now() - this.musicAnchor.at) / 1000);
+    const left = Math.round(m.ending_at_s - pos);
+    el.textContent = left > 0 ? `in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'now';
   }
 
   // ------------------------------------------------------------------ tabs
@@ -250,28 +299,28 @@ export class ControlPanel {
 
   private bindTalk() {
     const ptt = $<HTMLButtonElement>('ptt');
+    // On pointerdown, not click: the same instant as the OS mouse press, so the runtime's
+    // click-anywhere source (./r3x --click-anywhere) sees the panel's request and stands down.
     ptt.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      ptt.setPointerCapture(e.pointerId);
-      this.pttPress();
+      if (e.button === 0) this.pttInput({ kind: 'click' });
     });
-    ptt.addEventListener('pointerup', () => this.pttRelease());
-    ptt.addEventListener('pointercancel', () => this.pttRelease());
+    // Keyboard activation (Enter on the focused button); pointer clicks were handled above.
+    ptt.addEventListener('click', (e) => {
+      if (e.detail === 0) this.pttInput({ kind: 'click' });
+    });
     ptt.addEventListener('contextmenu', (e) => e.preventDefault());
 
+    // Space anywhere (except while typing) is hold-to-talk.
     addEventListener('keydown', (e) => {
-      if (e.code !== 'Space' || e.repeat || this.typing(e)) return;
-      e.preventDefault();
-      this.spaceDown = true;
-      this.pttPress();
+      if (e.code !== 'Space') return;
+      if (this.pttInput({ kind: 'space_down', repeat: e.repeat, typing: this.typing(e) })) e.preventDefault();
     });
     addEventListener('keyup', (e) => {
-      if (e.code !== 'Space' || !this.spaceDown) return;
-      e.preventDefault();
-      this.spaceDown = false;
-      this.pttDownAt = 0; // Space is always hold-to-talk
-      void this.pttStop();
+      if (e.code !== 'Space' || this.typing(e)) return;
+      e.preventDefault(); // a focused button must not also "click" on Space
+      this.pttInput({ kind: 'space_up' });
     });
+    window.setInterval(() => this.renderDjCountdown(), 1000);
 
     $<HTMLFormElement>('say-form').onsubmit = async (e) => {
       e.preventDefault();
@@ -294,61 +343,19 @@ export class ControlPanel {
     return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
   }
 
-  /** Press: start, or - if a click already toggled the mic on - stop and send. */
-  private pttPress() {
-    if (!this.connected) return;
-    if (this.listening && this.pttToggled) {
-      this.pttToggled = false;
-      this.pttDownAt = 0;
-      void this.pttStop();
-      return;
-    }
-    this.pttDownAt = performance.now();
-    void this.pttStart();
-  }
-
-  /** Release after a hold sends the turn; a quick click leaves the mic on (toggle). */
-  private pttRelease() {
-    if (!this.pttDownAt) return;
-    const held = performance.now() - this.pttDownAt;
-    this.pttDownAt = 0;
-    if (held < 300) {
-      this.pttToggled = true;
-      if (this.listening) this.setPhase('listening');
-      return;
-    }
-    void this.pttStop();
-  }
-
-  private async pttStart() {
-    if (this.pttBusy) return;
-    this.pttBusy = true;
-    if (!this.listening) this.setPhase('engaging');
-    const ack = await this.gw.send({ class: 'intent', type: 'ptt_start' });
-    this.pttBusy = false;
-    if (!ok(ack) && reason(ack) !== 'released before the mic started') {
-      this.pttToggled = false;
-      this.flash(ack);
-      if (!this.listening) this.setPhase('idle');
-    }
-  }
-
-  private async pttStop() {
-    this.pttToggled = false;
-    const ack = await this.gw.send({ class: 'intent', type: 'ptt_stop' });
-    if (!ok(ack)) this.flash(ack);
-    if (!this.listening && this.phase === 'engaging') this.setPhase('idle');
-  }
-
   private flashTimer?: number;
   private thinkingTimer?: number;
   private flash(a: Ack) {
-    const el = $('ptt-msg');
     if (ok(a)) {
-      el.hidden = true;
+      $('ptt-msg').hidden = true;
       return;
     }
-    el.textContent = reason(a);
+    this.note(reason(a));
+  }
+
+  private note(msg: string) {
+    const el = $('ptt-msg');
+    el.textContent = msg;
     el.hidden = false;
     clearTimeout(this.flashTimer);
     this.flashTimer = window.setTimeout(() => (el.hidden = true), 6000);
@@ -408,6 +415,7 @@ export class ControlPanel {
         turn.stoppedAt = at;
         turn.you.classList.remove('pending');
         turn.you.textContent = e.transcript || '(nothing heard)';
+        if (!e.transcript) this.note('(nothing heard) - speak once the button turns red, then click to send');
         break;
       case 'intent_detected':
         turn = known();
@@ -459,7 +467,10 @@ export class ControlPanel {
       const b = el.closest<HTMLButtonElement>('[data-cli],[data-eye],[data-engage],[data-stage-mode],[data-music],[data-dj],[data-play]');
       if (!b) return;
       const d = b.dataset;
-      if (d.cli) void this.runCli(d.cli);
+      if (d.cli) {
+        if (d.cliOut) this.consoleTo = d.cliOut;
+        void this.runCli(d.cli);
+      }
       else if (d.eye) void this.cmd({ class: 'perf', type: 'eyes', pattern: d.eye });
       else if (d.engage) void this.cmd({ class: 'stage', type: 'set_engagement', engagement: d.engage as Engagement });
       else if (d.stageMode) {

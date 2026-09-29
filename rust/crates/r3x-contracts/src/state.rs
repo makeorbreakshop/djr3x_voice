@@ -103,6 +103,11 @@ pub struct MusicState {
     pub position_t: f64,
     #[serde(default)]
     pub paused: bool,
+    /// Position (s) in `track` where `music.track_ending_soon` fires (the DJ's transition
+    /// point); none for a track shorter than the threshold.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub ending_at_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -112,6 +117,27 @@ pub struct DjState {
     pub current: Option<Track>,
     #[ts(optional = nullable)]
     pub next: Option<Track>,
+    /// The transition line into `next`.
+    #[serde(default)]
+    pub commentary: CommentaryStatus,
+    /// The running transition plan's step, e.g. `music_crossfade (5/7)`; none between them.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub step: Option<String>,
+}
+
+/// Where the DJ's next transition line is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentaryStatus {
+    #[default]
+    None,
+    /// Claude is writing it.
+    Writing,
+    /// Written; the speech cache is synthesising it.
+    Synthesizing,
+    /// Cached audio, ready to play.
+    Ready,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

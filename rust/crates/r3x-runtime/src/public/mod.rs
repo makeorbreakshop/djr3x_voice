@@ -412,7 +412,7 @@ fn ptt_hook(voice: r3x_voice::Voice) -> r3x_brain::PttHook {
         Box::pin(async move {
             match p {
                 Ptt::Start { owner } => v.ptt_start(&owner).await,
-                Ptt::Stop => v.ptt_stop(None).await,
+                Ptt::Stop { owner } => v.ptt_stop(Some(&owner)).await,
             }
         })
     })

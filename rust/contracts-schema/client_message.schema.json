@@ -234,6 +234,28 @@
             "action"
           ],
           "type": "object"
+        },
+        {
+          "description": "Jump in the current track: to `seconds`, or `seconds` before the end with `from_end`.",
+          "properties": {
+            "action": {
+              "const": "seek",
+              "type": "string"
+            },
+            "from_end": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seconds": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "action",
+            "seconds"
+          ],
+          "type": "object"
         }
       ]
     },

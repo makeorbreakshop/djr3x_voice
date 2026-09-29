@@ -30,6 +30,7 @@ fn music_state(st: &Status, library: Vec<String>, bus: &Bus) -> MusicState {
         position_s: st.position_s,
         position_t: t_now - age,
         paused: st.paused,
+        ending_at_s: st.ending_at_s,
     }
 }
 
@@ -44,6 +45,7 @@ pub async fn command(engine: &Engine, source: Source, cmd: MusicCommand) -> Ack 
         MusicCommand::Play { query } => engine.play(query, &src).await,
         MusicCommand::Stop => engine.stop().await,
         MusicCommand::Next => engine.next(&src).await,
+        MusicCommand::Seek { seconds, from_end } => engine.seek(seconds, from_end).await,
     })
 }
 
@@ -92,6 +94,7 @@ pub fn spawn(bus: &Bus, engine: &Engine) {
                         MusicEvent::Play { query } => engine.play(query, &src).await,
                         MusicEvent::Stop => engine.stop().await,
                         MusicEvent::Next => engine.next(&src).await,
+                        MusicEvent::Seek { seconds, from_end } => engine.seek(seconds, from_end).await,
                         MusicEvent::Crossfade { track, duration_s, id } => engine.crossfade(&track, duration_s, &id, &src).await,
                         MusicEvent::Duck { level, .. } => engine.duck(Some(level as f32)).await,
                         MusicEvent::Unduck { .. } => engine.unduck().await,

@@ -12,7 +12,7 @@ use rubato::{FftFixedIn, Resampler as _};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymError;
-use symphonia::core::formats::{FormatOptions, FormatReader};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -92,6 +92,8 @@ pub struct PlanarStream {
     rs: Option<Rs>,
     sb: Option<SampleBuffer<f32>>,
     done: bool,
+    /// Decoded frames (file rate) still to drop after a seek landed before the target.
+    lead_in: u64,
 }
 
 struct Rs {
@@ -131,7 +133,30 @@ impl PlanarStream {
         } else {
             None
         };
-        Ok(Self { o, out_channels: channels, rs, sb: None, done: false })
+        Ok(Self { o, out_channels: channels, rs, sb: None, done: false, lead_in: 0 })
+    }
+
+    /// Open at `start_s`: the reader seeks to the packet at or before it and the frames up to
+    /// it are dropped. Returns where the first block starts (`start_s`, clamped to the file).
+    pub fn open_at(path: &Path, rate: u32, channels: usize, start_s: f64) -> Result<(Self, f64)> {
+        let mut st = Self::open(path, rate, channels)?;
+        if start_s <= 0.0 {
+            return Ok((st, 0.0));
+        }
+        let o = &mut st.o;
+        let tb = o.format.tracks().iter().find(|t| t.id == o.track_id).and_then(|t| t.codec_params.time_base);
+        let to = SeekTo::Time { time: start_s.into(), track_id: Some(o.track_id) };
+        let seeked = o.format.seek(SeekMode::Accurate, to).with_context(|| format!("seek {} to {start_s:.1} s", path.display()))?;
+        o.decoder.reset();
+        let secs = |ts| {
+            tb.map_or(start_s, |tb: symphonia::core::units::TimeBase| {
+                let t = tb.calc_time(ts);
+                t.seconds as f64 + t.frac
+            })
+        };
+        let (actual, required) = (secs(seeked.actual_ts), secs(seeked.required_ts));
+        st.lead_in = ((required - actual).max(0.0) * o.info.sample_rate as f64).round() as u64;
+        Ok((st, required))
     }
 
     pub fn info(&self) -> FileInfo {
@@ -217,7 +242,12 @@ impl PlanarStream {
             };
             sb.copy_interleaved_ref(buf);
             let ch = spec.channels.count().max(1);
-            let s = &sb.samples()[..frames * ch];
+            let drop = (self.lead_in as usize).min(frames);
+            self.lead_in -= drop as u64;
+            if drop == frames {
+                continue;
+            }
+            let s = &sb.samples()[drop * ch..frames * ch];
             return Ok(Some(fold(s, ch, self.out_channels)));
         }
     }

@@ -6,6 +6,8 @@
 #
 #   ./r3x                 runtime + panel + CLI, opens the browser (runtime log: logs/r3x-runtime.log)
 #   ./r3x --logs          follow the runtime log here instead of the CLI
+#   ./r3x --click-anywhere  also a global left click toggles push-to-talk (Accessibility permission;
+#                         clicks on the panel's talk button stay the panel's)
 #   ./r3x --no-open       don't open a browser tab
 #   ./r3x --panel-only    just the panel (it runs its own demo until a backend connects)
 #   ./r3x --legacy        CantinaOS instead of the Rust runtime (its own CLI in this terminal)
@@ -23,6 +25,7 @@ OPEN=1
 BACKEND=1
 LEGACY=0
 LOGS=0
+CLICK_ANYWHERE=0
 RUNTIME_ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -31,8 +34,9 @@ while [ $# -gt 0 ]; do
     --panel-only) BACKEND=0 ;;
     --legacy) LEGACY=1 ;;
     --logs) LOGS=1 ;;
+    --click-anywhere) CLICK_ANYWHERE=1 ;;
     --) shift; RUNTIME_ARGS=("$@"); break ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -144,15 +148,18 @@ if [ "$BACKEND" = 0 ]; then
 fi
 
 if [ "$LEGACY" = 0 ]; then
-  # Build (incrementally) and run the Rust runtime. `mouse` = global left-click push-to-talk
-  # (needs Accessibility for Terminal.app; without it the click is simply off).
+  # Build (incrementally) and run the Rust runtime. Push-to-talk is the panel's button (click
+  # to talk, click to send) or Space held down. `--click-anywhere` adds the global left click
+  # (feature `mouse`; needs Accessibility for Terminal.app, without it the click is simply off).
+  MOUSE_ARGS=()
+  [ "$CLICK_ANYWHERE" = 1 ] && MOUSE_ARGS=(--mouse)
   say "building r3x-runtime + r3x-cli (release; the first build takes a few minutes)"
   cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime --features mouse -q \
     || die "r3x-runtime did not build"
   cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-cli -q || die "r3x-cli did not build"
   LOG="$ROOT/logs/r3x-runtime.log"
   set -m  # own process group (pgid = its pid), so cleanup can stop its children too
-  "$ROOT/rust/target/release/r3x-runtime" --standalone --mouse --session-log "$ROOT/logs" \
+  "$ROOT/rust/target/release/r3x-runtime" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
     ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} >"$LOG" 2>&1 </dev/null &
   RUNTIME_PID=$!
   set +m

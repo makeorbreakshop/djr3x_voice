@@ -43,10 +43,11 @@ use tokio::task::JoinHandle;
 pub use catalog::ShowCatalog;
 pub use plan::{Executor, Plan, Step};
 
-/// Push-to-talk, forwarded to the voice (the brain owns the `intent` class).
+/// Push-to-talk, forwarded to the voice (the brain owns the `intent` class). The owner is
+/// the sending client's source: only the owner of a turn can stop it.
 pub enum Ptt {
     Start { owner: String },
-    Stop,
+    Stop { owner: String },
 }
 pub type PttHook = Arc<dyn Fn(Ptt) -> Pin<Box<dyn Future<Output = Ack> + Send>> + Send + Sync>;
 /// Picks one of `options` for a choice point (`brain.next_track`); `None` = no pick. Random by
@@ -267,6 +268,7 @@ impl Brain {
             tokio::spawn(brain.clone().event_loop([bus.subscribe(Domain::Conversation), bus.subscribe(Domain::Music), bus.subscribe(Domain::Ops)])),
             tokio::spawn(brain.clone().warmup_loop()),
             tokio::spawn(brain.clone().dj_loop()),
+            tokio::spawn(brain.clone().dj_step_loop()),
         ];
         brain.tasks.lock().unwrap().extend(t);
         if brain.inner.router.active() {
@@ -333,20 +335,30 @@ impl Brain {
             IntentCommand::PttStart | IntentCommand::PttStop => match &self.inner.ptt {
                 None => req.ack(Ack::rejected("no voice input in this runtime")),
                 Some(hook) => {
+                    let owner = format!("{source:?}").to_ascii_lowercase();
                     let action = match req.command {
-                        Command::Intent(IntentCommand::PttStart) => Ptt::Start { owner: format!("{source:?}").to_ascii_lowercase() },
-                        _ => Ptt::Stop,
+                        Command::Intent(IntentCommand::PttStart) => Ptt::Start { owner },
+                        _ => Ptt::Stop { owner },
                     };
                     let ack = hook(action).await;
                     req.ack(ack);
                 }
             },
+            IntentCommand::Music(MusicCommand::Seek { seconds, from_end }) => {
+                // Not a tool: straight to the engine (it replies with the landing point in logs).
+                if self.inner.bus.get::<r3x_contracts::MusicState>().track.is_none() {
+                    return req.ack(Ack::rejected("No music is currently playing"));
+                }
+                req.ack(Ack::Accepted);
+                self.inner.bus.publish(source, None, Event::Music(MusicEvent::Seek { seconds, from_end }));
+            }
             IntentCommand::Music(m) => {
                 req.ack(Ack::Accepted);
                 let (tool, params) = match m {
                     MusicCommand::Play { query } => ("play_music", serde_json::json!({ "track": query })),
                     MusicCommand::Stop => ("stop_music", serde_json::json!({})),
                     MusicCommand::Next => ("next_track", serde_json::json!({})),
+                    MusicCommand::Seek { .. } => unreachable!("handled above"),
                 };
                 self.dispatch(tool, params.as_object().cloned().unwrap_or_default(), None, source).await;
             }
@@ -384,6 +396,8 @@ impl Brain {
                 None => ("latency tracking is off".into(), true),
             },
             ["dj", "next"] => self.dj_next().await,
+            ["dj", "test"] => self.dj_test().await,
+            ["dj", "transition", "now"] => self.dj_transition_now().await,
             ["reset"] | ["conversation", "reset"] => {
                 self.inner.session.lock().unwrap().clear();
                 ("Conversation reset".into(), false)

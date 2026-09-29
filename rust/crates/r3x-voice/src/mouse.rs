@@ -2,7 +2,11 @@
 //! Accessibility permission for the app hosting the process (Terminal.app; not Warp).
 //!
 //! A click toggles recording, only while `state.engagement` is INTERACTIVE, and only when no
-//! other client holds push-to-talk (`state.conversation.ptt_owner`).
+//! other client holds push-to-talk (`state.conversation.ptt_owner`). A click on the panel's
+//! own talk button is the panel's, not ours: [`Voice::click`] stands down when the panel's
+//! start/stop arrives with it. Off by default in `./r3x` (`--click-anywhere`).
+
+use std::time::Duration;
 
 use r3x_bus::Bus;
 use r3x_contracts::{Engagement, EngagementState};
@@ -10,6 +14,8 @@ use r3x_contracts::{Engagement, EngagementState};
 use crate::voice::Voice;
 
 pub const MOUSE_OWNER: &str = "mouse";
+/// How long a click waits to see whether it was on another client's talk button.
+pub const SETTLE: Duration = Duration::from_millis(250);
 
 pub fn spawn(bus: Bus, voice: Voice) -> anyhow::Result<()> {
     let rt = tokio::runtime::Handle::current();
@@ -21,10 +27,9 @@ pub fn spawn(bus: Bus, voice: Voice) -> anyhow::Result<()> {
             if bus.get::<EngagementState>().engagement != Engagement::Interactive {
                 return;
             }
-            let v = voice.clone();
+            let (v, pressed) = (voice.clone(), std::time::Instant::now());
             rt.spawn(async move {
-                let ack = v.toggle(MOUSE_OWNER).await;
-                if !ack.is_accepted() {
+                if let Some(ack) = v.click(MOUSE_OWNER, pressed, SETTLE).await.filter(|a| !a.is_accepted()) {
                     tracing::info!(?ack, "click ignored");
                 }
             });
