@@ -14,6 +14,8 @@ crates/
   r3x-cli         terminal gateway client (CantinaOS command set + shortcuts, history)
   r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
                   DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
+  r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
+                  DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
   r3x-audio       cpal output engine + mixer (speech/music/sfx buses, ramped ducking), speech
                   sinks (local device with output latency, paced remote), 20 ms AGC mouth, mic
   r3x-voice       Deepgram STT, ElevenLabs dialogue-socket TTS, speech FIFO, push-to-talk,
@@ -68,6 +70,17 @@ default: run CantinaOS with `R3X_EXTERNAL_BODY=1`, or give the runtime `--leds c
 (`R3X_LEDS=cantina`) to leave them to CantinaOS (eye/chest actions are then mirrored as
 `eye.command` / `chest.override`). The sim follows gateway frames, or embeds the same
 performer as WASM with `?offline` (`npm run build:wasm` in `sim/web` first).
+
+## Rust brain (Phase 5, instead of CantinaOS)
+
+```bash
+cargo run -p r3x-runtime -- --voice --brain rust        # not with --bridge
+R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice cargo run -p r3x-runtime -- --brain rust
+```
+
+Env: `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `R3X_MEMORY_DB`,
+`R3X_PERSONA_DIR`, `SHOW_DIR`, `SHOW_TAG_CHARS_PER_SEC`. Parity with the CantinaOS recordings:
+`cargo test -p r3x-brain --test parity` (`PARITY_SHOW=1` prints the per-turn summaries).
 
 ## Rust brain (Phase 5, instead of CantinaOS)
 

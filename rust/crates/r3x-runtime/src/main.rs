@@ -1,11 +1,13 @@
-//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Env: `R3X_GATEWAY_ADDR`, `R3X_TAP_URL`, `R3X_PROFILE`, `R3X_ALLOWED_ORIGINS`,
 //! `R3X_GATEWAY_TOKEN` / `R3X_TAP_TOKEN`, `R3X_CLI_TOKEN`, `R3X_PUBLIC_TOKEN`, `RUST_LOG`,
 //! `R3X_VOICE=1` (= `--voice`: mic/STT/TTS in r3x; run CantinaOS with `R3X_EXTERNAL_VOICE=1`),
 //! `R3X_LEDS=cantina` (= `--leds cantina`: CantinaOS keeps the face/chest boards; otherwise run
 //! it with `R3X_EXTERNAL_BODY=1`), `SHOW_DIR` (= `--show-dir`), `ARDUINO_SERIAL_PORT`,
-//! `CHEST_SERIAL_PORT`, `R3X_SERVO_PORT`, `FORCE_MOCK_LED_CONTROLLER`, `FORCE_MOCK_CHEST`.
+//! `CHEST_SERIAL_PORT`, `R3X_SERVO_PORT`, `FORCE_MOCK_LED_CONTROLLER`, `FORCE_MOCK_CHEST`,
+//! `R3X_BRAIN=rust` (= `--brain rust`: r3x-brain answers turns instead of CantinaOS; not with
+//! `--bridge`), `R3X_MEMORY_DB`, `R3X_PERSONA_DIR`.
 
 use std::sync::Arc;
 
@@ -15,7 +17,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
     // or CantinaOS (`--leds cantina` / R3X_LEDS=cantina).
     let mut leds = env("R3X_LEDS").is_none_or(|v| v != "cantina");
     let mut show_dir = r3x_runtime::performer::default_show_dir();
+    let mut brain: r3x_runtime::brain::BrainMode = env("R3X_BRAIN").map_or(Ok(Default::default()), |v| v.parse()).map_err(anyhow::Error::msg)?;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut val = || args.next().with_context(|| format!("{a} needs a value\n{USAGE}"));
@@ -42,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
             "--mouse" => mouse = true,
             "--leds" => leds = val()? != "cantina",
             "--show-dir" => show_dir = val()?.into(),
+            "--brain" => brain = val()?.parse().map_err(anyhow::Error::msg)?,
             "--tap-url" => tap_url = val()?,
             "--profile" => profile_path = val()?.into(),
             "--session-log" => session_log = Some(val()?.into()),
@@ -79,7 +83,10 @@ async fn main() -> anyhow::Result<()> {
     };
     let bus = Bus::default();
     tokio::select! {
-        r = r3x_runtime::run(bus, cfg, Some(level)) => r,
+        r = async {
+            let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
+            r3x_runtime::run_with_brain(bus, cfg, Some(level), listener, brain).await
+        } => r,
         _ = tokio::signal::ctrl_c() => Ok(()),
     }
 }

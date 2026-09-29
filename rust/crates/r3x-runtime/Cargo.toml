@@ -23,6 +23,10 @@ r3x-gateway.workspace = true
 r3x-performer-core = { path = "../r3x-performer-core" }
 r3x-drivers = { path = "../r3x-drivers" }
 r3x-voice = { path = "../r3x-voice" }
+r3x-brain = { path = "../r3x-brain" }
+r3x-llm = { path = "../r3x-llm" }
+r3x-intent = { path = "../r3x-intent" }
+r3x-memory = { path = "../r3x-memory" }
 tokio = { workspace = true, features = ["signal"] }
 serde_json.workspace = true
 tracing.workspace = true

@@ -1,5 +1,8 @@
 //! Operations (plan §5 `r3x-ops`): service health folded into `state.services`, runtime log
-//! lines fanned out to gateway clients, and the debug/trace controls (`telemetry` commands).
+//! lines fanned out to gateway clients, the debug/trace controls (`telemetry` commands), and
+//! per-turn latency legs ([`latency`]).
+
+pub mod latency;
 
 use std::sync::Arc;
 

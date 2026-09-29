@@ -260,6 +260,27 @@ pub enum ConversationEvent {
     /// Character timing of the line being spoken: ms from its first audible sample, which was
     /// heard at `audio_t0` (bus `t_mono` seconds). One event per synthesis chunk.
     SpeechTiming { chars: Vec<String>, start_ms: Vec<f64>, duration_ms: Vec<f64>, audio_t0: f64 },
+    /// Brain -> voice: queue this line on the one speech FIFO. `reply` = the turn's reply (the
+    /// envelope's `conversation_id` is the turn); plan lines carry their `clip_id` instead.
+    Speak {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        clip_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        plan_id: Option<String>,
+        reply: bool,
+    },
+    /// A tool the brain executed (router or Claude, per the envelope `source`) and its outcome.
+    ToolResult { tool: String, parameters: serde_json::Value, success: bool, result: serde_json::Value },
+    /// Brain -> speech cache: synthesise `text` now and hold it under `key`.
+    CacheSpeech { key: String, text: String },
+    SpeechCached { key: String, duration_s: f64 },
+    SpeechCacheFailed { key: String, error: String },
+    /// Play a cached line; exactly one `CachedPlaybackEnded` with the same `playback_id` follows.
+    PlayCached { key: String, playback_id: String },
+    CachedPlaybackEnded { playback_id: String, ok: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
@@ -331,6 +352,22 @@ pub enum MusicEvent {
     TrackEndingSoon { remaining_s: f64 },
     Ducked { level: f64 },
     Unducked,
+    // ---- requests to the music engine (brain -> engine) ----
+    /// Play `query` (a title, words of one, or `@semantic ...`); none = engine's choice.
+    Play {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        query: Option<String>,
+    },
+    Stop,
+    /// Music owns `next` (plan 7b); DJ mode layers its own transition on top.
+    Next,
+    /// Crossfade to `track` (library title) over `duration_s`; `CrossfadeComplete{id}` follows.
+    Crossfade { track: String, duration_s: f64, id: String },
+    /// Duck to `level` (0..1) over `fade_ms`.
+    Duck { level: f64, fade_ms: f64 },
+    Unduck { fade_ms: f64 },
+    CrossfadeComplete { id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -362,6 +399,10 @@ pub enum OpsEvent {
     Latency { leg: String, ms: f64 },
     /// Reply to an `intent.console` line.
     Console { message: String, is_error: bool },
+    /// Brain plan executor: a plan started on `layer` (ambient / foreground / show / override).
+    PlanStarted { plan_id: String, layer: String },
+    /// `status`: completed | failed | cancelled | paused.
+    PlanEnded { plan_id: String, layer: String, status: String },
     /// Servo controller telemetry (rate-limited by the driver).
     ServoTelemetry {
         /// Controller status flags (`r3x-drivers` `servo::proto::flag`).

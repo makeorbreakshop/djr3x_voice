@@ -1,5 +1,6 @@
 //! The `r3x` runtime: bus + gateway + ops + stage manager, optionally bridged to CantinaOS.
 
+pub mod brain;
 pub mod bridge;
 pub mod performer;
 
@@ -99,6 +100,17 @@ pub async fn run_on(
     level: Option<r3x_ops::LevelControl>,
     listener: tokio::net::TcpListener,
 ) -> anyhow::Result<()> {
+    run_with_brain(bus, cfg, level, listener, brain::BrainMode::Cantina).await
+}
+
+/// [`run_on`] with a choice of brain (`--brain rust|cantina`).
+pub async fn run_with_brain(
+    bus: Bus,
+    cfg: RuntimeConfig,
+    level: Option<r3x_ops::LevelControl>,
+    listener: tokio::net::TcpListener,
+    brain_mode: brain::BrainMode,
+) -> anyhow::Result<()> {
     if let Some(dir) = &cfg.session_log {
         let (path, _task) = bus.attach_session_log(dir).await?;
         tracing::info!(path = %path.display(), "session log");
@@ -136,6 +148,14 @@ pub async fn run_on(
         let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers };
         performer::spawn(&bus, pc)?;
     }
+    // Before the bridge: the brain takes the `intent` class.
+    let _brain = match brain_mode {
+        brain::BrainMode::Rust => {
+            anyhow::ensure!(cfg.bridge.is_none(), "--brain rust replaces the CantinaOS bridge; drop --bridge");
+            Some(brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()))?)
+        }
+        brain::BrainMode::Cantina => None,
+    };
     let backend = match cfg.bridge.clone() {
         Some(b) => Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?),
         None => None,

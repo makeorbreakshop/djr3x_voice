@@ -2,7 +2,7 @@
 import type { ServiceStatus } from "./ServiceStatus";
 import type { ServoChannelTelemetry } from "./ServoChannelTelemetry";
 
-export type OpsEvent = { "type": "service_status", service: string, status: ServiceStatus, detail?: string, } | { "type": "latency", leg: string, ms: number, } | { "type": "console", message: string, is_error: boolean, } | { "type": "servo_telemetry", 
+export type OpsEvent = { "type": "service_status", service: string, status: ServiceStatus, detail?: string, } | { "type": "latency", leg: string, ms: number, } | { "type": "console", message: string, is_error: boolean, } | { "type": "plan_started", plan_id: string, layer: string, } | { "type": "plan_ended", plan_id: string, layer: string, status: string, } | { "type": "servo_telemetry", 
 /**
  * Controller status flags (`r3x-drivers` `servo::proto::flag`).
  */
