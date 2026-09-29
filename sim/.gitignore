@@ -16,3 +16,6 @@ web/public/basis/
 # Render regression harness (scripts/render-harness.mjs): renders of the kit-derived model.
 web/.render-out/
 web/.render-baselines/
+
+# wasm-pack output of rust/crates/r3x-performer-wasm (npm run build:wasm).
+web/src/wasm/

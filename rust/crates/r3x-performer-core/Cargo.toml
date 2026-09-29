@@ -1,0 +1,17 @@
+[package]
+name = "r3x-performer-core"
+description = "R3X performer: show player, body compositor, actuation and LED firmware emulators. No I/O; deterministic; compiles to WASM."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+libm = "0.2"
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }

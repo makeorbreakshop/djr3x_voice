@@ -12,7 +12,8 @@
     "predev": "node scripts/copy-draco.mjs",
     "render:check": "node scripts/render-harness.mjs",
     "render:update": "node scripts/render-harness.mjs --update",
-    "render:perf": "node scripts/render-harness.mjs --perf"
+    "render:perf": "node scripts/render-harness.mjs --perf",
+    "build:wasm": "wasm-pack build ../../rust/crates/r3x-performer-wasm --target web --release --out-dir ../../../sim/web/src/wasm --out-name r3x_performer --no-pack"
   },
   "dependencies": {
     "n8ao": "^2.0.1",
