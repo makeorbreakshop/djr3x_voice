@@ -6,4 +6,5 @@ web/public/sfx/
 web/node_modules/
 web/dist/
 web/public/draco/
+web/public/basis/
 web/public/shows/
