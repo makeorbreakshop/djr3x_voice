@@ -32,7 +32,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 URL = "wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input"
 SAMPLE_RATE = 24000
 BYTES_PER_SECOND = SAMPLE_RATE * 2  # pcm_24000 is 16-bit mono
-KEEPALIVE_S = 15.0  # server idle timeout is 20 s
+KEEPALIVE_S = 10.0  # the server closes after 20 s without a *client* message
 RECV_TIMEOUT_S = 10.0
 
 #: (pcm bytes, alignment for exactly those bytes or None)
@@ -71,7 +71,9 @@ class DialogueSocket:
         self._keepalive_s = keepalive_s
         self._ws = None
         self._lock = threading.Lock()
-        self._last_io = 0.0
+        #: When we last *sent* something. Only client messages reset the server's 20 s idle
+        #: timer - audio we receive does not (learned the hard way: 1008 "No message received").
+        self._last_send = 0.0
         self._closed = threading.Event()
         self._keepalive_thread: Optional[threading.Thread] = None
 
@@ -117,7 +119,7 @@ class DialogueSocket:
             init["voice_settings"] = {"stability": self._stability}
         ws.send(json.dumps(init))
         self._ws = ws
-        self._last_io = time.monotonic()
+        self._last_send = time.monotonic()
         self._log.info(f"ElevenLabs dialogue socket open ({self._model_id})")
         return ws
 
@@ -131,14 +133,14 @@ class DialogueSocket:
 
     def _keepalive_loop(self) -> None:
         while not self._closed.wait(1.0):
-            if self._ws is None or time.monotonic() - self._last_io < self._keepalive_s:
+            if self._ws is None or time.monotonic() - self._last_send < self._keepalive_s:
                 continue
             if not self._lock.acquire(blocking=False):
                 continue  # a reply is streaming; that counts as activity
             try:
                 if self._ws is not None:
                     self._ws.send(json.dumps({"keep_alive": True}))
-                    self._last_io = time.monotonic()
+                    self._last_send = time.monotonic()
             except Exception as e:
                 self._log.info(f"ElevenLabs dialogue socket keep-alive failed ({e}); will reconnect on next reply")
                 self._drop()
@@ -158,14 +160,13 @@ class DialogueSocket:
                 ws = self._ensure_open()
                 ws.send(json.dumps({"inputs": [{"text": text, "voice_id": self._voice_id, "new_turn": True}]}))
                 ws.send(json.dumps({"flush": True}))
-                self._last_io = time.monotonic()
+                self._last_send = time.monotonic()
                 while True:
                     if should_stop():
                         # The rest of this turn would arrive on the next request; don't reuse it.
                         self._drop()
                         return
                     msg = json.loads(ws.recv(timeout=RECV_TIMEOUT_S))
-                    self._last_io = time.monotonic()
                     if msg.get("error") or msg.get("code"):
                         raise RuntimeError(f"ElevenLabs dialogue socket error: {msg}")
                     audio = msg.get("audio")

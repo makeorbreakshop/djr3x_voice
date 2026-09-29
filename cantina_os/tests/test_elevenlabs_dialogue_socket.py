@@ -150,3 +150,24 @@ def test_v4_lines_use_the_socket_and_others_use_http():
 
     out = list(svc._open_audio_stream(_FakeHTTP, "h", "voice-r3x", "eleven_flash_v2_5", {}))
     assert out == [(b"\x05\x00\x05\x00", None)]
+
+
+def test_keepalive_is_timed_from_the_last_message_we_sent_not_audio_received():
+    # The server's 20 s idle timer only counts client messages; a long reply full of
+    # received audio must not postpone the keep-alive (the 2026-09-29 1008 disconnect).
+    import time as _t
+    frames = [audio(b"\x00\x00")] * 3 + [{"is_final_audio_for_turn": True}]
+    sock, (ws,), _ = make([frames])
+    list(sock.synthesize("a"))
+    sent_at = sock._last_send
+    assert _t.monotonic() - sent_at < 1.0
+    ws.frames = []
+    sock._last_send -= 11  # pretend the flush went out 11 s ago
+    sock._keepalive_s = 10
+    sock.start()  # starts the keep-alive thread
+    for _ in range(40):
+        if any(m.get("keep_alive") for m in ws.sent):
+            break
+        _t.sleep(0.05)
+    sock.close()
+    assert any(m.get("keep_alive") for m in ws.sent)
