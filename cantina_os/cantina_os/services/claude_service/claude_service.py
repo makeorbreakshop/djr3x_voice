@@ -141,6 +141,22 @@ def _response_text(response: Any) -> str:
     )
 
 
+#: Model families that still accept a non-default ``temperature``. Everything newer
+#: (Sonnet 5/5.5, Opus 4.7+, Fable) returns 400 "`temperature` is deprecated for this model"
+#: on the direct API. OpenRouter silently drops the field instead, which is how every call
+#: site below survived the move to Sonnet 5.5 unnoticed. Matched on the Anthropic id and on
+#: OpenRouter's namespaced/dotted form alike.
+_TEMPERATURE_MODEL_PREFIXES = (
+    "claude-haiku-", "claude-sonnet-4", "claude-opus-4-5", "claude-opus-4-6", "claude-3",
+)
+
+
+def _temperature_kwargs(model: str, temperature: float) -> Dict[str, Any]:
+    """``{"temperature": t}`` when ``model`` accepts it, otherwise ``{}``."""
+    bare = model.split("/")[-1].replace(".", "-")
+    return {"temperature": temperature} if bare.startswith(_TEMPERATURE_MODEL_PREFIXES) else {}
+
+
 class ClaudeService(BaseService):
     """
     Service for natural language processing using Claude 3.5 Sonnet 4.5.
@@ -1340,7 +1356,7 @@ class ClaudeService(BaseService):
                 "thinking": {"type": "between_tools"},
                 "output_config": {"effort": self._config["SPOKEN_EFFORT"]},
             }
-        return {"temperature": temperature}
+        return _temperature_kwargs(self._config["MODEL"], temperature)
 
     def _get_tool_schemas_with_cache(self) -> Optional[List[Dict[str, Any]]]:
         """Get tool schemas with cache_control on the last tool for prompt caching.

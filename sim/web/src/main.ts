@@ -14,6 +14,7 @@ import { Activity, Performer } from './behavior';
 import { SpeechAudio } from './audio';
 import { LiveEvent, LiveLink } from './link';
 import { ChestFirmware, ChestHost, ChestLights, WINDOW_SUBSYSTEMS } from './chest';
+import { ControlPanel } from './panel';
 import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
 import { MaestroScript, MaestroScriptError } from './actuation/maestro';
 import { limitControls, setupStage } from './booth'; // before any material compiles (patches a chunk)
@@ -62,7 +63,9 @@ const post = new PostPipeline(renderer, scene, camera);
 function fitView() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const panel = w > 720 && !STILL ? 364 : 0;
+  const panelEl = document.getElementById('panel');
+  const panel = w > 720 && !STILL && panelEl ? panelEl.offsetWidth + 24 : 0;
+  document.documentElement.style.setProperty('--panel-space', `${panel}px`);
   camera.aspect = w / h;
   camera.setViewOffset(w, h, panel / 2, 0, w, h);
   camera.updateProjectionMatrix();
@@ -576,8 +579,8 @@ function onLiveEvent(ev: LiveEvent) {
 
 const liveEl = document.getElementById('st-live')!;
 const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
-  onHello(mode) {
-    host.setMode(liveMode(mode));
+  onHello(hello) {
+    host.setMode(liveMode(hello.mode));
     setActivity(restingActivity());
   },
   onEvent: onLiveEvent,
@@ -600,6 +603,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
     showUiDirty = true;
   },
 });
+new ControlPanel(link);
 // ?offline keeps a tab on the built-in demo even while CantinaOS is running.
 if (!new URLSearchParams(location.search).has('offline')) link.start();
 

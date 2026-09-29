@@ -793,9 +793,12 @@ class CantinaOS:
                                         self._services.get("eye_light_controller"))
                 return service
             elif service_name == "sim_bridge":
-                # Read-only mode query so a sim that connects late learns the current mode
+                # Read-only state queries so a panel that connects late learns the current
+                # mode, the music library and whether DJ mode is on (CLAUDE.md Pattern 2).
                 service = service_class(self._event_bus, service_config,
-                                        self._services.get("yoda_mode_manager"))
+                                        self._services.get("yoda_mode_manager"),
+                                        self._services.get("music_controller"),
+                                        self._services.get("brain_service"))
                 return service
             elif service_name == "claude":
                 # ClaudeService needs a reference to MemoryService for person profiles

@@ -19,6 +19,18 @@ from cantina_os.services.claude_service.claude_service import ClaudeService, Ses
 from cantina_os.event_payloads import TranscriptionTextPayload, LLMResponsePayload
 from cantina_os.core.event_topics import EventTopics
 
+# Dormant until 2026-09-29: every test here skips without ANTHROPIC_API_KEY, and there was
+# none on this machine, so these were never run against the ClaudeService they now target.
+# They call the pre-refactor API - `_stream_claude_response()` without `messages`,
+# `service.client` (now `_client`), `_handle_transcription_final` (now
+# `_handle_voice_transcript`), and a TranscriptionTextPayload without `source`/`timestamp`.
+# The live API path is covered by tests/test_claude_e2e_simple.py and
+# scripts/claude_live_verify.py. Rewrite against the current service rather than un-skip.
+pytestmark = pytest.mark.skip(
+    reason="targets the pre-refactor ClaudeService API (see module comment); "
+    "live coverage is in test_claude_e2e_simple.py"
+)
+
 
 class TestClaudeServiceE2E:
     """End-to-End tests with REAL Anthropic API calls"""
