@@ -232,12 +232,25 @@ impl Default for Ducking {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct AudioConfig {
     #[serde(default)]
     pub outputs: Vec<AudioOutput>,
     #[serde(default)]
     pub ducking: Ducking,
+    /// Mouth amplitude rate (plan §7b: one rate, here).
+    #[serde(default = "default_mouth_hz")]
+    pub mouth_hz: f64,
+}
+
+fn default_mouth_hz() -> f64 {
+    30.0
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self { outputs: Vec::new(), ducking: Ducking::default(), mouth_hz: default_mouth_hz() }
+    }
 }
 
 impl RobotProfile {
@@ -359,6 +372,9 @@ impl RobotProfile {
         }
         if !(0.0..=1.0).contains(&self.audio.ducking.level) {
             errs.push("audio.ducking.level must be in 0..1".into());
+        }
+        if !(1.0..=200.0).contains(&self.audio.mouth_hz) {
+            errs.push("audio.mouth_hz must be in 1..200".into());
         }
 
         if errs.is_empty() {

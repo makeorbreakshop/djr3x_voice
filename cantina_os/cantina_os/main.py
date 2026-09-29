@@ -414,7 +414,13 @@ class CantinaOS:
             "textual_dashboard",  # Add textual dashboard service for TUI monitoring (before CLI)
             "cli"
         ]
-        
+        # Phase 2 (docs/plans/r3x-platform-architecture.md): r3x owns mic, STT and TTS and
+        # speaks CantinaOS's voice/speech topics over the tap. These three must not run too.
+        if os.environ.get("R3X_EXTERNAL_VOICE", "").lower() in ("1", "true", "yes", "on"):
+            external = ("mouse_input", "deepgram_direct_mic", "elevenlabs")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_VOICE: voice I/O is r3x's; not starting {', '.join(external)}")
+
         try:
             # Initialize mode manager first - it's required by most services
             self.logger.info("Starting yoda_mode_manager service")

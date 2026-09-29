@@ -25,6 +25,7 @@
           "level": 0.5,
           "ramp_ms": 80.0
         },
+        "mouth_hz": 30.0,
         "outputs": []
       }
     },
@@ -132,6 +133,12 @@
             "level": 0.5,
             "ramp_ms": 80.0
           }
+        },
+        "mouth_hz": {
+          "description": "Mouth amplitude rate (plan §7b: one rate, here).",
+          "type": "number",
+          "format": "double",
+          "default": 30.0
         },
         "outputs": {
           "type": "array",

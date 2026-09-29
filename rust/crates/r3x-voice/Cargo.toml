@@ -1,0 +1,40 @@
+[package]
+name = "r3x-voice"
+description = "Voice I/O: Deepgram streaming STT, ElevenLabs dialogue-socket TTS, push-to-talk, remote voice, CantinaOS bridge"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["device"]
+# Local mic/speaker through r3x-audio's cpal backend.
+device = ["r3x-audio/device"]
+# Global left-click push-to-talk (macOS: needs Accessibility permission for the host app).
+mouse = ["dep:rdev"]
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+r3x-gateway.workspace = true
+r3x-audio = { path = "../r3x-audio", default-features = false }
+tokio = { workspace = true, features = ["net"] }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+futures-util.workspace = true
+tokio-tungstenite = { workspace = true, features = ["native-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["stream", "json", "native-tls"] }
+base64 = "0.23"
+rdev = { version = "0.5", optional = true }
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "net"] }
+
+[[bin]]
+name = "r3x-voice"
+path = "src/bin/r3x-voice.rs"
+required-features = ["device"]

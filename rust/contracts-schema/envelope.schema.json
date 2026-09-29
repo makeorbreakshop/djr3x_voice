@@ -294,6 +294,12 @@
             "ramp_ms": 80.0
           }
         },
+        "mouth_hz": {
+          "description": "Mouth amplitude rate (plan §7b: one rate, here).",
+          "type": "number",
+          "format": "double",
+          "default": 30.0
+        },
         "outputs": {
           "type": "array",
           "default": [],
@@ -632,6 +638,65 @@
           },
           "required": [
             "type"
+          ]
+        },
+        {
+          "description": "Mouth amplitude 0..1 at the profile's `audio.mouth_hz`, in step with playback.",
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "mouth"
+            }
+          },
+          "required": [
+            "type",
+            "level"
+          ]
+        },
+        {
+          "description": "Character timing of the line being spoken: ms from its first audible sample, which was\nheard at `audio_t0` (bus `t_mono` seconds). One event per synthesis chunk.",
+          "type": "object",
+          "properties": {
+            "audio_t0": {
+              "type": "number",
+              "format": "double"
+            },
+            "chars": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "duration_ms": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            },
+            "start_ms": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "speech_timing"
+            }
+          },
+          "required": [
+            "type",
+            "chars",
+            "start_ms",
+            "duration_ms",
+            "audio_t0"
           ]
         }
       ]
@@ -1921,6 +1986,7 @@
               "level": 0.5,
               "ramp_ms": 80.0
             },
+            "mouth_hz": 30.0,
             "outputs": []
           }
         },

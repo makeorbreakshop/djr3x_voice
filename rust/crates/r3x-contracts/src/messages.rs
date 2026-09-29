@@ -245,6 +245,11 @@ pub enum ConversationEvent {
     /// First audible sample.
     SpeechStarted,
     SpeechEnded,
+    /// Mouth amplitude 0..1 at the profile's `audio.mouth_hz`, in step with playback.
+    Mouth { level: f64 },
+    /// Character timing of the line being spoken: ms from its first audible sample, which was
+    /// heard at `audio_t0` (bus `t_mono` seconds). One event per synthesis chunk.
+    SpeechTiming { chars: Vec<String>, start_ms: Vec<f64>, duration_ms: Vec<f64>, audio_t0: f64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]

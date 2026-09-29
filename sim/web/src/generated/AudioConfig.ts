@@ -2,4 +2,8 @@
 import type { AudioOutput } from "./AudioOutput";
 import type { Ducking } from "./Ducking";
 
-export type AudioConfig = { outputs: Array<AudioOutput>, ducking: Ducking, };
+export type AudioConfig = { outputs: Array<AudioOutput>, ducking: Ducking, 
+/**
+ * Mouth amplitude rate (plan §7b: one rate, here).
+ */
+mouth_hz: number, };

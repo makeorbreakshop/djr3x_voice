@@ -1403,7 +1403,8 @@
     "ducking": {
       "level": 0.5,
       "ramp_ms": 80
-    }
+    },
+    "mouth_hz": 30
   },
   "emotes": [
     "yes",
