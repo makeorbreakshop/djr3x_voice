@@ -30,6 +30,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from ..tap import fixtures as tap_fixtures
+
 JEV_URL = "https://api.typesafe.ai/v1/systemone"
 #: Pinned deliberately. The benchmark measured jev-1.13.0 and the report is explicit: "Do not
 #: use jev-latest in production." A silent model bump would move every threshold below.
@@ -176,19 +178,30 @@ class JevClient:
             "questions": questions,
         }
 
+        fx = tap_fixtures.get()  # Phase 0 fixture record/replay; None in normal runs
         last_error: Optional[str] = None
         for attempt in range(self._attempts):
             started = time.perf_counter()
             try:
-                response = await self._client.post(self._url, json=payload)
+                if fx is not None and fx.replaying:
+                    rec = fx.jev_replay(payload)
+                    if rec is None:
+                        raise RuntimeError("no Jev fixture for this request")
+                    await asyncio.sleep(rec["latency_ms"] / 1000.0)
+                    status, body = rec["status"], rec["body"]
+                else:
+                    response = await self._client.post(self._url, json=payload)
+                    status = response.status_code
+                    body = response.json() if status == 200 else response.text[:200]
                 latency_ms = (time.perf_counter() - started) * 1000.0
-                if response.status_code != 200:
-                    last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                if fx is not None and not fx.replaying:
+                    fx.jev_record(payload, status, body, latency_ms)
+                if status != 200:
+                    last_error = f"HTTP {status}: {body}"
                     # 429/529 are the only genuinely retryable answers this API gives, but on the
                     # hot path there is no time to retry — record and fail open.
                     self.logger.warning(f"Jev request failed ({last_error})")
                     break
-                body = response.json()
                 return JevResult(
                     model=body.get("model", ""),
                     answers={

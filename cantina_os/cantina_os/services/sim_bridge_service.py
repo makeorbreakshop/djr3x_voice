@@ -31,6 +31,9 @@ Wire format, one JSON object per message.
        {"type": "cmd", "id": "...", "action": "cli", "text": "play music cantina"}
        {"type": "cmd", "id": "...", "action": "log_level", "level": "DEBUG"}
 
+Auth: the handshake needs the shared R3X token (``?token=`` or ``Authorization: Bearer``) and,
+from a browser, an allowed ``Origin`` - see ``cantina_os/tap/auth.py``.
+
 Config (env): SIM_BRIDGE_ENABLED (default true), SIM_BRIDGE_HOST, SIM_BRIDGE_PORT,
 SIM_BRIDGE_LOG_LEVEL (default INFO - the lowest level streamed to the panel).
 """
@@ -47,6 +50,7 @@ from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
 from ..base_service import BaseService
+from ..tap import auth as tap_auth
 from ..core.event_topics import EventTopics
 from ..event_payloads import CliCommandPayload, ServiceStatus, ServiceStatusPayload
 
@@ -186,6 +190,7 @@ class SimBridgeService(BaseService):
             "1", "true", "yes", "on")
         self._host = config.get("SIM_BRIDGE_HOST", os.getenv("SIM_BRIDGE_HOST", "127.0.0.1"))
         self._port = int(config.get("SIM_BRIDGE_PORT", os.getenv("SIM_BRIDGE_PORT", "8765")))
+        self._token = config.get("R3X_TAP_TOKEN")  # else tap_auth.load_token() at start
         self._log_level = str(config.get("SIM_BRIDGE_LOG_LEVEL", os.getenv("SIM_BRIDGE_LOG_LEVEL", "INFO"))).upper()
         # Read-only state queries (CLAUDE.md Pattern 2), so a panel that connects late still
         # learns the mode, the music library and what is playing. Any of them may be None.
@@ -229,7 +234,11 @@ class SimBridgeService(BaseService):
             self.logger.warning(f"Sim bridge unavailable, websockets not importable: {e}")
             return
         try:
-            self._server = await serve(self._handle_client, self._host, self._port)
+            # Token + Origin on every bind, loopback included: any web page can reach
+            # 127.0.0.1 (plan section 3b). The panel gets the token from ./r3x (#token=...).
+            token = self._token or tap_auth.load_token()
+            hook = tap_auth.process_request_hook(token, tap_auth.allowed_origins(), self.logger)
+            self._server = await serve(self._handle_client, self._host, self._port, process_request=hook)
         except OSError as e:
             self.logger.warning(f"Sim bridge could not listen on {self._host}:{self._port} ({e}); continuing without it")
             return

@@ -70,8 +70,18 @@ else
   done
   port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
 fi
-say "panel: $PANEL_URL"
-[ "$OPEN" = 1 ] && open "$PANEL_URL"
+# The backend's websockets need a token and an allowed Origin (cantina_os/tap/auth.py). The
+# panel gets the token in the URL fragment (never sent to a server) and keeps it.
+if [ -x "$PY" ]; then
+  R3X_TOKEN="$("$PY" "$ROOT/cantina_os/cantina_os/tap/auth.py")" || die "could not read/create the R3X access token"
+  export R3X_TAP_TOKEN="$R3X_TOKEN"
+  export R3X_ALLOWED_ORIGINS="${R3X_ALLOWED_ORIGINS:+$R3X_ALLOWED_ORIGINS,}http://localhost:$PANEL_PORT,http://127.0.0.1:$PANEL_PORT"
+  PANEL_LINK="$PANEL_URL#token=$R3X_TOKEN"
+else
+  PANEL_LINK="$PANEL_URL"
+fi
+say "panel: $PANEL_URL (open it once via ./r3x so it picks up the access token)"
+[ "$OPEN" = 1 ] && open "$PANEL_LINK"
 
 # ---------------------------------------------------------------- backend
 if [ "$BACKEND" = 0 ]; then

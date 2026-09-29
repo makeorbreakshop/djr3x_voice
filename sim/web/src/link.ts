@@ -1,11 +1,38 @@
 /**
- * Live link to a running CantinaOS (SimBridgeService, ws://127.0.0.1:8765).
+ * Live link to a running CantinaOS (SimBridgeService, ws://127.0.0.1:8765, token-protected).
  * Reconnects forever; the sim runs its own demo whenever the link is down.
  *
  * Two-way: besides the event stream it carries the backend's log records, a state
  * snapshot on connect, and panel commands (push-to-talk, typed turns, CLI lines), each
  * answered by an ack.
  */
+
+const TOKEN_KEY = 'r3x-token';
+
+/**
+ * The backend's access token (SimBridge refuses clients without it - any web page can reach
+ * localhost). `./r3x` opens the panel at `#token=...`; it is kept in localStorage (only this
+ * origin can read it) and removed from the address bar, so later reloads and tabs work too.
+ */
+export function accessToken(): string {
+  const m = /(?:^#|&)token=([^&]+)/.exec(location.hash);
+  let token = m ? decodeURIComponent(m[1]) : '';
+  if (m) {
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      /* storage blocked: this page load still has the token */
+    }
+  } else {
+    try {
+      token = localStorage.getItem(TOKEN_KEY) ?? '';
+    } catch {
+      /* no storage: stay unauthenticated; ./r3x prints the link */
+    }
+  }
+  return token;
+}
 
 export interface LiveEvent {
   topic: string;

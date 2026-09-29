@@ -1,0 +1,545 @@
+{
+  "version": 1,
+  "notes": "Hand-written 2026-09-29 by grepping every emit site (emit/_post_emit/_emit/.emit(EventTopics.X.value) of each topic under cantina_os/cantina_os/, live services only (main.py service_order). Excluded as not live: tests/, gpt_service.py, *_sdk4*/*_sdk5*, *backup*, *_BROKEN*, *v3_patch*, the flat services/music_controller_service.py (shadowed by the package), deepgram_transcription_service.py, voice_manager_service.py, web_bridge_service.py. Paths are relative to cantina_os/cantina_os/. On the wire every payload is a plain dict: BaseService.emit() calls model_dump() on any Pydantic model, and pyee passes the dict through untouched. model_dump() is NOT mode='json', so str-Enum members (ServiceStatus, LogLevel) arrive as Enum objects that are str subclasses - serialize with a default. BASE = the four fields BaseEventPayload (event_payloads.py:17) adds on dump: timestamp float (epoch s, time.time), event_id str (uuid4), conversation_id str|null, schema_version str (always '1.0'). Models from core/event_payloads.py (Show*, StageLights, ChestOverride, ChestCommand, MotionFreeze) do NOT inherit BaseEventPayload and carry no BASE fields. Fields shown with '?' may be absent from the dict; 'X|null' means the key is present but may be None.",
+  "topics": {
+    "voice.listening.started": {
+      "constant": "VOICE_LISTENING_STARTED",
+      "emitters": [
+        "services/deepgram_direct_mic_service.py:544",
+        "services/cli_service.py:427",
+        "services/sim_bridge_service.py:519"
+      ],
+      "variants": [
+        {
+          "from": "deepgram_direct_mic_service.py:544, cli_service.py:427 (raw dict)",
+          "fields": {"conversation_id": "str", "timestamp": "float"},
+          "note": "The capture service mints the turn's conversation_id (uuid4) here."
+        },
+        {
+          "from": "sim_bridge_service.py:519 (raw dict, panel 'say')",
+          "fields": {"conversation_id": "str", "timestamp": "float", "source": "enum:panel"}
+        }
+      ]
+    },
+    "voice.listening.stopped": {
+      "constant": "VOICE_LISTENING_STOPPED",
+      "emitters": [
+        "services/deepgram_direct_mic_service.py:582",
+        "services/cli_service.py:392",
+        "services/sim_bridge_service.py:522"
+      ],
+      "variants": [
+        {
+          "from": "deepgram_direct_mic_service.py:582 (raw dict)",
+          "fields": {"transcript": "str", "conversation_id": "str|null", "has_transcript": "bool"},
+          "note": "Emitted even when nothing was said (transcript '', has_transcript false)."
+        },
+        {
+          "from": "cli_service.py:392 ('done' command, raw dict)",
+          "fields": {"conversation_id": "str|null"},
+          "note": "No transcript and no has_transcript keys at all on the CLI path."
+        },
+        {
+          "from": "sim_bridge_service.py:522 (raw dict, panel 'say')",
+          "fields": {"transcript": "str", "conversation_id": "str", "has_transcript": "bool", "source": "enum:panel"}
+        }
+      ]
+    },
+    "transcription.final": {
+      "constant": "TRANSCRIPTION_FINAL",
+      "emitters": ["services/deepgram_direct_mic_service.py:468"],
+      "variants": [
+        {
+          "from": "TranscriptionTextPayload (event_payloads.py:142) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str", "source": "enum:deepgram", "is_final": "bool", "confidence": "float|null",
+            "words": "list[{word:str|null,start:float|null,end:float|null,confidence:float|null,punctuated_word:str|null}]|null"
+          },
+          "note": "Same emit site as transcription.interim, topic chosen by is_final (always true here). One event per Deepgram final segment, not per turn; the whole-turn text is VOICE_LISTENING_STOPPED.transcript. words is null when empty."
+        }
+      ]
+    },
+    "transcription.interim": {
+      "constant": "TRANSCRIPTION_INTERIM",
+      "emitters": ["services/deepgram_direct_mic_service.py:468"],
+      "variants": [
+        {
+          "from": "TranscriptionTextPayload + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str", "source": "enum:deepgram", "is_final": "bool", "confidence": "float|null",
+            "words": "list[{word:str|null,start:float|null,end:float|null,confidence:float|null,punctuated_word:str|null}]|null"
+          },
+          "note": "is_final always false here."
+        }
+      ]
+    },
+    "llm.response": {
+      "constant": "LLM_RESPONSE",
+      "emitters": [
+        "services/claude_service/claude_service.py:1243",
+        "services/claude_service/claude_service.py:1265"
+      ],
+      "variants": [
+        {
+          "from": "claude_service.py:1265 _emit_llm_stream_chunk -> LLMResponsePayload (event_payloads.py:245) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str", "tool_calls": "null", "is_complete": "bool",
+            "model_name": "null", "tokens_used": "null", "completion_tokens": "null", "prompt_tokens": "null",
+            "latency": "null", "response_type": "null"
+          },
+          "note": "Streaming chunk: is_complete=false, text is a delta. All optional fields present but None."
+        },
+        {
+          "from": "claude_service.py:1243 _emit_llm_response -> LLMResponsePayload + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str",
+            "tool_calls": "list[{type:enum:function,id:str,function:{name:str,arguments:str(JSON)}}]|null",
+            "is_complete": "bool",
+            "model_name": "null", "tokens_used": "null", "completion_tokens": "null", "prompt_tokens": "null",
+            "latency": "null", "response_type": "null"
+          },
+          "note": "Final: is_complete=true, text is the whole reply with {cue:..}/{clip:..} show tags stripped. Also used for verbal-feedback/vision/fallback replies (tool_calls null). INTENT_DETECTED for a tool call is emitted before this final event. response_type (filler|intent_feedback|track_intro) is never set by ClaudeService."
+        }
+      ]
+    },
+    "speech.generation.started": {
+      "constant": "SPEECH_GENERATION_STARTED",
+      "emitters": ["services/elevenlabs_service.py:626"],
+      "variants": [
+        {
+          "from": "elevenlabs_service.py:626 (raw dict, first audio chunk written)",
+          "fields": {"conversation_id": "str|null", "text": "str", "clip_id": "str|null", "audio_t0": "float"},
+          "note": "No BASE fields (no timestamp/event_id). audio_t0 = epoch s of first sample; show tags anchor on it. Only one emit site; not emitted for empty text."
+        }
+      ]
+    },
+    "speech.generation.complete": {
+      "constant": "SPEECH_GENERATION_COMPLETE",
+      "emitters": [
+        "services/elevenlabs_service.py:497",
+        "services/elevenlabs_service.py:663",
+        "services/elevenlabs_service.py:676",
+        "services/elevenlabs_service.py:820",
+        "services/elevenlabs_service.py:843",
+        "services/elevenlabs_service.py:858",
+        "services/elevenlabs_service.py:1356",
+        "services/elevenlabs_service.py:1389"
+      ],
+      "variants": [
+        {
+          "from": "SpeechGenerationCompletePayload (event_payloads.py:200) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str", "audio_length_seconds": "float", "success": "bool", "error": "str|null",
+            "clip_id": "str|null", "step_id": "str|null", "plan_id": "str|null"
+          },
+          "note": "Every site uses the same model. audio_length_seconds is always 0.0. conversation_id may be the literal 'unknown' on error paths (858, 1356, 1389). Empty-text requests (497) complete with success=true and no preceding STARTED."
+        }
+      ]
+    },
+    "speech.synthesis.amplitude": {
+      "constant": "SPEECH_SYNTHESIS_AMPLITUDE",
+      "emitters": ["services/elevenlabs_service.py:621"],
+      "variants": [
+        {
+          "from": "elevenlabs_service.py:613 (raw dict)",
+          "fields": {
+            "conversation_id": "str|null", "amplitude": "float", "timestamp_offset": "float",
+            "timestamp": "str", "event_id": "str"
+          },
+          "note": "timestamp is an ISO-8601 STRING (datetime.now().isoformat()), not epoch float like BASE; event_id is 'amp_<epoch float>', not a uuid. amplitude 0.0-1.0. One per PCM chunk (high rate)."
+        }
+      ]
+    },
+    "speech.alignment": {
+      "constant": "SPEECH_ALIGNMENT",
+      "emitters": ["services/elevenlabs_service.py:638"],
+      "variants": [
+        {
+          "from": "SpeechAlignmentPayload (event_payloads.py:220) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "text": "str", "chars": "list[str]", "char_start_ms": "list[float]", "char_duration_ms": "list[float]",
+            "audio_t0": "float", "clip_id": "str|null"
+          },
+          "note": "One per audio chunk that carries alignment; text is the full reply, chars covers this chunk only. char_start_ms is ms from reply audio start (absolute across chunks)."
+        }
+      ]
+    },
+    "music.playback.started": {
+      "constant": "MUSIC_PLAYBACK_STARTED",
+      "emitters": [
+        "services/music_controller_service/music_controller_service.py:1187",
+        "services/music_controller_service/music_controller_service.py:1996"
+      ],
+      "variants": [
+        {
+          "from": "music_controller_service.py:1187 (play) and :1996 (crossfade), raw dict wrapping TrackDataPayload (core/event_schemas.py:13)",
+          "fields": {
+            "track": "{track_id:str,title:str,artist:str,album:str|null,genre:str|null,duration:float|null,filepath:null,bpm:float|null,first_beat_s:float|null}",
+            "source": "str",
+            "mode": "str"
+          },
+          "note": "No BASE fields and no conversation_id. source is free-form (seen: cli, dj, timeline, api, or whatever the command carried). mode is the controller's last-seen system mode name (IDLE|AMBIENT|INTERACTIVE|STARTUP, default IDLE). filepath is never set. bpm/first_beat_s null until beat analysis has run."
+        }
+      ]
+    },
+    "music.playback.stopped": {
+      "constant": "MUSIC_PLAYBACK_STOPPED",
+      "emitters": [
+        "services/music_controller_service/music_controller_service.py:316",
+        "services/music_controller_service/music_controller_service.py:1237",
+        "services/music_controller_service/music_controller_service.py:1279",
+        "services/music_controller_service/music_controller_service.py:1753"
+      ],
+      "variants": [
+        {
+          "from": "music_controller_service.py:1279 (normal stop, raw dict)",
+          "fields": {"track_name": "str|null"}
+        },
+        {
+          "from": "music_controller_service.py:1237 (stop while nothing playing, raw dict)",
+          "fields": {"track_name": "null", "already_stopped": "bool"},
+          "note": "already_stopped is always true."
+        },
+        {
+          "from": "music_controller_service.py:1753 (dj next with nothing queued, raw dict)",
+          "fields": {},
+          "note": "Empty dict, emitted right after _stop_playback() already emitted the :1279 variant - a double stop."
+        },
+        {
+          "from": "music_controller_service.py:316 (service shutdown) -> BaseEventPayload",
+          "fields": {"timestamp": "float", "event_id": "str", "conversation_id": "null", "schema_version": "str"},
+          "note": "BASE fields only."
+        }
+      ]
+    },
+    "dj.mode.changed": {
+      "constant": "DJ_MODE_CHANGED",
+      "emitters": [
+        "services/brain_service.py:1133",
+        "services/brain_service.py:1162",
+        "services/music_controller_service/music_controller_service.py:2084",
+        "services/music_controller_service/music_controller_service.py:2114"
+      ],
+      "variants": [
+        {
+          "from": "DJModeChangedPayload (event_payloads.py:788) + BASE",
+          "fields": {"timestamp": "float", "event_id": "str", "conversation_id": "null", "schema_version": "str", "is_active": "bool"},
+          "note": "Same model at all sites (music controller uses .dict(), same output). Brain is the normal path (dj start/stop); the music controller's own dj start/stop handlers also emit it."
+        }
+      ]
+    },
+    "eye.command": {
+      "constant": "EYE_COMMAND",
+      "emitters": [
+        "services/intent_router_service.py:589",
+        "services/timeline_executor_service/show_player.py:555",
+        "services/command_dispatcher_service.py:286",
+        "services/command_dispatcher_service.py:311"
+      ],
+      "variants": [
+        {
+          "from": "intent_router_service.py:589 (set_eye_color intent, raw dict)",
+          "fields": {"pattern": "str", "color": "str", "intensity": "float", "conversation_id": "str|null"},
+          "note": "No BASE fields, no duration key. pattern defaults to 'custom'. Pattern names: idle|startup|engaged|listening|thinking|speaking|flash|happy|sad|angry|surprised|error|custom (EyePattern)."
+        },
+        {
+          "from": "show_player.py:555 (cue 'eyes' action) -> EyeCommandPayload (event_payloads.py:325) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "pattern": "str", "color": "str|null", "intensity": "float|null", "duration": "float|null"
+          }
+        },
+        {
+          "from": "command_dispatcher_service.py:286/311 (CLI 'eye ...', standardize_command_payload)",
+          "fields": {
+            "command": "str", "subcommand": "str|null", "args": "list[str]", "raw_input": "str",
+            "conversation_id": "str|null", "timestamp?": "any", "source?": "str"
+          },
+          "note": "CLI command shape - no pattern/color keys; the eye service parses raw_input/args. timestamp/source only if the incoming CLI_COMMAND had them."
+        }
+      ]
+    },
+    "show.perform": {
+      "constant": "SHOW_PERFORM",
+      "emitters": [
+        "services/claude_service/claude_service.py:1498",
+        "services/intent_router_service.py:618",
+        "services/timeline_executor_service/timeline_executor_service.py:1549"
+      ],
+      "variants": [
+        {
+          "from": "claude_service.py:1498 (inline {cue:}/{clip:} tag) and intent_router_service.py:618 (perform_show tool) -> ShowPerformPayload.model_dump()",
+          "fields": {"id": "str", "params": "null", "source": "enum:claude", "conversation_id": "str|null"},
+          "note": "No BASE fields. All keys present."
+        },
+        {
+          "from": "timeline_executor_service.py:1549 (CLI 'show <id> [intensity] [speed]') -> ShowPerformPayload.model_dump(exclude_none=True)",
+          "fields": {"id": "str", "source": "enum:cli", "params?": "{intensity:float,speed:float}"},
+          "note": "exclude_none: conversation_id absent, params absent unless a number was given; when present both intensity (0-1.5) and speed (0.5-2) are filled (defaults 1.0). Schema allows source jev|claude|timeline|idle|ui|cli but only claude and cli have live emitters."
+        }
+      ]
+    },
+    "show.stop": {
+      "constant": "SHOW_STOP",
+      "emitters": ["services/timeline_executor_service/timeline_executor_service.py:1535"],
+      "variants": [
+        {
+          "from": "ShowStopPayload.model_dump(exclude_none=True) (CLI 'show stop [id|show|gesture|all]')",
+          "fields": {"id?": "str", "layer?": "enum:show|gesture", "all?": "bool"},
+          "note": "Exactly one key present: {all:true} | {layer} | {id}."
+        }
+      ]
+    },
+    "show.started": {
+      "constant": "SHOW_STARTED",
+      "emitters": ["services/timeline_executor_service/show_player.py:398"],
+      "variants": [
+        {
+          "from": "ShowRunPayload (core/event_payloads.py:225)",
+          "fields": {
+            "id": "str", "kind": "enum:clip|cue|sequence", "source": "enum:jev|claude|timeline|idle|ui|cli",
+            "run_id": "str", "reason": "null", "conversation_id": "str|null"
+          }
+        }
+      ]
+    },
+    "show.ended": {
+      "constant": "SHOW_ENDED",
+      "emitters": [
+        "services/timeline_executor_service/show_player.py:267",
+        "services/timeline_executor_service/show_player.py:438"
+      ],
+      "variants": [
+        {
+          "from": "show_player.py:438 (run finished) -> ShowRunPayload",
+          "fields": {
+            "id": "str", "kind": "enum:clip|cue|sequence", "source": "str",
+            "run_id": "str", "reason": "enum:done|interrupted", "conversation_id": "str|null"
+          }
+        },
+        {
+          "from": "show_player.py:267 (refused) -> ShowRunPayload",
+          "fields": {
+            "id": "str", "kind": "enum:clip|cue|sequence|unknown", "source": "str",
+            "run_id": "str", "reason": "enum:rejected", "conversation_id": "str|null"
+          },
+          "note": "No show.started precedes it; run_id is a fresh uuid never seen elsewhere. kind 'unknown' when the id is not in the library. source may be any string (an unknown source is itself a rejection reason)."
+        }
+      ]
+    },
+    "show.motion": {
+      "constant": "SHOW_MOTION",
+      "emitters": ["services/timeline_executor_service/show_player.py:544"],
+      "variants": [
+        {
+          "from": "ShowMotionPayload (core/event_payloads.py:236)",
+          "fields": {
+            "run_id": "str", "clip": "str", "intensity": "float", "speed": "float",
+            "start_at": "float", "layer": "enum:show|gesture", "owns": "list[str]|null"
+          },
+          "note": "start_at is epoch seconds (wall clock)."
+        }
+      ]
+    },
+    "show.sfx": {
+      "constant": "SHOW_SFX",
+      "emitters": ["services/timeline_executor_service/show_player.py:564"],
+      "variants": [
+        {"from": "ShowSfxPayload (core/event_payloads.py:262)", "fields": {"id": "str"}, "note": "Sound effect file stem."}
+      ]
+    },
+    "stage.lights": {
+      "constant": "STAGE_LIGHTS",
+      "emitters": ["services/timeline_executor_service/show_player.py:561"],
+      "variants": [
+        {
+          "from": "StageLightsPayload (core/event_payloads.py:247)",
+          "fields": {"cue": "str|null", "mode": "str|null", "fade": "float", "hold": "float", "rig": "str|null"}
+        }
+      ]
+    },
+    "chest.command": {
+      "constant": "CHEST_COMMAND",
+      "emitters": ["services/chest_light_controller_service.py:247"],
+      "variants": [
+        {
+          "from": "ChestCommandPayload (core/event_payloads.py:176), emitted straight on the bus",
+          "fields": {"command": "str", "connected": "bool", "timestamp": "str"},
+          "note": "timestamp is an ISO-8601 STRING. command is the serial line without newline (e.g. 'SS', 'M128', 'H1FF'). connected=false in mock mode."
+        }
+      ]
+    },
+    "chest.override": {
+      "constant": "CHEST_OVERRIDE",
+      "emitters": ["services/timeline_executor_service/show_player.py:559"],
+      "variants": [
+        {"from": "ChestOverridePayload (core/event_payloads.py:256)", "fields": {"command": "str", "hold": "float"}, "note": "hold 0 = keep until replaced."}
+      ]
+    },
+    "motion.freeze": {
+      "constant": "MOTION_FREEZE",
+      "emitters": ["services/timeline_executor_service/timeline_executor_service.py:1516"],
+      "variants": [
+        {"from": "MotionFreezePayload (core/event_payloads.py:267)", "fields": {"on": "bool"}, "note": "CLI 'freeze' (true) / 'unfreeze' (false)."}
+      ]
+    },
+    "system.mode.change": {
+      "constant": "SYSTEM_MODE_CHANGE",
+      "emitters": [
+        "services/yoda_mode_manager_service.py:240",
+        "services/brain_service.py:533",
+        "services/brain_service.py:539"
+      ],
+      "variants": [
+        {
+          "from": "yoda_mode_manager_service.py:240 -> SystemModeChangePayload (event_payloads.py:315) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "null", "schema_version": "str",
+            "old_mode": "enum:STARTUP|IDLE|AMBIENT|INTERACTIVE", "new_mode": "enum:STARTUP|IDLE|AMBIENT|INTERACTIVE",
+            "message": "null"
+          },
+          "note": "The real 'mode changed' notification. It is SYSTEM_MODE_CHANGE (no D) that YodaModeManagerService emits; system.mode.changed has no emitter."
+        },
+        {
+          "from": "brain_service.py:533/539 (legacy DjCommandPayload branch, raw dict)",
+          "fields": {"mode": "enum:dj|standard"},
+          "note": "Disagrees with the yoda shape: key 'mode' not 'new_mode', lowercase values outside the SystemMode set. Consumers that require new_mode (e.g. MusicController) log it as invalid. Only reachable via a legacy direct DJ_COMMAND payload."
+        }
+      ]
+    },
+    "system.mode.changed": {
+      "constant": "SYSTEM_MODE_CHANGED",
+      "emitters": [],
+      "variants": [],
+      "note": "No live emitter. Subscribed by elevenlabs, memory and claude services, which therefore never see a mode change through it. Use system.mode.change."
+    },
+    "service_status": {
+      "constant": null,
+      "emitters": ["base_service.py:155 (BaseService._emit_status, inherited by nearly every service)"],
+      "variants": [
+        {
+          "from": "base_service.py:155 (raw dict, literal topic string)",
+          "fields": {
+            "service": "str",
+            "status": "enum:starting|running|degraded|error|stopped",
+            "message": "str",
+            "severity": "enum:debug|info|warning|error|critical"
+          },
+          "note": "Key is 'service' holding the CLASS name (e.g. 'BrainService'), not 'service_name'. No timestamp. status/severity are str-Enum objects. cli_service and music_controller override _emit_status and publish on service.status.update instead."
+        }
+      ]
+    },
+    "service.status.update": {
+      "constant": "SERVICE_STATUS_UPDATE",
+      "emitters": [
+        "services/cli_service.py:524",
+        "services/music_controller_service/music_controller_service.py:1594",
+        "services/sim_bridge_service.py:404"
+      ],
+      "variants": [
+        {
+          "from": "cli_service.py:524 (_emit_status override, raw dict)",
+          "fields": {
+            "service_name": "str", "status": "enum:starting|running|degraded|error|stopped",
+            "message": "str", "timestamp": "float", "severity": "enum:debug|info|warning|error|critical"
+          },
+          "note": "No event_id/schema_version/conversation_id."
+        },
+        {
+          "from": "music_controller_service.py:1594 (_emit_status override) and sim_bridge_service.py:404 -> ServiceStatusPayload (event_payloads.py:123) + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "null", "schema_version": "str",
+            "service_name": "str", "status": "enum:starting|running|degraded|error|stopped",
+            "message": "str|null", "severity": "enum:debug|info|warning|error|critical|null"
+          },
+          "note": "sim_bridge uses service_name 'control_panel' (running|stopped) to tell MouseInputService a panel owns push-to-talk."
+        }
+      ]
+    },
+    "intent.detected": {
+      "constant": "INTENT_DETECTED",
+      "emitters": [
+        "services/jev_intent_service.py:359",
+        "services/claude_service/claude_service.py:1561"
+      ],
+      "variants": [
+        {
+          "from": "jev_intent_service.py:359 -> IntentPayload (event_payloads.py:80) + BASE, then extra key",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "intent_name": "str", "parameters": "dict", "confidence": "float", "original_text": "str",
+            "source": "enum:jev_fast_router"
+          },
+          "note": "original_text is the user's transcript. conversation_id is overwritten with the turn's id when known."
+        },
+        {
+          "from": "claude_service.py:1561 -> IntentPayload + BASE",
+          "fields": {
+            "timestamp": "float", "event_id": "str", "conversation_id": "str|null", "schema_version": "str",
+            "intent_name": "str", "parameters": "dict", "confidence": "null", "original_text": "str"
+          },
+          "note": "No 'source' key (absence = Claude). original_text is Claude's reply text, NOT the user's utterance - disagrees with the Jev variant. parameters validated by the tool's Pydantic model when one exists."
+        }
+      ]
+    },
+    "music.command": {
+      "constant": "MUSIC_COMMAND",
+      "emitters": [
+        "services/command_dispatcher_service.py:286",
+        "services/command_dispatcher_service.py:311",
+        "services/brain_service.py:1008",
+        "services/brain_service.py:1175",
+        "services/brain_service.py:1681",
+        "services/brain_service.py:1708",
+        "services/timeline_executor_service/timeline_executor_service.py:1117"
+      ],
+      "variants": [
+        {
+          "from": "command_dispatcher_service.py:286/311 (CLI and voice intents; IntentRouter routes play/stop via CLI_COMMAND) -> standardize_command_payload",
+          "fields": {
+            "command": "str", "subcommand": "str|null", "args": "list[str]", "raw_input": "str",
+            "conversation_id": "str|null", "timestamp?": "any", "source?": "str"
+          },
+          "note": "Compound 'play music x' -> command 'play', subcommand 'music', args ['x']; basic 'music ...' -> command 'music'. Registered compounds: play/stop/next/list/install music."
+        },
+        {
+          "from": "brain_service.py:1008/1175/1708 (raw dict)",
+          "fields": {"action": "enum:stop", "conversation_id?": "null"},
+          "note": "1175 omits conversation_id."
+        },
+        {
+          "from": "brain_service.py:1681 (raw dict)",
+          "fields": {"action": "enum:crossfade", "song_query": "str", "fade_duration": "float", "conversation_id": "null"}
+        },
+        {
+          "from": "timeline_executor_service.py:1117 (raw dict)",
+          "fields": {"action": "enum:crossfade", "song_query": "str", "fade_duration": "float", "crossfade_id": "str"},
+          "note": "song_query here is a track id; brain's is a track title."
+        }
+      ]
+    },
+    "dj.command": {
+      "constant": "DJ_COMMAND",
+      "emitters": [
+        "services/command_dispatcher_service.py:286",
+        "services/command_dispatcher_service.py:311"
+      ],
+      "variants": [
+        {
+          "from": "command_dispatcher_service.py (compound 'dj start|stop|next|queue') -> standardize_command_payload",
+          "fields": {
+            "command": "enum:dj", "subcommand": "enum:start|stop|next|queue", "args": "list[str]", "raw_input": "str",
+            "conversation_id": "str|null", "timestamp?": "any", "source?": "str"
+          },
+          "note": "Only emitter. Voice dj_mode_on/off intents reach it via CLI_COMMAND -> dispatcher."
+        }
+      ]
+    }
+  }
+}

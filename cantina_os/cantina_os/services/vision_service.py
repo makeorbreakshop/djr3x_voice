@@ -42,6 +42,7 @@ from cantina_os.event_payloads import (
     VisionRequestPayload,
     VisionScenePayload,
 )
+from cantina_os.tap import fixtures as tap_fixtures
 from cantina_os.llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from cantina_os.utils.command_decorators import (
     command_error_handler,
@@ -90,7 +91,7 @@ class VisionService(BaseService):
             )
             self.vision_client = None
         else:
-            self.vision_client = Anthropic(**client_kwargs(provider))
+            self.vision_client = tap_fixtures.wrap_anthropic(Anthropic(**client_kwargs(provider)), "vision")
             self.model = map_model(self.model, provider.provider)
             self.logger.info(f"Vision client using {provider.provider} model {self.model}")
 

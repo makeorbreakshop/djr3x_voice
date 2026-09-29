@@ -22,6 +22,10 @@ import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, project_root)
 
+# Phase 0 bus tap: no session logs or tap websocket from tests that build a CantinaOS.
+os.environ.setdefault("R3X_SESSION_LOG", "0")
+os.environ.setdefault("R3X_TAP_ENABLED", "0")
+
 # Import test dependencies
 from cantina_os.event_bus import EventBus
 

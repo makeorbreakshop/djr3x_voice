@@ -43,6 +43,7 @@ from ...core.event_payloads import ShowPerformPayload
 from ...show.catalog import ShowCatalog, build_catalog
 from ...show.loader import load_library
 from ...show.tags import SpeechTagScheduler, TagParser, extract_tags
+from ...tap import fixtures as tap_fixtures
 from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from ...core.fast_router_gate import GATE as FAST_ROUTER_GATE, ActionTaken
 from pydantic import BaseModel, ValidationError
@@ -338,12 +339,12 @@ class ClaudeService(BaseService):
             self._provider = provider
 
             # Initialize Anthropic client with prompt caching enabled
-            self._client = Anthropic(
+            self._client = tap_fixtures.wrap_anthropic(Anthropic(
                 **client_kwargs(provider),
                 default_headers={
                     "anthropic-beta": "prompt-caching-2024-07-31"  # Enable prompt caching
                 }
-            )
+            ), "claude")  # fixture record/replay hook (Phase 0); a no-op normally
 
             # Verify client was initialized with key
             if not self._client:

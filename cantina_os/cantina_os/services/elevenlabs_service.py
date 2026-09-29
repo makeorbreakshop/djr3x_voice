@@ -29,6 +29,7 @@ from cantina_os.event_payloads import (
     LLMResponsePayload
 )
 from cantina_os.core.event_topics import EventTopics
+from ..tap import fixtures as tap_fixtures
 from .elevenlabs_dialogue_socket import DialogueSocket, supports_model, to_absolute, BYTES_PER_SECOND
 
 
@@ -280,7 +281,7 @@ class ElevenLabsService(BaseService):
                     self._audio_thread.start()
                     self.logger.info("Started audio streaming worker thread")
 
-                    if self._use_dialogue_socket and supports_model(self._config.model_id):
+                    if self._use_dialogue_socket and supports_model(self._config.model_id) and not tap_fixtures.replaying():
                         self._dialogue_socket = DialogueSocket(
                             api_key=self._config.api_key,
                             voice_id=self._config.voice_id,
@@ -702,6 +703,12 @@ class ElevenLabsService(BaseService):
         self.logger.info("Audio worker thread exiting")
     
     def _open_audio_stream(self, eleven_client, text, voice_id, model_id, voice_settings):
+        """The live stream below, or its fixture recording/replay (Phase 0, cantina_os/tap)."""
+        live = lambda: self._open_live_audio_stream(eleven_client, text, voice_id, model_id, voice_settings)
+        fx = tap_fixtures.get()
+        return live() if fx is None else fx.tts(text, model_id, live)
+
+    def _open_live_audio_stream(self, eleven_client, text, voice_id, model_id, voice_settings):
         """Iterator of (pcm bytes, alignment or None) for one line. Runs on the audio thread.
 
         v4 lines go over the warm dialogue socket, whole, which also returns character
@@ -1276,16 +1283,17 @@ class ElevenLabsService(BaseService):
                             voice_settings["speed"] = adjusted_speed
                     
                     # Use modern convert method instead of old generate()
-                    audio_generator = eleven_client.text_to_speech.convert(
-                        text=text,
-                        voice_id=voice_id,
-                        model_id=model_id,
-                        voice_settings=voice_settings,
-                        output_format="mp3_44100_128"
-                    )
-                    
-                    # Convert generator to bytes
-                    audio_bytes = b''.join(audio_generator)
+                    def _convert() -> bytes:
+                        return b''.join(eleven_client.text_to_speech.convert(
+                            text=text,
+                            voice_id=voice_id,
+                            model_id=model_id,
+                            voice_settings=voice_settings,
+                            output_format="mp3_44100_128"
+                        ))
+
+                    fx = tap_fixtures.get()  # Phase 0 fixture record/replay
+                    audio_bytes = _convert() if fx is None else fx.tts_bytes(text, model_id, _convert)
 
                     self.logger.info(f"Successfully generated speech, received {len(audio_bytes)} bytes")
 

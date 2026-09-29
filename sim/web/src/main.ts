@@ -12,7 +12,7 @@ import { Rig, RigDoc } from './rig';
 import { FaceLeds } from './leds';
 import { Activity, Performer } from './behavior';
 import { SpeechAudio } from './audio';
-import { LiveEvent, LiveLink } from './link';
+import { accessToken, LiveEvent, LiveLink } from './link';
 import { ChestFirmware, ChestHost, ChestLights, WINDOW_SUBSYSTEMS } from './chest';
 import { ControlPanel } from './panel';
 import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
@@ -578,7 +578,7 @@ function onLiveEvent(ev: LiveEvent) {
 }
 
 const liveEl = document.getElementById('st-live')!;
-const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
+const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=${encodeURIComponent(accessToken())}`, {
   onHello(hello) {
     host.setMode(liveMode(hello.mode));
     setActivity(restingActivity());

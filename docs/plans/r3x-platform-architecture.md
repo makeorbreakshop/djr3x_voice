@@ -378,6 +378,44 @@ transition, 2–3 real sessions. A service is retired only when its slice of the
 - Acceptance: a recorded corpus replays into CantinaOS and reproduces its own trace; the
   baseline table is written into this document.
 
+#### Phase 0 — what exists (2026-09-29)
+- Tap: `cantina_os/tap/` — `TappedEmitter` is the bus `main.py` builds; JSONL session log
+  `logs/session-<ts>.jsonl` (`R3X_SESSION_LOG=0` off); tap websocket `ws://127.0.0.1:8766/`
+  (`R3X_TAP_PORT`, `R3X_TAP_ENABLED`), token + Origin checked (`tap/auth.py`), every topic out,
+  `{topic, payload, id?}` in. Hand-written payload schema: `cantina_os/tap/topic_schema.json`.
+- SimBridge takes the same token; `./r3x` opens the panel at `#token=…`.
+- Fixtures: `R3X_FIXTURES=record|replay` + `R3X_FIXTURE_DIR`; corpus in `fixtures/smoke-voice`
+  (the 7 turns, real ElevenLabs) and `fixtures/smoke-show` (`--show`). Replay reproduces both
+  traces with an empty allow-list: `scripts/trace_compare.py <recorded>/trace.jsonl <replay log>`.
+
+#### Baseline (recorded 2026-09-29, `fixtures/smoke-voice`, real Jev/Claude/ElevenLabs, ms)
+From `trace_compare.py --latency`. "stop" = `VOICE_LISTENING_STOPPED` (transcript in hand);
+"1st audible sample" = `audio_t0` on `SPEECH_GENERATION_STARTED` (first `sounddevice` write).
+Claude via OpenRouter, TTS `eleven_v4_turbo` over the warm dialogue socket.
+
+| Turn | stop→intent | stop→action | stop→Claude 1st chunk | stop→Claude done | Claude done→1st sample | stop→1st audible sample |
+|---|---:|---:|---:|---:|---:|---:|
+| "hey Rex play some music" | 299 | 300 | 2,214 | 2,815 | 337 | 3,153 |
+| "play the next track" | 319 | 321 | 3,314 | 3,788 | 333 | 4,121 |
+| "stop the music" | 306 | 306 | 2,023 | 2,656 | 174 | 2,831 |
+| "start dj mode" | 252 | 254 | 1,850 | 2,072 | 1,595 * | 3,666 |
+| "stop dj mode" | 258 | 261 | 2,014 | 2,390 | 181 | 2,571 |
+| "make your eyes red" | 294 | 294 | 2,070 | 2,452 | 177 | 2,629 |
+| "what is your favourite cantina band" | - | - | 2,166 | 2,840 | 180 | 3,019 |
+| **median** | **297** | **297** | **2,070** | **2,656** | **181** | **3,019** |
+
+\* queued behind the DJ intro's own "Time to boogie!" line (one FIFO voice).
+Stop→Claude 1st chunk includes the fast-router wait and the reply's `<action_already_taken>`
+turn; the router path itself (stop→action ≈ 300 ms) is ~100 ms slower than the 2026-09-17
+figures, all of it in the Jev round trip. Phase 5 target: beat these medians.
+
+Found while building the harness (not fixed - §7b candidates): BrainService caches commentary
+from a free-running 15 s poll and its mp3 step blocks the event loop ~3 s, so a DJ turn's
+outcome depended on poll phase (the Jev verdict and Claude's tool call raced out of the stall);
+the smoke harness now waits for that caching after "start dj mode". When turns overlap,
+Claude's stream chunks appear to carry the *next* turn's `conversation_id` (a first chunk 13 ms
+after a stop, in an overlapped recording) - check before relying on per-turn attribution.
+
 ### Phase 1 — Skeleton: contracts, bus, gateway, stage manager, CLI
 - `r3x-contracts`, `r3x-bus`, `r3x-gateway`, `r3x-ops` (health), StageManager, `r3x-cli`,
   generated TS types.

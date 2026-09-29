@@ -16,6 +16,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pyee.asyncio import AsyncIOEventEmitter
+from .tap import fixtures as tap_fixtures
+from .tap.bus_tap import TappedEmitter, default_session_log, session_id
+from .tap.server import TapServer
 
 from .base_service import BaseService
 from .core.event_topics import EventTopics
@@ -164,11 +167,19 @@ class CantinaOS:
     
     def __init__(self, config: Dict[str, Any] = None):
         """Initialize the CantinaOS system."""
-        self._event_bus = AsyncIOEventEmitter()
+        # The bus is tapped (Phase 0): every emit goes to the JSONL session log and, once
+        # services start, the tap websocket. See cantina_os/tap/.
+        self._event_bus = TappedEmitter()
         self._services: Dict[str, BaseService] = {}
         self._shutdown_event = asyncio.Event()
         self._logger = logging.getLogger("cantina_os.main")
         self._load_config()  # Load values from .env file
+        self._session = session_id()
+        fixture_store = tap_fixtures.configure(session=self._session)
+        self._session_log = default_session_log(self._session, fixture_store.dir if fixture_store else None)
+        if self._session_log is not None:
+            self._event_bus.add_sink(self._session_log)
+        self._tap_server = None
         
         # Merge provided config with loaded values instead of replacing them
         if config:
@@ -369,6 +380,10 @@ class CantinaOS:
     async def _initialize_services(self) -> None:
         """Initialize all services."""
         self.logger.info("Initializing services")
+        if self._tap_server is None and os.environ.get("R3X_TAP_ENABLED", "1").lower() not in ("0", "false", "no", "off"):
+            self._tap_server = TapServer(self._event_bus, self._session)
+            if not await self._tap_server.start():
+                self._tap_server = None
         
         # Define the service initialization order
         service_order = [
@@ -445,6 +460,12 @@ class CantinaOS:
                 self.logger.info(f"Stopped service: {service_name}")
             except Exception as e:
                 self.logger.error(f"Error stopping service {service_name}: {e}")
+
+        if self._tap_server is not None:
+            await self._tap_server.stop()
+            self._tap_server = None
+        if self._session_log is not None:
+            self._session_log.close()
 
         # Final log message before stopping the listener
         self.logger.info("DJ R3X Voice has been shut down.")

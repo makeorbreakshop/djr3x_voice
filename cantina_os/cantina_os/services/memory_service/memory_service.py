@@ -38,6 +38,7 @@ try:
 except ImportError:
     Anthropic = None  # Graceful degradation if not installed
 
+from ...tap import fixtures as tap_fixtures
 from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 
 from ...base_service import BaseService
@@ -229,7 +230,7 @@ class MemoryService(BaseService):
         if self._summarization_enabled and Anthropic:
             provider = resolve_provider(self._config)
             if provider:
-                self._anthropic_client = Anthropic(**client_kwargs(provider))
+                self._anthropic_client = tap_fixtures.wrap_anthropic(Anthropic(**client_kwargs(provider)), "memory")
                 self._summarization_model = map_model(
                     self._summarization_model, provider.provider
                 )

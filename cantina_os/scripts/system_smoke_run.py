@@ -99,6 +99,8 @@ WATCH = [
     "MUSIC_PLAYBACK_STOPPED",
     "SYSTEM_MODE_CHANGE",
     "VOICE_LISTENING_STOPPED",
+    "SPEECH_CACHE_READY",
+    "DJ_NEXT_TRACK_SELECTED",
 ]
 
 TURNS: List[Tuple[str, str, List[str]]] = [
@@ -261,6 +263,20 @@ async def run(args) -> int:
             f"  -> landed={landed}  first action={first_action if first_action is None else f'{first_action:.0f} ms'}"
             f"  loop ticks during turn={ticks}"
         )
+
+        if label == "dj mode on":
+            # BrainService caches the next track's commentary from a free-running 15 s poll,
+            # and the mp3 step blocks the event loop for seconds. Left to chance it lands on a
+            # later turn at a different point each run, so a replay could not reproduce the
+            # trace. Let it finish here (recorded runs, R3X_FIXTURES, rely on this).
+            t_dj = time.monotonic()
+            def _cached_next() -> bool:
+                picked = [e["t"] for e in rec.since(t0) if e["topic"] == "DJ_NEXT_TRACK_SELECTED"]
+                return bool(picked) and any(e["topic"] == "SPEECH_CACHE_READY" for e in rec.since(picked[0]))
+
+            while time.monotonic() - t_dj < 40 and not _cached_next():
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(args.settle)
 
         if label == "play music" and args.hold:
             print(f"  holding {args.hold}s so VLC actually plays...")

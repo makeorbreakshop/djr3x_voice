@@ -125,3 +125,6 @@ venv.old-*/
 
 # ./r3x dependency-install checksum stamp
 cantina_os/.requirements_installed
+
+# Phase 0 bus-tap session logs (large, per run)
+logs/session-*.jsonl

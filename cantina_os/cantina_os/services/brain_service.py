@@ -23,6 +23,7 @@ from typing import Dict, Optional, Any, List
 from pydantic import BaseModel, Field, ValidationError
 
 from ..base_service import BaseService
+from ..tap import fixtures as tap_fixtures
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     ServiceStatus,
@@ -438,8 +439,7 @@ class BrainService(BaseService):
                     available_tracks = list(self._music_library.keys())
 
             # Basic random selection for now. Enhance with genre/energy matching later.
-            import random
-            selected_track_name = random.choice(available_tracks)
+            selected_track_name = tap_fixtures.choice("brain.next_track", available_tracks)
             return selected_track_name
 
         except Exception as e:

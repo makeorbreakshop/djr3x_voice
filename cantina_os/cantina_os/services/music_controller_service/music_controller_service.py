@@ -25,6 +25,7 @@ os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
 # NOTE: Do NOT set VLC_PLUGIN_PATH to empty string - it breaks VLC initialization!
 
 from cantina_os.base_service import BaseService
+from cantina_os.tap import fixtures as tap_fixtures
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     MusicCommandPayload,
@@ -1373,7 +1374,7 @@ class MusicControllerService(BaseService):
         current_track = getattr(self, "current_track", None)
         if current_track and len(choices) > 1:
             choices = [name for name in choices if name != current_track.name]
-        track_name = random.choice(choices)
+        track_name = tap_fixtures.choice("music.random_track", choices)
         self.logger.info(f"No track named; playing {track_name}")
         await self._play_track_by_name(track_name, source)
 
@@ -2094,8 +2095,7 @@ class MusicControllerService(BaseService):
                 # Get a random track
                 available_tracks = list(self.tracks.values())
                 if available_tracks:
-                    import random
-                    random_track = random.choice(available_tracks)
+                    random_track = tap_fixtures.choice("music.dj_random_track", available_tracks, lambda t: t.name)
                     await self._play_track_by_name(random_track.name, source="dj")
                     
         except Exception as e:

@@ -7,7 +7,19 @@ import socket
 
 import pytest
 from pyee.asyncio import AsyncIOEventEmitter
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import connect as _ws_connect
+
+TOKEN = "test-token"
+
+
+def connect(url, **kwargs):
+    """Every client below is an authorised one; refusal is covered in test_tap.py."""
+    return _ws_connect(f"{url}/?token={TOKEN}", **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _token(monkeypatch):
+    monkeypatch.setenv("R3X_TAP_TOKEN", TOKEN)
 
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.services.sim_bridge_service import SimBridgeService
