@@ -29,6 +29,8 @@ use r3x_performer_core::show::types::{Action, Kind, Source as PSource};
 use r3x_performer_core::Performer;
 use tokio::task::JoinHandle;
 
+mod calibrate;
+
 pub const TICK_HZ: f64 = 50.0;
 const RELOAD_EVERY: Duration = Duration::from_secs(1);
 
@@ -239,6 +241,11 @@ impl Host {
             req.ack(Ack::rejected("not a perf command"));
             return;
         };
+        if calibrate::is_calibration(cmd) {
+            let ack = calibrate::handle(cmd, source, self.stage.mode, &self.profile, self.drivers.as_ref());
+            req.ack(ack);
+            return;
+        }
         match cmd {
             // One switch: state.stage.frozen (the stage watcher applies it here).
             PerfCommand::Freeze { on } => {

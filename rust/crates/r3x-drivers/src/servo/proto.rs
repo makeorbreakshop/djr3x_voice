@@ -52,7 +52,9 @@ pub enum Msg {
     Config(ChannelConfig),
     /// Target in joint units; limits 0 = the channel's configured default.
     Goal { ch: u8, target: f32, v_max: f32, a_max: f32, j_max: f32 },
-    Heartbeat { outputs_enabled: bool },
+    /// `mask`: per-channel output enables, bit n = channel n (`u32::MAX` = all). Optional
+    /// on the wire (a 1-byte heartbeat means all).
+    Heartbeat { outputs_enabled: bool, mask: u32 },
     Direct { ch: u8, us: u16 },
     Park,
     HelloReply { version: u8, channels: u8, firmware: String },
@@ -104,8 +106,9 @@ impl Msg {
                 f32s(&mut p, &[*target, *v_max, *a_max, *j_max]);
                 t::GOAL
             }
-            Msg::Heartbeat { outputs_enabled } => {
+            Msg::Heartbeat { outputs_enabled, mask } => {
                 p.push(*outputs_enabled as u8);
+                p.extend_from_slice(&mask.to_le_bytes());
                 t::HEARTBEAT
             }
             Msg::Direct { ch, us } => {
@@ -184,7 +187,7 @@ impl Msg {
                 j_max: r.f32()?,
             }),
             t::GOAL => Msg::Goal { ch: r.u8()?, target: r.f32()?, v_max: r.f32()?, a_max: r.f32()?, j_max: r.f32()? },
-            t::HEARTBEAT => Msg::Heartbeat { outputs_enabled: r.u8()? != 0 },
+            t::HEARTBEAT => Msg::Heartbeat { outputs_enabled: r.u8()? != 0, mask: r.u32().unwrap_or(u32::MAX) },
             t::DIRECT => Msg::Direct { ch: r.u8()?, us: r.u16()? },
             t::PARK => Msg::Park,
             t::HELLO_REPLY => Msg::HelloReply {
@@ -219,6 +222,9 @@ impl Reader<'_> {
     }
     fn u16(&mut self) -> Option<u16> {
         Some(u16::from_le_bytes(self.take()?))
+    }
+    fn u32(&mut self) -> Option<u32> {
+        Some(u32::from_le_bytes(self.take()?))
     }
     fn f32(&mut self) -> Option<f32> {
         Some(f32::from_le_bytes(self.take()?))
@@ -324,7 +330,7 @@ mod tests {
         let msgs = [
             Msg::Hello,
             Msg::Goal { ch: 3, target: -12.5, v_max: 0.0, a_max: 400.0, j_max: 0.0 },
-            Msg::Heartbeat { outputs_enabled: true },
+            Msg::Heartbeat { outputs_enabled: true, mask: 0b101 },
             Msg::Direct { ch: 1, us: 1500 },
             Msg::HelloReply { version: 1, channels: 18, firmware: "r3x-servo 0.1".into() },
             Msg::Telemetry(Telemetry {

@@ -10,7 +10,7 @@
 //! | [`face::FaceDriver`] | `Out::FaceLine` | named_v1 (`SI SE SL ST SS SF`, `Mnnn`) |
 //! | [`chest::ChestDriver`] | `Out::ChestLine`, `Out::Freeze` | named_v1 (+ `Bnnn Xn Hxxx`), 20 Hz send-on-change |
 //! | [`virtual_driver::VirtualDriver`] | frames | bus frames channel, 50 Hz |
-//! | [`servo::r3x::R3xServoDriver`] | `Out::ServoGoal` | framed binary, see `PROTOCOL.md` |
+//! | [`servo::r3x::R3xServoDriver`] | `Out::ServoGoal`, `Out::ServoPulse` | framed binary, see `PROTOCOL.md` |
 //! | [`servo::maestro::MaestroDriver`] | frames (host follower) | Pololu compact/Pololu protocol |
 //! | [`servo::pca9685::Pca9685Driver`] | frames (host follower) | registers over a [`servo::pca9685::RegisterBus`] |
 //!
@@ -23,6 +23,8 @@ pub mod link;
 pub mod runner;
 pub mod servo;
 pub mod virtual_driver;
+
+use std::collections::BTreeMap;
 
 use r3x_contracts::ServiceStatus;
 use r3x_performer_core::performer::Out;
@@ -58,6 +60,12 @@ pub trait Driver: Send {
     fn start(&mut self, _now: f64) {}
     /// Output enable gate.
     fn set_enabled(&mut self, on: bool, now: f64);
+    /// `state.stage.outputs` (output name -> on). Default: the whole driver is off when any
+    /// output it serves is off. The servo controller gates per channel instead.
+    fn set_outputs(&mut self, outputs: &BTreeMap<String, bool>, now: f64) {
+        let on = !self.outputs().iter().any(|o| outputs.get(o) == Some(&false));
+        self.set_enabled(on, now);
+    }
     /// An event-time output of the performer. Drivers ignore what is not theirs.
     fn on_out(&mut self, _out: &Out, _now: f64) {}
     /// A performer frame (dumb sinks and the virtual driver).

@@ -1,6 +1,7 @@
 //! Servo drivers (plan D6). `r3x_servo` gets goals at event time; `maestro` and `pca9685`
 //! are dumb sinks fed the host follower's controller frame; Feetech and Dynamixel are stubs.
 
+pub mod calibrate;
 pub mod maestro;
 pub mod pca9685;
 pub mod proto;

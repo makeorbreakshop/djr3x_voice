@@ -1,6 +1,6 @@
 //! Online jerk-limited trajectory following with soft-limit braking (port of
 //! `trajectory.ts`). `no_std`-friendly (core + libm only): the same module runs on the
-//! servo controller firmware (D6) and on the host for dumb sinks.
+//! servo controller firmware (D6, `firmware/servo`) and on the host for dumb sinks.
 //!
 //! Construction (every limit provable, not approximate):
 //!   1. an exact trapezoidal follower (v <= vMax, |a| <= aMax, braking v = sqrt(2 a d)
@@ -87,6 +87,22 @@ impl JerkLimitedFollower {
         self.v = 0.0;
         self.v1 = 0.0;
         self.a = 0.0;
+    }
+
+    /// Ramp to hold: aim at the point where the trapezoid stage stops if it brakes now at
+    /// `a_max` (so the joint decelerates without reversing), inside the soft limits.
+    /// A target already between here and that point (braking into it) is kept.
+    pub fn hold(&mut self) {
+        let stop = self.x1 + self.v1 * self.v1.abs() / (2.0 * self.limits.a_max);
+        let (to_target, to_stop) = (self.target - self.x1, stop - self.x1);
+        if !(to_target * to_stop > 0.0 && to_target.abs() <= to_stop.abs()) {
+            self.set_target(stop);
+        }
+    }
+
+    /// Speed of the trapezoid stage (the filtered output lags it by ~2/omega).
+    pub fn stage1_velocity(&self) -> f64 {
+        self.v1
     }
 
     pub fn step(&mut self, dt: f64) {

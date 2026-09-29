@@ -1,0 +1,40 @@
+[package]
+name = "r3x-servo-fw"
+description = "r3x_servo motion controller firmware for the RP2040 (plan D6). Logic: rust/crates/r3x-servo-ctl."
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+rust-version = "1.91"
+
+[dependencies]
+r3x-servo-ctl = { path = "../../rust/crates/r3x-servo-ctl" }
+
+embassy-rp = { version = "0.10", features = ["rp2040", "defmt", "time-driver", "critical-section-impl", "unstable-pac"] }
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-sync = { version = "0.8", features = ["defmt"] }
+embassy-usb = { version = "0.6", features = ["defmt"] }
+embassy-futures = "0.1"
+
+cortex-m = { version = "0.7", features = ["inline-asm"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+static_cell = "2"
+portable-atomic = { version = "1", features = ["critical-section"] }
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"
+codegen-units = 1
+incremental = false
+
+[profile.dev]
+opt-level = 1
+
+# Not part of the host workspace in rust/.
+[workspace]
+resolver = "3"  # MSRV-aware: pick dependency versions that build on rust-version

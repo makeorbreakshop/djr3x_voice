@@ -1,0 +1,12 @@
+[package]
+name = "r3x-motion"
+description = "Jerk-limited trajectory follower, soft-limit braking and servo calibration. no_std, no alloc: shared by the host performer (dumb sinks) and the servo controller firmware (plan D6)."
+# Explicit (not workspace-inherited): firmware/servo depends on this crate by path from
+# outside the workspace.
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+libm = "0.2"

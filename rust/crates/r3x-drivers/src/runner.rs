@@ -25,7 +25,7 @@ use crate::{Driver, Health};
 enum Msg {
     Out(Out),
     Frames(Arc<Frames>),
-    Enable(bool),
+    Outputs(BTreeMap<String, bool>),
     Stop,
 }
 
@@ -43,8 +43,8 @@ impl DriverHandle {
     pub fn frames(&self, f: Arc<Frames>) {
         let _ = self.tx.send(Msg::Frames(f));
     }
-    pub fn set_enabled(&self, on: bool) {
-        let _ = self.tx.send(Msg::Enable(on));
+    pub fn set_outputs(&self, outputs: BTreeMap<String, bool>) {
+        let _ = self.tx.send(Msg::Outputs(outputs));
     }
 }
 
@@ -88,7 +88,7 @@ pub fn spawn(mut driver: Box<dyn Driver>, bus: Option<Bus>) -> DriverHandle {
                 match rx.recv_timeout(Duration::from_secs_f64(wait)) {
                     Ok(Msg::Out(o)) => driver.on_out(&o, now()),
                     Ok(Msg::Frames(f)) => driver.on_frames(&f, now()),
-                    Ok(Msg::Enable(on)) => driver.set_enabled(on, now()),
+                    Ok(Msg::Outputs(o)) => driver.set_outputs(&o, now()),
                     Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                     Err(RecvTimeoutError::Timeout) => {}
                 }
@@ -178,10 +178,10 @@ impl DriverSet {
         }
     }
 
-    /// Apply `state.stage.outputs`: a driver is off when any output it serves is off.
+    /// Apply `state.stage.outputs` (each driver decides: see [`Driver::set_outputs`]).
     pub fn apply_outputs(&self, outputs: &BTreeMap<String, bool>) {
         for d in &self.drivers {
-            d.set_enabled(!d.outputs.iter().any(|o| outputs.get(o) == Some(&false)));
+            d.set_outputs(outputs.clone());
         }
     }
 }
@@ -190,7 +190,7 @@ fn routes_to(o: &Out, driver: &str) -> bool {
     match o {
         Out::FaceLine { .. } => driver == "driver.face",
         Out::ChestLine { .. } | Out::Freeze { .. } => driver == "driver.chest",
-        Out::ServoGoal { .. } => driver == "driver.servo",
+        Out::ServoGoal { .. } | Out::ServoPulse { .. } => driver == "driver.servo",
         _ => false,
     }
 }

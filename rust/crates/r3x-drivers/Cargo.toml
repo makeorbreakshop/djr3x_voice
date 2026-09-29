@@ -10,6 +10,8 @@ publish.workspace = true
 r3x-contracts.workspace = true
 r3x-bus.workspace = true
 r3x-performer-core = { path = "../r3x-performer-core" }
+r3x-motion = { path = "../r3x-motion" }
+serde_json.workspace = true
 tracing.workspace = true
 serialport = { version = "4", default-features = false }
 

@@ -23,6 +23,8 @@ crates/
                   CLAP search (ort), sfx, commentary cache on the bus, CantinaOS music adapter
   r3x-vision      camera (AVFoundation via ffmpeg), YuNet + SFace on ort, gallery enrolment,
                   presence, Claude scene description; `r3x-vision` tool binary
+  r3x-motion      no_std follower + soft-limit braking + servo calibration (performer and firmware)
+  r3x-servo-ctl   no_std servo controller logic (PROTOCOL.md); firmware/servo runs it on an RP2040
   r3x-performer-core, ...   see the plan, section 5
 contracts-schema/ generated JSON Schema (do not edit)
 ```
@@ -155,6 +157,18 @@ Gallery at `R3X_VISION_GALLERY` (default `~/.local/share/dj-r3x/vision/gallery.j
 `R3X_VISION_SCENES=0` (no automatic paid scene captures), `R3X_VISION_EP=cpu` (skip CoreML).
 Missing models/gallery/camera leave vision off (fail-open). Threshold 0.50 cosine: training
 photos leave-one-out 0.747-0.889, 5,749 LFW impostors max 0.472.
+
+## Servo controller (Phase 8)
+
+```bash
+cd ../firmware/servo && cargo build --release     # RP2040 firmware (thumbv6m, flip-link); see its README
+cargo test -p r3x-servo-ctl                       # controller on a fake clock, incl. end to end with the host driver
+```
+
+`R3X_SERVO_PORT` points the runtime at the board. Stage outputs gate servos per channel (the
+heartbeat mask). Bench calibration: Drive tab -> Calibrate (`perf cal_jog` / `cal_save`, Bench
+mode, panel/CLI only) writes `calibrated: measured` into the profile (`R3X_PROFILE`, else
+`profiles/r3x/robot.json`); it applies at the next start.
 
 ## Build and test
 

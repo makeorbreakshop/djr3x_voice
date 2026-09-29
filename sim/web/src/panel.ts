@@ -13,6 +13,7 @@ import type { Ack, Command, Event as R3xEvent, EventMeta, Hello, RetainedState }
 import type { Engagement } from './generated/Engagement';
 import type { OperatingMode } from './generated/OperatingMode';
 import { accessToken, LiveLink, LogRecord } from './link';
+import { mountCalibrate } from './calibrate';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -90,6 +91,7 @@ export class ControlPanel {
     this.bindTalk();
     this.bindControls();
     this.bindDrive();
+    mountCalibrate(this.gw, $('drive'), (m) => this.toast(m));
     this.bindLogs();
     this.renderEyes();
     this.setPhase('offline');

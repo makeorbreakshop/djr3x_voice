@@ -269,6 +269,12 @@ pub enum Out {
         j_max: f64,
         seq: u64,
     },
+    /// A raw pulse for one actuator (Bench calibration jog). The controller still moves it
+    /// through its follower, clamped to the pulse range and soft limits.
+    ServoPulse {
+        actuator: String,
+        us: f64,
+    },
     Freeze {
         on: bool,
     },
@@ -678,6 +684,9 @@ impl Performer {
                 if intents {
                     self.puppet.release();
                 }
+            }
+            PerfCommand::CalJog { .. } | PerfCommand::CalSave { .. } => {
+                return Err("calibration is the runtime's job".into())
             }
             PerfCommand::Emote { slot } => {
                 if usize::from(*slot) >= self.slots.len() {

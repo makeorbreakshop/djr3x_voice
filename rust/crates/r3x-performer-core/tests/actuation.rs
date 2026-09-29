@@ -259,3 +259,32 @@ fn maestro_drives_the_pipeline_directly() {
     s.run(0.0, &mut a).unwrap();
     assert_eq!(a.channel(1).unwrap().direct_us, Some(1600.0));
 }
+
+/// The servo controller firmware computes pulses with `r3x_motion::Calibration`; it must
+/// agree bit for bit with the performer's output stage for every profile channel.
+#[test]
+fn firmware_calibration_matches_the_output_stage() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.json");
+    let profile = r3x_contracts::RobotProfile::load(path).unwrap();
+    let act = Actuation::from_profile(&profile, &BTreeMap::new(), Rng::new(1)).unwrap();
+    for ch in &act.channels {
+        let a = profile.actuators.iter().find(|a| a.name == ch.cfg.name).unwrap();
+        let c = &a.calibration;
+        let cal = r3x_motion::Calibration {
+            center_us: c.center_us,
+            center_value: c.center_value,
+            trim_us: c.trim_us,
+            invert: c.invert,
+            gear: c.gear,
+            mm_per_deg: ch.prismatic.then(|| c.mm_per_deg.unwrap_or(0.2)),
+            pulse_min_us: c.pulse_min_us,
+            pulse_max_us: c.pulse_max_us,
+            range_deg: c.range_deg,
+        };
+        let (lo, hi) = (ch.follower.soft_min, ch.follower.soft_max);
+        for i in 0..=100 {
+            let v = lo - 5.0 + (hi - lo + 10.0) * f64::from(i) / 100.0;
+            assert_eq!(cal.value_to_us(v).to_bits(), ch.value_to_us(v).to_bits(), "{} at {v}", ch.cfg.name);
+        }
+    }
+}

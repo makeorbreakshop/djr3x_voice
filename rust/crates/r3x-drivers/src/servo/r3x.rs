@@ -29,6 +29,8 @@ pub struct R3xServoConfig {
     pub retries: u32,
     /// Primary joint -> channel config.
     pub channels: BTreeMap<String, ChannelConfig>,
+    /// Actuator name (the stage output) -> channel.
+    pub actuators: BTreeMap<String, u8>,
 }
 
 impl R3xServoConfig {
@@ -40,6 +42,12 @@ impl R3xServoConfig {
             hello_wait: Duration::from_secs(1),
             retries: 3,
             channels: channel_configs(profile, DriverKind::R3xServo),
+            actuators: profile
+                .actuators
+                .iter()
+                .filter(|a| a.driver == DriverKind::R3xServo)
+                .map(|a| (a.name.clone(), a.channel as u8))
+                .collect(),
         }
     }
 }
@@ -85,6 +93,8 @@ pub struct R3xServoDriver {
     deframer: Deframer,
     seq: u16,
     enabled: bool,
+    /// Per-channel enables (bit n = channel n), from the stage outputs.
+    mask: u32,
     last_heartbeat: f64,
     connected_at: f64,
     stale: bool,
@@ -110,6 +120,7 @@ impl R3xServoDriver {
             deframer: Deframer::default(),
             seq: 0,
             enabled: true,
+            mask: u32::MAX,
             last_heartbeat: f64::NEG_INFINITY,
             connected_at: 0.0,
             stale: false,
@@ -133,13 +144,21 @@ impl R3xServoDriver {
                 for c in cfgs {
                     self.send(&Msg::Config(c));
                 }
-                self.send(&Msg::Heartbeat { outputs_enabled: self.enabled });
-                self.last_heartbeat = now;
+                self.beat(now);
                 return true;
             }
         }
         self.mock_reason = format!("no controller answered on {port}");
         false
+    }
+
+    fn beat(&mut self, now: f64) {
+        self.send(&Msg::Heartbeat { outputs_enabled: self.enabled, mask: self.mask });
+        self.last_heartbeat = now;
+    }
+
+    fn channel_on(&self, ch: u8) -> bool {
+        self.enabled && self.mask & (1u32 << ch) != 0
     }
 
     fn send(&mut self, msg: &Msg) {
@@ -204,7 +223,7 @@ impl Driver for R3xServoDriver {
         "driver.servo"
     }
     fn outputs(&self) -> Vec<String> {
-        self.cfg.channels.keys().cloned().collect()
+        self.cfg.actuators.keys().cloned().collect()
     }
     fn start(&mut self, now: f64) {
         if self.cfg.force_mock {
@@ -223,17 +242,38 @@ impl Driver for R3xServoDriver {
         if on != self.enabled {
             self.enabled = on;
             // Tell the controller now rather than at the next beat.
-            self.send(&Msg::Heartbeat { outputs_enabled: on });
-            self.last_heartbeat = now;
+            self.beat(now);
+        }
+    }
+    /// Per channel: an actuator whose output is off holds; the rest keep moving.
+    fn set_outputs(&mut self, outputs: &BTreeMap<String, bool>, now: f64) {
+        let mask = self
+            .cfg
+            .actuators
+            .iter()
+            .filter(|(name, _)| outputs.get(*name) != Some(&false))
+            .fold(0u32, |m, (_, ch)| m | 1 << ch);
+        let on = mask != 0;
+        if mask != self.mask || on != self.enabled {
+            self.mask = mask;
+            self.enabled = on;
+            self.beat(now);
         }
     }
     fn on_out(&mut self, out: &Out, _now: f64) {
-        let Out::ServoGoal { joint, target, v_max, a_max, j_max, .. } = out else { return };
-        if !self.enabled {
-            return;
-        }
-        if let Some(c) = self.cfg.channels.get(joint) {
-            let msg = Msg::Goal { ch: c.ch, target: *target as f32, v_max: *v_max as f32, a_max: *a_max as f32, j_max: *j_max as f32 };
+        let msg = match out {
+            Out::ServoGoal { joint, target, v_max, a_max, j_max, .. } => {
+                let Some(c) = self.cfg.channels.get(joint) else { return };
+                Msg::Goal { ch: c.ch, target: *target as f32, v_max: *v_max as f32, a_max: *a_max as f32, j_max: *j_max as f32 }
+            }
+            Out::ServoPulse { actuator, us } => {
+                let Some(&ch) = self.cfg.actuators.get(actuator) else { return };
+                Msg::Direct { ch, us: us.round().clamp(0.0, f64::from(u16::MAX)) as u16 }
+            }
+            _ => return,
+        };
+        let (Msg::Goal { ch, .. } | Msg::Direct { ch, .. }) = msg else { return };
+        if self.channel_on(ch) {
             self.send(&msg);
         }
     }
@@ -249,8 +289,7 @@ impl Driver for R3xServoDriver {
             }
         }
         if now - self.last_heartbeat >= HEARTBEAT_S - 1e-9 {
-            self.last_heartbeat = now;
-            self.send(&Msg::Heartbeat { outputs_enabled: self.enabled });
+            self.beat(now);
         }
         self.read_telemetry(now);
         let last = self.telemetry.as_ref().map_or(self.connected_at, |(t, _)| *t);
@@ -341,7 +380,7 @@ mod tests {
         let configs = msgs.iter().filter(|m| matches!(m, Msg::Config(_))).count();
         assert_eq!(configs, d.cfg.channels.len());
         assert!(configs > 10);
-        assert_eq!(msgs.last(), Some(&Msg::Heartbeat { outputs_enabled: true }));
+        assert_eq!(msgs.last(), Some(&Msg::Heartbeat { outputs_enabled: true, mask: u32::MAX }));
     }
 
     #[test]
@@ -364,11 +403,11 @@ mod tests {
         d.set_enabled(false, 1.0);
         d.on_out(&goal(6.0), 1.0); // dropped while disabled
         let msgs = sent(&o);
-        let beats = msgs.iter().filter(|m| matches!(m, Msg::Heartbeat { outputs_enabled: true })).count();
+        let beats = msgs.iter().filter(|m| matches!(m, Msg::Heartbeat { outputs_enabled: true, .. })).count();
         assert_eq!(beats, 10);
         assert_eq!(
             msgs[msgs.len() - 2..],
-            [Msg::Goal { ch, target: 5.0, v_max: 1.0, a_max: 2.0, j_max: 3.0 }, Msg::Heartbeat { outputs_enabled: false }]
+            [Msg::Goal { ch, target: 5.0, v_max: 1.0, a_max: 2.0, j_max: 3.0 }, Msg::Heartbeat { outputs_enabled: false, mask: u32::MAX }]
         );
     }
 
@@ -417,4 +456,21 @@ mod tests {
         assert_eq!(o.open_count("/dev/servo"), 2);
     }
 
+    #[test]
+    fn stage_outputs_gate_per_channel_and_jog_goes_direct() {
+        let (mut d, o) = start(true);
+        o.last("/dev/servo").unwrap().clear();
+        assert!(d.outputs().contains(&"neck".to_string()), "outputs are actuator names");
+        // Bench: everything off but the head lift (channel 1).
+        let outputs: BTreeMap<String, bool> = d.outputs().into_iter().map(|a| (a.clone(), a == "headlift")).collect();
+        d.set_outputs(&outputs, 0.0);
+        let pan = Out::ServoGoal { joint: "head_pan".into(), target: 5.0, v_max: 0.0, a_max: 0.0, j_max: 0.0, seq: 1 };
+        d.on_out(&pan, 0.0); // neck is off: dropped
+        d.on_out(&Out::ServoPulse { actuator: "headlift".into(), us: 1612.4 }, 0.0);
+        d.on_out(&Out::ServoPulse { actuator: "neck".into(), us: 1600.0 }, 0.0); // off: dropped
+        assert_eq!(sent(&o), [Msg::Heartbeat { outputs_enabled: true, mask: 0b10 }, Msg::Direct { ch: 1, us: 1612 }]);
+        let all_off: BTreeMap<String, bool> = d.outputs().into_iter().map(|a| (a, false)).collect();
+        d.set_outputs(&all_off, 0.0);
+        assert_eq!(sent(&o).last(), Some(&Msg::Heartbeat { outputs_enabled: false, mask: 0 }));
+    }
 }

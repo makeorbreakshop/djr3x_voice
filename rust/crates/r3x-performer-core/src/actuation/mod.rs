@@ -4,4 +4,5 @@
 pub mod maestro;
 pub mod pipeline;
 pub mod servos;
-pub mod trajectory;
+/// The follower lives in `r3x-motion` (`no_std`), shared with the servo controller firmware.
+pub use r3x_motion::trajectory;

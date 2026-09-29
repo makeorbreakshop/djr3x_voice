@@ -1,0 +1,16 @@
+[package]
+name = "r3x-servo-ctl"
+description = "The r3x_servo motion controller's logic (PROTOCOL.md v1): wire codec, per-channel follower, heartbeat hold, park and staggered power-up, rail stall detect, telemetry. no_std, no alloc, no HAL: firmware/servo runs it on an RP2040, tests run it on the host with a fake clock."
+# Explicit (not workspace-inherited): firmware/servo depends on this crate by path.
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+r3x-motion = { path = "../r3x-motion" }
+
+[dev-dependencies]
+r3x-drivers = { path = "../r3x-drivers" }
+r3x-contracts = { path = "../r3x-contracts" }
+r3x-performer-core = { path = "../r3x-performer-core" }

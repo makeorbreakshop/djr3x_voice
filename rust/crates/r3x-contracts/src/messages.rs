@@ -113,6 +113,19 @@ pub enum PerfCommand {
     },
     /// Fire an emote slot from the profile's `emotes`.
     Emote { slot: u8 },
+    /// Bench calibration wizard: a raw pulse (us) to one servo actuator. Bench mode, `ui`/`cli`
+    /// only; the controller still moves it through its follower, inside the soft limits.
+    CalJog { actuator: String, us: f64 },
+    /// Bench calibration wizard: write what was measured into the robot profile
+    /// (`calibrated: measured`). `limits_us`: the pulses at the two soft-limit ends.
+    CalSave {
+        actuator: String,
+        center_us: f64,
+        invert: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        limits_us: Option<[f64; 2]>,
+    },
     /// Stop every run, refuse new ones; `on: false` releases. Same switch as
     /// `StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.
     Freeze { on: bool },
