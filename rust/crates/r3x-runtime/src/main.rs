@@ -1,4 +1,4 @@
-//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Env: `R3X_GATEWAY_ADDR`, `R3X_TAP_URL`, `R3X_PROFILE`, `R3X_ALLOWED_ORIGINS`,
 //! `R3X_GATEWAY_TOKEN` / `R3X_TAP_TOKEN`, `R3X_CLI_TOKEN`, `R3X_PUBLIC_TOKEN`, `RUST_LOG`,
@@ -7,7 +7,9 @@
 //! it with `R3X_EXTERNAL_BODY=1`), `SHOW_DIR` (= `--show-dir`), `ARDUINO_SERIAL_PORT`,
 //! `CHEST_SERIAL_PORT`, `R3X_SERVO_PORT`, `FORCE_MOCK_LED_CONTROLLER`, `FORCE_MOCK_CHEST`,
 //! `R3X_BRAIN=rust` (= `--brain rust`: r3x-brain answers turns instead of CantinaOS; not with
-//! `--bridge`), `R3X_MEMORY_DB`, `R3X_PERSONA_DIR`.
+//! `--bridge`), `R3X_MEMORY_DB`, `R3X_PERSONA_DIR`, `R3X_MUSIC=rust` (= `--music rust`: the r3x
+//! music engine plays music/sfx; run CantinaOS with `R3X_EXTERNAL_MUSIC=1`), `MUSIC_DIR`,
+//! `R3X_SFX_DIR`, `R3X_CLAP_DIR`, `R3X_BEAT_CACHE_DIR`.
 
 use std::sync::Arc;
 
@@ -17,7 +19,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,6 +48,11 @@ async fn main() -> anyhow::Result<()> {
             "--leds" => leds = val()? != "cantina",
             "--show-dir" => show_dir = val()?.into(),
             "--brain" => brain = val()?.parse().map_err(anyhow::Error::msg)?,
+            "--music" => {
+                let m: r3x_runtime::music::MusicMode = val()?.parse().map_err(anyhow::Error::msg)?;
+                // Read by run(); set before any other thread starts.
+                std::env::set_var("R3X_MUSIC", if m == r3x_runtime::music::MusicMode::Rust { "rust" } else { "cantina" });
+            }
             "--tap-url" => tap_url = val()?,
             "--profile" => profile_path = val()?.into(),
             "--session-log" => session_log = Some(val()?.into()),

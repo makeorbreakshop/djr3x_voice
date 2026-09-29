@@ -56,6 +56,8 @@ pub struct BridgeConfig {
     /// CantinaOS still drives the face/chest boards (r3x runs without LED drivers): mirror a
     /// show's eye/chest actions to it as `eye.command` / `chest.override`.
     pub cantina_leds: bool,
+    /// `--music rust`: r3x plays the music and answers MusicController's topics.
+    pub music: Option<r3x_music::Engine>,
 }
 
 impl BridgeConfig {
@@ -66,6 +68,7 @@ impl BridgeConfig {
             duck_level: profile.audio.ducking.level,
             duck_ramp_ms: profile.audio.ducking.ramp_ms,
             cantina_leds: false,
+            music: None,
         }
     }
 }
@@ -109,7 +112,11 @@ impl TapLink {
 
     /// Emit without waiting for the tap's confirmation (high-rate voice topics).
     fn send(&self, topic: &str, payload: Value) {
-        let msg = json!({ "topic": topic, "payload": payload, "source": "r3x-voice" }).to_string();
+        self.send_as("r3x-voice", topic, payload);
+    }
+
+    fn send_as(&self, source: &str, topic: &str, payload: Value) {
+        let msg = json!({ "topic": topic, "payload": payload, "source": source }).to_string();
         if let Some(t) = self.tx.lock().unwrap().as_ref() {
             let _ = t.send(msg);
         }
@@ -143,6 +150,7 @@ struct Bridge {
     /// Phase 2: r3x owns mic/STT/TTS (CantinaOS runs with `R3X_EXTERNAL_VOICE=1`).
     voice: Option<r3x_voice::Voice>,
     cantina_voice: std::sync::OnceLock<Arc<r3x_voice::cantina::CantinaVoice>>,
+    cantina_music: std::sync::OnceLock<Arc<r3x_music::cantina::CantinaMusic>>,
 }
 
 /// Start the bridge. Takes the `intent` command class; returns the engagement backend for the
@@ -157,7 +165,17 @@ pub fn spawn(bus: &Bus, cfg: BridgeConfig, voice: Option<r3x_voice::Voice>) -> a
         ptt_held: AtomicBool::new(false),
         voice,
         cantina_voice: Default::default(),
+        cantina_music: Default::default(),
     });
+    if let Some(engine) = b.cfg.music.clone() {
+        let tap = Arc::downgrade(&b);
+        let emit = move |topic: &str, payload: Value| {
+            if let Some(b) = tap.upgrade() {
+                b.tap.send_as(r3x_music::cantina::TAP_SOURCE, topic, payload);
+            }
+        };
+        let _ = b.cantina_music.set(r3x_music::cantina::CantinaMusic::attach(&engine, Arc::new(emit)));
+    }
     if let Some(v) = &b.voice {
         let tap = Arc::downgrade(&b);
         let emit = move |topic: &str, payload: Value| {
@@ -219,7 +237,9 @@ impl Bridge {
         self.tap.set(Some(tx));
         tracing::info!(url = %self.cfg.tap_url, "bridge connected to the CantinaOS bus tap");
         r3x_ops::report(&self.bus, "bridge", ServiceStatus::Running, None);
-        if self.bus.get::<MusicState>().library.is_empty() {
+        if let Some(cm) = self.cantina_music.get() {
+            cm.on_connect(); // BrainService needs the library for DJ mode
+        } else if self.bus.get::<MusicState>().library.is_empty() {
             // The library event fired at boot; ask again (the reply is parsed in translate).
             let _ = self.tap.tx.lock().unwrap().as_ref().map(|t| t.send(cli_payload_msg("list music")));
         }
@@ -248,7 +268,14 @@ impl Bridge {
                 let topic = msg.get("topic").and_then(Value::as_str).unwrap_or("");
                 let payload = msg.get("payload").unwrap_or(&Value::Null);
                 // Our own emits come back through the tap as `tap:r3x...`.
-                let ours = msg.get("source").and_then(Value::as_str).is_some_and(|s| s.starts_with("tap:r3x"));
+                let src = msg.get("source").and_then(Value::as_str).unwrap_or("");
+                if src.strip_prefix("tap:") == Some(r3x_music::cantina::TAP_SOURCE) {
+                    return; // the engine already published its own state and events
+                }
+                let ours = src.starts_with("tap:r3x");
+                if let Some(cm) = self.cantina_music.get() {
+                    cm.on_tap(topic, payload);
+                }
                 translate(&self.bus, &mut self.tap_state.lock().unwrap(), topic, payload, ours);
                 if let Some(cv) = self.cantina_voice.get() {
                     cv.on_tap(topic, payload);

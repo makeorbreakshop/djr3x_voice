@@ -14,12 +14,13 @@ crates/
   r3x-cli         terminal gateway client (CantinaOS command set + shortcuts, history)
   r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
                   DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
-  r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
-                  DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
   r3x-audio       cpal output engine + mixer (speech/music/sfx buses, ramped ducking), speech
                   sinks (local device with output latency, paced remote), 20 ms AGC mouth, mic
   r3x-voice       Deepgram STT, ElevenLabs dialogue-socket TTS, speech FIFO, push-to-talk,
                   gateway audio, CantinaOS voice adapter; `r3x-voice` tool binary
+  r3x-beats       tempo + beat grid (librosa beat_track ported), cache, background analysis
+  r3x-music       library + matching, playback engine (crossfade, ducking, next, ending-soon),
+                  CLAP search (ort), sfx, commentary cache on the bus, CantinaOS music adapter
   r3x-performer-core, ...   see the plan, section 5
 contracts-schema/ generated JSON Schema (do not edit)
 ```
@@ -82,16 +83,22 @@ Env: `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `R3X_MEMORY_D
 `R3X_PERSONA_DIR`, `SHOW_DIR`, `SHOW_TAG_CHARS_PER_SEC`. Parity with the CantinaOS recordings:
 `cargo test -p r3x-brain --test parity` (`PARITY_SHOW=1` prints the per-turn summaries).
 
-## Rust brain (Phase 5, instead of CantinaOS)
+## Music engine (Phase 4)
 
 ```bash
-cargo run -p r3x-runtime -- --voice --brain rust        # not with --bridge
-R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice cargo run -p r3x-runtime -- --brain rust
+R3X_EXTERNAL_MUSIC=1 ./r3x ...                       # CantinaOS without MusicController / mode sound
+cargo run -p r3x-runtime -- --bridge --music rust    # r3x plays music + sfx (default: cantina)
+cargo run --release -p r3x-beats -- compare --out ../docs/plans/beat-analyzer-comparison.md
+venv/bin/python scripts/export_clap_onnx.py          # once: CLAP ONNX into ~/.cache/dj-r3x/clap
+cargo test -p r3x-music --release --test clap_parity -- --ignored --nocapture
 ```
 
-Env: `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `R3X_MEMORY_DB`,
-`R3X_PERSONA_DIR`, `SHOW_DIR`, `SHOW_TAG_CHARS_PER_SEC`. Parity with the CantinaOS recordings:
-`cargo test -p r3x-brain --test parity` (`PARITY_SHOW=1` prints the per-turn summaries).
+`--music rust` plays on the voice's output mixer (or its own device), publishes `state.music`
+with `position_s`@`position_t` (the performer's beat-clock anchor, with `track.bpm` and
+`first_beat_s`), serves the brain's `music.*` requests and the commentary cache, and plays
+`perf.sfx` cues and the mode-change ding. Env: `MUSIC_DIR`, `R3X_SFX_DIR` (default
+`sim/web/public/sfx`), `R3X_MODE_SOUND`, `R3X_CLAP_DIR`, `R3X_BEAT_CACHE_DIR`,
+`ENABLE_BEAT_ANALYSIS`, `R3X_SEMANTIC`. Spotify is an interface stub (plan D7: ported last).
 
 ## Build and test
 

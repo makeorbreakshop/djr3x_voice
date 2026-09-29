@@ -2,6 +2,7 @@
 
 pub mod brain;
 pub mod bridge;
+pub mod music;
 pub mod performer;
 
 use std::net::SocketAddr;
@@ -156,8 +157,20 @@ pub async fn run_with_brain(
         }
         brain::BrainMode::Cantina => None,
     };
+    // `--music rust` (R3X_MUSIC): the r3x engine plays; in bridge mode it speaks
+    // MusicController's topics over the tap (CantinaOS runs with R3X_EXTERNAL_MUSIC=1).
+    let music = match music::MusicMode::from_env() {
+        music::MusicMode::Rust => {
+            let mixer = voice.as_ref().and_then(|v| v.output.as_ref()).map(|o| o.mixer.clone());
+            Some(music::start(&bus, mixer, None, cfg.profile.as_deref()).await?)
+        }
+        music::MusicMode::Cantina => None,
+    };
     let backend = match cfg.bridge.clone() {
-        Some(b) => Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?),
+        Some(mut b) => {
+            b.music = music.as_ref().map(|m| m.engine.clone());
+            Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?)
+        }
         None => None,
     };
     let stage_cfg = cfg.profile.as_deref().map(r3x_stage::StageConfig::from_profile).unwrap_or_default();
@@ -173,7 +186,7 @@ pub async fn run_with_brain(
     tracing::info!(addr = %listener.local_addr()?, bridge = cfg.bridge.is_some(), "r3x gateway listening");
     r3x_ops::report(&bus, "gateway", ServiceStatus::Running, None);
     r3x_gateway::serve(listener, bus, gw).await?;
-    drop(voice); // the stack (and its audio device) lives as long as the gateway
+    drop((music, voice)); // the stacks (and their audio devices) live as long as the gateway
     Ok(())
 }
 

@@ -1,0 +1,29 @@
+[package]
+name = "r3x-music"
+description = "Music: library scan and matching, playback engine on r3x-audio, semantic search (CLAP via ort), Spotify stub, CantinaOS adapter"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["clap"]
+# Semantic search: CLAP text/audio encoders through onnxruntime (models from scripts/export_clap_onnx.py).
+clap = ["dep:ort", "dep:tokenizers"]
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+r3x-audio = { path = "../r3x-audio", default-features = false, features = ["decode"] }
+r3x-beats = { path = "../r3x-beats" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+ort = { version = "=2.0.0-rc.10", optional = true, default-features = false, features = ["std", "download-binaries", "copy-dylibs"] }
+tokenizers = { version = "0.21", optional = true, default-features = false, features = ["onig"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
