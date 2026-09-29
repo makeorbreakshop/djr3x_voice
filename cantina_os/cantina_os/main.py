@@ -420,6 +420,12 @@ class CantinaOS:
             external = ("mouse_input", "deepgram_direct_mic", "elevenlabs")
             service_order = [s for s in service_order if s not in external]
             self.logger.info(f"R3X_EXTERNAL_VOICE: voice I/O is r3x's; not starting {', '.join(external)}")
+        # Phase 4: r3x plays music and sfx (`r3x-runtime --bridge --music rust`) and answers
+        # MusicController's topics over the tap; two players would double every track.
+        if os.environ.get("R3X_EXTERNAL_MUSIC", "").lower() in ("1", "true", "yes", "on"):
+            external = ("music_controller", "mode_change_sound")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_MUSIC: music is r3x's; not starting {', '.join(external)}")
 
         try:
             # Initialize mode manager first - it's required by most services

@@ -6,6 +6,7 @@
 //! - [`decode`] (feature `decode`): symphonia + rubato, planar mono/stereo at any rate.
 //! - [`music`] (feature `decode`): a streamed file on the music bus with a playback position.
 //! - [`sfx`] (feature `decode`): one-shot clips on the sfx bus, kit-id resolution.
+//! - [`speech_cache`]: DJ commentary held as PCM and played on the speech bus on cue.
 //! - [`sink`]: where speech goes. [`sink::LocalSink`] plays through the mixer on a device and
 //!   reports exactly when each line becomes audible (device output latency included);
 //!   [`sink::RemoteSink`] paces 24 kHz PCM to a gateway client.
@@ -27,6 +28,7 @@ pub mod resample;
 #[cfg(feature = "decode")]
 pub mod sfx;
 pub mod sink;
+pub mod speech_cache;
 
 /// Speech-to-text capture rate.
 pub const MIC_RATE: u32 = 16_000;

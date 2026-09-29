@@ -7,6 +7,7 @@
 //! that bus's gain. Each source can also carry an equal-power envelope, so a crossfade is one
 //! command and both sides of it start on the same frame ([`MixerCommand::Crossfade`]).
 
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -106,8 +107,39 @@ struct Bus {
     sources: Vec<Voice>,
 }
 
+/// Per-bus output level, written by the render callback (post-gain, pre-clip).
+#[derive(Default)]
+pub struct Meters {
+    rms_bits: [AtomicU32; 3],
+    audible: [AtomicU64; 3],
+}
+
+/// A bus's last-buffer RMS and how many buffers so far were audible (RMS > -80 dBFS).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BusLevel {
+    pub rms: f32,
+    pub audible_buffers: u64,
+}
+
+impl Meters {
+    fn record(&self, bus: usize, rms: f32) {
+        self.rms_bits[bus].store(rms.to_bits(), Ordering::Relaxed);
+        if rms > 1e-4 {
+            self.audible[bus].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn level(&self, bus: BusId) -> BusLevel {
+        BusLevel {
+            rms: f32::from_bits(self.rms_bits[bus.index()].load(Ordering::Relaxed)),
+            audible_buffers: self.audible[bus.index()].load(Ordering::Relaxed),
+        }
+    }
+}
+
 pub struct Mixer {
     channels: usize,
+    meters: Arc<Meters>,
     buses: [Bus; 3],
     commands: rtrb::Consumer<MixerCommand>,
     scratch: Vec<f32>,
@@ -140,8 +172,9 @@ impl Mixer {
             self.voice_buf.resize(out.len(), 0.0);
         }
         let ch = self.channels;
-        for bus in &mut self.buses {
+        for (bi, bus) in self.buses.iter_mut().enumerate() {
             if bus.sources.is_empty() {
+                self.meters.record(bi, 0.0);
                 // Keep the ramp moving so a duck issued while silent has landed by the time
                 // music starts.
                 for _ in 0..out.len() / ch {
@@ -170,12 +203,16 @@ impl Mixer {
                     alive && !faded_out
                 }
             });
+            let mut energy = 0.0f32;
             for (frame_out, frame_in) in out.chunks_mut(ch).zip(scratch.chunks(ch)) {
                 let g = bus.gain.advance();
                 for (o, i) in frame_out.iter_mut().zip(frame_in) {
-                    *o += i * g;
+                    let v = i * g;
+                    energy += v * v;
+                    *o += v;
                 }
             }
+            self.meters.record(bi, (energy / out.len().max(1) as f32).sqrt());
         }
         for s in out.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
@@ -203,6 +240,7 @@ fn fade_out_all(bus: &mut Bus, frames: u32) {
 #[derive(Clone)]
 pub struct MixerHandle {
     tx: Arc<Mutex<rtrb::Producer<MixerCommand>>>,
+    meters: Arc<Meters>,
     sample_rate: u32,
     channels: usize,
 }
@@ -214,6 +252,11 @@ impl MixerHandle {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// Output level per bus (e.g. to verify sfx are audible without a listener).
+    pub fn level(&self, bus: BusId) -> BusLevel {
+        self.meters.level(bus)
     }
 
     pub fn send(&self, cmd: MixerCommand) -> bool {
@@ -251,8 +294,9 @@ impl MixerHandle {
 pub fn mixer(sample_rate: u32, channels: usize) -> (Mixer, MixerHandle) {
     let (tx, rx) = rtrb::RingBuffer::new(256);
     let bus = || Bus { gain: GainRamp::new(1.0), sources: Vec::new() };
-    let m = Mixer { channels, buses: [bus(), bus(), bus()], commands: rx, scratch: vec![0.0; 4096], voice_buf: vec![0.0; 4096] };
-    (m, MixerHandle { tx: Arc::new(Mutex::new(tx)), sample_rate, channels })
+    let meters = Arc::new(Meters::default());
+    let m = Mixer { channels, meters: meters.clone(), buses: [bus(), bus(), bus()], commands: rx, scratch: vec![0.0; 4096], voice_buf: vec![0.0; 4096] };
+    (m, MixerHandle { tx: Arc::new(Mutex::new(tx)), meters, sample_rate, channels })
 }
 
 #[cfg(test)]
@@ -280,6 +324,8 @@ mod tests {
         m.render(&mut out, &RenderTime::now());
         assert!((out[0] - 0.6).abs() < 1e-6 && (out[1] - 0.6).abs() < 1e-6);
         assert!((out[20] - 0.4).abs() < 1e-6, "speech source ended after 10 frames");
+        assert!((h.level(BusId::Music).rms - 0.4).abs() < 1e-5);
+        assert!((h.level(BusId::Speech).rms - 0.2 / 2f32.sqrt()).abs() < 1e-5, "half the buffer");
 
         h.duck(0.5, 80.0); // 80 frames at 1 kHz
         let mut out = vec![0.0; 160];
@@ -287,5 +333,8 @@ mod tests {
         assert!(out[0] > 0.39, "ramped, not stepped: {}", out[0]);
         assert!((out[158] - 0.2).abs() < 1e-3, "lands on 0.5 × 0.4: {}", out[158]);
         assert_eq!(m.buses[BusId::Speech.index()].sources.len(), 0);
+        assert_eq!(h.level(BusId::Speech).rms, 0.0, "silent bus meters zero");
+        assert_eq!(h.level(BusId::Speech).audible_buffers, 1);
+        assert_eq!(h.level(BusId::Sfx).audible_buffers, 0);
     }
 }
