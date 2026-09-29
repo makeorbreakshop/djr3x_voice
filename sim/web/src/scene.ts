@@ -1,0 +1,154 @@
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/**
+ * What R3X stands in front of, and a work light that does not depend on the stage-light desk.
+ *
+ * The booth (booth.ts) is built once at start-up (`?booth=0` builds the old turntable stage
+ * instead and this control stands aside). The plain backdrops hide the booth's objects and
+ * show a seamless floor that fades into the background colour (fog), with the droid's contact
+ * shadow on it. The work light is a soft key (casting that shadow), a fill and a rim; bloom
+ * only starts at 1.0 (post.ts) and look.ts keeps lit surfaces under it, so the eye and chest
+ * LEDs stay the only glow.
+ *
+ * The choice is remembered once the operator picks one (`r3x.scene`); until then it follows
+ * the operating mode: the booth in Show, Studio grey + work light in Bench and Studio.
+ */
+
+export type Backdrop = 'booth' | 'grey' | 'dark' | 'light';
+export interface SceneChoice {
+  backdrop: Backdrop;
+  workLight: boolean;
+}
+
+const PLAIN: Record<Exclude<Backdrop, 'booth'>, { bg: number; floor: number; env: number }> = {
+  grey: { bg: 0x3c3f44, floor: 0x55585d, env: 0.45 },
+  dark: { bg: 0x08090b, floor: 0x16171a, env: 0.25 },
+  light: { bg: 0xa9abae, floor: 0xb9bbbe, env: 0.6 },
+};
+const KEY = 'r3x.scene';
+
+export function defaultFor(mode: string): SceneChoice {
+  return mode === 'show' ? { backdrop: 'booth', workLight: false } : { backdrop: 'grey', workLight: true };
+}
+
+export function storedChoice(): SceneChoice | null {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY) ?? 'null') as SceneChoice | null;
+    return s && s.backdrop in { booth: 1, ...PLAIN } ? { backdrop: s.backdrop, workLight: !!s.workLight } : null;
+  } catch {
+    return null;
+  }
+}
+
+function store(c: SceneChoice) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(c));
+  } catch {
+    /* storage blocked: the choice lasts this page load */
+  }
+}
+
+export class SceneLook {
+  choice: SceneChoice;
+  private picked: boolean;
+  private plain = new THREE.Group();
+  private floorMat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+  private work = new THREE.Group();
+  private env: THREE.Texture;
+
+  constructor(
+    private scene: THREE.Scene,
+    renderer: THREE.WebGLRenderer,
+    /** The booth's own show/hide (booth.ts `StageSet.show`). */
+    private showBooth: (on: boolean) => void,
+    private onChange: (showingBooth: boolean) => void,
+  ) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(12, 96), this.floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    this.plain.add(floor);
+    this.plain.visible = false;
+
+    // Soft key (front right, high; casts the floor shadow), fill (front left), rim (behind).
+    const key = new THREE.SpotLight(0xfff1e2, 30, 9, 0.5, 0.9, 1.6);
+    key.position.set(1.4, 2.9, 2.3);
+    key.target.position.set(0, 0.55, 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.near = 1.5;
+    key.shadow.camera.far = 7;
+    key.shadow.bias = -0.0002;
+    key.shadow.normalBias = 0.004;
+    key.shadow.radius = 6;
+    const fill = new THREE.DirectionalLight(0xdfe8f5, 0.9);
+    fill.position.set(-2.2, 1.3, 2.4);
+    const rim = new THREE.SpotLight(0xdce8ff, 16, 8, 0.45, 0.9, 1.6);
+    rim.position.set(-0.9, 2.4, -2.4);
+    rim.target.position.set(0, 0.7, 0);
+    this.work.add(key, key.target, fill, rim, rim.target);
+    this.work.visible = false;
+    scene.add(this.plain, this.work);
+
+    const stored = storedChoice();
+    this.picked = !!stored;
+    this.choice = stored ?? defaultFor('show');
+    this.apply();
+  }
+
+  private listeners: (() => void)[] = [];
+  /** Called after every change (a mode default included), for the control's display. */
+  onUpdate(fn: () => void) {
+    this.listeners.push(fn);
+  }
+
+  get showingBooth() {
+    return this.choice.backdrop === 'booth';
+  }
+
+  /** The operator's pick: remembered, and no longer follows the mode. */
+  pick(c: Partial<SceneChoice>) {
+    const next = { ...this.choice, ...c };
+    // A plain backdrop without the work light is only the ambient environment; picking one
+    // switches the light on (it can be turned off again).
+    if (c.backdrop && c.backdrop !== 'booth' && this.choice.backdrop === 'booth' && c.workLight === undefined) next.workLight = true;
+    this.picked = true;
+    store(next);
+    this.set(next);
+  }
+
+  /** The operating mode changed: follow it unless the operator has picked. */
+  followMode(mode: string) {
+    if (!this.picked) this.set(defaultFor(mode));
+  }
+
+  private set(c: SceneChoice) {
+    if (c.backdrop === this.choice.backdrop && c.workLight === this.choice.workLight) return;
+    this.choice = c;
+    this.apply();
+  }
+
+  private apply() {
+    const { backdrop, workLight } = this.choice;
+    const booth = backdrop === 'booth';
+    const s = this.scene;
+    this.showBooth(booth); // restores the booth's background, fog and environment
+    if (!booth) {
+      const p = PLAIN[backdrop];
+      const bg = new THREE.Color(p.bg);
+      s.background = bg;
+      s.fog = new THREE.Fog(bg, 3.5, 10);
+      s.environment = this.env;
+      s.environmentIntensity = p.env;
+      this.floorMat.color.setHex(p.floor);
+    }
+    this.plain.visible = !booth;
+    this.work.visible = workLight;
+    this.onChange(booth);
+    for (const fn of this.listeners) fn();
+  }
+}

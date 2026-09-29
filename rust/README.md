@@ -11,7 +11,7 @@ crates/
   r3x-ops         health -> state.services, runtime log fan-out, log-level control
   r3x-stage       StageManager: Show/Bench/Studio, outputs, alive layers, brain, autonomy, freeze, engagement
   r3x-runtime     the binary: the whole robot in-process (default), or --bridge to a running CantinaOS
-  r3x-cli         terminal gateway client (CantinaOS command set + shortcuts, history)
+  r3x-cli         terminal gateway client: lines to the runtime console, replies printed; history
   r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
                   DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
   r3x-audio       cpal output engine + mixer (speech/music/sfx buses, ramped ducking), speech

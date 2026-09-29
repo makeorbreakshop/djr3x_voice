@@ -81,6 +81,11 @@ cleanup() {
     for _ in $(seq 1 20); do kill -0 "$RUNTIME_PID" 2>/dev/null || break; sleep 0.25; done
     kill -TERM "$RUNTIME_PID" 2>/dev/null || true
   fi
+  # The runtime leads its own process group: whatever it left behind (the camera's ffmpeg if
+  # it died hard) goes with it.
+  if [ -n "$RUNTIME_PID" ]; then
+    kill -TERM -- "-$RUNTIME_PID" 2>/dev/null || true
+  fi
   if [ -n "$PANEL_PID" ]; then
     pkill -P "$PANEL_PID" 2>/dev/null || true
     kill "$PANEL_PID" 2>/dev/null || true
@@ -146,9 +151,11 @@ if [ "$LEGACY" = 0 ]; then
     || die "r3x-runtime did not build"
   cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-cli -q || die "r3x-cli did not build"
   LOG="$ROOT/logs/r3x-runtime.log"
+  set -m  # own process group (pgid = its pid), so cleanup can stop its children too
   "$ROOT/rust/target/release/r3x-runtime" --standalone --mouse --session-log "$ROOT/logs" \
     ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} >"$LOG" 2>&1 </dev/null &
   RUNTIME_PID=$!
+  set +m
   say "r3x-runtime starting on :$GATEWAY_PORT - log: logs/r3x-runtime.log (tail -f it, or ./r3x --logs)"
   for _ in $(seq 1 240); do
     port_busy "$GATEWAY_PORT" && break

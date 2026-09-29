@@ -173,7 +173,7 @@
           "type": "object"
         },
         {
-          "description": "A line for the legacy command console (CantinaOS `help`, `status`, `eye ...`).\nBridge-only; retired with CantinaOS in Phase 7.",
+          "description": "A line for the runtime's command console (`help`, `status`, `eye pattern ...`): the\npanel's command line and `r3x-cli` both send raw lines; the reply is `ops.console`.",
           "properties": {
             "line": {
               "type": "string"

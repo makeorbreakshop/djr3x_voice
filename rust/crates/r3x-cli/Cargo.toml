@@ -1,6 +1,6 @@
 [package]
 name = "r3x-cli"
-description = "Terminal client of the r3x gateway: the CantinaOS command set as typed commands"
+description = "Terminal client of the r3x gateway: lines to the runtime command console, replies printed"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

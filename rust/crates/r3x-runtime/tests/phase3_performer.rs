@@ -74,6 +74,7 @@ async fn performer_on_the_bus() {
     assert_eq!(bus.command(Source::Bridge, None, eyes).await, Ack::Accepted);
     let after = frame_after(&mut frames, Duration::from_millis(300)).await.lights["eyes"].clone();
     assert_ne!(before, after, "the thinking pattern reached the eye pixels");
+    assert_eq!(bus.get::<r3x_contracts::LightsState>().eye_pattern.as_deref(), Some("thinking"), "retained for `eye status`");
 
     // Bench: alive layers and idle off, so a body with nothing playing holds still.
     let stop = Command::Perf(PerfCommand::Stop(r3x_contracts::StopTarget::All));

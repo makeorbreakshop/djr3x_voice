@@ -1,5 +1,6 @@
-/* Studio dock: bottom of the stage, left of the control panel. Dense, monospace numbers. */
-.studio { position: fixed; left: 12px; right: var(--panel-space, 404px); bottom: 12px; height: min(46vh, 460px);
+/* Studio dock: bottom of the stage, the whole width left of the control panel (never under
+   it). Dense, monospace numbers. */
+.studio { position: fixed; left: 12px; right: var(--panel-space, 404px); bottom: 12px; height: clamp(260px, 46vh, 540px);
   display: flex; flex-direction: column; background: rgba(11, 13, 18, .96); border: 1px solid var(--line);
   border-radius: 10px; overflow: hidden; z-index: 5; font-size: 12px; }
 .studio[hidden] { display: none; }
@@ -12,7 +13,7 @@
   padding: 3px 6px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; flex: 0 1 auto; min-width: 0; }
 .st-bar input[type=number] { width: 62px; }
 .st-bar select { max-width: 150px; }
-.st-time { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); min-width: 118px; }
+.st-time { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); min-width: 118px; white-space: nowrap; }
 .st-body { flex: 1; display: grid; grid-template-columns: 188px 1fr; overflow-y: auto; overflow-x: hidden; }
 .st-heads { border-right: 1px solid var(--line); }
 .st-head-top, .st-top { position: sticky; top: 0; z-index: 1; background: #0e1016; }
@@ -37,3 +38,20 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 22px; }
 .st-status.err { color: #ff8a80; }
 body.studio-open #caption { display: none; }
+
+/* Small windows: a narrower panel leaves the timeline more room. */
+@media (max-width: 1100px) {
+  body.studio-open #panel:not(.wide) { width: 320px; }
+  .st-body { grid-template-columns: 150px 1fr; }
+  /* One toolbar row that scrolls sideways, so the tracks keep the height. */
+  .st-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+}
+/* Short windows: the dock takes half the height (the droid keeps the top half). */
+@media (max-height: 700px) and (min-width: 721px) {
+  .studio { height: max(260px, 50vh); }
+}
+/* Phones: the panel is a bottom sheet; the dock sits above it, not over its mode buttons. */
+@media (max-width: 720px) {
+  .studio { left: 8px; right: 8px; bottom: calc(52vh + 16px); height: auto; top: 8px; }
+  .st-body { grid-template-columns: 124px 1fr; }
+}

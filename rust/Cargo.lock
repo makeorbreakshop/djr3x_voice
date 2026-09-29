@@ -2245,6 +2245,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "image",
+ "libc",
  "ort",
  "r3x-bus",
  "r3x-contracts",

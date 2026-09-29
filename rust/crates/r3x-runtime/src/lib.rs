@@ -193,7 +193,8 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         brain::BrainMode::Rust => {
             anyhow::ensure!(cfg.bridge.is_none(), "--brain rust replaces the CantinaOS bridge; drop --bridge");
             let ducking = cfg.profile.as_ref().map(|p| p.audio.ducking.clone()).unwrap_or_default();
-            let (b, m) = brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()), choices.clone(), ducking)?;
+            let emotes = cfg.profile.as_ref().map(|p| p.emotes.clone()).unwrap_or_default();
+            let (b, m) = brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()), choices.clone(), ducking, emotes)?;
             (Some(b), Some(m))
         }
         brain::BrainMode::Cantina => (None, None),
@@ -217,6 +218,7 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
     let backend = match cfg.bridge.clone() {
         Some(mut b) => {
             b.music = music.as_ref().map(|m| m.engine.clone());
+            b.console.show_dir = Some(cfg.show_dir.clone());
             Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?)
         }
         None => None,

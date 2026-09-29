@@ -1,5 +1,7 @@
 //! `r3x-cli [--url ws://127.0.0.1:8780/] [-c LINE]...`
 //!
+//! Lines go to the runtime's command console as typed (shortcuts, `help`, `status`, ... are
+//! answered there, the same as the panel's command line); replies are printed as they arrive.
 //! Interactive with history (`~/.config/dj-r3x/cli_history`) unless `-c` lines are given, in
 //! which case each is sent in order, its ack printed, and the client exits. Token:
 //! `R3X_CLI_TOKEN` or `~/.config/dj-r3x/cli_token` (the runtime reads the same file).
@@ -9,10 +11,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use futures_util::{SinkExt, StreamExt};
-use r3x_cli::{parse, Parsed, HELP};
+use r3x_cli::{classify, Local};
 use r3x_contracts::{
-    Ack, Body, Command, ConversationEvent, IntentCommand, MusicCommand, DjEvent, Envelope, Event, MusicEvent, OpsEvent, PerfEvent,
-    RetainedState, ServiceStatus, StageEvent,
+    Ack, Body, Command, ConversationEvent, DjEvent, Envelope, Event, IntentCommand, MusicEvent, OpsEvent, PerfEvent, ServiceStatus,
+    StageEvent,
 };
 use r3x_gateway::tokens;
 use rustyline::ExternalPrinter;
@@ -30,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
             "--url" => url = args.next().context("--url needs a value")?,
             "-c" => script.push(args.next().context("-c needs a line")?),
             "-h" | "--help" => {
-                println!("usage: r3x-cli [--url URL] [-c LINE]...\n\n{HELP}");
+                println!("usage: r3x-cli [--url URL] [-c LINE]...\n\nOnce connected, `help` lists the commands (the runtime answers it).");
                 return Ok(());
             }
             other => anyhow::bail!("unknown argument {other}"),
@@ -87,8 +89,6 @@ async fn main() -> anyhow::Result<()> {
         printer(format!("connected to {url}. `help` lists commands, `quit` or Ctrl-C stops."));
     }
 
-    let mut state = RetainedState::default();
-    let mut emotes: Vec<String> = Vec::new();
     let mut waiting: Option<String> = None;
     let mut next_id = 0u64;
     let mut input_done = false;
@@ -98,25 +98,13 @@ async fn main() -> anyhow::Result<()> {
         tokio::select! {
             line = lines.recv(), if hello_seen && waiting.is_none() && !input_done => {
                 let Some(line) = line else { input_done = true; continue };
-                match parse(&line, &emotes) {
-                    Parsed::Empty => {}
-                    Parsed::Quit => break,
-                    Parsed::Help => printer(HELP.into()),
-                    Parsed::Status => printer(status(&state)),
-                    Parsed::ListMusic => printer(
-                        state.music.library.iter().enumerate().map(|(i, t)| format!("{:>3}. {t}", i + 1)).collect::<Vec<_>>().join("\n"),
-                    ),
-                    Parsed::State => printer(serde_json::to_string_pretty(&state)?),
-                    Parsed::Error(e) => printer(e),
-                    Parsed::Send(mut cmd) => {
-                        // `play music 3` = the 3rd title of `list music`, as in CantinaOS.
-                        if let Command::Intent(IntentCommand::Music(MusicCommand::Play { query: Some(q) })) = &mut cmd {
-                            if let Some(t) = q.parse::<usize>().ok().and_then(|n| state.music.library.get(n.wrapping_sub(1))) {
-                                *q = t.clone();
-                            }
-                        }
+                match classify(&line) {
+                    Local::Empty => {}
+                    Local::Quit => break,
+                    Local::Send(line) => {
                         next_id += 1;
                         let id = format!("cli{next_id}");
+                        let cmd = Command::Intent(IntentCommand::Console { line });
                         let msg = json!({ "kind": "command", "id": id, "body": cmd });
                         sink.send(Message::Text(msg.to_string().into())).await?;
                         if !interactive {
@@ -133,19 +121,13 @@ async fn main() -> anyhow::Result<()> {
                     if waiting.as_deref() == Some(re) {
                         waiting = None;
                     }
-                    match ack {
-                        Ack::Accepted if !interactive => printer(format!("ok ({re})")),
-                        Ack::Accepted => {}
-                        Ack::Rejected { reason } => printer(format!("rejected: {reason}")),
+                    // The console's reply is an `ops.console` event; only a refusal comes as the ack.
+                    if let Ack::Rejected { reason } = ack {
+                        printer(format!("rejected: {reason}"));
                     }
                 }
                 match env.body {
-                    Body::Hello(h) => {
-                        hello_seen = true;
-                        emotes = h.profile.map(|p| p.emotes).unwrap_or_default();
-                        state = h.state;
-                    }
-                    Body::State(u) => u.apply(&mut state),
+                    Body::Hello(_) => hello_seen = true,
                     Body::Event(e) => {
                         if let Some(s) = describe(&e) {
                             printer(s);
@@ -161,31 +143,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn status(s: &RetainedState) -> String {
-    let mut out = format!(
-        "engagement {:?} | mode {:?} | brain {} | autonomy {}{}\nmusic: {}{}",
-        s.engagement.engagement,
-        s.stage.mode,
-        if s.stage.brain { "on" } else { "off" },
-        if s.stage.autonomy { "on" } else { "off" },
-        if s.stage.frozen { " | FROZEN" } else { "" },
-        match (&s.music.track, s.music.playing) {
-            (Some(t), true) => t.title.clone(),
-            _ => "nothing playing".into(),
-        },
-        if s.dj.active { " (DJ mode)" } else { "" },
-    );
-    for (name, h) in &s.services.services {
-        out += &format!("\n  {name:<14} {:?}{}", h.status, h.detail.as_deref().map(|d| format!(" - {d}")).unwrap_or_default());
-    }
-    out
-}
-
 fn describe(e: &Event) -> Option<String> {
     Some(match e {
         Event::Conversation(c) => match c {
             ConversationEvent::ListeningStarted => "[listening]".into(),
-            ConversationEvent::ListeningStopped { transcript } if !transcript.is_empty() => format!("you: {transcript}"),
+            ConversationEvent::ListeningStopped { transcript } if transcript.trim().is_empty() => "[nothing heard]".into(),
+            ConversationEvent::ListeningStopped { transcript } => format!("you: {transcript}"),
             ConversationEvent::IntentDetected { tool, .. } => format!("[intent {tool}]"),
             ConversationEvent::Reply { text } if !text.is_empty() => format!("R3X: {text}"),
             _ => return None,

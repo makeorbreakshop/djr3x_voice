@@ -46,7 +46,13 @@ impl std::str::FromStr for BrainMode {
 /// recorded corpus instead (`R3X_FIXTURE_PACE`, default 1 = recorded timing); no network.
 /// Also returns the brain's `Memory`, for vision's presence link (same instance, so the turn
 /// context sees who is present).
-pub fn spawn(bus: &Bus, voice: Option<Voice>, choices: Option<Choices>, ducking: Ducking) -> anyhow::Result<(Brain, Arc<r3x_memory::Memory>)> {
+pub fn spawn(
+    bus: &Bus,
+    voice: Option<Voice>,
+    choices: Option<Choices>,
+    ducking: Ducking,
+    emotes: Vec<String>,
+) -> anyhow::Result<(Brain, Arc<r3x_memory::Memory>)> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
     let replay = env("R3X_FIXTURES").filter(|m| m == "replay").and(env("R3X_FIXTURE_DIR"));
     let pace = env("R3X_FIXTURE_PACE").and_then(|p| p.parse().ok()).unwrap_or(1.0);
@@ -98,7 +104,7 @@ pub fn spawn(bus: &Bus, voice: Option<Voice>, choices: Option<Choices>, ducking:
         ptt: voice.map(ptt_hook),
         chooser: choices.map_or_else(r3x_brain::random_chooser, |c| c.chooser()),
     };
-    let brain = Brain::spawn(bus, BrainConfig::from_env(), deps).ok_or_else(|| anyhow::anyhow!("intent class taken (is --bridge on?)"))?;
+    let brain = Brain::spawn(bus, BrainConfig { emotes, ..BrainConfig::from_env() }, deps).ok_or_else(|| anyhow::anyhow!("intent class taken (is --bridge on?)"))?;
     Ok((brain, memory))
 }
 

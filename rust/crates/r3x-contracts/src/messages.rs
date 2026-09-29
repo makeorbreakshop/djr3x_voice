@@ -52,8 +52,8 @@ pub enum IntentCommand {
     PttStop,
     Music(MusicCommand),
     Dj { active: bool },
-    /// A line for the legacy command console (CantinaOS `help`, `status`, `eye ...`).
-    /// Bridge-only; retired with CantinaOS in Phase 7.
+    /// A line for the runtime's command console (`help`, `status`, `eye pattern ...`): the
+    /// panel's command line and `r3x-cli` both send raw lines; the reply is `ops.console`.
     Console { line: String },
 }
 

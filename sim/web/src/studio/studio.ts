@@ -202,7 +202,8 @@ export class Studio {
         btn('snap', 'Snap', 'Snap keys to beats / 50 ms (S)', () => { this.snap = !this.snap; this.dirty = true; this.syncBar(); }),
       ),
       el('span', 'st-time'),
-      group(load, input('id', 'Clip id (file name)', { value: '', size: 12, spellcheck: false }, (i) => this.edit(() => (this.clip.id = i.value.trim()))),
+      group(btn('new', '+ New', 'Start a new, empty clip (Cmd+Z brings the old one back)', () => this.open('')),
+        load, input('id', 'Clip id (file name)', { value: '', size: 12, spellcheck: false }, (i) => this.edit(() => (this.clip.id = i.value.trim()))),
         input('dur', 'Duration (s)', { type: 'number', step: '0.1', min: '0.1' }, (i) => this.edit(() => (this.clip.duration = Math.max(0.1, Number(i.value) || 1)))),
         tier,
         input('desc', 'Description: one line, the catalogue Claude and Jev see', { size: 18, placeholder: 'description' }, (i) => this.edit(() => (this.clip.description = i.value)))),
@@ -296,7 +297,7 @@ export class Studio {
   private vy(j: JointInfo, v: number, top: number, h: number) { const [a, b] = this.range(j); return top + h - 3 - ((v - a) / (b - a)) * (h - 6); }
   private yv(j: JointInfo, y: number, top: number, h: number) { const [a, b] = this.range(j); return a + ((top + h - 3 - y) / (h - 6)) * (b - a); }
   private track(j: string): Track | undefined { return this.clip.tracks.find((t) => t.joint === j); }
-  private width() { return Math.max(100, this.scroller.clientWidth - HEAD_W); }
+  private width() { return Math.max(100, this.scroller.clientWidth - (this.heads.offsetWidth || HEAD_W)); }
 
   private layout() {
     if (!this.active) return;
@@ -557,9 +558,11 @@ export class Studio {
     } catch (e) {
       this.marks = [{ message: String(e) }];
     }
+    // An empty new clip is not an error yet: keep the "New clip: ..." hint.
+    if (!this.clip.tracks.length) this.marks = [];
     if (this.marks.length) this.say(`${this.marks.length} lint error${this.marks.length > 1 ? 's' : ''}: ${this.marks[0].message}`, true);
     else if (this.status.classList.contains('err')) this.say('Lint clean.');
-    this.ui.save.classList.toggle('bad', this.marks.length > 0);
+    this.ui.save.classList.toggle('bad', this.marks.length > 0 || !this.clip.tracks.length);
     this.dirty = true;
   }
 
@@ -824,7 +827,11 @@ export class Studio {
     let s: { active?: boolean; clip?: StudioClip; t?: number; loop?: Studio['loop']; pps?: number; x0?: number; voice?: Studio['voice']; audio?: string; ext?: boolean } | null = null;
     try { s = JSON.parse(sessionStorage.getItem(SESSION) ?? 'null'); } catch { /* none */ }
     if (!s) return;
-    if (s.clip) { this.clip = s.clip; this.doc = toDoc(this.clip); }
+    if (s.clip) {
+      this.clip = s.clip;
+      this.doc = toDoc(this.clip);
+      this.say(`Restored your last session (${this.clip.id || 'unnamed clip'}). + New starts an empty clip.`);
+    }
     Object.assign(this, { t: s.t ?? 0, pps: s.pps ?? this.pps, x0: s.x0 ?? 0, showExt: !!s.ext });
     if (s.loop) this.loop = s.loop;
     if (s.voice) { this.voice = s.voice; (this.ui.voice as HTMLInputElement).value = s.voice.text; }
@@ -955,6 +962,8 @@ export class Studio {
     if (!this.active) return;
     const tgt = e.target instanceof HTMLElement ? e.target : null;
     if (tgt?.closest('input:not([type=range]), textarea, select') || tgt?.isContentEditable) return;
+    // Keys aimed at the control panel (a focused mode button, a tab) are the panel's.
+    if (tgt?.closest('#panel')) return;
     const mod = e.metaKey || e.ctrlKey;
     const tr = this.selTrack();
     const k = e.key;

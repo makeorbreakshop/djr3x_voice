@@ -142,12 +142,43 @@ async fn main() -> anyhow::Result<()> {
         show_dir,
         drivers: (!headless).then_some(r3x_runtime::performer::DriverOptions { leds }),
     };
+    // The camera's ffmpeg child lives on the capture thread, which exit does not unwind: turn
+    // it off on every way out (return, error, SIGINT/SIGTERM/SIGHUP, a panic on this thread).
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().name() == Some("main") {
+            r3x_vision::kill_captures();
+        }
+        prev(info);
+    }));
     let bus = Bus::default();
-    tokio::select! {
+    let r = tokio::select! {
         r = async {
             let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
             r3x_runtime::run_with_brain(bus, cfg, Some(level), listener, brain).await
         } => r,
-        _ = tokio::signal::ctrl_c() => Ok(()),
+        s = shutdown_signal() => {
+            tracing::info!("{s}: shutting down");
+            Ok(())
+        }
+    };
+    r3x_vision::kill_captures();
+    r
+}
+
+/// SIGINT (Ctrl-C, the launcher's stop), SIGTERM or SIGHUP.
+async fn shutdown_signal() -> &'static str {
+    use tokio::signal::unix::{signal, SignalKind};
+    let (mut term, mut hup) = match (signal(SignalKind::terminate()), signal(SignalKind::hangup())) {
+        (Ok(t), Ok(h)) => (t, h),
+        _ => {
+            let _ = tokio::signal::ctrl_c().await;
+            return "SIGINT";
+        }
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => "SIGINT",
+        _ = term.recv() => "SIGTERM",
+        _ = hup.recv() => "SIGHUP",
     }
 }

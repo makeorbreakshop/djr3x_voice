@@ -261,3 +261,14 @@ h2 .pill.on { color: #57d38c; border-color: #1f5a3a; }
 details.advanced { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
 details.advanced > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 details.advanced > section:first-of-type { border-top: 0; }
+
+/* The embedded demo's own controls: only while no runtime is connected. */
+body.live [data-offline] { display: none !important; }
+
+/* Scene control (scene.ts): backdrop + work light, over the 3D view, every mode. */
+.scene-ctl { position: fixed; top: 12px; left: 132px; display: flex; gap: 6px; align-items: center; z-index: 4; }
+.scene-ctl[hidden] { display: none; }
+.scene-ctl select, .scene-ctl button { width: auto; padding: 4px 8px; border-radius: 99px; font-size: 12px;
+  background: rgba(10,11,15,.72); border: 1px solid var(--line); color: var(--text); }
+.scene-ctl button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+@media (max-width: 720px) { .scene-ctl { left: auto; right: 12px; } }

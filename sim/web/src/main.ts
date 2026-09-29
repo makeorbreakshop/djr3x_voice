@@ -28,6 +28,7 @@ import { prepareDroidMaterials, tameHighlights } from './look';
 import { Ghosts } from './ghost';
 import { ServoWhine } from './servowhine';
 import { Studio } from './studio/studio';
+import { SceneLook, type Backdrop } from './scene';
 import {
   INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
   type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
@@ -56,6 +57,26 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(set.cams.full[1]);
 controls.enableDamping = true;
 limitControls(controls, set.booth);
+
+// Backdrop + work light (scene.ts), over the booth; `?booth=0` keeps the turntable stage.
+const sceneLook = set.show && !STILL
+  ? new SceneLook(scene, renderer, (on) => set.show!(on), (booth) => limitControls(controls, booth))
+  : null;
+{
+  const ctl = document.getElementById('scene-ctl')!;
+  const bg = document.getElementById('scene-bg') as HTMLSelectElement;
+  const work = document.getElementById('scene-work') as HTMLButtonElement;
+  const sync = () => {
+    if (!sceneLook) return;
+    bg.value = sceneLook.choice.backdrop;
+    work.setAttribute('aria-pressed', String(sceneLook.choice.workLight));
+  };
+  ctl.hidden = !sceneLook;
+  bg.onchange = () => { sceneLook?.pick({ backdrop: bg.value as Backdrop }); sync(); bg.blur(); };
+  work.onclick = () => { sceneLook?.pick({ workLight: !sceneLook.choice.workLight }); sync(); work.blur(); };
+  sceneLook?.onUpdate(sync);
+  sync();
+}
 
 // AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
 const post = new PostPipeline(renderer, scene, camera);
@@ -419,6 +440,7 @@ function onGatewayState(s: RetainedState) {
   $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
   stMode.textContent = s.engagement.engagement.toUpperCase();
   studio.setActive(s.stage.mode === 'studio');
+  sceneLook?.followMode(s.stage.mode);
   ghosts?.apply(s.stage.outputs);
   showUiDirty = true;
 }
@@ -444,7 +466,6 @@ function setConnected(on: boolean) {
     $('sh-freeze').classList.remove('on');
     stMode.textContent = mode;
   }
-  document.querySelectorAll<HTMLElement>('[data-offline] :is(button, input, select)').forEach((el) => ((el as HTMLButtonElement).disabled = on));
   showUiDirty = true;
 }
 
@@ -508,6 +529,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
 function setLocalStage(mode: string) {
   document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
   studio.setActive(mode === 'studio');
+  sceneLook?.followMode(mode);
 }
 if (studio.wantsOpen()) setLocalStage('studio');
 
@@ -617,7 +639,7 @@ function frame() {
   if (showUiDirty || ++showUiTick % 15 === 0) updateShowUi();
 
   controls.update();
-  set.constrain(camera, controls.target);
+  if (!sceneLook || sceneLook.showingBooth) set.constrain(camera, controls.target);
   post.render();
   drawLeds();
   if (logDirty) drawLog();
@@ -1037,6 +1059,8 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
       el.classList.toggle('on', !!r);
     }
     document.querySelectorAll<HTMLLIElement>('.show-list li').forEach((li) => li.classList.toggle('running', ids.has(li.dataset.id!)));
+    // Frozen motion refuses every play: say so instead of offering buttons that bounce.
+    document.querySelectorAll<HTMLButtonElement>('.show-list button, #pp-slots button').forEach((b) => (b.disabled = frozen));
     const take = performer?.takeInfo();
     $('take-info').textContent = !take ? '' : take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
     if (!connected) stMode.textContent = mode;

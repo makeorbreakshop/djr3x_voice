@@ -19,7 +19,7 @@ use futures_util::{SinkExt, StreamExt};
 use r3x_bus::{Bus, CommandRequest, Received};
 use r3x_contracts::{
     Ack, Body, Command, ConversationPhase, ConversationState, DjState, Domain, Engagement, EngagementState,
-    Event, IntentCommand, MessageClass, MusicCommand, MusicState, PerfEvent, RunKind, ServiceStatus, Source,
+    Event, IntentCommand, MessageClass, MusicCommand, MusicState, OpsEvent, PerfEvent, RunKind, ServiceStatus, Source,
     StageState,
 };
 use serde_json::{json, Value};
@@ -58,6 +58,8 @@ pub struct BridgeConfig {
     pub cantina_leds: bool,
     /// `--music rust`: r3x plays the music and answers MusicController's topics.
     pub music: Option<r3x_music::Engine>,
+    /// The runtime's command console (`intent.console`); lines it does not know go to CantinaOS.
+    pub console: r3x_brain::console::ConsoleCtx,
 }
 
 impl BridgeConfig {
@@ -69,6 +71,7 @@ impl BridgeConfig {
             duck_ramp_ms: profile.audio.ducking.ramp_ms,
             cantina_leds: false,
             music: None,
+            console: r3x_brain::console::ConsoleCtx { emotes: profile.emotes.clone(), show_dir: None },
         }
     }
 }
@@ -340,7 +343,25 @@ impl Bridge {
                 Ack::rejected(format!("DJ autonomy is off in {:?} mode", stage.mode))
             }
             IntentCommand::Dj { active } => self.console(if active { "dj start" } else { "dj stop" }).await,
-            IntentCommand::Console { line } => self.console(&line).await,
+            IntentCommand::Console { line } => self.typed_console(source, &line).await,
+        }
+    }
+
+    /// The runtime's console first (typed commands, state answers); what it does not know,
+    /// and what it passes on, CantinaOS answers.
+    async fn typed_console(&self, source: Source, line: &str) -> Ack {
+        use r3x_brain::console::{parse, run, Outcome, Parsed};
+        if matches!(parse(line, &self.cfg.console.emotes), Parsed::Error(_)) {
+            return self.console(line).await;
+        }
+        match run(&self.bus, source, line, &self.cfg.console).await {
+            Outcome::Reply(message, is_error) => {
+                if !message.is_empty() {
+                    self.bus.publish(Source::System, None, Event::Ops(OpsEvent::Console { message, is_error }));
+                }
+                Ack::Accepted
+            }
+            Outcome::Pass(l) => self.console(&l).await,
         }
     }
 

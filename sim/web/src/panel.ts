@@ -456,12 +456,17 @@ export class ControlPanel {
   private bindControls() {
     document.addEventListener('click', (e) => {
       const el = e.target as HTMLElement;
-      const b = el.closest<HTMLButtonElement>('[data-cli],[data-engage],[data-stage-mode],[data-music],[data-dj],[data-play]');
+      const b = el.closest<HTMLButtonElement>('[data-cli],[data-eye],[data-engage],[data-stage-mode],[data-music],[data-dj],[data-play]');
       if (!b) return;
       const d = b.dataset;
       if (d.cli) void this.runCli(d.cli);
+      else if (d.eye) void this.cmd({ class: 'perf', type: 'eyes', pattern: d.eye });
       else if (d.engage) void this.cmd({ class: 'stage', type: 'set_engagement', engagement: d.engage as Engagement });
-      else if (d.stageMode) void this.cmd({ class: 'stage', type: 'set_mode', mode: d.stageMode as OperatingMode });
+      else if (d.stageMode) {
+        // Focus left on a mode button must not re-send it on a later Space/Enter.
+        b.blur();
+        if (this.gw.state?.stage.mode !== d.stageMode) void this.cmd({ class: 'stage', type: 'set_mode', mode: d.stageMode as OperatingMode });
+      }
       else if (d.music === 'play') void this.cmd({ class: 'intent', type: 'music', action: 'play' });
       else if (d.music === 'stop') void this.cmd({ class: 'intent', type: 'music', action: 'stop' });
       else if (d.music === 'next') void this.cmd({ class: 'intent', type: 'music', action: 'next' });
@@ -497,7 +502,7 @@ export class ControlPanel {
     };
   }
 
-  /** The legacy console (CantinaOS commands with no typed equivalent). */
+  /** The runtime's command console: the same parser as r3x-cli; the reply is an `ops.console` event. */
   private async runCli(line: string) {
     this.addCliOut(`> ${line}`, false, true);
     const ack = await this.gw.send({ class: 'intent', type: 'console', line });
@@ -556,7 +561,7 @@ export class ControlPanel {
   }
 
   private renderEyes() {
-    $('eye-patterns').innerHTML = EYE_PATTERNS.map((p) => `<button class="chip" data-cli="eye pattern ${p}">${p}</button>`).join('');
+    $('eye-patterns').innerHTML = EYE_PATTERNS.map((p) => `<button class="chip" data-eye="${p}" title="Face pattern until the interaction state changes">${p}</button>`).join('');
   }
 
   private renderLibrary() {

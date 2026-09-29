@@ -7,6 +7,7 @@
 
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -111,7 +112,26 @@ impl Camera for FfmpegCamera {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| VisionError::Camera(format!("{}: {e}", self.ffmpeg)))?;
-        Ok(Box::new(PipeSource { child, width: w, height: h }))
+        Ok(Box::new(PipeSource::new(child, w, h)))
+    }
+}
+
+/// Capture children alive in this process. Their `PipeSource`s live on the capture thread,
+/// which process exit does not unwind, so the runtime's shutdown (and a panic on the main
+/// thread) calls [`kill_captures`]; otherwise the camera would stay on after the runtime.
+static CAPTURES: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn captures() -> std::sync::MutexGuard<'static, Vec<u32>> {
+    CAPTURES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// SIGKILL every live capture child (the camera turns off). Safe to call more than once.
+pub fn kill_captures() {
+    for pid in captures().drain(..) {
+        // SAFETY: plain kill(2) on a pid this process spawned and has not yet reaped.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
     }
 }
 
@@ -120,6 +140,14 @@ pub struct PipeSource {
     child: Child,
     width: u32,
     height: u32,
+}
+
+impl PipeSource {
+    /// Take over `child` (registered for [`kill_captures`] until dropped).
+    pub fn new(child: Child, width: u32, height: u32) -> Self {
+        captures().push(child.id());
+        Self { child, width, height }
+    }
 }
 
 impl FrameSource for PipeSource {
@@ -136,6 +164,7 @@ impl FrameSource for PipeSource {
 
 impl Drop for PipeSource {
     fn drop(&mut self) {
+        captures().retain(|p| *p != self.child.id());
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -161,5 +190,17 @@ mod tests {
         assert_eq!(pick(&cams, None), Some(2));
         assert_eq!(pick(&cams, Some(0)), Some(0));
         assert_eq!(pick(&cams[..2], None), None);
+    }
+
+    #[test]
+    fn kill_captures_ends_a_capture_child_nobody_dropped() {
+        let child = Command::new("sleep").arg("30").stdout(Stdio::piped()).spawn().unwrap();
+        let pid = child.id();
+        let src = PipeSource::new(child, 2, 2);
+        kill_captures();
+        let mut src = std::mem::ManuallyDrop::new(src); // as on a thread that never unwinds
+        let status = src.child.wait().unwrap();
+        assert!(!status.success(), "sleep {pid} was killed");
+        assert!(captures().is_empty());
     }
 }

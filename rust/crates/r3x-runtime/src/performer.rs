@@ -285,6 +285,13 @@ impl Host {
                             let cue = self.p.slots().get(usize::from(*slot)).cloned().unwrap_or_default();
                             self.bus.publish(Source::System, None, Event::Perf(PerfEvent::Emote { slot: *slot, cue }));
                         }
+                        // As a show's eye action: retained, and mirrored to CantinaOS's face board
+                        // when it drives the LEDs (bridge `--leds cantina`).
+                        if let PerfCommand::Eyes { pattern, duration } = cmd {
+                            let p = pattern.to_ascii_lowercase();
+                            self.bus.update(Source::System, |l: &mut LightsState| l.eye_pattern = Some(p.clone()));
+                            self.bus.publish(Source::System, None, Event::Perf(PerfEvent::Eyes { pattern: p, duration: *duration }));
+                        }
                         Ack::Accepted
                     }
                     Err(e) => Ack::rejected(e),

@@ -15,6 +15,7 @@
 //! and to the performer through `perf` commands.
 
 pub mod catalog;
+pub mod console;
 pub mod dj;
 pub mod plan;
 pub mod tags;
@@ -81,6 +82,8 @@ pub struct BrainConfig {
     /// tags performed as `public` (the performer holds them to `cheap`), and a note in the
     /// system prompt that music and the stage are not available.
     pub public: bool,
+    /// The profile's emote slots (`emote <cue>` on the console).
+    pub emotes: Vec<String>,
 }
 
 /// The tools a public brain keeps: nothing that plays music, runs DJ mode or uses the camera.
@@ -100,6 +103,7 @@ impl Default for BrainConfig {
             warmup_cooldown: Duration::from_secs(30),
             dj: dj::DjConfig::default(),
             public: false,
+            emotes: Vec::new(),
         }
     }
 }
@@ -352,49 +356,41 @@ impl Brain {
                 self.console(msg.0, msg.1);
             }
             IntentCommand::Console { line } => {
-                req.ack(Ack::Accepted);
-                let (msg, err) = self.console_line(&line).await;
+                // Acked after the reply is published, so a script sees replies in order.
+                let ctx = console::ConsoleCtx { emotes: self.inner.cfg.emotes.clone(), show_dir: Some(self.inner.cfg.show_dir.clone()) };
+                let (msg, err) = match console::run(&self.inner.bus, source, &line, &ctx).await {
+                    console::Outcome::Reply(m, e) => (m, e),
+                    console::Outcome::Pass(l) => self.console_line(&l).await,
+                };
                 self.console(msg, err);
+                req.ack(Ack::Accepted);
             }
         }
     }
 
     pub(crate) fn console(&self, message: String, is_error: bool) {
+        if message.is_empty() {
+            return;
+        }
         self.inner.bus.publish(Source::System, None, Event::Ops(OpsEvent::Console { message, is_error }));
     }
 
-    /// The CantinaOS console lines the brain owns.
+    /// The console lines the brain answers itself ([`console::Parsed::Pass`]).
     async fn console_line(&self, line: &str) -> (String, bool) {
         let words: Vec<&str> = line.split_whitespace().collect();
-        let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).filter(|s| !s.is_empty());
         match words.as_slice() {
             ["debug", "latency", ..] => match &self.inner.latency {
                 Some(l) => (l.report(), false),
                 None => ("latency tracking is off".into(), true),
             },
-            ["dj", "start"] => self.dj_start().await,
-            ["dj", "stop"] => self.dj_stop().await,
             ["dj", "next"] => self.dj_next().await,
-            ["play", "music", ..] => {
-                let q = rest(2);
-                self.dispatch("play_music", serde_json::json!({ "track": q }).as_object().cloned().unwrap(), None, Source::Cli).await;
-                ("Playing music".into(), false)
-            }
-            ["stop", "music"] => {
-                self.dispatch("stop_music", Default::default(), None, Source::Cli).await;
-                ("Music stopped".into(), false)
-            }
-            ["next", "music"] => {
-                self.dispatch("next_track", Default::default(), None, Source::Cli).await;
-                ("Next track".into(), false)
-            }
             ["reset"] | ["conversation", "reset"] => {
                 self.inner.session.lock().unwrap().clear();
                 ("Conversation reset".into(), false)
             }
             _ => match self.inner.vision.get().and_then(|v| v.console(line)) {
                 Some(reply) => (reply, false),
-                None => (format!("'{line}' is not handled by the rust brain"), true),
+                None => (format!("'{line}' is not available in this runtime"), true),
             },
         }
     }

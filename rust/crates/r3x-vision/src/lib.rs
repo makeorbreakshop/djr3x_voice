@@ -20,7 +20,7 @@ pub mod gallery;
 pub mod presence;
 pub mod service;
 
-pub use camera::{Camera, CameraInfo, FfmpegCamera, FrameSource};
+pub use camera::{kill_captures, Camera, CameraInfo, FfmpegCamera, FrameSource};
 pub use face::{FaceEngine, Face};
 pub use frame::Frame;
 pub use gallery::{Gallery, Match};

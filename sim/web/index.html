@@ -11,6 +11,15 @@
     <div id="loading">Loading R3X&hellip;</div>
     <div id="caption" hidden><div id="cap-heard"></div><div id="cap-said"></div></div>
     <div id="state-badge" class="state-badge" data-state="offline">offline</div>
+    <div id="scene-ctl" class="scene-ctl" hidden>
+      <select id="scene-bg" aria-label="Background" title="What R3X stands in front of">
+        <option value="booth">Booth</option>
+        <option value="grey">Studio grey</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+      <button id="scene-work" aria-pressed="false" title="Work light: soft key, fill and rim, independent of the stage lights">Work light</button>
+    </div>
 
     <aside id="panel">
       <header>
@@ -117,7 +126,7 @@
         </section>
 
         <details class="advanced">
-        <summary>Advanced: eye override, CantinaOS console</summary>
+        <summary>Advanced: eye override, console</summary>
         <section>
           <h2>Eyes <small>LED pattern override</small></h2>
           <div class="chips" id="eye-patterns"></div>
@@ -126,7 +135,7 @@
         <section>
           <h2>Command line <small>same commands as the terminal</small></h2>
           <form id="cli-form" class="row">
-            <input id="cli-in" placeholder="help, status, debug latency&hellip;" autocomplete="off" spellcheck="false" />
+            <input id="cli-in" placeholder="help, status, eye pattern thinking&hellip;" autocomplete="off" spellcheck="false" />
             <button type="submit">Run</button>
           </form>
           <div class="row wrap">
@@ -152,7 +161,7 @@
             <button class="chip on" data-kind="log">Logs</button>
             <button class="chip on" data-kind="event">Events</button>
           </div>
-          <select id="log-level" title="Lowest level streamed from CantinaOS">
+          <select id="log-level" title="Lowest level the runtime streams">
             <option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option>
           </select>
           <input id="log-filter" placeholder="Filter&hellip;" autocomplete="off" spellcheck="false" />

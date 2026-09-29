@@ -789,6 +789,11 @@ export interface StageSet {
   cams: Record<string, [THREE.Vector3, THREE.Vector3]>;
   /** The booth's light desk (absent on the turntable stage). See stagelights.ts. */
   lights?: BoothLights;
+  /**
+   * Show or hide the booth (scene.ts's plain backdrops). Hidden, it leaves the scene's
+   * background, fog and environment alone; its bakes still see it.
+   */
+  show?(on: boolean): void;
 }
 
 /** Build the set into the scene (tone mapping and exposure belong to post.ts). */
@@ -812,8 +817,10 @@ export function limitControls(controls: { minDistance: number; maxDistance: numb
 
 function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet {
   const bg = new THREE.Color(0x030203);
+  const fog = new THREE.Fog(bg, 4.5, 12);
   scene.background = bg;
-  scene.fog = new THREE.Fog(bg, 4.5, 12);
+  scene.fog = fog;
+  let shown = true;
 
   const grilleTex = perforated();
   const mats: Record<string, THREE.Material> = {
@@ -1115,11 +1122,11 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
     (d) => {
       setFixtures(d.out);
       if (basisReady) combine(d.out);
-      if (env) scene.environmentIntensity = THREE.MathUtils.clamp(roomLum(d.out) / env.lum, 0.3, 2);
+      if (env && shown) scene.environmentIntensity = THREE.MathUtils.clamp(roomLum(d.out) / env.lum, 0.3, 2);
     },
     (rig) => {
       env = envs.get(rig) ?? env;
-      if (env) scene.environment = env.tex;
+      if (env && shown) scene.environment = env.tex;
     },
   );
 
@@ -1211,6 +1218,9 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
       // Only the booth: hide the droid (and his LED lights) if he has loaded meanwhile.
       const hidden = scene.children.filter((o) => o.visible && !booth.has(o));
       hidden.forEach((o) => (o.visible = false));
+      // A hidden booth (a plain backdrop) is still what gets baked.
+      const away = scene.children.filter((o) => !o.visible && booth.has(o));
+      away.forEach((o) => (o.visible = true));
       const bg0 = scene.background, env0 = scene.environment;
       // Black background and no environment: both would be counted once per basis (the
       // environment is the lit booth itself; the first bake ran before it existed).
@@ -1236,6 +1246,7 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
       scene.background = bg0;
       scene.environment = env0;
       hidden.forEach((o) => (o.visible = true));
+      away.forEach((o) => (o.visible = false));
       lights.paused = false;
       lights.sync(true); // back to the desk's look before the next frame
       cpu += Date.now() - tb;
@@ -1279,6 +1290,17 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
   return {
     booth: true,
     lights,
+    show(on) {
+      if (on === shown) return;
+      shown = on;
+      for (const o of scene.children) if (booth.has(o)) o.visible = on;
+      if (on) {
+        scene.background = bg;
+        scene.fog = fog;
+        if (env) scene.environment = env.tex;
+        lights.sync(true);
+      }
+    },
     cams: {
       full: [V(0.42, 0.82, 1.72), V(0, 0.58, 0)],
       face: [V(0.16, 0.84, 0.9), V(0, 0.77, 0.08)],
