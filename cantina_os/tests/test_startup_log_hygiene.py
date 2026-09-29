@@ -78,23 +78,21 @@ class TestTrackCount:
 
     async def test_the_reported_count_is_the_library_count(self, loader):
         loaded = await loader._load_music_library()
-        assert loaded == len(loader.libraries["local"]) == 21, (
+        assert loaded == len(loader.libraries["local"]) == 22, (
             f"reported {loaded} but the library holds {len(loader.libraries['local'])}"
         )
 
-    async def test_the_collision_is_reported_once_and_names_the_title(self, loader, caplog):
+    async def test_title_collision_preserves_both_tracks(self, loader, caplog):
         with caplog.at_level(logging.DEBUG, logger="cantina_os.MusicController"):
             await loader._load_music_library()
 
-        collision_lines = [
+        assert "Utinni" in loader.libraries["local"]
+        assert "The Dusty Jawas - Utinni" in loader.libraries["local"]
+        assert not [
             r.getMessage()
             for r in caplog.records
-            if "duplicate" in r.getMessage().lower() and "Utinni" in r.getMessage()
+            if "dropped" in r.getMessage().lower() and "duplicate" in r.getMessage().lower()
         ]
-        assert collision_lines, (
-            "the dropped duplicate is not mentioned anywhere; the only clue was two "
-            "disagreeing counts"
-        )
 
     async def test_no_line_claims_22_tracks(self, loader, caplog):
         with caplog.at_level(logging.DEBUG, logger="cantina_os.MusicController"):

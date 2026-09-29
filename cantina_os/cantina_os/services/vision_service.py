@@ -9,12 +9,16 @@ import asyncio
 import base64
 import io
 import json
-import logging
 import os
 import pickle
+import re
+import shutil
 import subprocess
+import sys
+import tempfile
 import time
-from typing import Optional, List, Dict
+from pathlib import Path
+from typing import Dict, Optional
 
 import cv2
 import numpy as np
@@ -29,18 +33,21 @@ except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
 
 from cantina_os.base_service import BaseService
-from cantina_os.llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
-    VisionScenePayload,
-    VisionErrorPayload,
-    VisionRequestPayload,
-    VisionAnalysisRequestPayload,
+    CliResponsePayload,
     VisionCameraListPayload,
     VisionCameraSelectedPayload,
-    CliResponsePayload,
+    VisionErrorPayload,
+    VisionRequestPayload,
+    VisionScenePayload,
 )
-from cantina_os.utils.command_decorators import compound_command, command_error_handler, register_service_commands
+from cantina_os.llm.anthropic_provider import client_kwargs, map_model, resolve_provider
+from cantina_os.utils.command_decorators import (
+    command_error_handler,
+    compound_command,
+    register_service_commands,
+)
 
 
 class VisionService(BaseService):
@@ -124,72 +131,91 @@ class VisionService(BaseService):
 
     def _get_camera_names(self) -> Dict[int, str]:
         """
-        Get camera names from macOS system_profiler.
-        Returns dict mapping OpenCV camera index to actual camera name.
+        Return the native capture-device names keyed by their camera indexes.
+
+        On macOS, FFmpeg's AVFoundation device list exposes the same stable indexes
+        that OpenCV uses. Enumerating by opening guessed indexes is both noisy and
+        unsafe: Continuity Camera can present multiple devices at the same
+        resolution and OpenCV logs an error for every missing index.
         """
-        cameras = {}
+        cameras: Dict[int, str] = {}
+
+        if sys.platform == "darwin":
+            ffmpeg_path = shutil.which("ffmpeg")
+            if ffmpeg_path:
+                try:
+                    result = subprocess.run(
+                        [
+                            ffmpeg_path,
+                            "-hide_banner",
+                            "-f",
+                            "avfoundation",
+                            "-list_devices",
+                            "true",
+                            "-i",
+                            "",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                        check=False,
+                    )
+
+                    in_video_section = False
+                    for line in result.stderr.splitlines():
+                        if "AVFoundation video devices:" in line:
+                            in_video_section = True
+                            continue
+                        if "AVFoundation audio devices:" in line:
+                            break
+                        if not in_video_section:
+                            continue
+
+                        match = re.search(r"\]\s+\[(\d+)\]\s+(.+)$", line)
+                        if not match:
+                            continue
+
+                        index = int(match.group(1))
+                        name = match.group(2).strip()
+                        if name.lower().startswith("capture screen"):
+                            continue
+                        cameras[index] = name
+
+                    if cameras:
+                        return cameras
+                except (OSError, subprocess.SubprocessError) as exc:
+                    self.logger.debug(
+                        "Could not list AVFoundation cameras with FFmpeg: %s", exc
+                    )
 
         try:
-            # Get camera info as JSON
             result = subprocess.run(
-                ['system_profiler', 'SPCameraDataType', '-json'],
+                ["system_profiler", "SPCameraDataType", "-json"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                check=False,
             )
-
             data = json.loads(result.stdout)
-            camera_list = data.get('SPCameraDataType', [])
-
-            # Map system cameras to OpenCV indices
-            # Test each OpenCV camera to match by resolution/properties
-            opencv_cameras = {}
-            for idx in range(6):
-                try:
-                    camera = cv2.VideoCapture(idx)
-                    if camera.isOpened():
-                        width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        opencv_cameras[idx] = (width, height)
-                        camera.release()
-                except:
-                    pass
-
-            # Match cameras by typical resolutions
-            # FaceTime HD is usually 1280x720, iPhone/Continuity is 1920x1080
-            for idx, (width, height) in opencv_cameras.items():
-                matched = False
-                for cam_info in camera_list:
-                    cam_name = cam_info.get('_name', '')
-
-                    # Match FaceTime HD to 1280x720
-                    if 'FaceTime' in cam_name and width == 1280 and height == 720:
-                        cameras[idx] = cam_name
-                        matched = True
-                        break
-                    # Match iPhone to 1920x1080
-                    elif 'iPhone' in cam_name and width == 1920 and height == 1080:
-                        cameras[idx] = cam_name
-                        matched = True
-                        break
-
-                if not matched:
-                    # Use generic name with resolution
-                    cameras[idx] = f"Camera {idx} ({width}x{height})"
-
-        except Exception as e:
-            self.logger.debug(f"Could not get camera names from system_profiler: {e}")
+            for index, camera in enumerate(data.get("SPCameraDataType", [])):
+                name = camera.get("_name")
+                if name:
+                    cameras[index] = name
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            self.logger.debug(
+                "Could not get camera names from system_profiler: %s", exc
+            )
 
         return cameras
 
-    def _find_best_camera(self, preferred_index: Optional[int] = None) -> int:
+    def _find_best_camera(self, preferred_index: Optional[int] = None) -> Optional[int]:
         """
         Find the best available camera, avoiding Continuity Cameras (iPhones).
 
         Strategy:
         1. If preferred_index is provided, use it
         2. Otherwise, get camera names and pick first non-iPhone camera
-        3. Fallback to index 0 if nothing found
+        3. Disable capture if only virtual or Continuity cameras are available
         """
         if preferred_index is not None:
             self.logger.info(f"Using preferred camera index: {preferred_index}")
@@ -199,10 +225,13 @@ class VisionService(BaseService):
         camera_names = self._get_camera_names()
         self.logger.info(f"Detected cameras: {camera_names}")
 
-        # Pick the first camera that is NOT an iPhone
+        # Pick the first physical camera that is not a Continuity device.
         for idx, camera_name in camera_names.items():
-            # Skip iPhone cameras
-            if 'iPhone' in camera_name:
+            normalized_name = camera_name.lower()
+            if any(
+                marker in normalized_name
+                for marker in ("iphone", "continuity", "desk view", "capture screen")
+            ):
                 self.logger.info(f"Skipping camera {idx}: {camera_name}")
                 continue
 
@@ -210,9 +239,10 @@ class VisionService(BaseService):
             self.logger.info(f"Selected camera {idx}: {camera_name}")
             return idx
 
-        # Fallback to 0
-        self.logger.warning("No suitable camera found in names, defaulting to index 0")
-        return 0
+        self.logger.warning(
+            "No suitable physical camera detected; vision capture is disabled"
+        )
+        return None
 
     def _load_face_encodings(self):
         """Load trained face encodings from disk.
@@ -222,7 +252,7 @@ class VisionService(BaseService):
         2. New format: {'name1': encoding1, 'name2': encoding2, ...}
         """
         if not FACE_RECOGNITION_AVAILABLE:
-            self.logger.warning("face_recognition library not available, person detection disabled")
+            self.logger.info("face_recognition is not installed; person detection is disabled")
             return
 
         try:
@@ -296,9 +326,9 @@ class VisionService(BaseService):
             if not self.enable_continuous_monitoring:
                 self.logger.info("Continuous monitoring disabled in config")
             elif not FACE_RECOGNITION_AVAILABLE:
-                self.logger.warning("Continuous monitoring disabled: face_recognition not available")
+                self.logger.info("Continuous monitoring disabled: face_recognition not available")
             elif not self.known_face_encodings:
-                self.logger.warning("Continuous monitoring disabled: no face encodings loaded")
+                self.logger.info("Continuous monitoring disabled: no face encodings loaded")
 
     async def _stop(self):
         """Stop the vision service and release camera."""
@@ -384,6 +414,9 @@ class VisionService(BaseService):
         self.logger.info(f"Handling vision request: {payload.query}")
 
         try:
+            if self.camera_index is None:
+                raise RuntimeError("No physical camera is available for vision capture")
+
             # Reopen camera if needed
             if not self.camera:
                 self.camera = cv2.VideoCapture(self.camera_index)
@@ -455,6 +488,9 @@ class VisionService(BaseService):
         self.logger.info(f"Vision analysis request: '{question}' (conversation_id={conversation_id})")
 
         try:
+            if self.camera_index is None:
+                raise RuntimeError("No physical camera is available for vision capture")
+
             # Reopen camera if needed
             if not self.camera:
                 self.camera = cv2.VideoCapture(self.camera_index)
@@ -510,14 +546,13 @@ class VisionService(BaseService):
         Args:
             payload: Dict containing camera_id and mode
         """
-        import sys
-        from pathlib import Path
-        import tempfile
-
         try:
             # Use configured camera index (from .env) unless explicitly overridden
             camera_id = payload.get("camera_id", self.camera_index)
             mode = payload.get("mode", "combined")
+
+            if camera_id is None:
+                raise RuntimeError("No physical camera is available for the vision window")
 
             # Get path to test_vision.py script
             # Path: cantina_os/cantina_os/services/vision_service.py
@@ -589,6 +624,10 @@ class VisionService(BaseService):
         self.logger.info("Continuous vision monitoring loop started (unified face recognition + scene capture)")
 
         try:
+            if self.camera_index is None:
+                self.logger.info("Vision monitoring skipped because no physical camera is available")
+                return
+
             # Open camera for continuous monitoring
             self.camera = cv2.VideoCapture(self.camera_index)
             if not self.camera.isOpened():

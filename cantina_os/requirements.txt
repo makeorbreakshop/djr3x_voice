@@ -74,9 +74,10 @@ spotipy>=2.25.1  # Optional Spotify Connect backend (music_backends.py, try-guar
 
 # CLI Enhancement
 colorama>=0.4.6  # Cross-platform colored terminal output
+textual>=8.2.8,<9.0  # Terminal dashboard imported by cantina_os.main on every startup
 
 # Development Tools
 black>=23.11.0  # Code formatting
 isort>=5.12.0   # Import sorting
 mypy>=1.7.1     # Static type checking
-ruff>=0.1.6     # Fast Python linter 
+ruff>=0.1.6     # Fast Python linter
