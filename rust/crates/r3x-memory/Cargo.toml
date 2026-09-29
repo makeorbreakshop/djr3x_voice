@@ -1,0 +1,19 @@
+[package]
+name = "r3x-memory"
+description = "Long-term memory on SQLite: people, visits, timeline, DJ history, persisted operational state, LLM visit summaries"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-llm = { path = "../r3x-llm" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
