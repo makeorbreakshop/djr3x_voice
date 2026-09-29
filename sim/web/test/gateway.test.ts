@@ -62,6 +62,16 @@ describe('GatewayClient', () => {
     expect(gw.state?.engagement.engagement).toBe('idle');
   });
 
+  it('delivers performer frames', () => {
+    vi.stubGlobal('WebSocket', FakeSocket);
+    const gw = new GatewayClient('ws://x/?token=t');
+    const got: number[] = [];
+    gw.subscribe({ onFrames: (f) => got.push(f.joints.head_pan) });
+    gw.start();
+    FakeSocket.last.push({ kind: 'frames', body: { t_mono: 1, joints: { head_pan: 12 }, lights: { eyes: [[1, 2, 3]] } } });
+    expect(got).toEqual([12]);
+  });
+
   it('rejects immediately when offline', async () => {
     const gw = new GatewayClient('ws://x/');
     await expect(gw.send({ class: 'intent', type: 'ptt_stop' })).resolves.toMatchObject({ status: 'rejected' });

@@ -213,14 +213,16 @@ class EventTopics(str, Enum):
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
 
-    # Show system (show/SPEC.md "Live bus contract"). TimelineExecutorService is the conductor.
-    SHOW_PERFORM = "show.perform"  # anyone -> timeline: perform a clip/cue/sequence by id
-    SHOW_STOP = "show.stop"  # anyone -> timeline: {id?, layer?, all?}
-    SHOW_STARTED = "show.started"  # timeline -> all
-    SHOW_ENDED = "show.ended"  # timeline -> all, with reason done|interrupted|rejected
-    SHOW_MOTION = "show.motion"  # timeline -> body: start a clip
-    SHOW_SFX = "show.sfx"  # timeline -> audio
-    STAGE_LIGHTS = "stage.lights"  # timeline -> stage lights desk
-    CHEST_OVERRIDE = "chest.override"  # timeline -> chest service: {command, hold}
-    MOTION_FREEZE = "motion.freeze"  # anyone -> body/timeline: the "motion stop" {on}
+    # Show system (show/SPEC.md "Live bus contract"). Since Phase 3 the r3x performer
+    # (r3x-runtime --bridge, via the bus tap, source "tap:r3x") is the only conductor:
+    # CantinaOS emits the requests, the bridge emits everything else back onto this bus.
+    SHOW_PERFORM = "show.perform"  # claude/timeline/jev/cli/ui/idle -> r3x performer
+    SHOW_STOP = "show.stop"  # anyone -> r3x performer: {id?, layer?, all?}
+    SHOW_STARTED = "show.started"  # r3x performer -> all
+    SHOW_ENDED = "show.ended"  # r3x performer -> all, with reason done|interrupted|rejected
+    SHOW_MOTION = "show.motion"  # no emitter since Phase 3 (r3x drives motion internally)
+    SHOW_SFX = "show.sfx"  # r3x performer -> audio
+    STAGE_LIGHTS = "stage.lights"  # r3x performer -> stage lights desk
+    CHEST_OVERRIDE = "chest.override"  # r3x performer -> chest service (when CantinaOS owns it)
+    MOTION_FREEZE = "motion.freeze"  # anyone -> r3x performer: the "motion stop" {on}
     SHOW_COMMAND = "show.command"  # CLI 'show ...' / 'freeze' / 'unfreeze' -> timeline (not forwarded)

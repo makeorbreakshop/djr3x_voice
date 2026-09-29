@@ -70,6 +70,9 @@ pub struct PerformerConfig {
     pub player: PlayerOptions,
     /// Smallest target change that sends a new servo goal (joint units).
     pub goal_deadband: f64,
+    /// Plan §7b single mouth rate (the profile's `audio.mouth_hz`); None = the legacy
+    /// CantinaOS throttles (host.ts parity).
+    pub mouth_hz: Option<f64>,
 }
 
 impl Default for PerformerConfig {
@@ -80,6 +83,7 @@ impl Default for PerformerConfig {
             light_rig: None,
             player: PlayerOptions::default(),
             goal_deadband: 0.25,
+            mouth_hz: None,
         }
     }
 }
@@ -172,9 +176,33 @@ pub enum Command {
         activity: Activity,
         id: Option<String>,
     },
+    /// A service health report for the chest's status windows. `latched` defaults to the
+    /// fault-latch rule on `detail` (only "Failed to start/initialize" latches).
     ServiceStatus {
         service: String,
         status: String,
+        #[serde(default)]
+        detail: Option<String>,
+        #[serde(default)]
+        latched: Option<bool>,
+    },
+    /// Idle policy on/off (StageManager autonomy; off in Bench and Studio).
+    Autonomy {
+        on: bool,
+    },
+    /// Direct jog (Bench, sim sliders): hold `joint` at `value` over everything else;
+    /// `None` releases it (it follows the composed pose again through the follower).
+    Jog {
+        joint: String,
+        #[serde(default)]
+        value: Option<f64>,
+    },
+    JogRelease,
+    /// EYE_COMMAND: a named face pattern for `duration` s (0 = until the state changes).
+    Eyes {
+        pattern: String,
+        #[serde(default)]
+        duration: f64,
     },
 }
 
@@ -341,6 +369,8 @@ pub struct Performer {
     background_run: Option<(String, String)>,
     tags: Vec<(f64, String)>,
     sent_goals: BTreeMap<String, f64>,
+    /// Direct jog targets (joint -> value), applied after the compositor.
+    jog: BTreeMap<String, f64>,
     goal_seq: u64,
     goal_deadband: f64,
     out: Vec<Out>,
@@ -364,7 +394,9 @@ impl Performer {
             oob_aliases_mouth: true,
             rng: derive(cfg.seed, 2),
         });
-        let mut host = DualHost::new(CantinaHostEmulator::new(fw, true), ChestHost::new(120.0));
+        let mut face = CantinaHostEmulator::new(fw, true);
+        face.set_mouth_hz(cfg.mouth_hz);
+        let mut host = DualHost::new(face, ChestHost::new(120.0));
         host.chest.boot(0.0); // the boot sweep, as when CantinaOS starts
         let mut procedural = Procedural::default();
         procedural.layers = AliveLayers::from_map(&profile.alive);
@@ -399,6 +431,7 @@ impl Performer {
             background_run: None,
             tags: Vec::new(),
             sent_goals: BTreeMap::new(),
+            jog: BTreeMap::new(),
             goal_seq: 0,
             goal_deadband: cfg.goal_deadband,
             catalog,
@@ -413,6 +446,10 @@ impl Performer {
 
     pub fn now(&self) -> f64 {
         self.now
+    }
+    /// Emote slot -> cue id (the profile's `emotes`).
+    pub fn slots(&self) -> &[String] {
+        &self.slots
     }
     pub fn frozen(&self) -> bool {
         self.frozen
@@ -514,24 +551,60 @@ impl Performer {
                 let i = usize::from(activity == Activity::Dj);
                 self.backgrounds[i] = id;
             }
-            Command::ServiceStatus { service, status } => {
-                self.host.chest.service_status(&service, &status, true)
+            Command::ServiceStatus {
+                service,
+                status,
+                detail,
+                latched,
+            } => {
+                let latched = latched.unwrap_or_else(|| ChestHost::latches(detail.as_deref()));
+                self.host.chest.service_status(&service, &status, latched)
             }
+            Command::Autonomy { on } => {
+                self.idle.enabled = on;
+                if !on {
+                    self.poke_idle();
+                }
+            }
+            Command::Eyes { pattern, duration } => {
+                self.host.face.eye_command(&pattern, duration);
+            }
+            Command::Jog { joint, value } => match value {
+                Some(v) if self.joints.contains(&joint) => {
+                    self.jog.insert(joint, v);
+                }
+                _ => {
+                    self.jog.remove(&joint);
+                }
+            },
+            Command::JogRelease => self.jog.clear(),
         }
     }
 
-    /// A bus `PerfCommand` (plan D2) from `source`.
-    pub fn perf_command(&mut self, c: &PerfCommand, source: r3x_contracts::Source) {
+    /// A bus source as the show system's source (tier ceiling): `public` is `jev`-tier,
+    /// the runtime and the CantinaOS bridge are `timeline`.
+    pub fn show_source(source: r3x_contracts::Source) -> Source {
         use r3x_contracts::Source as S;
-        let source = match source {
+        match source {
             S::Jev | S::Public => Source::Jev,
             S::Claude => Source::Claude,
             S::Ui => Source::Ui,
             S::Cli => Source::Cli,
             S::Idle => Source::Idle,
-            _ => Source::Timeline,
-        };
+            S::Timeline | S::System | S::Bridge => Source::Timeline,
+        }
+    }
+
+    /// A bus `PerfCommand` (plan D2) from `source`. `Err` says why a play was refused (the
+    /// run also ends with `rejected`).
+    pub fn perf_command(
+        &mut self,
+        c: &PerfCommand,
+        source: r3x_contracts::Source,
+    ) -> Result<(), String> {
+        let source = Self::show_source(source);
         let layer = |l: &PerfLayer| match l {
+            PerfLayer::Background => RunLayer::Background,
             PerfLayer::Gesture => RunLayer::Gesture,
             PerfLayer::Show => RunLayer::Show,
         };
@@ -542,7 +615,7 @@ impl Performer {
                 speed,
                 layer: l,
             } => {
-                self.perform(
+                let run = self.perform(
                     id,
                     source,
                     Params {
@@ -551,21 +624,76 @@ impl Performer {
                     },
                     l.as_ref().map(layer),
                 );
+                if run.is_none() {
+                    let item = self.catalog.get(id).or_else(|| self.catalog.resolve(id));
+                    return Err(match item {
+                        _ if self.frozen => "motion is frozen".to_string(),
+                        None => format!("no show item {id:?}"),
+                        Some(it) => format!(
+                            "{id} is {:?}-tier; {source:?} may not perform it",
+                            it.tier
+                        )
+                        .to_lowercase(),
+                    });
+                }
             }
             PerfCommand::Stop(t) => self.stop(&match t {
                 StopTarget::Id { id } => StopSel::id(id.clone()),
                 StopTarget::Layer { layer: l } => StopSel::layer(layer(l)),
                 StopTarget::All => StopSel::all(),
             }),
+            // A joint name jogs that joint directly; anything else is a puppeteer intent.
             PerfCommand::Puppet { channels } => {
                 for (k, v) in channels {
-                    self.puppet.set(k, *v);
+                    if self.joints.contains(k) {
+                        self.jog.insert(k.clone(), *v);
+                    } else {
+                        self.puppet.set(k, *v);
+                    }
                 }
             }
-            PerfCommand::Release { .. } => self.puppet.release(),
-            PerfCommand::Emote { slot } => self.puppet.trigger(usize::from(*slot)),
+            PerfCommand::Release { channels } if channels.is_empty() => {
+                self.jog.clear();
+                self.puppet.release();
+            }
+            PerfCommand::Release { channels } => {
+                let mut intents = false;
+                for c in channels {
+                    intents |= self.jog.remove(c).is_none();
+                }
+                if intents {
+                    self.puppet.release();
+                }
+            }
+            PerfCommand::Emote { slot } => {
+                if usize::from(*slot) >= self.slots.len() {
+                    return Err(format!("no emote in slot {slot}"));
+                }
+                self.puppet.trigger(usize::from(*slot));
+            }
             PerfCommand::Freeze { on } => self.freeze(*on),
+            PerfCommand::Eyes { pattern, duration } => {
+                if !self.host.face.eye_command(pattern, duration.unwrap_or(0.0)) {
+                    return Err(format!("no eye pattern {pattern:?}"));
+                }
+            }
         }
+        Ok(())
+    }
+
+    /// Swap in a reloaded show folder. Running runs keep the items they started with;
+    /// the idle policy restarts when it changed.
+    pub fn set_catalog(&mut self, catalog: Arc<Catalog>) {
+        if catalog.idle != self.catalog.idle {
+            if let Some(run) = self.idle.poke(self.now) {
+                self.stop(&StopSel::id(run));
+            }
+            let enabled = self.idle.enabled;
+            self.idle = IdleRunner::new(catalog.idle.clone(), self.now);
+            self.idle.enabled = enabled;
+        }
+        self.player.cat = catalog.clone();
+        self.catalog = catalog;
     }
 
     fn resting(&self) -> Activity {
@@ -745,7 +873,10 @@ impl Performer {
                 }
             }
             Action::Sfx { id } if self.enables.sfx => self.out.push(Out::Sfx { id: id.clone() }),
-            Action::Speak { text } => self.out.push(Out::Speak { text: text.clone() }),
+            // A Claude-triggered show never talks over the reply that triggered it (§7a).
+            Action::Speak { text } if run.source != Source::Claude => {
+                self.out.push(Out::Speak { text: text.clone() })
+            }
             Action::Duck => self.out.push(Out::Duck),
             Action::Unduck => self.out.push(Out::Unduck),
             _ => {}
@@ -858,6 +989,11 @@ impl Performer {
             .procedural
             .update(t, dt, &ctx, &mut self.rng, &self.joints);
         self.body.apply(&mut pose, t, Some(&self.puppet));
+        if !self.frozen {
+            for (j, v) in &self.jog {
+                pose.insert(j.clone(), *v);
+            }
+        }
         for j in &self.joints {
             self.actuation.command(j, get(&pose, j));
         }

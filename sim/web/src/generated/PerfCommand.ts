@@ -9,4 +9,4 @@ export type PerfCommand = { "type": "play", id: string, intensity: number, speed
 /**
  * Defaults to the item's own layer.
  */
-layer?: PerfLayer, } | { "type": "stop" } & StopTarget | { "type": "puppet", channels: { [key in string]: number }, } | { "type": "release", channels: Array<string>, } | { "type": "emote", slot: number, } | { "type": "freeze", on: boolean, };
+layer?: PerfLayer, } | { "type": "stop" } & StopTarget | { "type": "puppet", channels: { [key in string]: number }, } | { "type": "release", channels: Array<string>, } | { "type": "emote", slot: number, } | { "type": "freeze", on: boolean, } | { "type": "eyes", pattern: string, duration?: number, };

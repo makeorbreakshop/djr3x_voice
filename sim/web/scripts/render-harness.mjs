@@ -92,18 +92,21 @@ export const SHOTS = [
  * (amber eyes, dim mouth); `speaking` is INTERACTIVE with the mouth held at a steady level.
  */
 const setup = (state, pose = {}) => `(async () => {
-  const r = window.__r3x, s = window.__r3xStill;
+  const r = window.__r3x, s = window.__r3xStill, p = r.performer;
   const pose = Object.assign({ hero_shoulder: 20 }, ${JSON.stringify(pose)});
-  document.getElementById('manual').click();
-  for (const j of r.rig.joints.keys()) r.actuation.command(j, pose[j] ?? 0);
+  p.command({ cmd: 'autonomy', on: false });
+  p.command({ cmd: 'look', pan_tilt: null });
+  document.getElementById('look').checked = false;
+  document.getElementById('look').dispatchEvent(new Event('change'));
+  for (const j of r.rig.joints.keys()) p.command({ cmd: 'jog', joint: j, value: pose[j] ?? 0 });
   if (${JSON.stringify(state)} === 'speaking') {
-    r.host.setMode('INTERACTIVE');
-    r.host.speechStarted();
+    p.command({ cmd: 'mode', mode: 'INTERACTIVE' });
+    p.command({ cmd: 'speech_started' });
   }
   await s.advance(150);
-  if (${JSON.stringify(state)} === 'speaking') r.fw.write('M150\\n');
+  if (${JSON.stringify(state)} === 'speaking') p.command({ cmd: 'amplitude', value: 150 / 255 });
   await s.advance(90);
-  return { t: s.now, state: r.fw.currentState };
+  return { t: s.now, state: ${JSON.stringify(state)} };
 })()`;
 
 // ------------------------------------------------------------------ chrome over CDP
@@ -172,7 +175,7 @@ async function launchChrome({ uncapped = false } = {}) {
       await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: dpr, mobile: false });
       await send('Page.navigate', { url });
       for (let i = 0; i < 240; i++) {
-        if (await js("document.readyState === 'complete' && !document.getElementById('loading') && !!window.__r3x?.actuation").catch(() => false)) return;
+        if (await js("document.readyState === 'complete' && !document.getElementById('loading') && !!window.__r3x?.performer && !!window.__r3x?.rig").catch(() => false)) return;
         await sleep(250);
       }
       throw new Error('sim did not finish loading (is the model built? sim/model/build.sh)');

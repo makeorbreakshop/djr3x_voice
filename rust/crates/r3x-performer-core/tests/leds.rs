@@ -1,5 +1,6 @@
 //! LED emulators: ports of sim/web/test/firmware.test.ts and chest.test.ts, plus byte-exact
-//! parity against the TS emulators (fixtures from sim/web/scripts/gen-led-parity.mjs).
+//! parity against the TS emulators (fixtures recorded by sim/web/scripts/gen-led-parity.mjs, removed with the TS emulators in
+//! Phase 3; the recordings are the frozen reference).
 
 use indexmap::IndexMap;
 use r3x_performer_core::leds::chest::{

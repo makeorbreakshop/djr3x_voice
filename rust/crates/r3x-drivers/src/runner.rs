@@ -93,6 +93,11 @@ pub fn spawn(mut driver: Box<dyn Driver>, bus: Option<Bus>) -> DriverHandle {
                     Err(RecvTimeoutError::Timeout) => {}
                 }
                 driver.poll(now());
+                while let Some(ev) = driver.take_event() {
+                    if let Some(bus) = &bus {
+                        bus.publish(Source::System, None, ev);
+                    }
+                }
                 let h = driver.health();
                 if h != health {
                     report(bus.as_ref(), &thread_name, &h);
@@ -114,13 +119,15 @@ pub struct DriverSet {
 impl DriverSet {
     /// Build from the Robot Profile and the environment (ports, force-mock flags).
     /// `servo_us_per_unit` = the performer actuation's `us_per_unit` (dumb sinks' frame units).
-    pub fn from_profile(profile: &RobotProfile, bus: &Bus, servo_us_per_unit: f64) -> Self {
-        Self::with_opener(profile, bus, servo_us_per_unit, Arc::new(SerialOpener))
+    /// `leds: false` leaves the face and chest boards to someone else (CantinaOS, while it
+    /// still owns them).
+    pub fn from_profile(profile: &RobotProfile, bus: &Bus, servo_us_per_unit: f64, leds: bool) -> Self {
+        Self::with_opener(profile, bus, servo_us_per_unit, leds, Arc::new(SerialOpener))
     }
 
-    pub fn with_opener(profile: &RobotProfile, bus: &Bus, us_per_unit: f64, opener: Arc<dyn Opener>) -> Self {
+    pub fn with_opener(profile: &RobotProfile, bus: &Bus, us_per_unit: f64, leds: bool, opener: Arc<dyn Opener>) -> Self {
         let board = |b: &str| {
-            profile.lights.iter().any(|g| matches!(&g.driver, LightDriver::SerialLed { board, .. } if board == b))
+            leds && profile.lights.iter().any(|g| matches!(&g.driver, LightDriver::SerialLed { board, .. } if board == b))
         };
         let kinds: Vec<DriverKind> = profile.actuators.iter().map(|a| a.driver).collect();
         let mut drivers: Vec<Box<dyn Driver>> = vec![Box::new(VirtualDriver::to_bus(bus.clone()))];
@@ -155,12 +162,19 @@ impl DriverSet {
 
     /// One performer tick: its queued outputs (`Performer::take_events`) and its frame.
     pub fn tick(&self, outs: &[Out], frames: Frames) {
+        self.outs(outs);
         let f = Arc::new(frames);
+        for d in &self.drivers {
+            d.frames(f.clone());
+        }
+    }
+
+    /// Event-time outputs only (between ticks).
+    pub fn outs(&self, outs: &[Out]) {
         for d in &self.drivers {
             for o in outs.iter().filter(|o| routes_to(o, &d.name)) {
                 d.out(o.clone());
             }
-            d.frames(f.clone());
         }
     }
 

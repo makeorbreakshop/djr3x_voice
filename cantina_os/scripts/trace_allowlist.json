@@ -1,1 +1,27 @@
-[]
+[
+  {
+    "drop": {
+      "side": "expected",
+      "source": "timeline_executor_service",
+      "topics": ["show.started", "show.ended", "show.motion", "show.sfx", "stage.lights",
+                 "chest.override", "eye.command"]
+    },
+    "reason": "Phase 3: the r3x performer plays shows. The Python show player's department events (recorded as timeline_executor_service) now come from the bridge (tap:r3x) or, without the runtime, not at all."
+  },
+  {
+    "drop": {"side": "expected", "source": "timeline_executor_service",
+             "topics": ["tts.generate.request"], "payload_match": {"clip_id": "show-.*"}},
+    "reason": "Phase 3: a show's speak line is the performer's now."
+  },
+  {
+    "drop": {"side": "actual", "source": "tap:r3x",
+             "topics": ["show.started", "show.ended", "show.sfx", "stage.lights", "chest.override",
+                        "eye.command", "tts.generate.request", "audio.ducking.start", "audio.ducking.stop"]},
+    "reason": "Phase 3: the same events, emitted by the r3x bridge when the runtime is attached to the replay."
+  },
+  {
+    "drop": {"side": "actual", "source": "timeline_executor_service", "topics": ["show.perform"],
+             "payload": {"source": "timeline"}},
+    "reason": "Phase 3: plan perform/sequence steps now ask the performer over the bus (show.perform source=timeline); the Python player ran them in-process."
+  }
+]

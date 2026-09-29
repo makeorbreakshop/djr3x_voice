@@ -56,12 +56,14 @@ async fn start_runtime(tap_url: String) -> String {
             info: ClientInfo { name: "test".into(), source: Source::Ui, classes: all_classes() },
         }],
         origins: vec!["http://localhost:5391".into()],
-        bridge: Some(BridgeConfig { tap_url, tap_token: "tap".into(), emotes: profile.emotes.clone() }),
+        bridge: Some(BridgeConfig::new(tap_url, "tap".into(), &profile)),
         profile: Some(Arc::new(profile)),
         session_log: None,
         logs: None,
         voice: None,
         mouse: false,
+        show_dir: r3x_runtime::performer::default_show_dir(),
+        drivers: None,
     };
     tokio::spawn(r3x_runtime::run_on(Bus::default(), cfg, None, listener));
     url
@@ -128,7 +130,10 @@ async fn read_state_switch_to_bench_trigger_emote() {
     assert_eq!(s.mode, OperatingMode::Bench);
     assert!(!s.brain && s.outputs.values().all(|v| !*v));
 
-    // The bridge may still be connecting to the tap; an emote is accepted once it is up.
+    // The performer plays the emote; the bridge tells CantinaOS once it is on the tap (its
+    // first message on connect asks for the music library).
+    let first = tokio::time::timeout(Duration::from_secs(5), seen.recv()).await.unwrap().unwrap();
+    assert_eq!(first["topic"], "cli.command");
     let mut ack = Ack::rejected("never tried");
     for i in 0..40 {
         ack = command(&mut ws, &format!("e{i}"), Command::Perf(PerfCommand::Emote { slot: 0 })).await.0;
@@ -140,7 +145,7 @@ async fn read_state_switch_to_bench_trigger_emote() {
     assert_eq!(ack, Ack::Accepted);
     loop {
         let m = tokio::time::timeout(Duration::from_secs(5), seen.recv()).await.unwrap().unwrap();
-        if m["topic"] == "show.perform" {
+        if m["topic"] == "show.started" {
             assert_eq!(m["payload"]["id"], "yes");
             assert_eq!(m["payload"]["source"], "ui");
             break;

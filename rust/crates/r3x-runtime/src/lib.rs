@@ -1,6 +1,7 @@
 //! The `r3x` runtime: bus + gateway + ops + stage manager, optionally bridged to CantinaOS.
 
 pub mod bridge;
+pub mod performer;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -38,6 +39,10 @@ pub struct RuntimeConfig {
     pub voice: Option<r3x_voice::VoiceSettings>,
     /// Global left-click push-to-talk (needs the `mouse` feature).
     pub mouse: bool,
+    /// The show folder the performer plays (hot-reloaded).
+    pub show_dir: PathBuf,
+    /// Hardware drivers for the performer (`None` = frames only).
+    pub drivers: Option<performer::DriverOptions>,
 }
 
 pub fn all_classes() -> Vec<MessageClass> {
@@ -126,6 +131,10 @@ pub async fn run_on(
         }
         #[cfg(not(feature = "mouse"))]
         anyhow::bail!("--mouse needs r3x-runtime built with --features mouse");
+    }
+    if let Some(profile) = cfg.profile.clone() {
+        let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers };
+        performer::spawn(&bus, pc)?;
     }
     let backend = match cfg.bridge.clone() {
         Some(b) => Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?),

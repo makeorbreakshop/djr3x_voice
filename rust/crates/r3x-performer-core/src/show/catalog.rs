@@ -115,6 +115,36 @@ impl Catalog {
         v
     }
 
+    /// One row per item, sorted by kind then id, for pickers (the sim's show list):
+    /// `{id, kind, tier, description, tags, title?, clock?, loop?, layer?, duration?, requires?}`.
+    pub fn summary(&self) -> Value {
+        let mut rows = Vec::new();
+        for kind in [Kind::Sequence, Kind::Cue, Kind::Clip] {
+            for it in self.list(kind) {
+                let mut r = serde_json::json!({
+                    "id": it.id, "kind": kind, "tier": it.tier,
+                    "description": it.description, "tags": it.tags,
+                });
+                if let Some(t) = &it.title {
+                    r["title"] = t.clone().into();
+                }
+                if let Some(s) = it.sequence() {
+                    r["clock"] = serde_json::to_value(s.clock).unwrap_or_default();
+                    r["loop"] = s.looped.into();
+                    r["layer"] = serde_json::to_value(s.layer).unwrap_or_default();
+                }
+                if let Some(c) = it.clip() {
+                    r["duration"] = c.duration.into();
+                    if let Some(q) = &c.requires {
+                        r["requires"] = q.clone().into();
+                    }
+                }
+                rows.push(r);
+            }
+        }
+        Value::Array(rows)
+    }
+
     /// Fuzzy resolve a name the way Reachy Mini resolves emotion names: exact id, then an
     /// id/title/tag match ignoring case and separators.
     pub fn resolve(&self, name: &str) -> Option<&ShowItem> {

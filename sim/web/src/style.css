@@ -37,7 +37,6 @@ section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px
 .status { display: flex; gap: 6px; }
 .pill { font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 4px 7px; border-radius: 99px;
   border: 1px solid var(--line); color: var(--muted); }
-.pill.fw { color: var(--accent-2); border-color: #23405e; }
 .pill.live.on { color: #57d38c; border-color: #1f5a3a; }
 
 #caption { position: fixed; left: 16px; bottom: 16px; right: var(--panel-space, 404px); max-width: 640px; pointer-events: none;

@@ -5,7 +5,7 @@
  *
  * Every action is a typed command to the r3x gateway and waits for its ack; state comes from
  * the gateway's retained state. The SimBridge LiveLink is only read here, for CantinaOS's own
- * log lines (the 3D view still follows it until the performer moves in, Phase 3).
+ * log lines (the 3D view follows the gateway's performer frames, see main.ts).
  */
 
 import { GatewayClient, gatewayUrl } from './gateway';

@@ -420,6 +420,12 @@ class CantinaOS:
             external = ("mouse_input", "deepgram_direct_mic", "elevenlabs")
             service_order = [s for s in service_order if s not in external]
             self.logger.info(f"R3X_EXTERNAL_VOICE: voice I/O is r3x's; not starting {', '.join(external)}")
+        # Phase 3: r3x-drivers own the face and chest LED boards; two owners of one serial
+        # port would fight, so CantinaOS's LED services stay down.
+        if os.environ.get("R3X_EXTERNAL_BODY", "").lower() in ("1", "true", "yes", "on"):
+            external = ("eye_light_controller", "chest_light_controller")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_BODY: LED boards are r3x's; not starting {', '.join(external)}")
         # Phase 4: r3x plays music and sfx (`r3x-runtime --bridge --music rust`) and answers
         # MusicController's topics over the tap; two players would double every track.
         if os.environ.get("R3X_EXTERNAL_MUSIC", "").lower() in ("1", "true", "yes", "on"):

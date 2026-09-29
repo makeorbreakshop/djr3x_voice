@@ -67,7 +67,7 @@ class IntentRouterService(BaseService):
             "dj_mode_off": self._handle_dj_mode_off_intent,
             # Alias: the fast router's name for the same action as set_eye_color.
             "set_eye_animation": self._handle_set_eye_color_intent,
-            # Claude's perform_show tool: hand the routine to the show player (timeline).
+            # Claude's perform_show tool: hand the routine to the r3x performer.
             "perform_show": self._handle_perform_show_intent,
         }
         #: Set by MUSIC_PLAYBACK_STARTED, cleared before each play dispatch. This is how the

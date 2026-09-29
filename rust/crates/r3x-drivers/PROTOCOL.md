@@ -38,7 +38,7 @@ packet = type:u8  seq:u16  payload  crc:u16
 | type | name | payload |
 |---|---|---|
 | 0x81 | HELLO_REPLY | `version:u8 channels:u8 firmware:utf8...` (version = 1) |
-| 0x82 | TELEMETRY | `flags:u8 rail_ma:u16 last_seq:u16 n:u8` then `n` x `us:u16 x:f32 flags:u8` |
+| 0x82 | TELEMETRY | `flags:u8 rail_ma:u16 last_seq:u16 n:u8` then `n` x `us:u16 x:f32 flags:u8`, in channel order 0..n-1 |
 | 0x83 | NAK | `seq:u16 code:u8` (1 bad channel, 2 unconfigured, 3 bad length, 4 unknown type) |
 
 Telemetry at 20-50 Hz. `us` = commanded pulse (0 = off), `x` = follower position in joint

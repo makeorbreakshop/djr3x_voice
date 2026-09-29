@@ -1,8 +1,11 @@
-//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Env: `R3X_GATEWAY_ADDR`, `R3X_TAP_URL`, `R3X_PROFILE`, `R3X_ALLOWED_ORIGINS`,
 //! `R3X_GATEWAY_TOKEN` / `R3X_TAP_TOKEN`, `R3X_CLI_TOKEN`, `R3X_PUBLIC_TOKEN`, `RUST_LOG`,
-//! `R3X_VOICE=1` (= `--voice`: mic/STT/TTS in r3x; run CantinaOS with `R3X_EXTERNAL_VOICE=1`).
+//! `R3X_VOICE=1` (= `--voice`: mic/STT/TTS in r3x; run CantinaOS with `R3X_EXTERNAL_VOICE=1`),
+//! `R3X_LEDS=cantina` (= `--leds cantina`: CantinaOS keeps the face/chest boards; otherwise run
+//! it with `R3X_EXTERNAL_BODY=1`), `SHOW_DIR` (= `--show-dir`), `ARDUINO_SERIAL_PORT`,
+//! `CHEST_SERIAL_PORT`, `R3X_SERVO_PORT`, `FORCE_MOCK_LED_CONTROLLER`, `FORCE_MOCK_CHEST`.
 
 use std::sync::Arc;
 
@@ -12,7 +15,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,6 +28,10 @@ async fn main() -> anyhow::Result<()> {
     let (mut bridge, mut session_log) = (false, None);
     let mut voice = env("R3X_VOICE").is_some_and(|v| !matches!(v.as_str(), "0" | "false" | "no" | "off"));
     let mut mouse = false;
+    // Who drives the face/chest boards: r3x (default; run CantinaOS with R3X_EXTERNAL_BODY=1)
+    // or CantinaOS (`--leds cantina` / R3X_LEDS=cantina).
+    let mut leds = env("R3X_LEDS").is_none_or(|v| v != "cantina");
+    let mut show_dir = r3x_runtime::performer::default_show_dir();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut val = || args.next().with_context(|| format!("{a} needs a value\n{USAGE}"));
@@ -33,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
             "--bridge" => bridge = true,
             "--voice" => voice = true,
             "--mouse" => mouse = true,
+            "--leds" => leds = val()? != "cantina",
+            "--show-dir" => show_dir = val()?.into(),
             "--tap-url" => tap_url = val()?,
             "--profile" => profile_path = val()?.into(),
             "--session-log" => session_log = Some(val()?.into()),
@@ -49,11 +58,9 @@ async fn main() -> anyhow::Result<()> {
         let file = std::env::var_os("R3X_TOKEN_FILE")
             .map(Into::into)
             .unwrap_or_else(|| tokens::config_dir().join("tap_token"));
-        Some(BridgeConfig {
-            tap_url,
-            tap_token: tokens::load_or_create("R3X_TAP_TOKEN", file)?,
-            emotes: profile.emotes.clone(),
-        })
+        let mut b = BridgeConfig::new(tap_url, tokens::load_or_create("R3X_TAP_TOKEN", file)?, &profile);
+        b.cantina_leds = !leds;
+        Some(b)
     } else {
         None
     };
@@ -67,6 +74,8 @@ async fn main() -> anyhow::Result<()> {
         logs: Some(hub.sender()),
         voice: if voice { Some(r3x_voice::VoiceSettings::from_env()?) } else { None },
         mouse,
+        show_dir,
+        drivers: Some(r3x_runtime::performer::DriverOptions { leds }),
     };
     let bus = Bus::default();
     tokio::select! {

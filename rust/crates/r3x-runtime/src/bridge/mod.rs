@@ -1,7 +1,12 @@
-//! Bridge mode (plan §9 Phase 1): CantinaOS stays the brain and the body; `r3x` connects to
-//! its bus tap, turns tap topics into typed events and state ([`translate`]), and turns typed
-//! commands into CantinaOS bus emits. Reconnects with backoff; fail-open (a dead tap only
-//! means commands are rejected with a reason).
+//! Bridge mode (plan §9 Phase 1): CantinaOS stays the brain; `r3x` connects to its bus tap,
+//! turns tap topics into typed events, state and perf commands ([`translate`]), and turns
+//! typed commands into CantinaOS bus emits. Reconnects with backoff; fail-open (a dead tap
+//! only means commands are rejected with a reason).
+//!
+//! Phase 3: the body is r3x's. CantinaOS's show requests (`show.perform` from Claude tags,
+//! plan steps, its CLI; `show.stop`; `motion.freeze`; `eye.command`) become perf commands for
+//! the native performer, and what the performer does goes back as the topics CantinaOS
+//! services still consume ([`Bridge::forward_perf`]).
 
 pub mod translate;
 
@@ -11,11 +16,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use r3x_bus::{Bus, CommandRequest};
+use r3x_bus::{Bus, CommandRequest, Received};
 use r3x_contracts::{
-    Ack, Command, ConversationPhase, ConversationState, DjState, Engagement, EngagementState,
-    Event, IntentCommand, MessageClass, MusicCommand, MusicState, PerfCommand, PerfEvent,
-    PerfLayer, ServiceStatus, Source, StageCommand, StageState, StopTarget,
+    Ack, Body, Command, ConversationPhase, ConversationState, DjState, Domain, Engagement, EngagementState,
+    Event, IntentCommand, MessageClass, MusicCommand, MusicState, PerfEvent, RunKind, ServiceStatus, Source,
+    StageState,
 };
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -45,8 +50,24 @@ const PTT_START_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct BridgeConfig {
     pub tap_url: String,
     pub tap_token: String,
-    /// Profile emote slot -> cue id.
-    pub emotes: Vec<String>,
+    /// A show's `duck`: the profile's ducking level and ramp.
+    pub duck_level: f64,
+    pub duck_ramp_ms: f64,
+    /// CantinaOS still drives the face/chest boards (r3x runs without LED drivers): mirror a
+    /// show's eye/chest actions to it as `eye.command` / `chest.override`.
+    pub cantina_leds: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(tap_url: String, tap_token: String, profile: &r3x_contracts::RobotProfile) -> Self {
+        BridgeConfig {
+            tap_url,
+            tap_token,
+            duck_level: profile.audio.ducking.level,
+            duck_ramp_ms: profile.audio.ducking.ramp_ms,
+            cantina_leds: false,
+        }
+    }
 }
 
 /// The live tap connection, shared by the reader and every command handler.
@@ -75,6 +96,14 @@ impl TapLink {
                 self.pending.lock().unwrap().remove(&id);
                 Err(format!("CantinaOS did not confirm {topic}"))
             }
+        }
+    }
+
+    /// Emit as `r3x` without waiting for the confirmation (in order, fire-and-forget).
+    fn post(&self, topic: &str, payload: Value) {
+        let msg = json!({ "topic": topic, "payload": payload, "source": "r3x" }).to_string();
+        if let Some(t) = self.tx.lock().unwrap().as_ref() {
+            let _ = t.send(msg);
         }
     }
 
@@ -116,11 +145,10 @@ struct Bridge {
     cantina_voice: std::sync::OnceLock<Arc<r3x_voice::cantina::CantinaVoice>>,
 }
 
-/// Start the bridge. Takes the `intent` and `perf` command classes; returns the engagement
-/// backend for the StageManager.
+/// Start the bridge. Takes the `intent` command class; returns the engagement backend for the
+/// StageManager. (The `perf` class belongs to the performer.)
 pub fn spawn(bus: &Bus, cfg: BridgeConfig, voice: Option<r3x_voice::Voice>) -> anyhow::Result<r3x_stage::EngagementBackend> {
     let intent = bus.take_commands(MessageClass::Intent).ok_or_else(|| anyhow::anyhow!("intent class taken"))?;
-    let perf = bus.take_commands(MessageClass::Perf).ok_or_else(|| anyhow::anyhow!("perf class taken"))?;
     let b = Arc::new(Bridge {
         bus: bus.clone(),
         cfg,
@@ -142,8 +170,8 @@ pub fn spawn(bus: &Bus, cfg: BridgeConfig, voice: Option<r3x_voice::Voice>) -> a
     let (eng_tx, mut eng_rx) = mpsc::channel::<(Engagement, oneshot::Sender<Ack>)>(8);
 
     tokio::spawn(b.clone().run_tap());
-    for mut rx in [intent, perf] {
-        let b = b.clone();
+    {
+        let (b, mut rx) = (b.clone(), intent);
         tokio::spawn(async move {
             while let Some(req) = rx.recv().await {
                 // Concurrent: a held push-to-talk must not block a stop.
@@ -152,6 +180,7 @@ pub fn spawn(bus: &Bus, cfg: BridgeConfig, voice: Option<r3x_voice::Voice>) -> a
             }
         });
     }
+    tokio::spawn(b.clone().forward_perf());
     {
         let b = b.clone();
         tokio::spawn(async move {
@@ -218,7 +247,9 @@ impl Bridge {
             Some("event") => {
                 let topic = msg.get("topic").and_then(Value::as_str).unwrap_or("");
                 let payload = msg.get("payload").unwrap_or(&Value::Null);
-                translate(&self.bus, &mut self.tap_state.lock().unwrap(), topic, payload);
+                // Our own emits come back through the tap as `tap:r3x...`.
+                let ours = msg.get("source").and_then(Value::as_str).is_some_and(|s| s.starts_with("tap:r3x"));
+                translate(&self.bus, &mut self.tap_state.lock().unwrap(), topic, payload, ours);
                 if let Some(cv) = self.cantina_voice.get() {
                     cv.on_tap(topic, payload);
                 }
@@ -251,7 +282,6 @@ impl Bridge {
         let source = req.source();
         let ack = match req.command.clone() {
             Command::Intent(i) => self.intent(source, i).await,
-            Command::Perf(p) => self.perf(source, p).await,
             other => Ack::rejected(format!("bridge does not handle {:?}", other.class())),
         };
         req.ack(ack);
@@ -385,58 +415,61 @@ impl Bridge {
         to_ack(self.emit("mic.recording.stop", json!({})).await)
     }
 
-    async fn perf(&self, source: Source, cmd: PerfCommand) -> Ack {
-        let frozen = self.bus.get::<StageState>().frozen;
-        match cmd {
-            PerfCommand::Play { .. } | PerfCommand::Emote { .. } if frozen => Ack::rejected("motion is frozen"),
-            PerfCommand::Play { id, intensity, speed, .. } => self.perform(source, &id, intensity, speed).await,
-            PerfCommand::Emote { slot } => {
-                let Some(cue) = self.cfg.emotes.get(slot as usize).cloned() else {
-                    return Ack::rejected(format!("no emote in slot {slot}"));
-                };
-                let ack = self.perform(source, &cue, 1.0, 1.0).await;
-                if ack.is_accepted() {
-                    self.bus.publish(Source::Bridge, None, Event::Perf(PerfEvent::Emote { slot, cue }));
-                }
-                ack
-            }
-            PerfCommand::Stop(t) => {
-                let p = match t {
-                    StopTarget::Id { id } => json!({ "id": id }),
-                    StopTarget::Layer { layer: PerfLayer::Show } => json!({ "layer": "show" }),
-                    StopTarget::Layer { layer: PerfLayer::Gesture } => json!({ "layer": "gesture" }),
-                    StopTarget::All => json!({ "all": true }),
-                };
-                to_ack(self.emit("show.stop", p).await)
-            }
-            // One switch: state.stage.frozen. follow_stage() carries it to CantinaOS.
-            PerfCommand::Freeze { on } => {
-                self.bus.command(Source::System, None, Command::Stage(StageCommand::Freeze { on })).await
-            }
-            PerfCommand::Puppet { .. } | PerfCommand::Release { .. } => {
-                Ack::rejected("puppeting arrives with the performer (Phase 3)")
-            }
-        }
-    }
+    // ------------------------------------------------------------------ performer -> CantinaOS
 
-    async fn perform(&self, source: Source, id: &str, intensity: f64, speed: f64) -> Ack {
-        // CantinaOS enforces the item's tier against this source (show/SPEC.md).
-        let src = match source {
-            Source::Jev => "jev",
-            Source::Claude => "claude",
-            Source::Timeline => "timeline",
-            Source::Idle => "idle",
-            Source::Cli => "cli",
-            _ => "ui",
-        };
-        let p = json!({ "id": id, "source": src, "params": { "intensity": intensity, "speed": speed } });
-        to_ack(self.emit("show.perform", p).await)
+    /// What the performer did, as the topics CantinaOS services consume: run lifecycle (plan
+    /// steps wait on `show.ended`, the CLI reports refusals), a show's spoken line (the
+    /// voice's FIFO), ducking, sfx and stage lights (SimBridge), and eye/chest actions while
+    /// CantinaOS owns the LED boards.
+    async fn forward_perf(self: Arc<Self>) {
+        let mut rx = self.bus.subscribe(Domain::Perf);
+        let mut speech = 0u64;
+        while let Some(m) = rx.recv().await {
+            let Received::Message(env) = m else { continue };
+            let Body::Event(Event::Perf(ev)) = &env.body else { continue };
+            if env.source == Source::Bridge {
+                continue;
+            }
+            let run = |id: &str, kind: RunKind, source: Source, run_id: u64| {
+                json!({ "id": id, "kind": kind, "source": source, "run_id": run_id.to_string(),
+                        "conversation_id": env.conversation_id })
+            };
+            let (topic, payload) = match ev {
+                PerfEvent::Started { id, kind, source, run_id } => ("show.started", run(id, *kind, *source, *run_id)),
+                PerfEvent::Ended { id, kind, source, run_id, reason } => {
+                    let mut p = run(id, *kind, *source, *run_id);
+                    p["reason"] = json!(reason);
+                    ("show.ended", p)
+                }
+                PerfEvent::Sfx { id } => ("show.sfx", json!({ "id": id })),
+                PerfEvent::Speak { text } => {
+                    speech += 1;
+                    let clip = format!("show-r3x-{speech}");
+                    ("tts.generate.request", json!({ "text": text, "clip_id": clip, "step_id": clip, "plan_id": "r3x-performer", "conversation_id": null }))
+                }
+                PerfEvent::Duck { on: true } => {
+                    ("audio.ducking.start", json!({ "level": self.cfg.duck_level, "fade_ms": self.cfg.duck_ramp_ms }))
+                }
+                PerfEvent::Duck { on: false } => ("audio.ducking.stop", json!({ "fade_ms": self.cfg.duck_ramp_ms })),
+                PerfEvent::Lights { cue, mode, rig, fade, hold } => {
+                    ("stage.lights", json!({ "cue": cue, "mode": mode, "rig": rig, "fade": fade, "hold": hold }))
+                }
+                PerfEvent::Eyes { pattern, duration } if self.cfg.cantina_leds => {
+                    ("eye.command", json!({ "pattern": pattern, "duration": duration }))
+                }
+                PerfEvent::Chest { command, hold } if self.cfg.cantina_leds => {
+                    ("chest.override", json!({ "command": command, "hold": hold.unwrap_or(0.0) }))
+                }
+                _ => continue,
+            };
+            self.tap.post(topic, payload);
+        }
     }
 
     // ------------------------------------------------------------------ stage -> CantinaOS
 
     /// Carry stage switches CantinaOS understands: freeze, brain off (disengage), autonomy
-    /// off (DJ stop). Outputs and alive layers gate drivers the performer owns (Phase 3).
+    /// off (DJ stop). Outputs and alive layers belong to the performer.
     async fn follow_stage(self: Arc<Self>) {
         let mut w: watch::Receiver<StageState> = self.bus.watch();
         let mut prev = w.borrow_and_update().clone();

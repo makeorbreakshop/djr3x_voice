@@ -139,12 +139,14 @@ async fn browser_hold_to_talk_and_hear_r3x() {
         bind: listener.local_addr().unwrap(),
         clients: vec![ClientAuth { token: "t0k".into(), info: ClientInfo { name: "lobot".into(), source: Source::Ui, classes: all_classes() } }],
         origins: vec!["http://localhost:5391".into()],
-        bridge: Some(BridgeConfig { tap_url, tap_token: "tap".into(), emotes: profile.emotes.clone() }),
+        bridge: Some(BridgeConfig::new(tap_url, "tap".into(), &profile)),
         profile: Some(Arc::new(profile)),
         session_log: None,
         logs: None,
         voice: Some(voice),
         mouse: false,
+        show_dir: r3x_runtime::performer::default_show_dir(),
+        drivers: None,
     };
     tokio::spawn(r3x_runtime::run_on(Bus::default(), cfg, None, listener));
 

@@ -4,6 +4,8 @@ import { defineConfig, searchForWorkspaceRoot } from 'vite';
 // The show files (repo-root show/, shared with CantinaOS) are bundled through
 // import.meta.glob in src/show/loader.ts; the dev server must be allowed to read them.
 const SHOW = fileURLToPath(new URL('../../show', import.meta.url));
+// The Robot Profile the embedded performer loads (src/performer.ts).
+const PROFILES = fileURLToPath(new URL('../../profiles', import.meta.url));
 
 export default defineConfig({
   // voice.html: standalone hold-to-talk page (Phase 2 remote voice), iframe-able.
@@ -16,6 +18,6 @@ export default defineConfig({
     },
   },
   server: {
-    fs: { allow: [searchForWorkspaceRoot(process.cwd()), SHOW] },
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), SHOW, PROFILES] },
   },
 });

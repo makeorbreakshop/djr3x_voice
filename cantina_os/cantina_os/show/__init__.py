@@ -7,7 +7,7 @@
 * ``catalog``  - the compact catalogue Claude sees in its system prompt;
 * ``tags``     - inline ``{cue:id}`` / ``{clip:id}`` tags: stream stripping and speech timing.
 
-The live player lives in ``services/timeline_executor_service/show_player.py``.
+The live player is the Rust r3x performer (``r3x-runtime --bridge``); CantinaOS only requests shows.
 """
 
 from .expand import expand

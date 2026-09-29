@@ -69,6 +69,10 @@ pub trait Driver: Send {
         now + 0.1
     }
     fn health(&self) -> Health;
+    /// A bus event to publish (telemetry), drained after every `poll`.
+    fn take_event(&mut self) -> Option<r3x_contracts::Event> {
+        None
+    }
     /// Leave the hardware in a sane state.
     fn stop(&mut self, _now: f64) {}
 }

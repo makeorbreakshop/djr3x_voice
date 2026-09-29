@@ -1,251 +1,203 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ClientMessage",
-  "description": "What a gateway client sends. The gateway stamps `seq`, clocks and `source`; a client never\ndeclares them. `id` comes back as `re` on the command's ack.",
-  "type": "object",
-  "properties": {
-    "id": {
-      "type": [
-        "string",
-        "null"
-      ]
-    }
-  },
-  "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "body": {
-          "$ref": "#/$defs/Command"
-        },
-        "kind": {
-          "type": "string",
-          "const": "command"
-        }
-      },
-      "required": [
-        "kind",
-        "body"
-      ]
-    },
-    {
-      "description": "Metadata for the binary audio frames that follow (Phase 2).",
-      "type": "object",
-      "properties": {
-        "body": {
-          "$ref": "#/$defs/AudioMeta"
-        },
-        "kind": {
-          "type": "string",
-          "const": "audio"
-        }
-      },
-      "required": [
-        "kind",
-        "body"
-      ]
-    }
-  ],
   "$defs": {
     "AudioDirection": {
-      "type": "string",
       "enum": [
         "in",
         "out"
-      ]
+      ],
+      "type": "string"
     },
     "AudioMeta": {
-      "type": "object",
       "properties": {
         "channels": {
-          "type": "integer",
           "format": "uint8",
           "maximum": 255,
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "direction": {
-          "description": "`in` = client mic to runtime, `out` = runtime TTS to client.",
-          "$ref": "#/$defs/AudioDirection"
+          "$ref": "#/$defs/AudioDirection",
+          "description": "`in` = client mic to runtime, `out` = runtime TTS to client."
         },
         "sample_rate": {
-          "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
         "direction",
         "sample_rate",
         "channels"
-      ]
+      ],
+      "type": "object"
     },
     "Command": {
       "oneOf": [
         {
-          "type": "object",
-          "properties": {
-            "class": {
-              "type": "string",
-              "const": "intent"
-            }
-          },
           "$ref": "#/$defs/IntentCommand",
-          "required": [
-            "class"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "class": {
-              "type": "string",
-              "const": "perf"
+              "const": "intent",
+              "type": "string"
             }
           },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/PerfCommand",
-          "required": [
-            "class"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "class": {
-              "type": "string",
-              "const": "stage"
+              "const": "perf",
+              "type": "string"
             }
           },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
           "$ref": "#/$defs/StageCommand",
-          "required": [
-            "class"
-          ]
-        },
-        {
-          "type": "object",
           "properties": {
             "class": {
-              "type": "string",
-              "const": "telemetry"
+              "const": "stage",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/TelemetryCommand",
           "required": [
             "class"
-          ]
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TelemetryCommand",
+          "properties": {
+            "class": {
+              "const": "telemetry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
         }
       ]
     },
     "Engagement": {
       "description": "Today's STARTUP/IDLE/AMBIENT/INTERACTIVE; gates the STT socket, ducking, mouse trigger.",
-      "type": "string",
       "enum": [
         "startup",
         "idle",
         "ambient",
         "interactive"
-      ]
+      ],
+      "type": "string"
     },
     "IntentCommand": {
       "description": "Things you ask the character to do; the brain decides how.",
       "oneOf": [
         {
           "description": "Inject a line as if spoken.",
-          "type": "object",
           "properties": {
             "text": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "say"
+              "const": "say",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "text"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Push-to-talk; ownership lands in `state.conversation.ptt_owner`.",
-          "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "ptt_start"
+              "const": "ptt_start",
+              "type": "string"
             }
           },
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "ptt_stop"
+              "const": "ptt_stop",
+              "type": "string"
             }
           },
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "music"
-            }
-          },
           "$ref": "#/$defs/MusicCommand",
+          "properties": {
+            "type": {
+              "const": "music",
+              "type": "string"
+            }
+          },
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "active": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "dj"
+              "const": "dj",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "active"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "A line for the legacy command console (CantinaOS `help`, `status`, `eye ...`).\nBridge-only; retired with CantinaOS in Phase 7.",
-          "type": "object",
           "properties": {
             "line": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "console"
+              "const": "console",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "line"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "MusicCommand": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "action": {
-              "type": "string",
-              "const": "play"
+              "const": "play",
+              "type": "string"
             },
             "query": {
               "type": [
@@ -256,60 +208,59 @@
           },
           "required": [
             "action"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "action": {
-              "type": "string",
-              "const": "stop"
+              "const": "stop",
+              "type": "string"
             }
           },
           "required": [
             "action"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "action": {
-              "type": "string",
-              "const": "next"
+              "const": "next",
+              "type": "string"
             }
           },
           "required": [
             "action"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "OperatingMode": {
       "description": "Operating mode (plan §4). Distinct from [`Engagement`].",
-      "type": "string",
       "enum": [
         "show",
         "bench",
         "studio"
-      ]
+      ],
+      "type": "string"
     },
     "PerfCommand": {
       "description": "Direct body control. Goes to the performer.",
       "oneOf": [
         {
           "description": "Play a clip, cue or sequence by id.",
-          "type": "object",
           "properties": {
             "id": {
               "type": "string"
             },
             "intensity": {
-              "type": "number",
+              "default": 1.0,
               "format": "double",
-              "default": 1.0
+              "type": "number"
             },
             "layer": {
-              "description": "Defaults to the item's own layer.",
               "anyOf": [
                 {
                   "$ref": "#/$defs/PerfLayer"
@@ -317,162 +268,196 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Defaults to the item's own layer."
             },
             "speed": {
-              "type": "number",
+              "default": 1.0,
               "format": "double",
-              "default": 1.0
+              "type": "number"
             },
             "type": {
-              "type": "string",
-              "const": "play"
+              "const": "play",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "id"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
+          "$ref": "#/$defs/StopTarget",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "stop"
+              "const": "stop",
+              "type": "string"
             }
           },
-          "$ref": "#/$defs/StopTarget",
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Per-channel override: channel (joint or intent) -> value.",
-          "type": "object",
           "properties": {
             "channels": {
-              "type": "object",
               "additionalProperties": {
-                "type": "number",
-                "format": "double"
-              }
+                "format": "double",
+                "type": "number"
+              },
+              "type": "object"
             },
             "type": {
-              "type": "string",
-              "const": "puppet"
+              "const": "puppet",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "channels"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Release puppeted channels (empty = all); they ease back.",
-          "type": "object",
           "properties": {
             "channels": {
-              "type": "array",
               "default": [],
               "items": {
                 "type": "string"
-              }
+              },
+              "type": "array"
             },
             "type": {
-              "type": "string",
-              "const": "release"
+              "const": "release",
+              "type": "string"
             }
           },
           "required": [
             "type"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Fire an emote slot from the profile's `emotes`.",
-          "type": "object",
           "properties": {
             "slot": {
-              "type": "integer",
               "format": "uint8",
               "maximum": 255,
-              "minimum": 0
+              "minimum": 0,
+              "type": "integer"
             },
             "type": {
-              "type": "string",
-              "const": "emote"
+              "const": "emote",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "slot"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Stop every run, refuse new ones; `on: false` releases. Same switch as\n`StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.",
-          "type": "object",
           "properties": {
             "on": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "freeze"
+              "const": "freeze",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "on"
-          ]
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Show a named face pattern (`happy`, `thinking`, ...) through the face board, for\n`duration` s; none = until the interaction state next changes (EYE_COMMAND).",
+          "properties": {
+            "duration": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "const": "eyes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pattern"
+          ],
+          "type": "object"
         }
       ]
     },
     "PerfLayer": {
       "description": "Performance layer a run occupies.",
-      "type": "string",
-      "enum": [
-        "gesture",
-        "show"
+      "oneOf": [
+        {
+          "enum": [
+            "gesture",
+            "show"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "background",
+          "description": "Authored loops under the activity (idle/DJ bop); lowest.",
+          "type": "string"
+        }
       ]
     },
     "StageCommand": {
       "description": "Stage manager: operating mode, output and layer switches.",
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "mode": {
               "$ref": "#/$defs/OperatingMode"
             },
             "type": {
-              "type": "string",
-              "const": "set_mode"
+              "const": "set_mode",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "mode"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "engagement": {
               "$ref": "#/$defs/Engagement"
             },
             "type": {
-              "type": "string",
-              "const": "set_engagement"
+              "const": "set_engagement",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "engagement"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Gate a driver output (profile actuator or light group name).",
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -481,19 +466,19 @@
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "set_output"
+              "const": "set_output",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "output",
             "enabled"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Toggle a procedural alive layer (e.g. `breathing`).",
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -502,150 +487,198 @@
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "set_layer"
+              "const": "set_layer",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "layer",
             "enabled"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "set_brain"
+              "const": "set_brain",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "enabled"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "set_autonomy"
+              "const": "set_autonomy",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "enabled"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "on": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "freeze"
+              "const": "freeze",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "on"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "StopTarget": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "id": {
               "type": "string"
             },
             "target": {
-              "type": "string",
-              "const": "id"
+              "const": "id",
+              "type": "string"
             }
           },
           "required": [
             "target",
             "id"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "layer": {
               "$ref": "#/$defs/PerfLayer"
             },
             "target": {
-              "type": "string",
-              "const": "layer"
+              "const": "layer",
+              "type": "string"
             }
           },
           "required": [
             "target",
             "layer"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "target": {
-              "type": "string",
-              "const": "all"
+              "const": "all",
+              "type": "string"
             }
           },
           "required": [
             "target"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "TelemetryCommand": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "level": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "set_log_level"
+              "const": "set_log_level",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "level"
-          ]
+          ],
+          "type": "object"
         },
         {
           "description": "Subscribe this client to 50 Hz `frames`.",
-          "type": "object",
           "properties": {
             "enabled": {
               "type": "boolean"
             },
             "type": {
-              "type": "string",
-              "const": "frames"
+              "const": "frames",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "enabled"
-          ]
+          ],
+          "type": "object"
         }
       ]
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What a gateway client sends. The gateway stamps `seq`, clocks and `source`; a client never\ndeclares them. `id` comes back as `re` on the command's ack.",
+  "oneOf": [
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Command"
+        },
+        "kind": {
+          "const": "command",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Metadata for the binary audio frames that follow (Phase 2).",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/AudioMeta"
+        },
+        "kind": {
+          "const": "audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "ClientMessage",
+  "type": "object"
 }

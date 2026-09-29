@@ -1,3 +1,12 @@
+/**
+ * The 3D sim. It never conducts: the Rust performer does (plan D4).
+ *
+ * - Connected (the r3x gateway is up): a follower. It renders the runtime's `frames`
+ *   (joints + light pixels) and shows its events (captions, sfx, show runs, rig switches).
+ * - Standalone (`?offline`, or whenever the gateway is down): the same performer, embedded
+ *   as WASM (src/performer.ts) and ticked every animation frame - idle life, LED firmware,
+ *   the stage-light desk and actuation all come from it.
+ */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -6,31 +15,22 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { STILL } from './still'; // first: ?still swaps the clock and RNG before anything reads them
 import { PostPipeline } from './post';
 
-import { RexFaceFirmware, RGB, OUTPUT_BRIGHTNESS } from './firmware';
-import { CantinaHostEmulator, DualHost, SystemMode, TtsAmplitudeAgc } from './host';
 import { Rig, RigDoc } from './rig';
-import { FaceLeds } from './leds';
-import { Activity, Performer } from './behavior';
-import { SpeechAudio } from './audio';
-import { accessToken, LiveEvent, LiveLink } from './link';
-import { ChestFirmware, ChestHost, ChestLights, WINDOW_SUBSYSTEMS } from './chest';
+import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
+import { ChestLights } from './chestlights';
+import { SpeechAudio, TtsAmplitudeAgc } from './audio';
+import { accessToken, LiveLink } from './link';
 import { ControlPanel } from './panel';
-import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
-import { MaestroScript, MaestroScriptError } from './actuation/maestro';
+import type { Event as R3xEvent, Frames, RetainedState } from './gateway';
+import type { Command } from './generated/Command';
 import { limitControls, setupStage } from './booth'; // before any material compiles (patches a chunk)
 import { prepareDroidMaterials, tameHighlights } from './look';
-import { RIGS, type Mode as LightMode } from './stagelights';
-import { loadCatalog } from './show/loader';
-import { norm } from './show/catalog';
-import { expand, ownsUnion } from './show/expand';
-import { ShowPlayer, type DispatchCtx, type EndReason, type RunInfo, type RunLayer } from './show/player';
-import { BodyCompositor, type Pose } from './show/body';
-import { IdleRunner } from './show/idle';
-import { CONTINUOUS, MODES, Puppeteer, SLOT_COUNT, type Intent, type PuppetMode } from './show/puppeteer';
-import { TakeRecorder } from './show/take';
-import { clampIntensity, clampSpeed, type DeptAction, type Params, type Source } from './show/types';
+import { Ghosts } from './ghost';
 import { ServoWhine } from './servowhine';
-import { trackBpm } from './tempo';
+import {
+  INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
+  type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
+} from './performer';
 
 // ------------------------------------------------------------------ renderer / scene
 // The droid's look (per-class materials, weathering) lives in look.ts; the booth set and
@@ -74,194 +74,105 @@ function fitView() {
 addEventListener('resize', fitView);
 fitView();
 
-// ------------------------------------------------------------------ simulation core
+
+// ------------------------------------------------------------------ state
+const params = new URLSearchParams(location.search);
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const t0 = performance.now();
-const fw = new RexFaceFirmware();
-const log: { dir: 'tx' | 'rx'; line: string; at: number }[] = [];
-// Two boards, one event stream: the face (EyeLightControllerService port) and the chest
-// (ChestLightControllerService port). Live, the chest takes the real service's commands.
-let chestFw: ChestFirmware | null = null;
-let chestLights: ChestLights | null = null;
-const host = new DualHost(
-  new CantinaHostEmulator(fw, (dir, line, at) => pushLog(dir, line, at)),
-  new ChestHost((cmd) => chestFw?.write(cmd + '\n')),
-);
-const agc = new TtsAmplitudeAgc();
-const audio = new SpeechAudio();
+const clock = () => (performance.now() - t0) / 1000;
+const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+interface Profile {
+  actuators: { name: string; joints: Record<string, number>; channel: number; servo: string }[];
+  emotes: string[];
+}
+const PROFILE = JSON.parse(PROFILE_JSON) as Profile;
+const SLOTS = PROFILE.emotes;
+/** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
+const SUBSYSTEMS: [string, string][] = [
+  ['mic / speech-to-text', 'DeepgramDirectMicService'], ['LLM', 'ClaudeService'], ['text-to-speech', 'ElevenLabsService'],
+  ['intent routing', 'IntentRouterService'], ['music', 'MusicControllerService'], ['memory', 'MemoryService'],
+  ['vision', 'VisionService'], ['face LEDs', 'EyeLightControllerService'], ['show control', 'BrainService'],
+];
+
+/** What gets drawn this frame, from whichever conductor is live. */
+interface View {
+  joints: Record<string, number>;
+  eyes: RGB[];
+  mouth: RGB[];
+  chest: RGB[];
+  /** Linear flux per stage group (GROUPS order), or null to leave the desk alone. */
+  stage: number[][] | null;
+  /** Controller units per channel (standalone only). */
+  servo: number[] | null;
+}
 
 let rig: Rig | null = null;
 let leds: FaceLeds | null = null;
+let chestLights: ChestLights | null = null;
+let ghosts: Ghosts | null = null;
 let performer: Performer | null = null;
-let actuation: Actuation | null = null;
-let rigDoc: RigDoc | null = null;
-let script: MaestroScript | null = null;
-/** Joints with no servo in the active profile: hand-posed, like the static kit. */
-const posed = new Map<string, number>();
-let amplitude = 0;
-let speaking = false;
-let busy = false;
+let view: View | null = null;
 let clips: string[] = [];
 
-function pushLog(dir: 'tx' | 'rx', line: string, at: number) {
-  log.push({ dir, line, at });
+/** Gateway up: follow its frames; the embedded performer stands down. */
+let connected = false;
+let gwState: RetainedState | null = null;
+// Standalone bits the performer does not report back.
+let mode: SystemMode = 'IDLE';
+let speaking = false;
+let busy = false;
+let djOn = false;
+let bpm = 118;
+let frozen = false;
+let manual = false;
+let lookAtCamera = true;
+let autonomy = true;
+
+const agc = new TtsAmplitudeAgc();
+const audio = new SpeechAudio();
+const whine = new ServoWhine();
+/** Look-dev URL params pin the booth's own desk in standalone mode (the performer's desk has no rig/cue command). */
+const pinDesk = params.has('rig') || params.has('cue');
+
+/** A command for the embedded performer (standalone only; ignored while it stands down). */
+function perf(c: PerfCmd) {
+  if (performer && !connected) performer.command(c);
+}
+
+/** A typed command to the r3x gateway; a rejection shows in the show status line. */
+async function send(c: Command) {
+  const a = await panel.gw.send(c);
+  if (a.status === 'rejected') showStatus(a.reason);
+}
+
+const log: { line: string; at: number }[] = [];
+let logDirty = true;
+function pushLog(line: string) {
+  log.push({ line, at: clock() });
   if (log.length > 40) log.shift();
   logDirty = true;
 }
 
-function setActivity(a: Activity) {
-  if (a === 'listening' || a === 'thinking' || a === 'speaking') {
-    // Interaction: idle stops and its timer restarts. A listening turn also blends the
-    // gesture layer out (Reachy clears its move queue when the user starts talking).
-    idle.poke(clock(), stopRun);
-    if (a === 'listening' && performer?.activity !== 'listening') player.stop({ layer: 'gesture' }, clock());
-  }
-  performer?.setActivity(a, clock());
-}
-
-const clock = () => (performance.now() - t0) / 1000;
-const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
-
-// ------------------------------------------------------------------ show system (show/SPEC.md)
-// Clips, cues and sequences from the repo's show/ folder. Offline, ShowPlayer conducts and
-// dispatches each department here; live, CantinaOS conducts and the same renderers are fed
-// from the bus (onLiveEvent). The body compositor sits between the Performer and actuation.
-const catalog = loadCatalog();
-if (catalog.errors.length) console.warn(`show: ${catalog.errors.length} problem(s)\n  ${catalog.errors.join('\n  ')}`);
-const procPose: Pose = {};
-const body = new BodyCompositor();
-/** Kit sounds by normalised stem ("airhorn" -> "Air Horn.mp3"); loaded apart from the model, so live show.sfx works early. */
-const sfxFiles = new Map<string, string>();
-fetch('/sfx/index.json')
-  .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
-  .then((list) => list.forEach((f) => sfxFiles.set(norm(f.replace(/\.[^.]+$/, '')), f)))
-  .catch(() => { /* no kit sounds on this machine */ });
-const liveRuns = new Map<string, { id: string; layer: RunLayer; source: string }>();
-const whine = new ServoWhine();
-const take = new TakeRecorder();
-let frozen = false;
-let showUiDirty = true;
-let showUiTick = 0;
-/** A show's `lights {mode}`: held until `until` or until the state underneath changes. */
-let showLight: { mode: LightMode; until: number; natural: LightMode } | null = null;
-/** Background layer: an authored loop per activity (null = procedural only). */
-const backgrounds: Record<'idle' | 'dj', string | null> = { idle: null, dj: null };
-let backgroundRun: { id: string; run: string } | null = null;
-let updateShowUi = () => {};
 let statusTimer = 0;
 function showStatus(msg: string) {
-  const el = document.getElementById('sh-status');
-  if (!el) return;
+  const el = $('sh-status');
   el.textContent = msg;
   clearTimeout(statusTimer);
   statusTimer = window.setTimeout(() => (el.textContent = ''), 5000);
 }
 
-const player = new ShowPlayer(catalog, {
-  dispatch: showDispatch,
-  speechActive: () => speaking || liveSpeaking,
-  // Offline the BPM slider is the live tempo whenever music or DJ mode is on.
-  liveBpm: () => (musicPlaying || djOn || liveDj ? bpm : null),
-  started: onRunStarted,
-  ended: onRunEnded,
-});
-const idle = new IdleRunner(catalog.idle, 0);
-const SLOTS = ['yes', 'no', 'greet', 'excited', 'thinking', 'hype_drop', 'glitch_small', 'applause_thanks'].slice(0, SLOT_COUNT);
-const puppet = new Puppeteer({
-  slot: (i) => performShow(SLOTS[i], { intensity: 1 + 0.3 * puppet.cmd.energy, speed: 1 + 0.15 * puppet.cmd.energy }, 'ui'),
-  mode: (m) => applyPuppetMode(m),
-  freeze: () => setFreeze(!frozen),
-});
-body.puppet = puppet;
-
-const stopRun = (runId: string) => player.stop({ id: runId }, clock());
-
-/** Perform from the UI, a pad slot, __r3x or the idle policy (offline only). */
-function performShow(id: string, params: Params = {}, source: Source = 'ui'): string | null {
-  if (link.connected) {
-    showStatus('Live: CantinaOS conducts. Trigger shows from CantinaOS (show.perform).');
-    return null;
-  }
-  if (source !== 'idle') idle.poke(clock(), stopRun);
-  return player.perform(id, { source, params, now: clock() });
-}
-
-function showDispatch(a: DeptAction, ctx: DispatchCtx) {
-  switch (a.do) {
-    case 'clip': {
-      const c = catalog.clip(a.id);
-      if (c) body.play({ runId: ctx.run.run_id, clip: c, intensity: a.intensity, speed: a.speed, layer: ctx.run.layer, owns: ctx.run.owns, t0: ctx.at });
-      break;
-    }
-    case 'eyes':
-      // EYE_COMMAND through the host emulator's pattern path, so the firmware renders it.
-      host.face.eyeCommand(a.pattern, a.duration ?? 0);
-      break;
-    case 'chest':
-      host.chest.override(a.command, a.hold ?? 0, fw.now);
-      break;
-    case 'lights':
-      lightsAction(a);
-      break;
-    case 'sfx':
-      playSfx(a.id);
-      break;
-    case 'speak':
-      void showSpeak(a.text);
-      break;
-    case 'duck':
-    case 'unduck':
-      break; // the sim has no music bed to duck
-  }
-  take.event(clock(), 'show.action', { run_id: ctx.run.run_id, ...a });
-}
-
-function onRunStarted(r: RunInfo) {
-  if (r.owns) body.own(r.run_id, r.layer, r.owns, clock());
-  take.event(clock(), 'show.started', { id: r.id, kind: r.kind, source: r.source, run_id: r.run_id });
-  showUiDirty = true;
-}
-
-function onRunEnded(r: RunInfo, reason: EndReason) {
-  body.release(r.run_id, clock());
-  idle.ended(r.run_id, clock());
-  take.event(clock(), 'show.ended', { id: r.id, kind: r.kind, source: r.source, run_id: r.run_id, reason });
-  if (reason === 'rejected') showStatus(frozen ? `${r.id}: rejected (motion frozen)` : `${r.id}: rejected - unknown, or its tier does not allow source "${r.source}"`);
-  showUiDirty = true;
-}
-
-/** motion.freeze: stop shows and gestures, stop idle, hold setpoints; off blends back over 0.5 s. */
-function setFreeze(on: boolean) {
-  const t = clock();
-  frozen = on;
-  player.freeze(on, t);
-  const hold: Pose = {};
-  if (on && actuation) for (const [j, ch] of actuation.byJoint) if (ch.primaryJoint === j) hold[j] = ch.follower.x;
-  body.freeze(on, t, hold);
-  if (on) idle.poke(t, stopRun);
-  document.getElementById('sh-freeze')?.classList.toggle('on', on);
-  take.event(t, 'motion.freeze', { on });
-  showUiDirty = true;
-}
-
-/** The desk's mode from the system state, not counting speech (speech is a transient overlay). */
-function naturalLightMode(): LightMode {
-  return djOn || liveDj ? 'dj' : musicPlaying ? 'music' : 'idle';
-}
-
-/** SPEC `lights` / stage.lights: {cue?, mode?, fade?, hold?, rig?}. */
-function lightsAction(a: { cue?: string; mode?: string; fade?: number; hold?: number; rig?: string }) {
-  const L = set.lights;
-  if (!L) return;
-  const fade = Number(a.fade ?? 0);
-  const hold = Number(a.hold ?? 0);
-  if (a.rig && RIGS[a.rig]) L.setRig(a.rig, fade || 1);
-  if (a.mode) {
-    const m = a.mode as LightMode;
-    showLight = { mode: m, until: hold > 0 ? clock() + hold : Infinity, natural: naturalLightMode() };
-    L.setMode(m, fade || undefined);
-  }
-  if (a.cue && !L.showCue(a.cue, fade, hold)) console.warn(`lights: rig ${L.rigPreset} has no cue "${a.cue}"`);
-}
+// ------------------------------------------------------------------ sounds, speech, captions
+/** Kit sounds by normalised stem ("airhorn" -> "Air Horn.mp3"); loaded apart from the model. */
+const sfxFiles = new Map<string, string>();
+fetch('/sfx/index.json')
+  .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
+  .then((list) => {
+    clips = list;
+    list.forEach((f) => sfxFiles.set(norm(f.replace(/\.[^.]+$/, '')), f));
+  })
+  .catch(() => { /* no kit sounds on this machine */ });
 
 function playSfx(id: string) {
   const f = sfxFiles.get(norm(id));
@@ -271,71 +182,288 @@ function playSfx(id: string) {
   void el.play().catch(() => { /* autoplay before a user gesture */ });
 }
 
-/** Offline `speak`: a caption plus the fake-amplitude speaking path. */
+const capHeard = $('cap-heard');
+const capSaid = $('cap-said');
+const caption = $('caption');
+const updateCaption = () => (caption.hidden = !(capHeard.textContent || capSaid.textContent));
+
+function randomClip() {
+  return clips.length ? `/sfx/${clips[Math.floor(Math.random() * clips.length)]}` : null;
+}
+
+function setMode(m: SystemMode) {
+  mode = m;
+  perf({ cmd: 'mode', mode: m });
+}
+
+/** One reply: speech_started -> amplitude stream (frame loop) -> speech_ended. */
+async function speak(url: string) {
+  agc.reset();
+  await audio.play(url, () => {
+    speaking = true;
+    perf({ cmd: 'speech_started' });
+  });
+  speaking = false;
+  perf({ cmd: 'speech_ended' });
+}
+
+/** Without the kit's clips: a synthetic syllable envelope instead of audio. */
+async function fakeSpeech(seconds: number) {
+  agc.reset();
+  speaking = true;
+  perf({ cmd: 'speech_started' });
+  const start = clock();
+  while (clock() - start < seconds) await sleep(0.05);
+  speaking = false;
+  perf({ cmd: 'speech_ended' });
+}
+
+async function sayLine() {
+  const url = randomClip();
+  if (url) await speak(url);
+  else await fakeSpeech(2.5);
+}
+
+async function converse() {
+  if (busy || connected) return;
+  busy = true;
+  try {
+    if (mode !== 'INTERACTIVE') {
+      setMode('INTERACTIVE');
+      await sleep(0.8);
+    }
+    perf({ cmd: 'listening_started' });
+    await sleep(2.4);
+    perf({ cmd: 'listening_stopped' });
+    await sleep(0.9 + Math.random() * 0.8);
+    await sayLine();
+  } finally {
+    busy = false;
+  }
+}
+
+/** A show's `speak` (standalone): a caption plus the fake-amplitude speaking path. */
 async function showSpeak(text: string) {
-  if (host.mode === 'IDLE') host.setMode('INTERACTIVE');
+  if (mode === 'IDLE') setMode('INTERACTIVE');
   capSaid.textContent = text;
-  caption.hidden = false;
+  updateCaption();
   await fakeSpeech(Math.max(1.2, 0.06 * text.length + 0.4));
   setTimeout(() => {
     if (capSaid.textContent !== text) return;
     capSaid.textContent = '';
-    caption.hidden = !capHeard.textContent;
+    updateCaption();
   }, 1500);
 }
 
-function idleEligible() {
-  const a = performer?.activity;
-  return !frozen && !busy && !speaking && !audio.micOn && (a === 'idle' || a === 'engaged' || a === 'dj') &&
-    player.running().every((r) => r.run_id === idle.current || r.layer === 'background');
+// ------------------------------------------------------------------ standalone performer
+Performer.create(Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31)))
+  .then((p) => {
+    performer = p;
+    const cat = p.catalog();
+    if (cat.errors.length) console.warn(`show: ${cat.errors.length} problem(s)\n  ${cat.errors.join('\n  ')}`);
+    buildShowUi(cat.items, cat.idle_after_s);
+    p.command({ cmd: 'tempo', bpm });
+  })
+  .catch((e) => {
+    console.error('performer (wasm) failed to load - run `npm run build:wasm`', e);
+    showStatus('Embedded performer failed to load (npm run build:wasm).');
+  });
+
+/** Outgoing performer events, standalone: what the real drivers would get. */
+function onPerfOut(o: PerfOut) {
+  switch (o.type) {
+    case 'started':
+      showUiDirty = true;
+      break;
+    case 'ended':
+      if (o.reason === 'rejected') showStatus(frozen ? `${o.run.id}: rejected (motion frozen)` : `${o.run.id}: rejected - unknown, or its tier does not allow source "${o.run.source}"`);
+      showUiDirty = true;
+      break;
+    case 'sfx':
+      playSfx(o.id);
+      break;
+    case 'speak':
+      void showSpeak(o.text);
+      break;
+    case 'stage_lights':
+      if (o.action.rig) set.lights?.setRig(o.action.rig, o.action.fade || 1);
+      break;
+    case 'face_line':
+      pushLog(`face  ${o.line}`);
+      break;
+    case 'chest_line':
+      pushLog(`chest ${o.line}`);
+      break;
+    case 'freeze':
+      frozen = o.on;
+      $('sh-freeze').classList.toggle('on', o.on);
+      break;
+  }
 }
 
-function updateBackground() {
-  const a = performer?.activity;
-  const want = frozen ? null : a === 'dj' ? backgrounds.dj : a === 'idle' || a === 'engaged' ? backgrounds.idle : null;
-  const cur = player.running().find((r) => r.layer === 'background');
-  if (backgroundRun && (backgroundRun.id !== want || !cur || cur.run_id !== backgroundRun.run)) {
-    if (cur) player.stop({ layer: 'background' }, clock());
-    backgroundRun = null;
+/** The droid's head as the performer wants a look target: (pan, tilt) degrees in the head_pan parent frame. */
+const tmpV = new THREE.Vector3();
+function aimAt(p: THREE.Vector3): [number, number] | null {
+  const pan = rig?.joints.get('head_pan')?.node;
+  const tilt = rig?.joints.get('head_tilt')?.node;
+  if (!pan?.parent || !tilt) return null;
+  const local = pan.parent.worldToLocal(tmpV.copy(p));
+  const dy = local.y - (pan.position.y + tilt.position.y);
+  const yaw = THREE.MathUtils.radToDeg(Math.atan2(local.x, local.z));
+  // Rotation about +X tips the face down, so looking up is negative tilt.
+  const pitch = -THREE.MathUtils.radToDeg(Math.atan2(dy, Math.hypot(local.x, local.z)));
+  return [yaw, pitch];
+}
+
+let hadPad = false;
+function pollGamepad() {
+  const pad = [...(navigator.getGamepads?.() ?? [])].find((g) => g && g.mapping === 'standard');
+  if (pad) {
+    perf({ cmd: 'pad', axes: [...pad.axes], buttons: pad.buttons.map((b) => [b.pressed, b.value] as [boolean, number]) });
+  } else if (hadPad) {
+    // The performer has no "pad gone": park it at neutral.
+    perf({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
   }
-  if (want && !backgroundRun) {
-    const run = player.perform(want, { source: 'timeline', layer: 'background', now: clock() });
-    if (run) backgroundRun = { id: want, run };
+  if (!!pad !== hadPad) {
+    hadPad = !!pad;
+    $('pp-pad').hidden = hadPad;
   }
 }
 
-function applyPuppetMode(m: PuppetMode) {
-  if (m === 'dj') {
-    if (!djOn) setDj(true);
-  } else {
-    if (djOn) setDj(false);
-    host.setMode(m === 'idle' ? 'IDLE' : 'INTERACTIVE');
-    setActivity(m === 'idle' ? 'idle' : 'engaged');
+function tickPerformer(t: number) {
+  if (!performer || connected) return;
+  if (speaking || audio.micOn) {
+    let a = 0;
+    if (audio.active) a = agc.next(audio.rmsInt16());
+    else if (speaking) {
+      const syl = Math.max(0, Math.sin(t * 9.5) * Math.sin(t * 2.3 + 1));
+      a = agc.next(1200 + syl * 9000 + Math.random() * 800);
+    }
+    perf({ cmd: 'amplitude', value: a });
   }
-  document.querySelectorAll<HTMLButtonElement>('[data-pmode]').forEach((b) => b.classList.toggle('on', b.dataset.pmode === m));
+  if (lookAtCamera) {
+    const pt = aimAt(camera.position);
+    if (pt) perf({ cmd: 'look', pan_tilt: pt });
+  }
+  pollGamepad();
+  const f = performer.tick(t);
+  for (const o of performer.events()) onPerfOut(o);
+  view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets };
 }
 
-function takeSample() {
-  const layers: Record<string, string | null> = { background: null, gesture: null, show: null };
-  for (const r of player.running()) layers[r.layer] = r.id;
-  for (const r of liveRuns.values()) layers[r.layer] = r.id;
-  const slots = puppet.fired.splice(0);
-  return {
-    cmd: { ...puppet.cmd }, slots, mode: puppet.mode, frozen, activity: performer?.activity ?? 'idle',
-    speaking: speaking || liveSpeaking, layers, live: link.connected,
+// ------------------------------------------------------------------ gateway follower
+function onFrames(f: Frames) {
+  const px = (k: string) => f.lights[k] ?? [];
+  view = {
+    joints: f.joints, eyes: px('eyes'), mouth: px('mouth'), chest: px('chest'),
+    stage: f.lights.stage ? f.lights.stage.map((c) => c.map((v) => v / 255)) : null, servo: null,
   };
 }
 
-function startTake() {
-  take.start(clock(), SLOTS);
-  $('take-rec').classList.add('on');
-  $('take-rec').textContent = 'Stop take';
+function onGatewayEvent(e: R3xEvent) {
+  switch (e.domain) {
+    case 'conversation':
+      switch (e.type) {
+        case 'listening_started':
+          capHeard.textContent = '';
+          capSaid.textContent = '';
+          break;
+        case 'transcript':
+          capHeard.textContent = e.text;
+          break;
+        case 'listening_stopped':
+          if (e.transcript) capHeard.textContent = e.transcript;
+          break;
+        case 'reply_delta':
+          capSaid.textContent += e.text;
+          break;
+        case 'reply':
+          capSaid.textContent = e.text;
+          break;
+      }
+      updateCaption();
+      break;
+    case 'perf':
+      switch (e.type) {
+        case 'sfx':
+          playSfx(e.id);
+          break;
+        case 'lights':
+          if (e.rig) set.lights?.setRig(e.rig, e.fade || 1);
+          break;
+        case 'started':
+        case 'ended':
+          if (e.type === 'ended' && e.reason === 'rejected') showStatus(`${e.id}: rejected (tier) from ${e.source}`);
+          showUiDirty = true;
+          break;
+      }
+      break;
+    case 'music':
+      if (e.type === 'track_started' && e.track.bpm) setBpm(e.track.bpm);
+      break;
+  }
 }
-function stopTake() {
-  take.stop();
-  $('take-rec').classList.remove('on');
-  $('take-rec').textContent = 'Record take';
+
+function onGatewayState(s: RetainedState) {
+  gwState = s;
+  frozen = s.stage.frozen;
+  $('sh-freeze').classList.toggle('on', frozen);
+  $('btn-dj').classList.toggle('on', s.dj.active);
+  $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
+  stMode.textContent = s.engagement.engagement.toUpperCase();
+  ghosts?.apply(s.stage.outputs);
+  showUiDirty = true;
 }
+
+function setConnected(on: boolean) {
+  if (on === connected) return;
+  if (on) {
+    // The runtime conducts from now on: the embedded performer stands down.
+    performer?.command({ cmd: 'stop', all: true });
+    performer?.command({ cmd: 'autonomy', on: false });
+    if (speaking) performer?.command({ cmd: 'speech_ended' });
+    audio.stop();
+    speaking = false;
+  }
+  connected = on;
+  if (!on) {
+    gwState = null;
+    ghosts?.apply(null);
+    perf({ cmd: 'autonomy', on: autonomy });
+    $<HTMLInputElement>('sh-idle').checked = autonomy;
+    $('btn-dj').classList.toggle('on', djOn);
+    frozen = false;
+    $('sh-freeze').classList.remove('on');
+    stMode.textContent = mode;
+  }
+  document.querySelectorAll<HTMLElement>('[data-offline] :is(button, input, select)').forEach((el) => ((el as HTMLButtonElement).disabled = on));
+  showUiDirty = true;
+}
+
+// CantinaOS's SimBridge feed: the panel still reads its log lines; the 3D view no longer does.
+const liveEl = $('st-live');
+const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=${encodeURIComponent(accessToken())}`, {
+  onHello: () => {},
+  onEvent: () => {},
+  onStatus(on) {
+    liveEl.textContent = on ? 'LIVE' : 'OFFLINE';
+    liveEl.classList.toggle('on', on);
+  },
+});
+const panel = new ControlPanel(link);
+panel.gw.subscribe({
+  onHello: (h) => {
+    setConnected(true);
+    onGatewayState(h.state);
+    void panel.gw.send({ class: 'telemetry', type: 'frames', enabled: true });
+  },
+  onStatus: (on) => setConnected(on),
+  onState: (s) => onGatewayState(s),
+  onEvent: (e) => onGatewayEvent(e),
+  onFrames,
+});
+// ?offline keeps a tab on the embedded performer even while the runtime is running.
+if (!params.has('offline')) link.start();
 
 // ------------------------------------------------------------------ load model
 async function load() {
@@ -344,12 +472,10 @@ async function load() {
   const draco = new DRACOLoader().setDecoderPath('/draco/');
   const ktx2 = new KTX2Loader().setTranscoderPath('/basis/').detectSupport(renderer);
   const loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2);
-  const [gltf, doc, clipList] = await Promise.all([
+  const [gltf, doc] = await Promise.all([
     loader.loadAsync('/model/r3x.glb'),
     fetch('/model/rig.json').then((r) => r.json() as Promise<RigDoc>),
-    fetch('/sfx/index.json').then((r) => (r.ok ? r.json() : []), () => []),
   ]);
-  clips = clipList as string[];
   ktx2.dispose(); // frees the transcoder workers; the textures are on the GPU
 
   // The paint (baked PBR textures) comes with the GLB's materials - see look.ts.
@@ -363,18 +489,12 @@ async function load() {
   scene.add(gltf.scene);
 
   rig = new Rig(gltf.scene, doc);
-  rigDoc = doc;
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
-  chestFw = new ChestFirmware(doc.chest_lights ?? []);
-  host.chest.boot(fw.now); // the boot sweep, as when CantinaOS starts
   chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
-  setProfile(currentProfile);
-  // The Performer writes the procedural pose; the body compositor (show/body.ts) stacks the
-  // background / gesture / show / puppeteer / freeze layers on it before actuation.
-  performer = new Performer(rig, (joint, value) => (procPose[joint] = value));
+  ghosts = new Ghosts(rig, PROFILE);
+  ghosts.apply(gwState?.stage.outputs ?? null);
   buildJointUi(rig);
-  loadShows();
   document.getElementById('loading')!.remove();
 }
 
@@ -384,350 +504,85 @@ load().catch((e) => {
     'Model not found. Build it first:<br><code>sim/model/build.sh</code>';
 });
 
-// ------------------------------------------------------------------ show scripts
-function randomClip() {
-  return clips.length ? `/sfx/${clips[Math.floor(Math.random() * clips.length)]}` : null;
-}
-
-/** One reply: SPEECH_GENERATION_STARTED -> amplitude stream -> SPEECH_GENERATION_COMPLETE. */
-async function speak(url: string) {
-  agc.reset();
-  await audio.play(url, () => {
-    speaking = true;
-    host.speechStarted();
-    setActivity('speaking');
-  });
-  speaking = false;
-  amplitude = 0;
-  host.speechEnded();
-  setActivity(host.mode === 'IDLE' ? 'idle' : 'engaged');
-}
-
-async function converse() {
-  if (busy) return;
-  busy = true;
-  try {
-    if (host.mode !== 'INTERACTIVE') {
-      host.setMode('INTERACTIVE');
-      setActivity('engaged');
-      await sleep(0.8);
-    }
-    host.listeningStarted();
-    setActivity('listening');
-    await sleep(2.4);
-    host.listeningStopped();
-    setActivity('thinking');
-    await sleep(0.9 + Math.random() * 0.8);
-    const url = randomClip();
-    if (url) await speak(url);
-    else await fakeSpeech(2.5);
-  } finally {
-    busy = false;
-  }
-}
-
-/** Without the kit's clips: a synthetic syllable envelope instead of audio. */
-async function fakeSpeech(seconds: number) {
-  host.speechStarted();
-  setActivity('speaking');
-  speaking = true;
-  const start = clock();
-  while (clock() - start < seconds) await sleep(0.05);
-  speaking = false;
-  amplitude = 0;
-  host.speechEnded();
-  setActivity(restingActivity());
-}
-
-// ------------------------------------------------------------------ live link
-// With CantinaOS running, SimBridgeService streams the real bus events here and they go
-// through the same host emulator -> firmware path as the demo, so the LEDs show what the
-// Arduino would. Motion follows the same events.
-let musicPlaying = false;
-let liveSpeaking = false;
-let liveDj = false;
-const capHeard = document.getElementById('cap-heard')!;
-const capSaid = document.getElementById('cap-said')!;
-const caption = document.getElementById('caption')!;
-
-function liveMode(raw: unknown): SystemMode {
-  const m = String(raw ?? '').toUpperCase();
-  return m === 'AMBIENT' || m === 'INTERACTIVE' ? m : 'IDLE';
-}
-
-function restingActivity(): Activity {
-  if (musicPlaying || djOn || liveDj) return 'dj';
-  return host.mode === 'IDLE' ? 'idle' : 'engaged';
-}
-
-function onLiveEvent(ev: LiveEvent) {
-  const d = ev.data;
-  switch (ev.topic) {
-    case 'system.mode.change':
-      host.setMode(liveMode(d.new_mode));
-      if (!liveSpeaking) setActivity(restingActivity());
-      break;
-    case 'voice.listening.started':
-      host.listeningStarted();
-      setActivity('listening');
-      capHeard.textContent = '';
-      capSaid.textContent = '';
-      break;
-    case 'voice.listening.stopped':
-    case 'voice.processing.started':
-    case 'mouse.recording.stopped':
-      host.listeningStopped();
-      if (host.mode === 'INTERACTIVE') setActivity('thinking');
-      if (typeof d.transcript === 'string' && d.transcript) capHeard.textContent = d.transcript;
-      break;
-    case 'transcription.interim':
-      if (typeof d.text === 'string') capHeard.textContent = d.text;
-      break;
-    case 'llm.response.chunk':
-      host.llmChunk();
-      break;
-    case 'llm.response':
-      if (typeof d.text === 'string' && d.text) capSaid.textContent = d.text;
-      break;
-    case 'speech.generation.started':
-    case 'speech.synthesis.started':
-      if (!liveSpeaking) agc.reset();
-      liveSpeaking = true;
-      host.speechStarted();
-      setActivity('speaking');
-      break;
-    case 'speech.synthesis.amplitude':
-      amplitude = Number(d.amplitude) || 0;
-      host.amplitude(amplitude);
-      break;
-    case 'speech.generation.complete':
-    case 'speech.synthesis.ended':
-      if (!liveSpeaking) break;
-      liveSpeaking = false;
-      amplitude = 0;
-      host.speechEnded();
-      setActivity(restingActivity());
-      break;
-    case 'chest.command':
-      // The real ChestLightControllerService is running: mirror its exact commands.
-      if (typeof d.command === 'string') {
-        host.chest.muted = true;
-        chestFw?.write(d.command + '\n');
-      }
-      break;
-    case 'music.playback.started': {
-      musicPlaying = true;
-      // The analysed tempo (track.bpm) drives the stage-light desk, the bop loops and the
-      // chest; with none known the BPM slider stays in charge.
-      const live = trackBpm(d);
-      if (live !== null) setBpm(live, false);
-      host.chest.music(true, bpm);
-      if (!liveSpeaking) setActivity('dj');
-      break;
-    }
-    case 'music.playback.stopped':
-      musicPlaying = false;
-      host.chest.music(false);
-      if (!liveSpeaking) setActivity(restingActivity());
-      break;
-    case 'dj.mode.changed':
-      liveDj = Boolean(d.is_active);
-      if (!liveSpeaking) setActivity(restingActivity());
-      break;
-    // ---- show system (SPEC "Live bus contract"): CantinaOS conducts, the sim renders.
-    case 'show.motion': {
-      const c = catalog.clip(String(d.clip));
-      if (!c) { console.warn(`show.motion: unknown clip ${String(d.clip)}`); break; }
-      const startAt = Number(d.start_at);
-      const delay = Number.isFinite(startAt) ? Math.min(2, Math.max(0, startAt - Date.now() / 1000)) : 0;
-      const layer: RunLayer = d.layer === 'show' || d.layer === 'background' ? d.layer : 'gesture';
-      body.play({
-        runId: String(d.run_id), clip: c, layer, t0: clock() + delay,
-        intensity: clampIntensity(Number(d.intensity ?? 1)), speed: clampSpeed(Number(d.speed ?? 1)),
-        owns: Array.isArray(d.owns) ? d.owns.map(String) : null,
-      });
-      break;
-    }
-    case 'stage.lights':
-      lightsAction(d as Parameters<typeof lightsAction>[0]);
-      break;
-    case 'show.sfx':
-      playSfx(String(d.id));
-      break;
-    case 'show.started': {
-      const seq = catalog.sequence(String(d.id));
-      const owns = seq ? ownsUnion(seq, catalog) : null;
-      const layer: RunLayer = seq?.layer ?? (d.kind === 'sequence' ? 'show' : 'gesture');
-      liveRuns.set(String(d.run_id), { id: String(d.id), layer, source: String(d.source ?? '') });
-      if (owns) body.own(String(d.run_id), layer, owns, clock());
-      showUiDirty = true;
-      break;
-    }
-    case 'show.ended':
-      liveRuns.delete(String(d.run_id));
-      body.release(String(d.run_id), clock());
-      if (d.reason === 'rejected') showStatus(`CantinaOS rejected ${String(d.id)} (tier) from ${String(d.source)}`);
-      showUiDirty = true;
-      break;
-    case 'motion.freeze':
-      setFreeze(Boolean(d.on));
-      break;
-  }
-  if (/^(show|stage|motion|vision)\./.test(ev.topic)) take.event(clock(), ev.topic, d);
-  caption.hidden = !(capHeard.textContent || capSaid.textContent);
-}
-
-const liveEl = document.getElementById('st-live')!;
-const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=${encodeURIComponent(accessToken())}`, {
-  onHello(hello) {
-    host.setMode(liveMode(hello.mode));
-    setActivity(restingActivity());
-  },
-  onEvent: onLiveEvent,
-  onStatus(on) {
-    liveEl.textContent = on ? 'LIVE' : 'OFFLINE';
-    liveEl.classList.toggle('on', on);
-    if (on) {
-      // CantinaOS conducts from now on: the offline player and idle policy stand down.
-      player.stop({ all: true }, clock());
-      idle.poke(clock(), stopRun);
-    } else {
-      liveSpeaking = false;
-      musicPlaying = false;
-      liveDj = false;
-      host.chest.muted = false; // back to the offline port of the chest service
-      host.chest.resync();
-      for (const id of liveRuns.keys()) body.release(id, clock());
-      liveRuns.clear();
-    }
-    showUiDirty = true;
-  },
-});
-new ControlPanel(link);
-// ?offline keeps a tab on the built-in demo even while CantinaOS is running.
-if (!new URLSearchParams(location.search).has('offline')) link.start();
-
-// Devtools: __r3x.fw.write('ST\n'), __r3x.actuation.command('head_pan', 40)
+// ------------------------------------------------------------------ devtools
+// __r3x.show.play('dj_intro', {intensity: 1.3}), __r3x.performer.command({cmd: 'eyes', pattern: 'happy'})
 Object.assign(window, { __r3x: {
-  fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; }, camera, controls, post,
-  // Show system: __r3x.show.play('dj_intro'), .play('nod', {intensity: 1.3, speed: 1.5}), .stop(), .running()
+  get rig() { return rig; }, get performer() { return performer; }, get frames() { return view; },
+  get connected() { return connected; }, gw: panel.gw, camera, controls, post,
   show: {
-    play: (id: string, params: Params & { source?: Source } = {}) => performShow(id, params, params.source ?? 'ui'),
-    stop: (sel?: { id?: string; layer?: RunLayer; all?: boolean }) => player.stop(sel ?? { all: true }, clock()),
-    running: () => player.running().map((r) => ({ ...r, clips: body.active(r.layer) })),
+    play: (id: string, p: { intensity?: number; speed?: number } = {}) => playShow(id, p.intensity ?? 1, p.speed ?? 1),
+    stop: () => stopShows(),
+    running: () => (connected ? gwState?.perf.runs ?? [] : performer?.running() ?? []),
     freeze: (on = true) => setFreeze(on),
-    expand: (id: string, bpm?: number) => expand(id, catalog, { bpm }),
-    background: (activity: 'idle' | 'dj', id: string | null) => { backgrounds[activity] = id; },
-    catalog, player, body, idle,
+    catalog: () => performer?.catalog(),
   },
   puppet: {
-    set: (c: Partial<Record<Intent, number>>) => puppet.set(c),
-    slot: (i: number) => puppet.trigger(i),
-    mode: (m: PuppetMode) => puppet.setMode(m),
-    get command() { return { ...puppet.cmd }; },
-    freeze: (on = true) => setFreeze(on),
-    record: (on = true) => (on ? startTake() : stopTake()),
-    take: () => take.toJsonl(),
+    set: (c: Record<string, number>) => Object.entries(c).forEach(([intent, value]) => perf({ cmd: 'puppet', intent, value })),
+    slot: (i: number) => emote(i),
+    mode: (m: 'idle' | 'engaged' | 'dj') => perf({ cmd: 'puppet_mode', mode: m }),
+    record: (on = true) => (on ? performer?.takeStart() : performer?.takeStop()),
+    take: () => performer?.takeJsonl(),
   },
 } });
 
 // ------------------------------------------------------------------ frame loop
 let last = clock();
-let logDirty = true;
+let prevJoints: Record<string, number> | null = null;
+let showUiDirty = true;
+let showUiTick = 0;
+let updateShowUi = () => {};
+const stMode = $('st-mode');
+
+/** Disabled light outputs (connected), dimmed: the real driver would stay dark. */
+function dim(px: RGB[], output: string): RGB[] {
+  if (gwState?.stage.outputs[output] !== false) return px;
+  return px.map((c) => c.map((v) => v * 0.15) as RGB);
+}
+
 function frame() {
   requestAnimationFrame(frame);
   const t = clock();
   const dt = Math.min(0.05, t - last);
   last = t;
 
-  // Speech amplitude, as ElevenLabsService computes it.
-  if (speaking || audio.micOn) {
-    if (audio.active) {
-      amplitude = agc.next(audio.rmsInt16());
-    } else if (speaking) {
-      const syl = Math.max(0, Math.sin(t * 9.5) * Math.sin(t * 2.3 + 1));
-      amplitude = agc.next(1200 + syl * 9000 + Math.random() * 800);
-    }
-    host.amplitude(amplitude);
-  }
-
-  // Firmware runs on its own simulated millis(); the host's 60 Hz loop rides on it.
-  host.tick(fw.now);
-  fw.advanceTo((performance.now() - t0));
-  for (const line of fw.readLines()) pushLog('rx', line, fw.now);
-
-  if (rig && performer && leds && actuation) {
-    if (script) {
-      script.run(actuation.simTime * 1000);
-      if (!script.running) stopScript();
-    } else if (!manual) {
-      performer.update(t, dt, {
-        amplitude,
-        lookTarget: lookAtCamera ? camera.position : null,
-        bpm,
-        energy: puppet.energyGain,
-      });
-      body.apply(procPose, t);
-      for (const j of rig.joints.keys()) actuation.command(j, procPose[j] ?? 0);
-    }
-    actuation.update(dt);
-    const values = actuation.jointValues();
-    for (const j of rig.joints.keys()) if (!values.has(j)) values.set(j, posed.get(j) ?? 0);
+  tickPerformer(t);
+  if (view && rig && leds && chestLights) {
+    const values = new Map(Object.entries(view.joints));
     rig.apply(values);
-    leds.update(fw);
-    if (chestFw && chestLights) {
-      chestFw.update(fw.now);
-      chestLights.update(chestFw.pixels);
-    }
+    leds.update(dim(view.eyes, 'eyes'), dim(view.mouth, 'mouth'));
+    chestLights.update(dim(view.chest, 'chest'));
+    let speed = 0;
+    if (prevJoints && dt > 0) for (const [j, v] of values) speed += Math.abs(v - (prevJoints[j] ?? v)) / dt;
+    prevJoints = view.joints;
+    whine.update(speed, dt);
     updateJointReadout();
     updateServoTable();
   }
-
-  // Show system: offline, the sim's own player conducts (live, CantinaOS does).
-  puppet.update(dt);
-  if (!link.connected) {
-    player.update(t);
-    updateBackground();
-    idle.update(t, { eligible: idleEligible(), music: musicPlaying || djOn }, (id) => performShow(id, {}, 'idle'), stopRun);
+  // The venue's light desk: the performer's stage output, or (look-dev pin) its own program.
+  if (view?.stage) {
+    const off = gwState?.stage.outputs.stage === false;
+    set.lights?.setExternal(off ? view.stage.map((c) => c.map((v) => v * 0.15)) : view.stage);
+  } else {
+    set.lights?.setExternal(null);
   }
-  take.sample(t, takeSample);
-  if (!take.recording) puppet.fired.length = 0; // slot triggers only matter to a take
-  whine.update(actuation, dt);
   if (showUiDirty || ++showUiTick % 15 === 0) updateShowUi();
-
-  // Stage lights: the venue's separate light desk, following the show state. A show's
-  // `lights {mode}` holds until its hold runs out or the state underneath changes; while
-  // R3X talks the desk runs its speaking program and then returns to the show's mode.
-  const natural = naturalLightMode();
-  if (showLight && (natural !== showLight.natural || t >= showLight.until)) showLight = null;
-  set.lights?.setMode(liveSpeaking || speaking ? 'speaking' : showLight?.mode ?? natural);
-  set.lights?.setBpm(bpm);
-  set.lights?.update(dt);
 
   controls.update();
   set.constrain(camera, controls.target);
   post.render();
   drawLeds();
-  updateStatus();
+  if (logDirty) drawLog();
 }
 requestAnimationFrame(frame);
 
-// ------------------------------------------------------------------ UI
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-let manual = false;
-let lookAtCamera = true;
-let bpm = 118;
-let djOn = false;
-
+// ------------------------------------------------------------------ offline demo UI
 $('btn-converse').onclick = () => void converse();
 $('btn-line').onclick = async () => {
   if (busy) return;
   busy = true;
   try {
-    if (host.mode === 'IDLE') host.setMode('INTERACTIVE');
-    const url = randomClip();
-    if (url) await speak(url);
-    else await fakeSpeech(2.5);
+    if (mode === 'IDLE') setMode('INTERACTIVE');
+    await sayLine();
   } finally {
     busy = false;
   }
@@ -737,18 +592,15 @@ $('btn-mic').onclick = async (e) => {
   if (audio.micOn) {
     audio.stop();
     speaking = false;
-    amplitude = 0;
-    host.speechEnded();
-    setActivity('engaged');
+    perf({ cmd: 'speech_ended' });
     btn.classList.remove('on');
     return;
   }
   try {
-    if (host.mode !== 'INTERACTIVE') host.setMode('INTERACTIVE');
+    if (mode !== 'INTERACTIVE') setMode('INTERACTIVE');
     agc.reset();
     await audio.startMic();
-    host.speechStarted();
-    setActivity('speaking');
+    perf({ cmd: 'speech_started' });
     btn.classList.add('on');
   } catch (err) {
     console.warn('mic unavailable', err);
@@ -756,58 +608,43 @@ $('btn-mic').onclick = async (e) => {
 };
 function setDj(on: boolean) {
   djOn = on;
-  $('btn-dj').classList.toggle('on', djOn);
-  host.chest.dj(djOn, bpm);
-  if (djOn) {
-    if (host.mode === 'IDLE') host.setMode('AMBIENT');
-    setActivity('dj');
-  } else {
-    setActivity(host.mode === 'IDLE' ? 'idle' : 'engaged');
-  }
+  $('btn-dj').classList.toggle('on', on);
+  if (on && mode === 'IDLE') mode = 'AMBIENT'; // the performer does the same
+  perf({ cmd: 'dj', on });
 }
 $('btn-dj').onclick = () => setDj(!djOn);
-/** One place that changes the tempo: the slider, or CantinaOS's live track bpm. */
-function setBpm(n: number, updateChest = true) {
+/** The tempo: the slider, or the live track's analysed bpm. */
+function setBpm(n: number) {
   bpm = n;
   $<HTMLInputElement>('bpm').value = String(Math.round(n)); // the range input clamps its own display
   $('bpm-out').textContent = String(Math.round(n * 10) / 10);
-  if (!updateChest) return;
-  if (djOn) host.chest.dj(true, bpm);
-  else if (musicPlaying) host.chest.music(true, bpm);
+  perf({ cmd: 'tempo', bpm: n });
 }
 $<HTMLInputElement>('bpm').oninput = (e) => setBpm(Number((e.target as HTMLInputElement).value));
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => {
-  b.onclick = () => {
-    const m = b.dataset.mode as SystemMode;
-    host.setMode(m);
-    if (!djOn) setActivity(m === 'IDLE' ? 'idle' : 'engaged');
-  };
+  b.onclick = () => setMode(b.dataset.mode as SystemMode);
 });
 document.querySelectorAll<HTMLButtonElement>('[data-ev]').forEach((b) => {
   b.onclick = () => {
     const ev = b.dataset.ev!;
-    if (ev === 'listen') { host.listeningStarted(); setActivity('listening'); }
-    if (ev === 'stop') { host.listeningStopped(); setActivity('thinking'); }
-    if (ev === 'speak') { host.speechStarted(); setActivity('speaking'); agc.reset(); speaking = true; }
-    if (ev === 'end') { speaking = false; amplitude = 0; host.speechEnded(); setActivity('engaged'); }
+    if (ev === 'listen') perf({ cmd: 'listening_started' });
+    if (ev === 'stop') perf({ cmd: 'listening_stopped' });
+    if (ev === 'speak') { agc.reset(); speaking = true; perf({ cmd: 'speech_started' }); }
+    if (ev === 'end') { speaking = false; perf({ cmd: 'speech_ended' }); }
   };
 });
 
-const serialIn = $<HTMLInputElement>('serial-in');
-const sendSerial = () => {
-  const v = serialIn.value.trim();
-  if (!v) return;
-  fw.write(v + '\n');
-  chestFw?.write(v + '\n');
-  pushLog('tx', v, fw.now);
-  serialIn.value = '';
+$<HTMLInputElement>('manual').onchange = (e) => {
+  manual = (e.target as HTMLInputElement).checked;
+  if (manual) return;
+  if (connected) void send({ class: 'perf', type: 'release', channels: [...jointInputs.keys()] });
+  else perf({ cmd: 'jog_release' });
 };
-$('serial-send').onclick = sendSerial;
-serialIn.onkeydown = (e) => { if (e.key === 'Enter') sendSerial(); };
-
-$<HTMLInputElement>('manual').onchange = (e) => { manual = (e.target as HTMLInputElement).checked; };
-$<HTMLInputElement>('look').onchange = (e) => { lookAtCamera = (e.target as HTMLInputElement).checked; };
+$<HTMLInputElement>('look').onchange = (e) => {
+  lookAtCamera = (e.target as HTMLInputElement).checked;
+  if (!lookAtCamera) perf({ cmd: 'look', pan_tilt: null });
+};
 
 const pivots: THREE.Object3D[] = [];
 $<HTMLInputElement>('axes').onchange = (e) => {
@@ -843,17 +680,30 @@ addEventListener('drop', async (e) => {
   e.preventDefault();
   stage.classList.remove('dragging');
   const f = e.dataTransfer?.files?.[0];
-  if (!f || !f.type.startsWith('audio') || busy) return;
+  if (!f || !f.type.startsWith('audio') || busy || connected) return;
   busy = true;
   try {
-    if (host.mode !== 'INTERACTIVE') host.setMode('INTERACTIVE');
+    if (mode !== 'INTERACTIVE') setMode('INTERACTIVE');
     await speak(URL.createObjectURL(f));
   } finally {
     busy = false;
   }
 });
 
-// ------------------------------------------------------------------ joint sliders
+// Machine status (chest windows): offline stand-ins for the service health CantinaOS reports.
+SUBSYSTEMS.forEach(([label, service], i) => {
+  const row = document.createElement('label');
+  row.className = 'inline sub';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = true;
+  cb.onchange = () => perf({ cmd: 'service_status', service, status: cb.checked ? 'running' : 'error', latched: true });
+  row.append(cb, label);
+  row.title = `Panel ${Math.floor(i / 3) + 1}, window ${(i % 3) + 1}: ${service}`;
+  $('subsystems').appendChild(row);
+});
+
+// ------------------------------------------------------------------ joint sliders (jog)
 const jointInputs = new Map<string, { input: HTMLInputElement; out: HTMLOutputElement }>();
 function buildJointUi(r: Rig) {
   const container = $('joints');
@@ -883,18 +733,15 @@ function buildJointUi(r: Rig) {
       out.textContent = '0';
       input.oninput = () => {
         const v = Number(input.value);
-        if (actuation?.byJoint.has(j.spec.name)) {
-          if (!manual) {
-            manual = true;
-            $<HTMLInputElement>('manual').checked = true;
-          }
-          actuation.command(j.spec.name, v);
-        } else {
-          posed.set(j.spec.name, v); // no servo: pose by hand, instantly
+        if (!manual) {
+          manual = true;
+          $<HTMLInputElement>('manual').checked = true;
         }
+        // A joint name in a perf puppet command jogs that joint directly (runtime).
+        if (connected) void send({ class: 'perf', type: 'puppet', channels: { [j.spec.name]: v } });
+        else perf({ cmd: 'jog', joint: j.spec.name, value: v });
       };
-      const tag = document.createElement('i');
-      row.append(name, input, out, tag);
+      row.append(name, input, out);
       container.appendChild(row);
       jointInputs.set(j.spec.name, { input, out });
     }
@@ -902,143 +749,38 @@ function buildJointUi(r: Rig) {
 }
 
 function updateJointReadout() {
-  if (!rig || !actuation) return;
+  if (!view) return;
   for (const [name, ui] of jointInputs) {
-    const j = rig.get(name);
-    ui.out.textContent = j.value.toFixed(0);
-    const ch = actuation.byJoint.get(name);
-    const row = ui.input.parentElement!;
-    row.classList.toggle('posable', !ch);
-    (row.lastElementChild as HTMLElement).textContent = ch ? `ch${ch.cfg.ch}` : 'pose';
-    if (ch && !manual && document.activeElement !== ui.input) ui.input.value = String(ch.follower.target);
+    const v = view.joints[name] ?? 0;
+    ui.out.textContent = v.toFixed(0);
+    if (!manual && document.activeElement !== ui.input) ui.input.value = String(v);
   }
 }
 
-// ------------------------------------------------------------------ actuation UI
-let currentProfile = DEFAULT_PROFILE;
-function setProfile(name: string) {
-  if (!rigDoc) return;
-  stopScript();
-  currentProfile = name;
-  actuation = new Actuation(rigDoc.joints, rigDoc.dynamics ?? {}, name);
-  actuation.plantEnabled = $<HTMLInputElement>('plant').checked;
-  buildServoTable();
-}
-
-const profileSel = $<HTMLSelectElement>('profile');
-for (const [k, label] of Object.entries(PROFILES)) profileSel.add(new Option(label, k, k === DEFAULT_PROFILE, k === DEFAULT_PROFILE));
-profileSel.onchange = () => setProfile(profileSel.value);
-$<HTMLInputElement>('plant').onchange = (e) => {
-  if (actuation) actuation.plantEnabled = (e.target as HTMLInputElement).checked;
-};
-
-const servoRows = new Map<number, HTMLTableRowElement>();
-function buildServoTable() {
-  const body = $('servo-body');
-  body.innerHTML = '';
-  servoRows.clear();
-  if (!actuation) return;
-  $('servo-summary').textContent =
-    `${actuation.channels.length} servos, ${{ custom: 'custom controller', maestro: 'Maestro', pca9685: 'PCA9685' }[actuation.controller.type]} ` +
-    `@ ${actuation.frequencyHz.toFixed(1)} Hz, ${actuation.usPerUnit} us resolution`;
-  const warnings: string[] = [];
-  for (const ch of actuation.channels) {
+// ------------------------------------------------------------------ servo readout
+const servoCells = new Map<number, HTMLElement>();
+{
+  $('servo-summary').textContent = `${PROFILE.actuators.length} actuators; pulses from the performer's controller frame (standalone).`;
+  for (const a of PROFILE.actuators) {
     const tr = document.createElement('tr');
-    const load = Math.round(ch.utilisation * 100);
-    tr.title = [ch.cfg.note, ch.cfg.calibration === 'assumed' ? 'Calibration assumed - set centreUs on the bench.' : '', ...ch.warnings]
-      .filter(Boolean).join('\n');
-    tr.innerHTML = `<td>${ch.cfg.ch}</td><td>${ch.cfg.name}</td><td>${ch.model.label}</td>` +
-      `<td class="us"></td><td class="${load > 50 ? 'bad' : load > 30 ? 'meh' : ''}">${load}%</td>`;
-    body.appendChild(tr);
-    servoRows.set(ch.cfg.ch, tr);
-    for (const w of ch.warnings) warnings.push(`ch${ch.cfg.ch} ${ch.cfg.name}: ${w}`);
+    tr.innerHTML = `<td>${a.channel}</td><td>${a.name}</td><td>${a.servo}</td><td class="us">-</td>`;
+    $('servo-body').appendChild(tr);
+    servoCells.set(a.channel, tr.querySelector('.us')!);
   }
-  const wEl = $('servo-warn');
-  wEl.hidden = !warnings.length;
-  wEl.textContent = warnings.join(' · ');
 }
-
 let servoTick = 0;
 function updateServoTable() {
-  if (!actuation || ++servoTick % 6) return; // ~10 Hz is plenty for a readout
-  for (const ch of actuation.channels) {
-    const cell = servoRows.get(ch.cfg.ch)?.querySelector('.us');
-    if (cell) cell.textContent = `${ch.us.toFixed(0)}${ch.directUs !== null ? '*' : ''}`;
-  }
+  if (++servoTick % 6) return; // ~10 Hz is plenty for a readout
+  for (const [ch, cell] of servoCells) cell.textContent = view?.servo ? String(view.servo[ch] ?? '-') : '-';
 }
-
-$('export-frames').onclick = () => {
-  if (!actuation) return;
-  const blob = new Blob([actuation.exportLog()], { type: 'application/x-ndjson' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `r3x-frames-${actuation.profileName}.jsonl`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-};
-
-// ------------------------------------------------------------------ Maestro show scripts
-const scriptText = $<HTMLTextAreaElement>('script-text');
-const scriptStatus = $('script-status');
-async function loadShows() {
-  try {
-    const names: string[] = await fetch('/shows/index.json').then((r) => (r.ok ? r.json() : []));
-    if (names.length && !scriptText.value) {
-      scriptText.value = await fetch(`/shows/${encodeURIComponent(names[0])}`).then((r) => r.text());
-      scriptStatus.textContent = `Loaded ${names[0]}`;
-    }
-  } catch {
-    /* no shows copied - paste one */
-  }
-}
-
-function startScript() {
-  if (!actuation) return;
-  const a = actuation;
-  try {
-    script = new MaestroScript(scriptText.value, {
-      setTarget: (ch, q) => a.setTarget(ch, q),
-      setSpeed: (ch, v) => a.setMaestroLimits(ch, v, undefined),
-      setAccel: (ch, v) => a.setMaestroLimits(ch, undefined, v),
-      getPosition: (ch) => a.byNumber.get(ch)?.target ?? 0,
-      anyMoving: () => a.channels.some((c) => c.directUs !== null && Math.abs(c.directUs - c.us) > 0.5),
-    });
-    scriptStatus.textContent = 'Running on the sim clock - channels marked * are script-driven.';
-    $('script-run').textContent = 'Stop';
-  } catch (e) {
-    scriptStatus.textContent = e instanceof MaestroScriptError ? e.message : String(e);
-    script = null;
-  }
-}
-
-function stopScript() {
-  script = null;
-  actuation?.releaseAll();
-  $('script-run').textContent = 'Run script';
-}
-$('script-run').onclick = () => (script ? stopScript() : startScript());
 
 // ------------------------------------------------------------------ status + LED view
-const stMode = $('st-mode');
-const stFw = $('st-fw');
-const warn = $('warn-reset');
 const logEl = $('serial-log');
-function updateStatus() {
-  stMode.textContent = host.mode;
-  stFw.textContent = fw.flashActive ? 'FLASH' : fw.currentState;
-  if (host.droppedMouthResets > 0) {
-    warn.hidden = false;
-    warn.textContent =
-      `${host.droppedMouthResets}x the end-of-speech M000 landed inside the adapter's 10 Hz throttle ` +
-      `window and was dropped, so the mouth kept its last amplitude in ENGAGED. Timing-dependent: ` +
-      `it only happens when an amplitude update went out <100 ms before speech ended.`;
-  }
-  if (logDirty) {
-    logDirty = false;
-    logEl.innerHTML = log.slice(-12).map((e) =>
-      `<li><span class="${e.dir}">${e.dir === 'tx' ? '→' : '←'}</span> ${(e.at / 1000).toFixed(2).padStart(7)}s  ${escapeHtml(e.line)}</li>`,
-    ).join('');
-  }
+function drawLog() {
+  logDirty = false;
+  logEl.innerHTML = log.slice(-12).map((e) =>
+    `<li><span class="tx">→</span> ${e.at.toFixed(2).padStart(7)}s  ${escapeHtml(e.line)}</li>`,
+  ).join('');
 }
 function escapeHtml(s: string) {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
@@ -1046,17 +788,20 @@ function escapeHtml(s: string) {
 
 const ledCanvas = $<HTMLCanvasElement>('ledview');
 const lctx = ledCanvas.getContext('2d')!;
+const BLACK: RGB = [0, 0, 0];
 function drawLeds() {
   const W = ledCanvas.width;
   const H = ledCanvas.height;
   lctx.clearRect(0, 0, W, H);
+  if (!view) return;
+  const { eyes, mouth } = view;
   const k = (OUTPUT_BRIGHTNESS + 1) / 256;
-  const css = (c: RGB) => {
+  const css = (c: RGB = BLACK) => {
     // Show emitted light (after global brightness), boosted to read on screen.
     const b = (v: number) => Math.min(255, Math.round(v * k * 1.9));
     return `rgb(${b(c[0])},${b(c[1])},${b(c[2])})`;
   };
-  const dot = (x: number, y: number, c: RGB, r = 7) => {
+  const dot = (x: number, y: number, c: RGB | undefined, r = 7) => {
     lctx.beginPath();
     lctx.arc(x, y, r, 0, Math.PI * 2);
     lctx.fillStyle = css(c);
@@ -1066,10 +811,10 @@ function drawLeds() {
   };
   // Viewer's perspective: droid's left eye (LEDs 0-6) on the right.
   const eye = (cx: number, start: number) => {
-    dot(cx, 44, fw.eyeLeds[start]);
+    dot(cx, 44, eyes[start]);
     for (let i = 1; i < 7; i++) {
       const a = ((i - 1) * Math.PI) / 3;
-      dot(cx + Math.sin(a) * 20, 44 - Math.cos(a) * 20, fw.eyeLeds[start + i]);
+      dot(cx + Math.sin(a) * 20, 44 - Math.cos(a) * 20, eyes[start + i]);
     }
   };
   eye(W * 0.8, 0);
@@ -1078,53 +823,58 @@ function drawLeds() {
   for (let i = 0; i < 8; i++) {
     const arm = i < 4 ? i : 7 - i;
     const side = i < 4 ? -1 : 1;
-    dot(vx + side * (22 - arm * 6), 12 + arm * 22, fw.mouthLeds[i], 5);
+    dot(vx + side * (22 - arm * 6), 12 + arm * 22, mouth[i], 5);
   }
   lctx.fillStyle = '#5b6170';
   lctx.font = '10px ui-monospace, Menlo, monospace';
-  lctx.fillText('R eye 7-13', 8, 90);
-  lctx.fillText('mouth 0-7', vx - 24, 92);
-  lctx.fillText('L eye 0-6', W - 62, 90);
-}
-
-// ------------------------------------------------------------------ machine status (chest)
-// Offline stand-ins for what CantinaOS reports: service health and system state.
-{
-  const box = document.getElementById('subsystems')!;
-  WINDOW_SUBSYSTEMS.forEach(([label, services], i) => {
-    const row = document.createElement('label');
-    row.className = 'inline sub';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = true;
-    cb.onchange = () => host.chest.serviceStatus(services[0], cb.checked ? 'running' : 'error');
-    const panel = Math.floor(i / 3) + 1;
-    row.append(cb, `${label}`);
-    row.title = `Panel ${panel}, window ${(i % 3) + 1}: ${services.join(' / ')}`;
-    box.appendChild(row);
-  });
-  document.getElementById('btn-boot')!.onclick = () => host.chest.boot(fw.now);
-  document.getElementById('btn-sleep')!.onclick = (e) => {
-    host.chest.sleeping = !host.chest.sleeping;
-    (e.currentTarget as HTMLElement).classList.toggle('on', host.chest.sleeping);
-  };
+  lctx.fillText('R eye 7-13', 8, H - 6);
+  lctx.fillText('mouth 0-7', vx - 24, H - 4);
+  lctx.fillText('L eye 0-6', W - 62, H - 6);
 }
 
 // ------------------------------------------------------------------ show system UI
-{
-  const params = (): Params => ({ intensity: Number($<HTMLInputElement>('sh-int').value), speed: Number($<HTMLInputElement>('sh-speed').value) });
+/** Play from the UI: through the gateway when connected, else the embedded performer. */
+function playShow(id: string, intensity: number, speed: number) {
+  if (connected) void send({ class: 'perf', type: 'play', id, intensity, speed });
+  else perf({ cmd: 'perform', id, source: 'ui', params: { intensity, speed } });
+}
+function stopShows() {
+  if (connected) void send({ class: 'perf', type: 'stop', target: 'all' });
+  else perf({ cmd: 'stop', all: true });
+}
+function setFreeze(on: boolean) {
+  if (connected) {
+    void send({ class: 'stage', type: 'freeze', on });
+    return;
+  }
+  frozen = on;
+  perf({ cmd: 'freeze', on });
+  $('sh-freeze').classList.toggle('on', on);
+  showUiDirty = true;
+}
+function emote(slot: number) {
+  if (connected) void send({ class: 'perf', type: 'emote', slot });
+  else perf({ cmd: 'emote', slot });
+}
+function puppetSet(intent: string, value: number) {
+  if (connected) void send({ class: 'perf', type: 'puppet', channels: { [intent]: value } });
+  else perf({ cmd: 'puppet', intent, value });
+}
+
+function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
+  const params = () => [Number($<HTMLInputElement>('sh-int').value), Number($<HTMLInputElement>('sh-speed').value)] as const;
   for (const kind of ['sequence', 'cue', 'clip'] as const) {
     const ul = $('sh-list-' + kind);
-    const items = catalog.list(kind);
-    $('sh-n-' + kind).textContent = `(${items.length})`;
-    for (const it of items) {
+    const list = items.filter((it) => it.kind === kind);
+    $('sh-n-' + kind).textContent = `(${list.length})`;
+    for (const it of list) {
       const li = document.createElement('li');
       li.dataset.id = it.id;
-      li.title = `${it.description}${'requires' in it && it.requires ? ' [extended build]' : ''}${it.tags?.length ? `\ntags: ${it.tags.join(', ')}` : ''}`;
+      li.title = `${it.description}${it.requires ? ' [extended build]' : ''}${it.tags?.length ? `\ntags: ${it.tags.join(', ')}` : ''}`;
       const b = document.createElement('button');
-      b.textContent = '\u25B6';
+      b.textContent = '▶';
       b.setAttribute('aria-label', `Play ${it.id}`);
-      b.onclick = () => performShow(it.id, params(), 'ui');
+      b.onclick = () => playShow(it.id, ...params());
       const nm = document.createElement('span');
       nm.className = 'nm';
       nm.textContent = it.id;
@@ -1138,25 +888,40 @@ function drawLeds() {
       ul.appendChild(li);
     }
   }
-  const out = (id: string, v: string) => ($(id).textContent = Number(v).toFixed(2));
-  $<HTMLInputElement>('sh-int').oninput = (e) => out('sh-int-out', (e.target as HTMLInputElement).value);
-  $<HTMLInputElement>('sh-speed').oninput = (e) => out('sh-speed-out', (e.target as HTMLInputElement).value);
-  $('sh-stop').onclick = () => player.stop({ all: true }, clock());
-  $('sh-freeze').onclick = () => setFreeze(!frozen);
-  $('sh-idle-label').textContent = `Idle policy (after ${catalog.idle?.after_s ?? '-'} s quiet)`;
-  $<HTMLInputElement>('sh-idle').onchange = (e) => { idle.enabled = (e.target as HTMLInputElement).checked; };
-  const loops = catalog.list('sequence').filter((q) => q.loop);
-  for (const [sel, key] of [['sh-bg-idle', 'idle'], ['sh-bg-dj', 'dj']] as const) {
+  $('sh-idle-label').textContent = `Idle policy (after ${idleAfter ?? '-'} s quiet)`;
+  const loops = items.filter((q) => q.kind === 'sequence' && q.loop);
+  for (const [sel, activity] of [['sh-bg-idle', 'idle'], ['sh-bg-dj', 'dj']] as const) {
     const el = $<HTMLSelectElement>(sel);
     el.add(new Option('none', ''));
     for (const q of loops) el.add(new Option(q.id, q.id));
-    el.onchange = () => { backgrounds[key] = el.value || null; };
+    el.onchange = () => perf({ cmd: 'background', activity, id: el.value || null });
   }
+  SLOTS.forEach((id, i) => {
+    const b = document.createElement('button');
+    b.textContent = `${i + 1} ${id}`;
+    b.title = items.find((it) => it.id === id)?.description ?? id;
+    b.onclick = () => emote(i);
+    $('pp-slots').appendChild(b);
+  });
+}
 
-  // Puppeteer: one slider per continuous intent, the modes, the 8 cue slots.
+{
+  const out = (id: string, v: string) => ($(id).textContent = Number(v).toFixed(2));
+  $<HTMLInputElement>('sh-int').oninput = (e) => out('sh-int-out', (e.target as HTMLInputElement).value);
+  $<HTMLInputElement>('sh-speed').oninput = (e) => out('sh-speed-out', (e.target as HTMLInputElement).value);
+  $('sh-stop').onclick = () => stopShows();
+  $('sh-freeze').onclick = () => setFreeze(!frozen);
+  $<HTMLInputElement>('sh-idle').onchange = (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    if (connected) return void send({ class: 'stage', type: 'set_autonomy', enabled: on });
+    autonomy = on;
+    perf({ cmd: 'autonomy', on });
+  };
+
+  // Puppeteer: one slider per continuous intent, the modes, the emote slots.
   const box = $('pp-intents');
-  const sliders = new Map<Intent, HTMLInputElement>();
-  for (const k of CONTINUOUS) {
+  const sliders = new Map<string, HTMLInputElement>();
+  for (const k of INTENTS) {
     const name = document.createElement('span');
     name.textContent = k;
     const input = document.createElement('input');
@@ -1165,33 +930,44 @@ function drawLeds() {
     input.max = '1';
     input.step = '0.01';
     input.value = '0';
-    input.oninput = () => puppet.set({ [k]: Number(input.value) });
     const o = document.createElement('output');
     o.textContent = '0.00';
+    input.oninput = () => {
+      o.textContent = Number(input.value).toFixed(2);
+      puppetSet(k, Number(input.value));
+    };
     box.append(name, input, o);
     sliders.set(k, input);
   }
   $('pp-center').onclick = () => {
-    puppet.set(Object.fromEntries(CONTINUOUS.map((k) => [k, 0])));
-    sliders.forEach((s) => (s.value = '0'));
+    if (connected) void send({ class: 'perf', type: 'release', channels: [...INTENTS] });
+    else perf({ cmd: 'puppet_release' });
+    sliders.forEach((s) => {
+      s.value = '0';
+      s.nextElementSibling!.textContent = '0.00';
+    });
   };
-  for (const m of MODES) {
+  for (const m of PUPPET_MODES) {
     const b = document.createElement('button');
     b.textContent = m;
     b.dataset.pmode = m;
-    b.onclick = () => puppet.setMode(m);
+    b.onclick = () => {
+      perf({ cmd: 'puppet_mode', mode: m });
+      document.querySelectorAll<HTMLButtonElement>('[data-pmode]').forEach((x) => x.classList.toggle('on', x === b));
+    };
     $('pp-modes').appendChild(b);
   }
-  SLOTS.forEach((id, i) => {
-    const b = document.createElement('button');
-    b.textContent = `${i + 1} ${id}`;
-    b.title = catalog.get(id)?.description ?? id;
-    b.onclick = () => puppet.trigger(i);
-    $('pp-slots').appendChild(b);
-  });
-  $('take-rec').onclick = () => (take.recording ? stopTake() : startTake());
+  $('take-rec').onclick = () => {
+    if (!performer) return;
+    if (performer.takeInfo().recording) performer.takeStop();
+    else performer.takeStart();
+    const on = performer.takeInfo().recording;
+    $('take-rec').classList.toggle('on', on);
+    $('take-rec').textContent = on ? 'Stop take' : 'Record take';
+  };
   $('take-dl').onclick = () => {
-    const blob = new Blob([take.toJsonl()], { type: 'application/x-ndjson' });
+    if (!performer) return;
+    const blob = new Blob([performer.takeJsonl()], { type: 'application/x-ndjson' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `r3x-take-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
@@ -1201,28 +977,19 @@ function drawLeds() {
   $<HTMLInputElement>('whine').onchange = (e) => whine.setEnabled((e.target as HTMLInputElement).checked);
 
   // Refreshed ~4x a second (and on every show event) from the frame loop.
-  const outs = [...box.querySelectorAll('output')];
   updateShowUi = () => {
     showUiDirty = false;
-    const running = link.connected
-      ? [...liveRuns.entries()].map(([run_id, r]) => ({ run_id, id: r.id, layer: r.layer, source: r.source }))
-      : player.running();
+    const running: { id: string; layer: string; source: string }[] = connected ? gwState?.perf.runs ?? [] : performer?.running() ?? [];
     const ids = new Set(running.map((r) => r.id));
-    for (const layer of ['show', 'gesture', 'background'] as const) {
+    for (const layer of ['show', 'gesture', 'background'] satisfies RunLayer[]) {
       const r = running.find((x) => x.layer === layer);
-      const clipsOn = body.active(layer);
-      const q = link.connected ? null : player.queued(layer);
       const el = $('sh-' + layer);
-      el.textContent = r ? `${r.id} (${r.source})${clipsOn.length ? ' · ' + clipsOn.join(', ') : ''}${q ? ` · next ${q}` : ''}` : clipsOn.length ? clipsOn.join(', ') : '-';
-      el.classList.toggle('on', !!r || clipsOn.length > 0);
+      el.textContent = r ? `${r.id} (${r.source})` : '-';
+      el.classList.toggle('on', !!r);
     }
     document.querySelectorAll<HTMLLIElement>('.show-list li').forEach((li) => li.classList.toggle('running', ids.has(li.dataset.id!)));
-    CONTINUOUS.forEach((k, i) => {
-      outs[i].textContent = puppet.cmd[k].toFixed(2);
-      if (puppet.gamepad) sliders.get(k)!.value = String(puppet.target[k]);
-    });
-    $('pp-pad').hidden = puppet.gamepad;
-    $('take-info').textContent = take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
-    document.querySelectorAll<HTMLButtonElement>('#show-system .show-list button').forEach((b) => (b.disabled = link.connected));
+    const take = performer?.takeInfo();
+    $('take-info').textContent = !take ? '' : take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
+    if (!connected) stMode.textContent = mode;
   };
 }

@@ -91,3 +91,34 @@ export class SpeechAudio {
     return Math.sqrt(s / this.buf.length) * 32768;
   }
 }
+
+/**
+ * ElevenLabsService's per-chunk amplitude: RMS -> dBFS -> AGC-normalised 0..1 (the
+ * performer's `amplitude` command). Feed it int16-scale RMS values, one per ~16.7 ms chunk.
+ */
+export class TtsAmplitudeAgc {
+  private recent: number[] = [];
+  private readonly window = 30;
+  private readonly minRangeDb = 12;
+
+  next(rmsInt16: number): number {
+    if (rmsInt16 <= 0) return 0;
+    const db = 20 * Math.log10(rmsInt16 / 32768);
+    this.recent.push(db);
+    if (this.recent.length > this.window) this.recent.shift();
+    let a: number;
+    if (this.recent.length >= 10) {
+      const lo = Math.min(...this.recent);
+      const hi = Math.max(...this.recent);
+      const range = Math.max(this.minRangeDb, hi - lo);
+      a = Math.max(0, Math.min(1, (db - lo) / range));
+    } else {
+      a = Math.max(0, Math.min(1, (db + 50) / 40));
+    }
+    return Math.min(1, a * 2);
+  }
+
+  reset() {
+    this.recent = [];
+  }
+}

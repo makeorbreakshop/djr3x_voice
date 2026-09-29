@@ -711,6 +711,10 @@ function machineryPanel(kit: Kit, grille: THREE.Material, mats: Record<string, T
  * The booth's light desk: a StageLights whose output lands on the booth's fixtures.
  * Drive it with setMode / setBpm / beat / goCue / setRig. update(dt) works as usual; if no
  * caller ever calls it, the booth advances the desk itself on the render clock.
+ *
+ * The sim itself does not conduct: `setExternal` lands the performer's stage output (its
+ * own desk, in Rust) on the fixtures and pauses this desk's program; setRig still switches
+ * the booth's rig (bakes and env capture).
  */
 export class BoothLights extends StageLights {
   /** While set, the render hook neither advances nor pushes the desk (the booth's own bakes). */
@@ -718,6 +722,7 @@ export class BoothLights extends StageLights {
   private manual = false;
   private synced = -1;
   private lastTick = -1;
+  private external = false;
 
   constructor(
     opts: StageLightsOptions,
@@ -746,10 +751,26 @@ export class BoothLights extends StageLights {
     this.onSync(this);
   }
 
+  /**
+   * Output from outside: linear flux per group in GROUPS order (performer frames). The
+   * desk's own program stops advancing until `null` hands it back.
+   */
+  setExternal(stage: ArrayLike<ArrayLike<number>> | null) {
+    this.external = !!stage;
+    if (!stage) return;
+    GROUPS.forEach((g, i) => {
+      const c = stage[i];
+      const o = this.out[g];
+      if (c) for (let k = 0; k < 3; k++) o[k] = c[k];
+    });
+    this.version++;
+    this.sync();
+  }
+
   /** @internal Called by the booth once per rendered pass with the render clock (s). */
   tick(nowS: number) {
     if (this.paused) return;
-    if (!this.manual) {
+    if (!this.manual && !this.external) {
       const dt = this.lastTick < 0 ? 0 : Math.min(0.5, nowS - this.lastTick);
       this.lastTick = nowS;
       if (dt > 0) super.update(dt);

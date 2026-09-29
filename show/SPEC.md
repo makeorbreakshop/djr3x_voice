@@ -2,7 +2,7 @@
 
 A single, file-based format for R3X's performance content. It is read by **both** runtimes:
 
-- **CantinaOS (Python)** is the live conductor. `TimelineExecutorService` expands cues and sequences into department events on the bus.
+- **The r3x performer (Rust, `r3x-runtime --bridge`)** is the live conductor since Phase 3. **CantinaOS (Python)** validates and catalogues the files (Claude's prompt, CLI, plan steps) and sends the requests over its bus tap; the bridge puts the performer's events back on the CantinaOS bus.
 - **The sim (TypeScript)** renders the body, and plays everything offline when CantinaOS is not connected.
 
 There are three kinds of file, from small to large:
@@ -91,16 +91,16 @@ A cue is one moment: every department fires together, optionally with small offs
 
 **Department actions (`do`).** This one table is the whole contract between file, runtime and hardware.
 
-| `do` | Fields | Live topic (CantinaOS) | Sim renders |
+| `do` | Fields | Live topic (CantinaOS bus, emitted by the r3x bridge) | Sim renders |
 |---|---|---|---|
-| `clip` | `id`, `intensity?`, `speed?` | `show.motion` | body compositor (gesture/show layer) |
+| `clip` | `id`, `intensity?`, `speed?` | none since Phase 3 (the performer drives motion) | body compositor (gesture/show layer) |
 | `eyes` | `pattern`, `color?`, `intensity?`, `duration?` | `EYE_COMMAND` (existing `EyeCommandPayload`) | face firmware via host |
 | `chest` | `command` (chest serial word, e.g. `X2`, `SF`, `M200`), `hold?` s | `chest.override` (new; the chest service applies it, then returns to status after `hold`) | chest firmware |
 | `lights` | `cue` and/or `mode`, `fade?`, `hold?`, `rig?` | `stage.lights` (new) | `stagelights.ts` desk |
 | `sfx` | `id` (file stem under the sim's sfx folder) | `show.sfx` (new) | browser audio |
 | `speak` | `text` | the existing path that makes ElevenLabs speak a line | offline: caption plus fake amplitude |
 | `duck` / `unduck` | none | existing `AUDIO_DUCKING_START` / `STOP` | none |
-| `wait` | `for`: `"speech_end"` | not emitted; holds the timeline | same |
+| `wait` | `for`: `"speech_end"` | not emitted; the performer holds its run | same |
 
 A `hold` of 0 or missing means the department keeps the state until something else changes it.
 `lights` with `hold` returns to whatever the desk's mode program was running.
@@ -147,13 +147,13 @@ A show element is a timeline of cues, clips and actions on one clock.
 
 | Topic | Direction | Payload |
 |---|---|---|
-| `show.perform` | anyone → timeline | `{id, params?: {intensity, speed}, source: "jev" \| "claude" \| "timeline" \| "idle" \| "ui" \| "cli", conversation_id?}` |
-| `show.stop` | anyone → timeline | `{id?, layer?, all?}` |
-| `show.started` / `show.ended` | timeline → all | `{id, kind, source, run_id, reason?: "done" \| "interrupted" \| "rejected"}` |
-| `show.motion` | timeline → body | `{run_id, clip, intensity, speed, start_at (epoch s), layer, owns?}` |
-| `stage.lights` | timeline → lights | `{cue?, mode?, fade, hold, rig?}` |
-| `chest.override` | timeline → chest svc | `{command, hold}` |
-| `show.sfx` | timeline → audio | `{id}` |
+| `show.perform` | anyone → performer | `{id, params?: {intensity, speed}, source: "jev" \| "claude" \| "timeline" \| "idle" \| "ui" \| "cli", conversation_id?}` |
+| `show.stop` | anyone → performer | `{id?, layer?, all?}` |
+| `show.started` / `show.ended` | performer → all | `{id, kind, source, run_id, reason?: "done" \| "interrupted" \| "rejected"}` |
+| `show.motion` | Python player only (retired in Phase 3) | `{run_id, clip, intensity, speed, start_at (epoch s), layer, owns?}` |
+| `stage.lights` | performer → lights | `{cue?, mode?, fade, hold, rig?}` |
+| `chest.override` | performer → chest svc (only while CantinaOS owns the board) | `{command, hold}` |
+| `show.sfx` | performer → audio | `{id}` |
 | `motion.freeze` | anyone → body | `{on: bool}`. This is the "motion stop" (BD-X's Menu button). **on:** stop every show and gesture, stop idle, and hold the current setpoints. **off:** blend back to procedural motion over 0.5 s. The body obeys this above every other layer. |
 
 Every payload is a Pydantic model emitted via `model_dump()`. SimBridge forwards all of them.

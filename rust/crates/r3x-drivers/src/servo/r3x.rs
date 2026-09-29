@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use r3x_contracts::profile::{DriverKind, Unit};
-use r3x_contracts::{RobotProfile, ServiceStatus};
+use r3x_contracts::{Event, OpsEvent, RobotProfile, ServoChannelTelemetry, ServiceStatus};
 use r3x_performer_core::performer::Out;
 
 use super::proto::{flag, ChannelConfig, Deframer, Msg, Telemetry};
-use crate::link::{Link, Opener};
+use crate::link::{Backoff, Link, Opener};
 use crate::{env_flag, env_str, Driver, Health};
 
 pub const HEARTBEAT_S: f64 = 0.1;
@@ -91,7 +91,14 @@ pub struct R3xServoDriver {
     pub telemetry: Option<(f64, Telemetry)>,
     pub firmware: Option<String>,
     pub naks: u64,
+    backoff: Backoff,
+    /// Telemetry waiting to go on the bus, and when the last one went.
+    pending: Option<Telemetry>,
+    last_published: f64,
 }
+
+/// Telemetry reaches the bus at most this often (the controller sends 20-50 Hz).
+pub const TELEMETRY_PUBLISH_S: f64 = 0.2;
 
 impl R3xServoDriver {
     pub fn new(cfg: R3xServoConfig, opener: Arc<dyn Opener>) -> Self {
@@ -109,7 +116,30 @@ impl R3xServoDriver {
             telemetry: None,
             firmware: None,
             naks: 0,
+            backoff: Backoff::default(),
+            pending: None,
+            last_published: f64::NEG_INFINITY,
         }
+    }
+
+    /// Open the port and say hello; on success configure every channel and beat once.
+    fn connect(&mut self, port: &str, now: f64) -> bool {
+        for _ in 0..self.cfg.retries {
+            if let Some(link) = self.opener.open(port, self.cfg.baud).ok().and_then(|l| self.hello(l)) {
+                self.link = Some(link);
+                self.connected_at = now;
+                self.telemetry = None;
+                let cfgs: Vec<_> = self.cfg.channels.values().copied().collect();
+                for c in cfgs {
+                    self.send(&Msg::Config(c));
+                }
+                self.send(&Msg::Heartbeat { outputs_enabled: self.enabled });
+                self.last_heartbeat = now;
+                return true;
+            }
+        }
+        self.mock_reason = format!("no controller answered on {port}");
+        false
     }
 
     fn send(&mut self, msg: &Msg) {
@@ -154,7 +184,10 @@ impl R3xServoDriver {
             };
             for (_, m) in self.deframer.push(&buf[..n]) {
                 match m {
-                    Msg::Telemetry(t) => self.telemetry = Some((now, t)),
+                    Msg::Telemetry(t) => {
+                        self.pending = Some(t.clone());
+                        self.telemetry = Some((now, t));
+                    }
                     Msg::Nak { seq, code } => {
                         self.naks += 1;
                         tracing::warn!(seq, code, "servo controller rejected a message");
@@ -182,20 +215,9 @@ impl Driver for R3xServoDriver {
             self.mock_reason = "R3X_SERVO_PORT not set".into();
             return;
         };
-        for _ in 0..self.cfg.retries {
-            if let Some(link) = self.opener.open(&port, self.cfg.baud).ok().and_then(|l| self.hello(l)) {
-                self.link = Some(link);
-                self.connected_at = now;
-                let cfgs: Vec<_> = self.cfg.channels.values().copied().collect();
-                for c in cfgs {
-                    self.send(&Msg::Config(c));
-                }
-                self.send(&Msg::Heartbeat { outputs_enabled: self.enabled });
-                self.last_heartbeat = now;
-                return;
-            }
+        if !self.connect(&port, now) {
+            self.backoff.failed(now);
         }
-        self.mock_reason = format!("no controller answered on {port}");
     }
     fn set_enabled(&mut self, on: bool, now: f64) {
         if on != self.enabled {
@@ -216,6 +238,16 @@ impl Driver for R3xServoDriver {
         }
     }
     fn poll(&mut self, now: f64) {
+        if self.link.is_none() && !self.cfg.force_mock && self.backoff.due(now) {
+            if let Some(port) = self.cfg.port.clone() {
+                if self.connect(&port, now) {
+                    tracing::info!(port, "servo controller reconnected");
+                    self.backoff.reset();
+                } else {
+                    self.backoff.failed(now);
+                }
+            }
+        }
         if now - self.last_heartbeat >= HEARTBEAT_S - 1e-9 {
             self.last_heartbeat = now;
             self.send(&Msg::Heartbeat { outputs_enabled: self.enabled });
@@ -224,8 +256,29 @@ impl Driver for R3xServoDriver {
         let last = self.telemetry.as_ref().map_or(self.connected_at, |(t, _)| *t);
         self.stale = now - last > TELEMETRY_STALE_S;
     }
-    fn next_poll(&self, _now: f64) -> f64 {
+    fn next_poll(&self, now: f64) -> f64 {
+        if self.link.is_none() {
+            return now + 0.5;
+        }
         self.last_heartbeat + HEARTBEAT_S
+    }
+    fn take_event(&mut self) -> Option<Event> {
+        let now = self.telemetry.as_ref().map(|(t, _)| *t)?;
+        if now - self.last_published < TELEMETRY_PUBLISH_S - 1e-9 {
+            return None;
+        }
+        let t = self.pending.take()?;
+        self.last_published = now;
+        let channels = self
+            .cfg
+            .channels
+            .iter()
+            .filter_map(|(joint, c)| {
+                let ch = t.channels.get(usize::from(c.ch))?;
+                Some((joint.clone(), ServoChannelTelemetry { us: f64::from(ch.us), x: f64::from(ch.x), flags: ch.flags }))
+            })
+            .collect();
+        Some(Event::Ops(OpsEvent::ServoTelemetry { flags: t.flags, rail_ma: f64::from(t.rail_ma), channels }))
     }
     fn health(&self) -> Health {
         let Some(_) = self.link else {
@@ -331,4 +384,37 @@ mod tests {
         d.poll(1.6);
         assert_eq!(d.health().status, ServiceStatus::Degraded);
     }
+
+    #[test]
+    fn telemetry_reaches_the_bus_rate_limited_by_joint() {
+        use super::super::proto::ChannelTelemetry;
+        let (mut d, o) = start(true);
+        let wire = o.last("/dev/servo").unwrap();
+        let (joint, ch) = d.cfg.channels.iter().next().map(|(j, c)| (j.clone(), c.ch)).unwrap();
+        let mut chans = vec![ChannelTelemetry::default(); 18];
+        chans[usize::from(ch)] = ChannelTelemetry { us: 1600, x: 4.5, flags: 0 };
+        let tm = |seq| Msg::Telemetry(Telemetry { flags: 0, rail_ma: 250, last_seq: seq, channels: chans.clone() }).encode(seq);
+        wire.push(&tm(1));
+        d.poll(0.05);
+        let Some(Event::Ops(OpsEvent::ServoTelemetry { rail_ma, channels, .. })) = d.take_event() else { panic!("no telemetry") };
+        assert_eq!(rail_ma, 250.0);
+        assert_eq!(channels[&joint], ServoChannelTelemetry { us: 1600.0, x: 4.5, flags: 0 });
+        wire.push(&tm(2));
+        d.poll(0.10);
+        assert!(d.take_event().is_none(), "5 Hz at most");
+        d.poll(0.30);
+        assert!(d.take_event().is_none(), "nothing new since");
+    }
+
+    #[test]
+    fn lost_controller_reconnects() {
+        let (mut d, o) = start(true);
+        o.last("/dev/servo").unwrap().0.lock().unwrap().fail_writes = true;
+        d.poll(0.2); // heartbeat write fails
+        assert!(d.link.is_none());
+        d.poll(0.3);
+        assert!(d.link.is_some());
+        assert_eq!(o.open_count("/dev/servo"), 2);
+    }
+
 }

@@ -17,7 +17,7 @@ pub use envelope::{
 pub use frames::{Frames, Rgb};
 pub use messages::{
     Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, IntentCommand,
-    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind,
+    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind, ServoChannelTelemetry,
     StageCommand,
     StageEvent, StopTarget, TelemetryCommand,
 };

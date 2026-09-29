@@ -48,6 +48,7 @@ pub struct WasmPerformer {
 #[wasm_bindgen]
 impl WasmPerformer {
     /// `profile_json`: `profiles/<name>/robot.json`; `show_files_json`: see [`catalog`].
+    /// Mouth commands run at the profile's `audio.mouth_hz` (plan §7b), as on the robot.
     #[wasm_bindgen(constructor)]
     pub fn new(
         profile_json: &str,
@@ -61,6 +62,7 @@ impl WasmPerformer {
             &profile,
             PerformerConfig {
                 seed,
+                mouth_hz: Some(profile.audio.mouth_hz),
                 ..Default::default()
             },
         )
@@ -80,8 +82,7 @@ impl WasmPerformer {
     pub fn perf_command(&mut self, cmd_json: &str, source: &str) -> Result<(), JsError> {
         let c: PerfCommand = serde_json::from_str(cmd_json).map_err(err)?;
         let s: Source = serde_json::from_value(Value::String(source.into())).map_err(err)?;
-        self.inner.perf_command(&c, s);
-        Ok(())
+        self.inner.perf_command(&c, s).map_err(err)
     }
 
     /// Advance to `t` (monotonic seconds); returns the frame as JSON.
@@ -92,6 +93,42 @@ impl WasmPerformer {
     /// Outgoing events since the last call, as a JSON array.
     pub fn events(&mut self) -> String {
         serde_json::to_string(&self.inner.take_events()).unwrap_or_default()
+    }
+
+    /// The show folder as picker rows (see `Catalog::summary`), plus `idle_after_s` and the
+    /// catalogue's validation `errors`: `{items: [...], idle_after_s, errors}`.
+    pub fn catalog(&self) -> String {
+        let c = &self.inner.catalog;
+        json!({
+            "items": c.summary(),
+            "idle_after_s": c.idle.as_ref().map(|i| i.after_s),
+            "errors": c.errors,
+        })
+        .to_string()
+    }
+
+    /// Start recording a puppet take (`started_iso`: wall-clock start, for the header).
+    #[wasm_bindgen(js_name = takeStart)]
+    pub fn take_start(&mut self, started_iso: &str) {
+        self.inner.take_start(started_iso);
+    }
+
+    #[wasm_bindgen(js_name = takeStop)]
+    pub fn take_stop(&mut self) {
+        self.inner.take.stop();
+    }
+
+    /// `{recording, seconds, samples}`.
+    #[wasm_bindgen(js_name = takeInfo)]
+    pub fn take_info(&self) -> String {
+        let t = &self.inner.take;
+        json!({"recording": t.recording, "seconds": t.seconds(), "samples": t.samples()}).to_string()
+    }
+
+    /// The take as JSONL (header line, then samples and events).
+    #[wasm_bindgen(js_name = takeJsonl)]
+    pub fn take_jsonl(&self) -> String {
+        self.inner.take.to_jsonl()
     }
 
     /// Runs on each layer: `[{run_id, id, kind, source, layer, ...}]`.

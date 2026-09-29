@@ -1,11 +1,9 @@
 /**
  * Servo/gear whine (as Disney's BD-X sim does): a quiet synthesized hum whose loudness and
- * pitch follow the summed servo-shaft speed from the actuation pipeline. It sells the
+ * pitch follow the summed joint speed in the performer's frames. It sells the
  * physicality of a move - and tells you by ear when a clip is working the servos hard.
  * Off by default; the audio graph is only built on the first enable (a user gesture).
  */
-import type { Actuation } from './actuation/pipeline';
-
 export class ServoWhine {
   private ctx?: AudioContext;
   private gain?: GainNode;
@@ -14,8 +12,8 @@ export class ServoWhine {
   private filter?: BiquadFilterNode;
   private level = 0;
   enabled = false;
-  /** Summed servo-shaft speed that counts as "working hard" (deg/s). */
-  fullScale = 700;
+  /** Summed joint speed that counts as "working hard" (deg/s). */
+  fullScale = 450;
 
   setEnabled(on: boolean) {
     this.enabled = on;
@@ -45,16 +43,10 @@ export class ServoWhine {
     this.oscB.start();
   }
 
-  /** Summed |servo shaft speed| (deg/s) the controller is commanding. */
-  static shaftSpeed(a: Actuation): number {
-    let s = 0;
-    for (const ch of a.channels) s += Math.abs(ch.valueToServo(ch.follower.v) - ch.valueToServo(0));
-    return s;
-  }
-
-  update(a: Actuation | null, dt: number) {
-    if (!this.enabled || !this.ctx || !a) return;
-    const x = Math.min(1, ServoWhine.shaftSpeed(a) / this.fullScale);
+  /** `speed`: summed |joint speed| (deg/s) from successive frames. */
+  update(speed: number, dt: number) {
+    if (!this.enabled || !this.ctx || !(dt > 0)) return;
+    const x = Math.min(1, speed / this.fullScale);
     this.level += (x - this.level) * (1 - Math.exp(-dt / 0.04));
     const t = this.ctx.currentTime;
     // Quiet: at most ~-24 dBFS, and silent below a small deadband (holding still hums nothing).

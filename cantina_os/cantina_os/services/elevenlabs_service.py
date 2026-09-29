@@ -626,7 +626,7 @@ class ElevenLabsService(BaseService):
                                         self._post_emit(EventTopics.SPEECH_GENERATION_STARTED, {
                                             "conversation_id": conversation_id,
                                             "text": text,
-                                            # How the show player knows its own `speak` line started.
+                                            # How the r3x performer knows its own `speak` line started.
                                             "clip_id": clip_id,
                                             # Wall clock of the first sample; show tags anchor here.
                                             "audio_t0": audio_t0,

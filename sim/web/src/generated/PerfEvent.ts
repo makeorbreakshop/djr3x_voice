@@ -3,4 +3,4 @@ import type { EndReason } from "./EndReason";
 import type { RunKind } from "./RunKind";
 import type { Source } from "./Source";
 
-export type PerfEvent = { "type": "started", id: string, kind: RunKind, source: Source, run_id: number, } | { "type": "ended", id: string, kind: RunKind, source: Source, run_id: number, reason: EndReason, } | { "type": "sfx", id: string, } | { "type": "emote", slot: number, cue: string, };
+export type PerfEvent = { "type": "started", id: string, kind: RunKind, source: Source, run_id: number, } | { "type": "ended", id: string, kind: RunKind, source: Source, run_id: number, reason: EndReason, } | { "type": "sfx", id: string, } | { "type": "emote", slot: number, cue: string, } | { "type": "speak", text: string, } | { "type": "duck", on: boolean, } | { "type": "lights", cue?: string, mode?: string, rig?: string, fade?: number, hold?: number, } | { "type": "eyes", pattern: string, duration?: number, } | { "type": "chest", command: string, hold?: number, };

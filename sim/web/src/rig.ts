@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import type { JointDynamics } from './actuation/pipeline';
 
 export interface JointSpec {
   name: string;
@@ -16,14 +15,15 @@ export interface JointSpec {
 export interface RigDoc {
   joints: JointSpec[];
   anchors: Record<string, number[]> & { mouth_kind?: string };
-  dynamics: Record<string, JointDynamics>;
-  chest_lights?: import('./chest').ChestLightSpec[];
+  /** Per-joint mass/inertia for the servo plant (read by the Rust performer). */
+  dynamics?: Record<string, unknown>;
+  chest_lights?: import('./chestlights').ChestLightSpec[];
   triangles: number;
 }
 
 /**
  * A joint in the 3D model. It has no dynamics of its own: its angle is whatever the
- * servo plant (actuation/pipeline.ts) says the output shaft is at.
+ * performer's frames say the output shaft is at.
  */
 export class Joint {
   value = 0; // deg, or mm when prismatic

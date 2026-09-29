@@ -208,7 +208,7 @@ class ShowParams(BaseModel):
 
 
 class ShowPerformPayload(BaseModel):
-    """show.perform - anyone asks the timeline to perform a clip, cue or sequence."""
+    """show.perform - anyone asks the r3x performer (via the bus tap) to perform a clip, cue or sequence."""
     id: str
     params: Optional[ShowParams] = None
     source: ShowSource

@@ -1,27 +1,50 @@
-//! CantinaOS tap topics -> typed events and retained state.
+//! CantinaOS tap topics -> typed events, retained state and (Phase 3) perf commands.
 //!
 //! Payload shapes are from `cantina_os/cantina_os/tap/topic_schema.json` (hand-written from
 //! the emit sites). Payloads are untyped dicts, so every read is tolerant: a missing or
 //! mistyped field degrades to a default instead of dropping the event.
 
-use std::collections::HashMap;
-
 use r3x_bus::Bus;
 use r3x_contracts::{
-    ConversationEvent, ConversationPhase, ConversationState, DjEvent, DjState, Engagement,
-    EndReason, Event, LightsState, MusicEvent, MusicState, OpsEvent, PerfEvent, PerfLayer,
-    PerfState, RunInfo, RunKind, ServiceStatus, Source, StageState, Track,
+    Ack, Command, ConversationEvent, ConversationPhase, ConversationState, DjEvent, DjState,
+    Engagement, Event, LightsState, MusicEvent, MusicState, OpsEvent, PerfCommand, PerfLayer,
+    ServiceStatus, Source, StageCommand, StopTarget, Track,
 };
 use serde_json::Value;
 
 /// Bridge-side memory the tap does not carry.
 #[derive(Default)]
 pub struct TapState {
-    /// CantinaOS run uuid -> our run id.
-    runs: HashMap<String, u64>,
-    next_run: u64,
-    /// Last freeze state CantinaOS reported, so the stage watcher does not echo it back.
+    /// Last freeze state CantinaOS saw, so the stage watcher does not echo it back.
     pub cantina_frozen: bool,
+}
+
+/// Send a command on the bus as the bridge would (fire-and-forget; refusals are logged).
+fn command(bus: &Bus, source: Source, cmd: Command) {
+    let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+    let bus = bus.clone();
+    rt.spawn(async move {
+        let what = format!("{cmd:?}");
+        if let Ack::Rejected { reason } = bus.command(source, None, cmd).await {
+            tracing::info!("{what} refused: {reason}");
+        }
+    });
+}
+
+fn f_or(p: &Value, k: &str, default: f64) -> f64 {
+    f(p, k).unwrap_or(default)
+}
+
+/// `eye.command`: `{pattern, duration?}`, or the CLI shape `{command: "eye", args: ["pattern", X]}`.
+fn eye_pattern(p: &Value) -> Option<String> {
+    if let Some(pat) = s(p, "pattern") {
+        return Some(pat.to_owned());
+    }
+    let args: Vec<&str> = p.get("args")?.as_array()?.iter().filter_map(Value::as_str).collect();
+    match args.as_slice() {
+        ["pattern", x, ..] => Some((*x).to_owned()),
+        _ => None,
+    }
 }
 
 const SRC: Source = Source::Bridge;
@@ -86,23 +109,15 @@ pub fn engagement(raw: &str) -> Option<Engagement> {
     })
 }
 
+/// A `show.perform` source: its tier ceiling applies (unknown = the timeline's).
 fn source(raw: Option<&str>) -> Source {
     match raw.unwrap_or("") {
         "jev" => Source::Jev,
         "claude" => Source::Claude,
-        "timeline" => Source::Timeline,
         "idle" => Source::Idle,
         "ui" => Source::Ui,
         "cli" => Source::Cli,
-        _ => Source::Bridge,
-    }
-}
-
-fn run_kind(raw: Option<&str>) -> RunKind {
-    match raw {
-        Some("clip") => RunKind::Clip,
-        Some("sequence") => RunKind::Sequence,
-        _ => RunKind::Cue,
+        _ => Source::Timeline,
     }
 }
 
@@ -131,8 +146,9 @@ pub fn library_from_listing(msg: &str) -> Option<Vec<String>> {
     Some(v)
 }
 
-/// Translate one tap event. Unknown topics are ignored.
-pub fn translate(bus: &Bus, st: &mut TapState, topic: &str, p: &Value) {
+/// Translate one tap event. Unknown topics are ignored. `ours`: an echo of the bridge's own
+/// emit (it must not come back in as a command).
+pub fn translate(bus: &Bus, st: &mut TapState, topic: &str, p: &Value, ours: bool) {
     let id = conv_id(p);
     let ev = |e: Event| {
         bus.publish(SRC, id.clone(), e);
@@ -199,66 +215,61 @@ pub fn translate(bus: &Bus, st: &mut TapState, topic: &str, p: &Value) {
                 ev(Event::Dj(if active { DjEvent::Started } else { DjEvent::Stopped }));
             }
         }
-        "show.started" => {
-            let Some(uuid) = s(p, "run_id") else { return };
-            st.next_run += 1;
-            let run_id = st.next_run;
-            st.runs.insert(uuid.to_owned(), run_id);
-            let (name, kind, src) = (s(p, "id").unwrap_or("?").to_owned(), run_kind(s(p, "kind")), source(s(p, "source")));
-            let layer = if kind == RunKind::Sequence { PerfLayer::Show } else { PerfLayer::Gesture };
-            bus.update(SRC, |ps: &mut PerfState| {
-                ps.runs.push(RunInfo { run_id, id: name.clone(), kind, layer, source: src })
-            });
-            ev(Event::Perf(PerfEvent::Started { id: name, kind, source: src, run_id }));
-        }
-        "show.ended" => {
-            let run_id = s(p, "run_id").and_then(|u| st.runs.remove(u)).unwrap_or(0);
-            let reason = match s(p, "reason") {
-                Some("interrupted") => EndReason::Interrupted,
-                Some("rejected") => EndReason::Rejected,
-                _ => EndReason::Done,
+        // CantinaOS asks, the performer plays (Phase 3).
+        "show.perform" if !ours => {
+            let Some(item) = s(p, "id") else { return };
+            let params = p.get("params").unwrap_or(&Value::Null);
+            let play = PerfCommand::Play {
+                id: item.to_owned(),
+                intensity: f_or(params, "intensity", 1.0),
+                speed: f_or(params, "speed", 1.0),
+                layer: None,
             };
-            bus.update(SRC, |ps: &mut PerfState| ps.runs.retain(|r| r.run_id != run_id));
-            ev(Event::Perf(PerfEvent::Ended {
-                id: s(p, "id").unwrap_or("?").to_owned(),
-                kind: run_kind(s(p, "kind")),
-                source: source(s(p, "source")),
-                run_id,
-                reason,
-            }));
+            command(bus, source(s(p, "source")), Command::Perf(play));
         }
-        "show.sfx" => ev(Event::Perf(PerfEvent::Sfx { id: s(p, "id").unwrap_or("?").to_owned() })),
+        "show.stop" if !ours => {
+            let target = if let Some(item) = s(p, "id") {
+                StopTarget::Id { id: item.to_owned() }
+            } else {
+                match s(p, "layer") {
+                    Some("show") => StopTarget::Layer { layer: PerfLayer::Show },
+                    Some("gesture") => StopTarget::Layer { layer: PerfLayer::Gesture },
+                    Some("background") => StopTarget::Layer { layer: PerfLayer::Background },
+                    _ => StopTarget::All,
+                }
+            };
+            command(bus, SRC, Command::Perf(PerfCommand::Stop(target)));
+        }
         "motion.freeze" => {
             let on = b(p, "on").unwrap_or(false);
             st.cantina_frozen = on;
-            bus.update(SRC, |ps: &mut PerfState| {
-                ps.frozen = on;
-                if on {
-                    ps.runs.clear();
-                }
-            });
-            bus.update(SRC, |s: &mut StageState| s.frozen = on);
+            if !ours {
+                command(bus, SRC, Command::Stage(StageCommand::Freeze { on }));
+            }
+        }
+        "speech.synthesis.amplitude" if !ours => {
+            let level = f(p, "amplitude").unwrap_or(0.0);
+            ev(Event::Conversation(ConversationEvent::Mouth { level }));
         }
         "eye.command" => {
-            // The CLI-shaped variant has no pattern key; the eye service parses it itself.
-            if let Some(pattern) = s(p, "pattern") {
-                let color = s(p, "color").map(str::to_owned);
-                bus.update(SRC, |l: &mut LightsState| {
-                    l.eye_pattern = Some(pattern.to_owned());
-                    if color.is_some() {
-                        l.eye_color = color;
-                    }
-                });
+            let Some(pattern) = eye_pattern(p) else { return };
+            let color = s(p, "color").map(str::to_owned);
+            bus.update(SRC, |l: &mut LightsState| {
+                l.eye_pattern = Some(pattern.clone());
+                if color.is_some() {
+                    l.eye_color = color;
+                }
+            });
+            if !ours {
+                // A live eye command (Jev/Claude `set_eye_color`, the CLI): the performer shows it.
+                let duration = f(p, "duration").filter(|d| *d > 0.0);
+                command(bus, SRC, Command::Perf(PerfCommand::Eyes { pattern, duration }));
             }
         }
         "chest.command" => {
             if let Some(c) = s(p, "command") {
                 bus.update(SRC, |l: &mut LightsState| l.chest_mode = Some(c.to_owned()));
             }
-        }
-        "stage.lights" => {
-            let cue = s(p, "cue").map(str::to_owned);
-            bus.update(SRC, |l: &mut LightsState| l.stage_cue = cue);
         }
         "system.mode.change" => {
             if let Some(e) = s(p, "new_mode").and_then(engagement) {
@@ -290,7 +301,7 @@ pub fn translate(bus: &Bus, st: &mut TapState, topic: &str, p: &Value) {
 mod tests {
     use super::*;
     use r3x_bus::Received;
-    use r3x_contracts::{Body, Domain, EngagementState};
+    use r3x_contracts::{Body, Domain, EngagementState, MessageClass};
     use serde_json::json;
 
     fn drain(rx: &mut r3x_bus::EventReceiver) -> Vec<(Event, Option<String>)> {
@@ -313,13 +324,13 @@ mod tests {
         let mut rx = bus.subscribe(Domain::Conversation);
         let mut st = TapState::default();
         let cid = json!("abc");
-        translate(&bus, &mut st, "voice.listening.started", &json!({"conversation_id": cid, "timestamp": 1.0}));
+        translate(&bus, &mut st, "voice.listening.started", &json!({"conversation_id": cid, "timestamp": 1.0}), false);
         assert_eq!(bus.get::<ConversationState>().phase, ConversationPhase::Listening);
-        translate(&bus, &mut st, "voice.listening.stopped", &json!({"conversation_id": cid, "transcript": "play something"}));
-        translate(&bus, &mut st, "intent.detected", &json!({"conversation_id": cid, "intent_name": "play_music", "confidence": null}));
-        translate(&bus, &mut st, "llm.response", &json!({"conversation_id": cid, "text": "On it", "is_complete": false}));
-        translate(&bus, &mut st, "llm.response", &json!({"conversation_id": cid, "text": "On it.", "is_complete": true}));
-        translate(&bus, &mut st, "speech.generation.started", &json!({"conversation_id": cid, "text": "On it.", "audio_t0": 1.0}));
+        translate(&bus, &mut st, "voice.listening.stopped", &json!({"conversation_id": cid, "transcript": "play something"}), false);
+        translate(&bus, &mut st, "intent.detected", &json!({"conversation_id": cid, "intent_name": "play_music", "confidence": null}), false);
+        translate(&bus, &mut st, "llm.response", &json!({"conversation_id": cid, "text": "On it", "is_complete": false}), false);
+        translate(&bus, &mut st, "llm.response", &json!({"conversation_id": cid, "text": "On it.", "is_complete": true}), false);
+        translate(&bus, &mut st, "speech.generation.started", &json!({"conversation_id": cid, "text": "On it.", "audio_t0": 1.0}), false);
         let evs = drain(&mut rx);
         assert!(evs.iter().all(|(_, c)| c.as_deref() == Some("abc")), "turn id adopted");
         let kinds: Vec<_> = evs.iter().map(|(e, _)| e.topic()).collect();
@@ -343,31 +354,23 @@ mod tests {
         let bus = Bus::default();
         let mut st = TapState::default();
         let track = json!({"track": {"track_id": "1", "title": "Cantina Band", "artist": "Figrin", "duration": 160.0, "bpm": 120.0}});
-        translate(&bus, &mut st, "music.playback.started", &track);
+        translate(&bus, &mut st, "music.playback.started", &track, false);
         let m = bus.get::<MusicState>();
         assert!(m.playing);
         assert_eq!(m.track.unwrap().bpm, Some(120.0));
-        translate(&bus, &mut st, "music.playback.stopped", &json!({}));
+        translate(&bus, &mut st, "music.playback.stopped", &json!({}), false);
         assert!(!bus.get::<MusicState>().playing);
 
-        translate(&bus, &mut st, "music.library.updated", &json!({"tracks": {"b": {"title": "B"}, "a": {}}}));
+        translate(&bus, &mut st, "music.library.updated", &json!({"tracks": {"b": {"title": "B"}, "a": {}}}), false);
         assert_eq!(bus.get::<MusicState>().library, ["B", "a"]);
 
-        translate(&bus, &mut st, "dj.mode.changed", &json!({"is_active": true}));
+        translate(&bus, &mut st, "dj.mode.changed", &json!({"is_active": true}), false);
         assert!(bus.get::<DjState>().active);
 
-        translate(&bus, &mut st, "show.started", &json!({"id": "yes", "kind": "cue", "source": "ui", "run_id": "u-1"}));
-        assert_eq!(bus.get::<PerfState>().runs.len(), 1);
-        translate(&bus, &mut st, "show.ended", &json!({"id": "yes", "kind": "cue", "source": "ui", "run_id": "u-1", "reason": "done"}));
-        assert!(bus.get::<PerfState>().runs.is_empty());
-
-        translate(&bus, &mut st, "system.mode.change", &json!({"old_mode": "IDLE", "new_mode": "INTERACTIVE"}));
+        translate(&bus, &mut st, "system.mode.change", &json!({"old_mode": "IDLE", "new_mode": "INTERACTIVE"}), false);
         assert_eq!(bus.get::<EngagementState>().engagement, Engagement::Interactive);
-        translate(&bus, &mut st, "system.mode.change", &json!({"mode": "dj"}));
+        translate(&bus, &mut st, "system.mode.change", &json!({"mode": "dj"}), false);
         assert_eq!(bus.get::<EngagementState>().engagement, Engagement::Interactive, "dj/standard variant ignored");
-
-        translate(&bus, &mut st, "motion.freeze", &json!({"on": true}));
-        assert!(bus.get::<StageState>().frozen && st.cantina_frozen);
     }
 
     #[test]
@@ -375,5 +378,29 @@ mod tests {
         assert_eq!(library_from_listing("Available tracks:\n1. Zed\n2. Alpha"), Some(vec!["Alpha".into(), "Zed".into()]));
         assert_eq!(library_from_listing("Playing X"), None);
         assert_eq!(service_status("ServiceStatus.RUNNING"), ServiceStatus::Running);
+    }
+
+    /// CantinaOS's show requests and eye commands become perf commands; our own echoes do not.
+    #[tokio::test]
+    async fn requests_become_perf_commands() {
+        let bus = Bus::default();
+        let mut perf = bus.take_commands(MessageClass::Perf).unwrap();
+        let mut st = TapState::default();
+        let claude = json!({"id": "excited", "source": "claude", "params": {"intensity": 1.2}});
+        translate(&bus, &mut st, "show.perform", &claude, true); // echo: ignored
+        translate(&bus, &mut st, "show.perform", &claude, false);
+        translate(&bus, &mut st, "eye.command", &json!({"pattern": "angry", "color": "red"}), false);
+        translate(&bus, &mut st, "show.stop", &json!({"layer": "show"}), false);
+        let mut got = vec![];
+        for _ in 0..3 {
+            let req = perf.recv().await.unwrap();
+            got.push((req.source(), req.command.clone()));
+            req.ack(Ack::Accepted);
+        }
+        assert!(got.contains(&(Source::Claude, Command::Perf(PerfCommand::Play { id: "excited".into(), intensity: 1.2, speed: 1.0, layer: None }))));
+        assert!(got.contains(&(Source::Bridge, Command::Perf(PerfCommand::Eyes { pattern: "angry".into(), duration: None }))));
+        assert!(got.contains(&(Source::Bridge, Command::Perf(PerfCommand::Stop(StopTarget::Layer { layer: PerfLayer::Show })))));
+        assert_eq!(bus.get::<LightsState>().eye_color.as_deref(), Some("red"));
+        assert_eq!(eye_pattern(&json!({"command": "eye", "args": ["pattern", "happy"]})).as_deref(), Some("happy"));
     }
 }

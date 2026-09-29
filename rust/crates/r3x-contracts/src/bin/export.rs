@@ -14,7 +14,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ts_dir = repo.join("sim/web/src/generated");
     let schema_dir = repo.join("rust/contracts-schema");
 
-    let out = if check { std::env::temp_dir().join("r3x-contracts-check") } else { repo.clone() };
+    // Per process: concurrent checks (parallel test runs, worktrees) must not share a scratch dir.
+    let scratch = std::env::temp_dir().join(format!("r3x-contracts-check-{}", std::process::id()));
+    let out = if check { scratch.clone() } else { repo.clone() };
     let ts_out = out.join("sim/web/src/generated");
     let schema_out = out.join("rust/contracts-schema");
     for d in [&ts_out, &schema_out] {
@@ -35,10 +37,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if check {
         for (committed, fresh) in [(&ts_dir, &ts_out), (&schema_dir, &schema_out)] {
             if !same_tree(committed, fresh)? {
+                let _ = std::fs::remove_dir_all(&scratch);
                 eprintln!("{} is stale; run `cargo run -p r3x-contracts --bin export`", committed.display());
                 std::process::exit(1);
             }
         }
+        let _ = std::fs::remove_dir_all(&scratch);
         println!("generated contracts are up to date");
     } else {
         println!("wrote {} and {}", ts_dir.display(), schema_dir.display());
@@ -46,8 +50,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Object keys sorted, so the output does not depend on serde_json's `preserve_order` feature
+/// (which feature unification turns on when this builds alongside the performer).
+fn sorted(v: serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(m) => {
+            let mut kv: Vec<_> = m.into_iter().collect();
+            kv.sort_by(|a, b| a.0.cmp(&b.0));
+            serde_json::Value::Object(kv.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+        }
+        serde_json::Value::Array(a) => serde_json::Value::Array(a.into_iter().map(sorted).collect()),
+        other => other,
+    }
+}
+
 fn write_schema(dir: &Path, name: &str, schema: schemars::Schema) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(&schema).expect("schema serialises");
+    let json = serde_json::to_string_pretty(&sorted(schema.to_value())).expect("schema serialises");
     std::fs::write(dir.join(format!("{name}.schema.json")), json + "\n")
 }
 

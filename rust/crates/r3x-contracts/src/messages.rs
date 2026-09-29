@@ -73,6 +73,8 @@ pub enum MusicCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PerfLayer {
+    /// Authored loops under the activity (idle/DJ bop); lowest.
+    Background,
     Gesture,
     Show,
 }
@@ -114,6 +116,14 @@ pub enum PerfCommand {
     /// Stop every run, refuse new ones; `on: false` releases. Same switch as
     /// `StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.
     Freeze { on: bool },
+    /// Show a named face pattern (`happy`, `thinking`, ...) through the face board, for
+    /// `duration` s; none = until the interaction state next changes (EYE_COMMAND).
+    Eyes {
+        pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        duration: Option<f64>,
+    },
 }
 
 fn one() -> f64 {
@@ -275,6 +285,42 @@ pub enum PerfEvent {
     Ended { id: String, kind: RunKind, source: Source, run_id: u64, reason: EndReason },
     Sfx { id: String },
     Emote { slot: u8, cue: String },
+    /// A show's spoken line, for the voice to say (never from a Claude-sourced run).
+    Speak { text: String },
+    /// A show ducks (`on`) or restores the music.
+    Duck { on: bool },
+    /// A show's stage-light action (the venue desk; frames carry the resulting output).
+    Lights {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        cue: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        rig: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        fade: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        hold: Option<f64>,
+    },
+    /// A show's face pattern (the performer renders it; mirrored to a board it does not own).
+    Eyes {
+        pattern: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        duration: Option<f64>,
+    },
+    /// A show's chest override word, held for `hold` s (0 = until the status changes).
+    Chest {
+        command: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        hold: Option<f64>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -316,6 +362,21 @@ pub enum OpsEvent {
     Latency { leg: String, ms: f64 },
     /// Reply to an `intent.console` line.
     Console { message: String, is_error: bool },
+    /// Servo controller telemetry (rate-limited by the driver).
+    ServoTelemetry {
+        /// Controller status flags (`r3x-drivers` `servo::proto::flag`).
+        flags: u8,
+        rail_ma: f64,
+        /// Joint -> commanded pulse (µs, 0 = off) and follower position (joint units).
+        channels: BTreeMap<String, ServoChannelTelemetry>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ServoChannelTelemetry {
+    pub us: f64,
+    pub x: f64,
+    pub flags: u8,
 }
 
 #[cfg(test)]

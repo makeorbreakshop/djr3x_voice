@@ -4,6 +4,10 @@
 //! amplitude at 60 Hz change-only, "FLASH then M000" at speech end) and SimpleEyeAdapter
 //! (mouth commands throttled to 10 Hz by DROPPING, so the end-of-speech M000 can be lost -
 //! reproduced on purpose, see `dropped_mouth_resets`).
+//!
+//! Plan §7b fixes both rates to one (the profile's `audio.mouth_hz`): with
+//! [`CantinaHostEmulator::set_mouth_hz`] the EMA updates at that rate and the end-of-speech
+//! `M000` is never dropped. The legacy rates stay the default for parity with `host.ts`.
 
 use std::collections::VecDeque;
 
@@ -100,6 +104,8 @@ pub struct CantinaHostEmulator {
     last_mouth_command_time: f64,
     adapter_last_mouth_time: f64,
     last_control_tick: f64,
+    /// §7b single mouth rate (ms between mouth commands); None = the legacy 16.7/100 ms pair.
+    mouth_interval_ms: Option<f64>,
     // A show's eye command: shown until its duration ends or the interaction state changes.
     shown: Option<Pattern>,
     shown_until: f64,
@@ -121,11 +127,18 @@ impl CantinaHostEmulator {
             last_mouth_command_time: f64::NEG_INFINITY,
             adapter_last_mouth_time: f64::NEG_INFINITY,
             last_control_tick: f64::NEG_INFINITY,
+            mouth_interval_ms: None,
             shown: None,
             shown_until: 0.0,
             shown_over: Pattern::Idle,
             tapped: Vec::new(),
         }
+    }
+
+    /// One mouth rate (plan §7b): EMA updates at `hz` and the end-of-speech `M000` always
+    /// goes out. `None` restores the legacy throttles (parity with `host.ts`).
+    pub fn set_mouth_hz(&mut self, hz: Option<f64>) {
+        self.mouth_interval_ms = hz.filter(|h| *h > 0.0).map(|h| 1000.0 / h);
     }
 
     /// Lines sent since the last call.
@@ -193,7 +206,9 @@ impl CantinaHostEmulator {
         }
         self.amplitude_modulation = 0.3 * a + 0.7 * self.amplitude_modulation;
         let now = self.fw.now;
-        if now - self.last_mouth_command_time >= MOUTH_UPDATE_INTERVAL {
+        // Live rate on the firmware's whole-millisecond clock: within a millisecond of the period.
+        let every = self.mouth_interval_ms.map_or(MOUTH_UPDATE_INTERVAL, |ms| ms - 1.0);
+        if now - self.last_mouth_command_time >= every {
             let level = libm::trunc(self.amplitude_modulation * 255.0) as i64;
             if level != self.last_mouth_level {
                 self.adapter_set_mouth(level);
@@ -210,15 +225,19 @@ impl CantinaHostEmulator {
         self.target_pattern = Pattern::Flash;
         self.amplitude_modulation = 0.0;
         self.last_mouth_level = -1;
-        if !self.adapter_set_mouth(0) {
+        if self.mouth_interval_ms.is_some() {
+            self.adapter_last_mouth_time = self.fw.now;
+            self.send("M000".into());
+        } else if !self.adapter_set_mouth(0) {
             self.dropped_mouth_resets += 1;
         }
     }
 
-    /// Returns false when the adapter's 10 Hz throttle swallowed the command.
+    /// Returns false when the adapter's throttle (10 Hz legacy) swallowed the command.
     fn adapter_set_mouth(&mut self, level: i64) -> bool {
         let now = self.fw.now;
-        if now - self.adapter_last_mouth_time < ADAPTER_MOUTH_INTERVAL {
+        let every = self.mouth_interval_ms.map_or(ADAPTER_MOUTH_INTERVAL, |ms| ms - 1.0);
+        if now - self.adapter_last_mouth_time < every {
             return false;
         }
         self.adapter_last_mouth_time = now;

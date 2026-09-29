@@ -16,6 +16,7 @@ interface Wasm {
     command(c: string): void;
     tick(t: number): string;
     events(): string;
+    catalog(): string;
     free(): void;
   };
   expandShow(files: string, root: string, bpm?: number): string;
@@ -44,6 +45,37 @@ describe.skipIf(!built)('wasm performer', () => {
     expect(frame!.chest).toHaveLength(33);
     const events = JSON.parse(p.events()) as { type: string; run?: { id: string } }[];
     expect(events.find((e) => e.type === 'started')?.run?.id).toBe('nod');
+    p.free();
+  });
+
+  it('drives the controls the standalone sim uses', async () => {
+    const w = await load();
+    const p = new w.WasmPerformer(JSON.stringify(PROFILE), showFiles(), 7);
+    type F = { joints: Record<string, number>; eyes: number[][]; stage: number[][] };
+    const run = (from: number, n: number) => {
+      let f: F | null = null;
+      for (let i = 0; i < n; i++) f = JSON.parse(p.tick(from + i / 60));
+      return f!;
+    };
+    p.command(JSON.stringify({ cmd: 'autonomy', on: false }));
+    const before = run(0, 30);
+    expect(before.stage).toHaveLength(11); // stagelights.ts GROUPS
+
+    // The catalogue lists the show folder for the pickers.
+    const cat = JSON.parse(p.catalog()) as { items: { id: string; kind: string }[] };
+    expect(cat.items.some((it) => it.id === 'nod' && it.kind === 'clip')).toBe(true);
+
+    // An eye command (EYE_COMMAND) changes the eye pixels.
+    p.command(JSON.stringify({ cmd: 'eyes', pattern: 'angry', duration: 5 }));
+    const angry = run(0.5, 30);
+    expect(angry.eyes).not.toEqual(before.eyes);
+
+    // A jog holds the joint where the slider put it.
+    p.command(JSON.stringify({ cmd: 'jog', joint: 'head_pan', value: 30 }));
+    const jogged = run(1, 180);
+    expect(jogged.joints.head_pan).toBeCloseTo(30, 0);
+    p.command(JSON.stringify({ cmd: 'jog_release' }));
+    expect(run(4, 180).joints.head_pan).not.toBeCloseTo(30, 0);
     p.free();
   });
 

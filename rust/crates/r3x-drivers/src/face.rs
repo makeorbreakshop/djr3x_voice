@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use r3x_contracts::RobotProfile;
 use r3x_performer_core::performer::Out;
 
-use crate::link::{probe_led_ports, LineLink, Lines, Link, Opener};
+use crate::link::{probe_led_ports, Backoff, LineLink, Lines, Link, Opener};
 use crate::{env_flag, env_str, Driver, Health};
 
 #[derive(Debug, Clone)]
@@ -155,6 +155,10 @@ pub struct FaceDriver {
     pending_mouth: Option<u16>,
     last_mouth_at: f64,
     last_drain: f64,
+    /// The board's port once known (explicit or found): a lost link is retried there only
+    /// (probing other ports would reset boards that are not ours).
+    retry_port: Option<String>,
+    backoff: Backoff,
 }
 
 impl FaceDriver {
@@ -169,6 +173,36 @@ impl FaceDriver {
             pending_mouth: None,
             last_mouth_at: f64::NEG_INFINITY,
             last_drain: f64::NEG_INFINITY,
+            retry_port: None,
+            backoff: Backoff::default(),
+        }
+    }
+
+    /// After a write failure (or a board that was absent at start on an explicit port):
+    /// reconnect with backoff, then re-assert the state word with the mouth closed.
+    fn reconnect(&mut self, now: f64) {
+        if self.led.link.is_some() || self.cfg.force_mock {
+            return;
+        }
+        let Some(port) = self.retry_port.clone() else { return };
+        if !self.backoff.due(now) {
+            return;
+        }
+        let led = connect(self.opener.as_ref(), &FaceConfig { port: Some(port.clone()), ..self.cfg.clone() });
+        if led.link.is_none() {
+            self.backoff.failed(now);
+            self.led.mock_reason = format!("reconnecting to {port}: {}", led.mock_reason);
+            return;
+        }
+        tracing::info!(port, "face board reconnected");
+        self.led = led;
+        self.backoff.reset();
+        self.mouth = None;
+        if self.enabled {
+            if let Some(s) = self.state.clone() {
+                self.led.send(&s);
+            }
+            self.close_mouth(now);
         }
     }
 
@@ -233,6 +267,7 @@ impl Driver for FaceDriver {
     }
     fn start(&mut self, _now: f64) {
         self.led = connect(self.opener.as_ref(), &self.cfg);
+        self.retry_port = self.led.port.clone().or_else(|| self.cfg.port.clone());
     }
     fn set_enabled(&mut self, on: bool, now: f64) {
         if on == self.enabled {
@@ -254,6 +289,7 @@ impl Driver for FaceDriver {
         }
     }
     fn poll(&mut self, now: f64) {
+        self.reconnect(now);
         self.poll_mouth(now);
         if now - self.last_drain >= 0.25 {
             self.last_drain = now;
@@ -378,4 +414,19 @@ mod tests {
         d.set_enabled(true, 0.3);
         assert_eq!(wire.lines(), vec!["SS", "M200", "M000", "SL"]);
     }
+
+    #[test]
+    fn write_failure_reconnects_with_backoff_and_reasserts_state() {
+        let (mut d, o) = driver(FakeOpener::default().board("/dev/x", || FakeLink::new("READY\n", silent())), Some("/dev/x"));
+        d.line("SE", 0.0);
+        o.last("/dev/x").unwrap().0.lock().unwrap().fail_writes = true;
+        d.line("SL", 0.1); // the write fails: mock until reconnected
+        assert!(d.led.link.is_none());
+        assert_eq!(d.health().status, ServiceStatus::Degraded);
+        d.poll(0.2); // first retry at once: a fresh board answers
+        assert!(d.led.link.is_some(), "reconnected");
+        assert_eq!(o.open_count("/dev/x"), 2);
+        assert_eq!(o.last("/dev/x").unwrap().lines(), ["SL", "M000"], "state re-asserted, mouth closed");
+    }
+
 }

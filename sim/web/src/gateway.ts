@@ -13,12 +13,13 @@ import type { ClientMessage } from './generated/ClientMessage';
 import type { Command } from './generated/Command';
 import type { Envelope } from './generated/Envelope';
 import type { Event } from './generated/Event';
+import type { Frames } from './generated/Frames';
 import type { Hello } from './generated/Hello';
 import type { LogLine } from './generated/LogLine';
 import type { RetainedState } from './generated/RetainedState';
 import type { StateUpdate } from './generated/StateUpdate';
 
-export type { Ack, AudioMeta, Command, Event, Hello, LogLine, RetainedState };
+export type { Ack, AudioMeta, Command, Event, Frames, Hello, LogLine, RetainedState };
 
 /** Where the event came from: the turn id and backend wall clock ride on the envelope. */
 export interface EventMeta {
@@ -31,6 +32,8 @@ export interface GatewayHandlers {
   onState?(s: RetainedState, changed: StateUpdate['domain']): void;
   onEvent?(e: Event, meta: EventMeta): void;
   onLog?(l: LogLine, wall: number): void;
+  /** Performer frames (after `{class: 'telemetry', type: 'frames', enabled: true}`). */
+  onFrames?(f: Frames): void;
   onStatus?(connected: boolean): void;
   /** Runtime TTS audio (Phase 2): the latest `audio` meta and one binary frame. */
   onAudio?(meta: AudioMeta | null, pcm: ArrayBuffer): void;
@@ -175,6 +178,9 @@ export class GatewayClient {
         break;
       case 'log':
         this.each((h) => h.onLog?.(env.body, env.t_wall));
+        break;
+      case 'frames':
+        this.each((h) => h.onFrames?.(env.body));
         break;
       case 'ack': {
         const done = env.re ? this.pending.get(env.re) : undefined;

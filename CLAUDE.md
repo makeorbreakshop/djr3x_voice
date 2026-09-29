@@ -345,7 +345,7 @@ cues/clips/actions on a `time` or `beat` clock), `idle.json`. `SHOW_DIR` overrid
 | Where | What |
 |---|---|
 | `cantina_os/show/` | models, tolerant loader (missing/empty folder is fine), validation incl. tier rules, `expand()` (golden parity), Claude catalogue, tag parser/scheduler |
-| `services/timeline_executor_service/show_player.py` | the clock-driven player, owned by `TimelineExecutorService` (still the conductor) |
+| `rust/` r3x performer (`cargo run -p r3x-runtime -- --bridge`) | **the only player since Phase 3.** The Python `show_player.py` is deleted; CantinaOS emits `show.perform`/`show.stop`/`motion.freeze` and the bridge, attached to the bus tap, emits `show.started`/`ended`, `show.sfx`, `stage.lights`, the show's `tts.generate.request` (`clip_id` `show-…`), ducking and - only while CantinaOS owns the boards - `eye.command`/`chest.override` back onto the bus (source `tap:r3x`). No runtime = no shows. `R3X_EXTERNAL_BODY=1` stops `eye_light_controller`/`chest_light_controller` so r3x-drivers own the serial ports |
 
 **Topics** (Pydantic payloads in `core/event_payloads.py`, all forwarded by SimBridge):
 `show.perform {id, params?, source, conversation_id?}`, `show.stop {id?|layer?|all?}`,
@@ -355,7 +355,7 @@ sends it, then returns to status after `hold`), `motion.freeze {on}` (stops ever
 refuses new ones; the chest holds its state). Cue `eyes` use the existing `EYE_COMMAND`, `speak`
 uses `TTS_GENERATE_REQUEST`, `duck`/`unduck` the existing ducking events.
 
-**Clock.** Every item is scheduled against a monotonic clock anchored at the start - never by
+**Clock** (now the performer's; kept as the behaviour contract). Every item is scheduled against a monotonic clock anchored at the start - never by
 accumulated sleeps. `beat` clocks chase the live tempo (`MUSIC_PLAYBACK_STARTED` `track.bpm`,
 when a track has one; else the sequence's `bpm`). `wait for speech_end` pauses every clock in
 the run, so everything later slides. A run's own `speak` line queued behind Claude's reply
@@ -393,12 +393,15 @@ timer_for_speech()` is the seam for ElevenLabs character timestamps. Routines us
 Jev dedup (`tool_choice: none`) tags still work; the tool does not.
 
 **Plans**: step types `perform {id}` and `sequence {id}` (never fail a plan - BrainService
-treats a failed plan as a failed DJ transition). DJ start emits `sequence dj_intro`
+treats a failed plan as a failed DJ transition). The timeline validates the id locally, emits
+`show.perform {source: timeline}` and, with `wait_for_completion`, awaits that id's
+`show.ended` from source `timeline` (60 s cap). DJ start emits `sequence dj_intro`
 (`optional`) on the `show` plan layer.
 
 **CLI**: `show [list]`, `show <id> [intensity] [speed]`, `show stop [id|show|gesture|all]`,
 `show reload`, `freeze`, `unfreeze`. Registered as basic commands; the timeline parses
 `raw_input` itself (compound registration prefix-matches and carries `max_args`, see 3b).
+`show list` shows runs from `show.started`/`ended`; a cli-sourced `rejected` is replied as a refusal.
 
 **Smoke**: `env -u ANTHROPIC_BASE_URL ../venv/bin/python scripts/system_smoke_run.py --show`
 (writes a temp show set when `show/` is empty; `--with-tts` for real ElevenLabs).

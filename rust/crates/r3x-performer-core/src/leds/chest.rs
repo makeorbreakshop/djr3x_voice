@@ -626,6 +626,12 @@ impl ChestHost {
         };
     }
 
+    /// The fault-latch rule (ChestLightControllerService): only a failure to start or
+    /// initialise holds until the service reports again; runtime errors expire after the hold.
+    pub fn latches(detail: Option<&str>) -> bool {
+        detail.is_some_and(|m| m.starts_with("Failed to start") || m.starts_with("Failed to initialize"))
+    }
+
     /// latched: a failure to start/initialise, or an offline toggle - holds until cleared.
     pub fn service_status(&mut self, service: &str, status: &str, latched: bool) {
         let r = Report {

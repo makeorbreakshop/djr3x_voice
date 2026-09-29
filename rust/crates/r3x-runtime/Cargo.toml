@@ -20,6 +20,8 @@ r3x-bus.workspace = true
 r3x-ops.workspace = true
 r3x-stage.workspace = true
 r3x-gateway.workspace = true
+r3x-performer-core = { path = "../r3x-performer-core" }
+r3x-drivers = { path = "../r3x-drivers" }
 r3x-voice = { path = "../r3x-voice" }
 tokio = { workspace = true, features = ["signal"] }
 serde_json.workspace = true

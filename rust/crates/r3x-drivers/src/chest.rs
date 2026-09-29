@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use r3x_performer_core::performer::Out;
 
-use crate::link::{probe_led_ports, LineLink, Lines, Link, Opener};
+use crate::link::{probe_led_ports, Backoff, LineLink, Lines, Link, Opener};
 use crate::{env_flag, env_str, Driver, Health};
 
 pub const LOOP_HZ: f64 = 20.0;
@@ -114,6 +114,9 @@ pub struct ChestDriver {
     enabled: bool,
     resync: bool,
     last_flush: f64,
+    /// See `FaceDriver::retry_port`.
+    retry_port: Option<String>,
+    backoff: Backoff,
 }
 
 impl ChestDriver {
@@ -129,7 +132,31 @@ impl ChestDriver {
             enabled: true,
             resync: false,
             last_flush: f64::NEG_INFINITY,
+            retry_port: None,
+            backoff: Backoff::default(),
         }
+    }
+
+    /// Reconnect with backoff after a lost link; every channel is re-sent on success.
+    fn reconnect(&mut self, now: f64) {
+        if self.led.link.is_some() || self.cfg.force_mock {
+            return;
+        }
+        let Some(port) = self.retry_port.clone() else { return };
+        if !self.backoff.due(now) {
+            return;
+        }
+        let led = connect(self.opener.as_ref(), &ChestConfig { port: Some(port.clone()), ..self.cfg.clone() });
+        if led.link.is_none() {
+            self.backoff.failed(now);
+            self.led.mock_reason = format!("reconnecting to {port}: {}", led.mock_reason);
+            return;
+        }
+        tracing::info!(port, "chest board reconnected");
+        self.led = led;
+        self.backoff.reset();
+        self.sent.clear();
+        self.resync = true;
     }
 
     fn held(&self) -> bool {
@@ -191,6 +218,7 @@ impl Driver for ChestDriver {
     }
     fn start(&mut self, _now: f64) {
         self.led = connect(self.opener.as_ref(), &self.cfg);
+        self.retry_port = self.led.port.clone().or_else(|| self.cfg.port.clone());
     }
     fn set_enabled(&mut self, on: bool, _now: f64) {
         self.set_held(self.frozen, on);
@@ -203,6 +231,7 @@ impl Driver for ChestDriver {
         }
     }
     fn poll(&mut self, now: f64) {
+        self.reconnect(now);
         if now - self.last_flush >= 1.0 / LOOP_HZ - 1e-9 {
             self.last_flush = now;
             self.flush();

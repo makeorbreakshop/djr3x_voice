@@ -31,11 +31,14 @@ Usage
 
 Show system (``--show``)
 ------------------------
-Runs three show scenarios instead of the voice turns, printing every show/department event
-with its millisecond offset:
+Runs three show scenarios instead of the voice turns, printing every show event with its
+millisecond offset. Since Phase 3 CantinaOS only *requests* shows; the r3x performer
+(``cargo run -p r3x-runtime -- --bridge``, over the bus tap) plays them and emits
+``show.started``/``ended`` and the department events back. The assertions therefore check
+the requests, which hold with or without the runtime attached:
 
-1. ``show <id>`` typed at the CLI -> dispatcher -> timeline -> timed department events;
-2. ``dj start`` -> BrainService -> ``dj_intro`` on the show plan layer;
+1. ``show <id>`` typed at the CLI -> dispatcher -> timeline -> ``show.perform {source: cli}``;
+2. ``dj start`` -> BrainService plan -> ``show.perform {id: dj_intro, source: timeline}``;
 3. a real Claude turn ("say hi to everyone and get hyped") -> inline tags stripped from the
    spoken text -> ``show.perform {source: claude}`` after speech start.
 
@@ -472,8 +475,8 @@ async def run_show(args) -> int:
     cli("show hype_drop")
     await asyncio.sleep(2.5)
     evs = dump(t0)
-    topics = {e["topic"] for e in evs}
-    ok["cli show"] = {"SHOW_MOTION", "EYE_COMMAND", "CHEST_OVERRIDE", "STAGE_LIGHTS", "SHOW_SFX"} <= topics
+    ok["cli show"] = any(e["topic"] == "SHOW_PERFORM" and e["payload"].get("id") == "hype_drop"
+                         and e["payload"].get("source") == "cli" for e in evs)
 
     # 2. DJ start -> dj_intro
     print("-" * 78)
@@ -484,7 +487,8 @@ async def run_show(args) -> int:
     cli("dj stop")
     await asyncio.sleep(1.0)
     evs = dump(t0)
-    ok["dj_intro"] = any(e["topic"] == "SHOW_STARTED" and e["payload"].get("id") == "dj_intro" for e in evs)
+    ok["dj_intro"] = any(e["topic"] == "SHOW_PERFORM" and e["payload"].get("id") == "dj_intro"
+                         and e["payload"].get("source") == "timeline" for e in evs)
 
     # 3. Real Claude turn with tags
     print("-" * 78)

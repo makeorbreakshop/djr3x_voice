@@ -1,9 +1,15 @@
 import * as THREE from 'three';
-import {
-  LEDS_PER_EYE, LEFT_EYE_START, NUM_MOUTH_LEDS, OUTPUT_BRIGHTNESS, RIGHT_EYE_START,
-  RexFaceFirmware, RGB,
-} from './firmware';
 import { Rig } from './rig';
+
+/** One LED: WS2812 channel values 0..255 (PWM duty, i.e. linear light). */
+export type RGB = [number, number, number];
+export const LEDS_PER_EYE = 7;
+/** Eye strip: LEDs 0-6 the left eye, 7-13 the right (rex_face firmware). */
+export const LEFT_EYE_START = 0;
+export const RIGHT_EYE_START = 7;
+export const NUM_MOUTH_LEDS = 8;
+/** FastLED.setBrightness on the face board. */
+export const OUTPUT_BRIGHTNESS = 128;
 
 /**
  * Where the light physically comes from.
@@ -231,9 +237,10 @@ export class FaceLeds {
       new THREE.Vector3(0, 0, 0.004), 0.06, 0.12);
   }
 
-  update(fw: RexFaceFirmware) {
-    this.left.update(fw.eyeLeds.slice(LEFT_EYE_START, LEFT_EYE_START + LEDS_PER_EYE));
-    this.right.update(fw.eyeLeds.slice(RIGHT_EYE_START, RIGHT_EYE_START + LEDS_PER_EYE));
-    this.mouth.update(fw.mouthLeds.slice(0, NUM_MOUTH_LEDS));
+  /** Firmware pixels, as frames carry them: 14 eye LEDs, 8 mouth LEDs. */
+  update(eyes: RGB[], mouth: RGB[]) {
+    this.left.update(eyes.slice(LEFT_EYE_START, LEFT_EYE_START + LEDS_PER_EYE));
+    this.right.update(eyes.slice(RIGHT_EYE_START, RIGHT_EYE_START + LEDS_PER_EYE));
+    this.mouth.update(mouth.slice(0, NUM_MOUTH_LEDS));
   }
 }

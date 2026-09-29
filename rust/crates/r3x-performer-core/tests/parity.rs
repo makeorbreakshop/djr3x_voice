@@ -1,5 +1,6 @@
 //! Player-level parity with the TypeScript reference: traces written by
-//! `sim/web/scripts/gen-performer-parity.mjs` (blend, interruption, beat clock, idle, the
+//! `sim/web/scripts/gen-performer-parity.mjs` (removed with the TS player in Phase 3; the
+//! recorded traces are the frozen reference) (blend, interruption, beat clock, idle, the
 //! procedural layers, the actuation pipeline). The Rust side replays the same inputs.
 
 mod common;

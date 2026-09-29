@@ -38,11 +38,11 @@ from cantina_os.core.event_schemas import (
 from cantina_os.core.event_payloads import (
     MotionFreezePayload,
     ShowPerformPayload,
+    ShowRunPayload,
     ShowStopPayload,
 )
 from cantina_os.show.loader import ShowLibraryHandle
 from cantina_os.show.models import TIER_RANK
-from .show_player import ShowPlayer
 from cantina_os.event_payloads import (
     PlanStartedPayload,
     StepReadyPayload,
@@ -129,16 +129,19 @@ class TimelineExecutorService(BaseService):
             self._layer_events[layer] = asyncio.Event()
             self._layer_events[layer].set()  # Layers start unpaused
         
-        # ----- show player (show/SPEC.md): the timeline is the conductor -----
-        self._show = ShowPlayer(
-            ShowLibraryHandle(self._config.show_dir),
-            emit=lambda topic, payload: self._event_bus.emit(topic, payload),
-            logger=self.logger,
-            speech_budget=self._speech_timeout_for,
-            ducking_level=self._config.default_ducking_level,
-            ducking_fade_ms=self._config.ducking_fade_ms,
-            on_duck=self._set_ducked,
-        )
+        # ----- shows (show/SPEC.md) -----
+        # The r3x performer (r3x-runtime --bridge, over the bus tap) is the only conductor
+        # since Phase 3. CantinaOS keeps the library to validate plan steps and list shows,
+        # sends show.perform/show.stop/motion.freeze, and watches show.started/ended.
+        self._show_library = ShowLibraryHandle(self._config.show_dir)
+        #: run_id -> (id, layer-less summary) of runs the performer reported started.
+        self._show_runs: Dict[str, Dict[str, Any]] = {}
+        self._show_ever_started: bool = False
+        self._motion_frozen: bool = False
+        #: Plan steps waiting for their show.ended (id -> futures), source "timeline" only.
+        self._show_waiters: Dict[str, List[asyncio.Future]] = {}
+        #: Upper bound on a wait_for_completion show step; a lost show.ended never wedges a plan.
+        self._show_wait_timeout_s: float = 60.0
 
         # ----- audio state -----
         self._audio_ducked: bool = False
@@ -187,10 +190,11 @@ class TimelineExecutorService(BaseService):
     async def _stop(self) -> None:
         """Clean up tasks and subscriptions."""
         self.logger.info(f"Stopping {self.service_name}")
-        try:
-            await self._show.shutdown()
-        except Exception as e:
-            self.logger.debug(f"Show player shutdown: {e}")
+        for futures in self._show_waiters.values():
+            for fut in futures:
+                if not fut.done():
+                    fut.cancel()
+        self._show_waiters.clear()
         # Cancel all running tasks (includes layer tasks)
         for task in self._tasks:
             if not task.done():
@@ -252,15 +256,14 @@ class TimelineExecutorService(BaseService):
         # Subscribe to DJ_MODE_CHANGED to cancel plans when DJ mode stops
         await self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
 
-        # Show system (show/SPEC.md "Live bus contract")
-        await self.subscribe(EventTopics.SHOW_PERFORM, self._handle_show_perform)
-        await self.subscribe(EventTopics.SHOW_STOP, self._handle_show_stop)
-        await self.subscribe(EventTopics.MOTION_FREEZE, self._handle_motion_freeze)
+        # Show system: the r3x performer plays shows; we only request and observe them.
         await self.subscribe(EventTopics.SHOW_COMMAND, self._handle_show_command)
-        await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_generation_started)
-        # Live tempo for beat clocks: MusicController's track metadata carries bpm when known.
-        await self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_tempo)
-        await self.subscribe(EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_tempo_stopped)
+        await self.subscribe(EventTopics.SHOW_STARTED, self._handle_show_started)
+        await self.subscribe(EventTopics.SHOW_ENDED, self._handle_show_ended)
+        await self.subscribe(EventTopics.MOTION_FREEZE, self._handle_motion_freeze)
+        # A show's duck/unduck now arrives from the performer; keep _audio_ducked truthful.
+        await self.subscribe(EventTopics.AUDIO_DUCKING_START, self._handle_ducking_started)
+        await self.subscribe(EventTopics.AUDIO_DUCKING_STOP, self._handle_ducking_stopped)
 
     # ------------------------------------------------------------------
     # Plan handling
@@ -829,8 +832,8 @@ class TimelineExecutorService(BaseService):
                 # Signal the waiting speak step using clip_id, step_id, or conversation_id
                 speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
                 
-                if self._show.on_speech_complete(payload):
-                    self.logger.debug(f"Show speech {speech_id} complete")
+                if speech_id and str(speech_id).startswith("show-"):
+                    self.logger.debug(f"Show speech {speech_id} complete (the performer waits on it)")
                 elif speech_id and speech_id in self._speech_end_events:
                     self.logger.debug(f"Setting speech completion event for speech_id: {speech_id}")
                     self._speech_end_events[speech_id].set()
@@ -857,7 +860,6 @@ class TimelineExecutorService(BaseService):
                 
                 # Still signal completion even on failure so the plan can continue
                 speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
-                self._show.on_speech_complete(payload)
                 if speech_id and speech_id in self._speech_end_events:
                     self.logger.debug(f"Setting speech completion event (failed) for speech_id: {speech_id}")
                     self._speech_end_events[speech_id].set()
@@ -1304,8 +1306,9 @@ class TimelineExecutorService(BaseService):
             is_active = payload.get('is_active', False)
             if not is_active:
                 self.logger.info("DJ mode deactivated, cancelling all DJ-related plans")
-                # Shows started by plans (e.g. dj_intro) belong to DJ mode too.
-                self._show.stop(source="timeline")
+                # Shows started by plans (e.g. dj_intro) belong to DJ mode too; they run on
+                # the performer's show layer.
+                await self.emit(EventTopics.SHOW_STOP, ShowStopPayload(layer="show").model_dump(exclude_none=True))
 
                 # Cancel all active plans on all layers
                 for layer_name, task in list(self._layer_tasks.items()):
@@ -1416,83 +1419,86 @@ class TimelineExecutorService(BaseService):
             await asyncio.sleep(0.15) 
 
     # ------------------------------------------------------------------
-    # Show system (show/SPEC.md). The player does the work; these are the bus adapters.
+    # Show system (show/SPEC.md). The r3x performer plays; these are requests + bookkeeping.
     # ------------------------------------------------------------------
     @property
-    def show_player(self) -> ShowPlayer:
-        return self._show
+    def show_library(self) -> ShowLibraryHandle:
+        return self._show_library
 
-    def _set_ducked(self, ducked: bool) -> None:
-        self._audio_ducked = ducked
+    async def _handle_ducking_started(self, payload: Dict[str, Any]) -> None:
+        self._audio_ducked = True
 
-    async def _handle_show_perform(self, payload: Dict[str, Any]) -> None:
-        try:
-            req = ShowPerformPayload(**(payload or {}))
-        except ValidationError as e:
-            self.logger.error(f"Invalid show.perform payload: {e}")
-            return
-        run = self._show.perform(
-            req.id, req.source,
-            req.params.model_dump() if req.params else None,
-            conversation_id=req.conversation_id,
-        )
-        if req.source == "cli":
-            if run is None:
-                await self._send_cli(f"Show '{req.id}' refused: {self._show.last_refusal}", True)
-            else:
-                await self._send_cli(f"Performing {run.kind} '{run.id}' on the {run.layer} layer (run {run.run_id[:8]})")
-
-    async def _handle_show_stop(self, payload: Dict[str, Any]) -> None:
-        try:
-            req = ShowStopPayload(**(payload or {}))
-        except ValidationError as e:
-            self.logger.error(f"Invalid show.stop payload: {e}")
-            return
-        n = self._show.stop(item_id=req.id, layer=req.layer, all_=req.all)
-        self.logger.info(f"show.stop {req.model_dump(exclude_none=True)}: ended {n} run(s)")
+    async def _handle_ducking_stopped(self, payload: Dict[str, Any]) -> None:
+        self._audio_ducked = False
 
     async def _handle_motion_freeze(self, payload: Dict[str, Any]) -> None:
         try:
-            req = MotionFreezePayload(**(payload or {}))
+            self._motion_frozen = MotionFreezePayload(**(payload or {})).on
         except ValidationError as e:
             self.logger.error(f"Invalid motion.freeze payload: {e}")
-            return
-        self._show.set_frozen(req.on)
 
-    async def _handle_speech_generation_started(self, payload: Dict[str, Any]) -> None:
-        self._show.on_speech_started(payload or {})
-
-    async def _handle_music_tempo(self, payload: Dict[str, Any]) -> None:
-        track = (payload or {}).get("track") or {}
-        bpm = None
-        if isinstance(track, dict):
-            bpm = track.get("bpm") or track.get("tempo")
+    async def _handle_show_started(self, payload: Dict[str, Any]) -> None:
         try:
-            self._show.set_live_bpm(float(bpm) if bpm else None)
-        except (TypeError, ValueError):
-            self._show.set_live_bpm(None)
+            run = ShowRunPayload(**(payload or {}))
+        except ValidationError as e:
+            self.logger.debug(f"Ignoring malformed show.started: {e}")
+            return
+        self._show_ever_started = True
+        self._show_runs[run.run_id] = {"id": run.id, "kind": run.kind, "source": run.source}
 
-    async def _handle_music_tempo_stopped(self, payload: Dict[str, Any]) -> None:
-        self._show.set_live_bpm(None)
+    async def _handle_show_ended(self, payload: Dict[str, Any]) -> None:
+        try:
+            run = ShowRunPayload(**(payload or {}))
+        except ValidationError as e:
+            self.logger.debug(f"Ignoring malformed show.ended: {e}")
+            return
+        self._show_runs.pop(run.run_id, None)
+        reason = run.reason or "done"
+        if run.source == "cli" and reason == "rejected":
+            await self._send_cli(f"Show '{run.id}' refused by the r3x performer", True)
+        if run.source == "timeline":
+            for fut in self._show_waiters.pop(run.id, []):
+                if not fut.done():
+                    fut.set_result(reason)
 
     async def _execute_show_step(self, step, plan_id: str) -> tuple[bool, Dict[str, Any]]:
-        """Run a ``perform``/``sequence`` plan step. Never fails the plan (see PerformShowStep)."""
+        """Run a ``perform``/``sequence`` plan step. Never fails the plan (see PerformShowStep).
+
+        Validates against the local library, then asks the performer via ``show.perform``.
+        With ``wait_for_completion`` it awaits the matching ``show.ended`` (bounded).
+        """
         data = step if isinstance(step, dict) else step.model_dump()
-        step_type = data.get("step_type")
         item_id = data.get("id")
         if not item_id:
             return True, {"skipped": True, "reason": "no id"}
-        run = self._show.perform(
-            item_id, "timeline", data.get("params"),
-            expect_kind="sequence" if step_type == "sequence" else None,
-            optional=bool(data.get("optional")),
-        )
-        if run is None:
-            return True, {"id": item_id, "skipped": True, "reason": self._show.last_refusal}
+        item = self._show_library.library.get(item_id)
+        if item is None:
+            log = self.logger.info if data.get("optional") else self.logger.warning
+            log(f"Plan {plan_id}: show step {item_id!r} skipped (unknown show item)")
+            return True, {"id": item_id, "skipped": True, "reason": "unknown show item"}
+        if data.get("step_type") == "sequence" and item.kind != "sequence":
+            reason = f"is a {item.kind}, not a sequence"
+            self.logger.warning(f"Plan {plan_id}: show step {item_id!r} skipped ({reason})")
+            return True, {"id": item_id, "skipped": True, "reason": reason}
+
+        fut: Optional[asyncio.Future] = None
         if data.get("wait_for_completion"):
-            reason = await self._show.wait(run)
-            return True, {"id": item_id, "run_id": run.run_id, "reason": reason}
-        return True, {"id": item_id, "run_id": run.run_id, "status": "started"}
+            fut = asyncio.get_running_loop().create_future()
+            self._show_waiters.setdefault(item_id, []).append(fut)
+        req = ShowPerformPayload(id=item_id, source="timeline", params=data.get("params"))
+        await self.emit(EventTopics.SHOW_PERFORM, req.model_dump(exclude_none=True))
+        if fut is None:
+            return True, {"id": item_id, "status": "requested"}
+        try:
+            reason = await asyncio.wait_for(fut, self._show_wait_timeout_s)
+        except asyncio.TimeoutError:
+            reason = "timeout"
+            waiters = self._show_waiters.get(item_id, [])
+            if fut in waiters:
+                waiters.remove(fut)
+            if not waiters:
+                self._show_waiters.pop(item_id, None)
+        return True, {"id": item_id, "reason": reason}
 
     async def _send_cli(self, message: str, is_error: bool = False) -> None:
         await self.emit(EventTopics.CLI_RESPONSE, {"message": message, "is_error": is_error})
@@ -1521,9 +1527,10 @@ class TimelineExecutorService(BaseService):
             if sub == "list":
                 await self._send_cli(self._format_show_list())
             elif sub == "reload":
-                lib = self._show.library.reload()
+                lib = self._show_library.reload()
                 issues = "\n".join(f"  {i}" for i in lib.issues) or "  no issues"
-                await self._send_cli(f"Reloaded {len(lib)} show item(s) from {lib.root}\n{issues}")
+                await self._send_cli(f"Reloaded {len(lib)} show item(s) from {lib.root} "
+                                     f"(the r3x runtime hot-reloads its own copy)\n{issues}")
             elif sub == "stop":
                 target = args[1] if len(args) > 1 else "all"
                 if target == "all":
@@ -1547,12 +1554,13 @@ class TimelineExecutorService(BaseService):
                     return
                 req = ShowPerformPayload(id=args[0], source="cli", params=params or None)
                 await self.emit(EventTopics.SHOW_PERFORM, req.model_dump(exclude_none=True))
+                await self._send_cli(f"Show '{args[0]}' sent to the r3x performer")
         except Exception as e:
             self.logger.error(f"show command failed: {e}", exc_info=True)
             await self._send_cli(f"show command failed: {e}", True)
 
     def _format_show_list(self) -> str:
-        lib = self._show.library.library
+        lib = self._show_library.library
         lines = [f"Show library ({lib.root}): {len(lib)} item(s)"
                  + (f", {sum(1 for i in lib.issues if i.severity == 'error')} error(s)" if lib.issues else "")]
         if not len(lib):
@@ -1566,10 +1574,13 @@ class TimelineExecutorService(BaseService):
                 flag = "" if lib.is_valid(it.id) else "  [INVALID]"
                 extra = f" {it.clock}" if kind == "sequence" else ""
                 lines.append(f"    {it.id:<22} {it.tier:<5}{extra:<5} {it.description}{flag}")
-        running = [r for r in self._show.runs if r.started]
+        running = list(self._show_runs.values())
         if running:
-            lines.append("  running: " + ", ".join(f"{r.id} ({r.layer}, {r.source})" for r in running))
-        if self._show.frozen:
+            lines.append("  running: " + ", ".join(f"{r['id']} ({r['kind']}, {r['source']})" for r in running))
+        if not self._show_ever_started:
+            lines.append("  (no show.started seen yet: shows play only while the r3x runtime is running,"
+                         " `cargo run -p r3x-runtime -- --bridge`)")
+        if self._motion_frozen:
             lines.append("  MOTION FROZEN ('unfreeze' to resume)")
         lines.append("  usage: show <id> [intensity] [speed] | show stop [id|show|gesture|all] | show reload | freeze | unfreeze")
         return "\n".join(lines)

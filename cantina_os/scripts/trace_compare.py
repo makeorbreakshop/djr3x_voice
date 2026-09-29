@@ -17,9 +17,16 @@ A trace is cut into turns at each ``voice.listening.started`` or ``cli.command``
 
 Free text is compared only where a fixture pins it (the final reply and the spoken line).
 Ids that are minted per run (conversation ids, run ids, event ids, timestamps) never enter
-the normalised form. Intended differences go in the allow-list: ``[{"match": "<regex over
-the difference line>", "reason": "..."}]`` - empty in Phase 0. Exit status 1 on any
-difference not allowed.
+the normalised form. Intended differences go in the allow-list, two kinds of entry:
+
+* ``{"match": "<regex over the difference line>", "reason": "..."}``;
+* ``{"drop": {"side": "expected|actual|both", "topics": [...], "source": "<tap source>",
+  "payload": {<subset>}, "payload_match": {<field: regex>}}, "reason": "..."}`` - events removed from that side before
+  normalising, for work that moved to another process (e.g. Phase 3: shows are played by
+  the r3x performer, so the recorded timeline's department events are not CantinaOS's now).
+  ``source``, ``payload`` and ``payload_match`` are optional narrowing.
+
+Exit status 1 on any difference not allowed.
 """
 
 from __future__ import annotations
@@ -76,6 +83,23 @@ def load(path: Path) -> List[dict]:
             if "kind" not in rec:
                 out.append(rec)
     return out
+
+
+def apply_drops(records: List[dict], allow: List[dict], side: str) -> List[dict]:
+    """Remove the events that allow-list ``drop`` entries name for this side."""
+    drops = [a["drop"] for a in allow if "drop" in a and a["drop"].get("side", "both") in (side, "both")]
+    if not drops:
+        return records
+
+    def dropped(r: dict) -> bool:
+        p = r.get("payload") if isinstance(r.get("payload"), dict) else {}
+        return any(r.get("topic") in d.get("topics", ())
+                   and d.get("source", r.get("source")) == r.get("source")
+                   and all(p.get(k) == v for k, v in (d.get("payload") or {}).items())
+                   and all(re.fullmatch(v, str(p.get(k))) for k, v in (d.get("payload_match") or {}).items())
+                   for d in drops)
+
+    return [r for r in records if not dropped(r)]
 
 
 def _noise(topic: str) -> bool:
@@ -264,10 +288,11 @@ def main() -> int:
         return 0
     if len(args.traces) != 2:
         ap.error("need EXPECTED and ACTUAL")
-    exp, act = (turns(load(p)) for p in args.traces)
     allow = json.loads(args.allow.read_text()) if args.allow.exists() else []
+    exp = turns(apply_drops(load(args.traces[0]), allow, "expected"))
+    act = turns(apply_drops(load(args.traces[1]), allow, "actual"))
     diffs = compare(exp, act, args.startup)
-    unexplained = [d for d in diffs if not any(re.search(a["match"], d) for a in allow)]
+    unexplained = [d for d in diffs if not any("match" in a and re.search(a["match"], d) for a in allow)]
     for d in diffs:
         print(("ALLOWED " if d not in unexplained else "DIFF    ") + d)
     print(f"{len(exp)} turns compared; {len(diffs)} difference(s), {len(unexplained)} not allow-listed")

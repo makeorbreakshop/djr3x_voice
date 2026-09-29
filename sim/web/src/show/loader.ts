@@ -1,25 +1,16 @@
 /**
- * The repo-root `show/` folder, bundled by Vite (vite.config.ts allows serving it). In dev,
- * editing a show file hot-reloads the page; `npm run build` inlines the whole catalogue.
+ * The repo-root `show/` folder as raw text, bundled by Vite (vite.config.ts allows serving
+ * it), keyed by repo-relative path (`show/clips/nod.json`, `show/idle.json`) - the form the
+ * Rust performer's catalogue loads. In dev, editing a show file hot-reloads the page.
  */
-import { Catalog } from './catalog';
+const files = import.meta.glob<string>(
+  ['../../../../show/clips/*.json', '../../../../show/cues/*.json', '../../../../show/sequences/*.json', '../../../../show/idle.json'],
+  { eager: true, query: '?raw', import: 'default' },
+);
 
-const files = import.meta.glob<unknown>(['../../../../show/clips/*.json', '../../../../show/cues/*.json', '../../../../show/sequences/*.json'], {
-  eager: true,
-  import: 'default',
-});
-const idle = import.meta.glob<unknown>('../../../../show/idle.json', { eager: true, import: 'default' });
-
-/** Path of each file relative to the repo root, e.g. `show/clips/nod.json`. */
-const rel = (p: string) => p.replace(/^(\.\.\/)+/, '');
-
-export function loadCatalog(): Catalog {
-  const cat = new Catalog();
-  for (const [path, doc] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) cat.add(doc, rel(path));
-  const idleDoc = Object.values(idle)[0];
-  if (idleDoc !== undefined) cat.setIdle(idleDoc);
-  return cat;
-}
-
-/** File paths (repo-relative) by id, for error messages. */
-export const SHOW_FILES = Object.keys(files).map(rel);
+/** `{path: json text}`, sorted by path, as `WasmPerformer` takes it. */
+export const SHOW_FILES: Record<string, string> = Object.fromEntries(
+  Object.entries(files)
+    .map(([p, text]) => [p.replace(/^(\.\.\/)+/, ''), text] as const)
+    .sort(([a], [b]) => a.localeCompare(b)),
+);

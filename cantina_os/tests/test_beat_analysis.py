@@ -281,27 +281,3 @@ async def test_chest_pulses_at_the_track_tempo_and_falls_back_without_one():
         assert sent[-1] == "B120" or "B120" in sent[-3:], sent
     finally:
         await svc.stop()
-
-
-async def test_show_player_takes_the_tempo_from_the_music_controller_payload(tmp_path, click_wav):
-    """End to end on one bus: the controller's own payload drives the beat clock's tempo."""
-    from cantina_os.services.timeline_executor_service.timeline_executor_service import (
-        TimelineExecutorService,
-    )
-
-    bus = AsyncIOEventEmitter()
-    timeline = TimelineExecutorService(bus)
-    await timeline.start()
-    try:
-        svc, track = _controller(tmp_path, click_wav)
-        svc._beat_cache.put(str(click_wav), BeatInfo(bpm=128.0, first_beat_s=0.25))
-        svc._attach_cached_beats()
-        await svc._play_track_by_name("Click", source="cli")
-        bus.emit(EventTopics.MUSIC_PLAYBACK_STARTED.value, _started_payloads(svc)[-1])
-        await asyncio.sleep(0.01)
-        assert timeline.show_player.live_bpm == 128.0
-        bus.emit(EventTopics.MUSIC_PLAYBACK_STOPPED.value, {})
-        await asyncio.sleep(0.01)
-        assert timeline.show_player.live_bpm is None
-    finally:
-        await timeline.stop()

@@ -152,7 +152,7 @@ class ParallelSteps(BasePlanStep):
     steps: list[BasePlanStep] = Field(..., description="List of steps to execute concurrently")
 
 class PerformShowStep(BasePlanStep):
-    """Plan step: perform a show item (clip, cue or sequence) through the show player.
+    """Plan step: ask the r3x performer (show.perform source=timeline) for a clip, cue or sequence.
 
     Fire-and-forget by default. A show step never fails its plan: an unknown, invalid or
     refused item is logged and skipped, because BrainService treats a failed plan as a failed

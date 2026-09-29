@@ -125,6 +125,35 @@ impl Lines {
     }
 }
 
+/// Reconnect pacing after a lost link: 1 s, doubling to 30 s; reset on success.
+#[derive(Debug, Clone, Copy)]
+pub struct Backoff {
+    next_at: f64,
+    delay: f64,
+}
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Backoff { next_at: f64::NEG_INFINITY, delay: Backoff::MIN_S }
+    }
+}
+
+impl Backoff {
+    pub const MIN_S: f64 = 1.0;
+    pub const MAX_S: f64 = 30.0;
+
+    pub fn due(&self, now: f64) -> bool {
+        now >= self.next_at
+    }
+    pub fn failed(&mut self, now: f64) {
+        self.next_at = now + self.delay;
+        self.delay = (self.delay * 2.0).min(Self::MAX_S);
+    }
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// A named_v1 line link that fails open: without a board every line is dropped (counted)
 /// and the driver reports degraded health, never an error into the performer.
 pub struct LineLink {
