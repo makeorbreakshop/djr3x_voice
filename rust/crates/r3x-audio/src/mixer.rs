@@ -3,8 +3,9 @@
 //! [`Mixer::render`] runs on the device callback: it never blocks and never allocates in the
 //! steady state. Control arrives through a lock-free queue from [`MixerHandle`].
 //!
-//! Phase 4 adds music by handing a decoder [`Source`] to [`MixerHandle::add`] on
-//! [`BusId::Music`]; ducking already ramps that bus.
+//! Music is a decoder [`Source`] on [`BusId::Music`] (see [`crate::music`]); ducking ramps
+//! that bus's gain. Each source can also carry an equal-power envelope, so a crossfade is one
+//! command and both sides of it start on the same frame ([`MixerCommand::Crossfade`]).
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -52,11 +53,57 @@ pub enum MixerCommand {
     Add(BusId, Box<dyn Source>),
     Gain { bus: BusId, gain: f32, ramp_frames: u32 },
     Clear(BusId),
+    /// Equal-power crossfade, sample-accurate: every source on `bus` fades out over `frames`
+    /// (then is dropped) while `src` fades in over the same frames, starting on the same frame.
+    Crossfade { bus: BusId, src: Box<dyn Source>, frames: u32 },
+    /// Fade every source on `bus` out over `frames`, then drop them (a click-free stop).
+    FadeOut { bus: BusId, frames: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shape {
+    /// sin(t·π/2): 0 -> 1
+    In,
+    /// cos(t·π/2): 1 -> 0, then the source is dropped
+    Out,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Envelope {
+    shape: Shape,
+    pos: u32,
+    len: u32,
+}
+
+impl Envelope {
+    fn new(shape: Shape, len: u32) -> Self {
+        Self { shape, pos: 0, len: len.max(1) }
+    }
+
+    #[inline]
+    fn advance(&mut self) -> f32 {
+        let t = self.pos as f32 / self.len as f32;
+        self.pos = (self.pos + 1).min(self.len);
+        let a = t * std::f32::consts::FRAC_PI_2;
+        match self.shape {
+            Shape::In => a.sin(),
+            Shape::Out => a.cos(),
+        }
+    }
+
+    fn done(&self) -> bool {
+        self.pos >= self.len
+    }
+}
+
+struct Voice {
+    src: Box<dyn Source>,
+    env: Option<Envelope>,
 }
 
 struct Bus {
     gain: GainRamp,
-    sources: Vec<Box<dyn Source>>,
+    sources: Vec<Voice>,
 }
 
 pub struct Mixer {
@@ -64,6 +111,7 @@ pub struct Mixer {
     buses: [Bus; 3],
     commands: rtrb::Consumer<MixerCommand>,
     scratch: Vec<f32>,
+    voice_buf: Vec<f32>,
 }
 
 impl Mixer {
@@ -75,14 +123,21 @@ impl Mixer {
     pub fn render(&mut self, out: &mut [f32], when: &RenderTime) {
         while let Ok(cmd) = self.commands.pop() {
             match cmd {
-                MixerCommand::Add(bus, src) => self.buses[bus.index()].sources.push(src),
+                MixerCommand::Add(bus, src) => self.buses[bus.index()].sources.push(Voice { src, env: None }),
                 MixerCommand::Gain { bus, gain, ramp_frames } => self.buses[bus.index()].gain.set(gain, ramp_frames),
                 MixerCommand::Clear(bus) => self.buses[bus.index()].sources.clear(),
+                MixerCommand::Crossfade { bus, src, frames } => {
+                    let b = &mut self.buses[bus.index()];
+                    fade_out_all(b, frames);
+                    b.sources.push(Voice { src, env: Some(Envelope::new(Shape::In, frames)) });
+                }
+                MixerCommand::FadeOut { bus, frames } => fade_out_all(&mut self.buses[bus.index()], frames),
             }
         }
         out.fill(0.0);
         if self.scratch.len() < out.len() {
             self.scratch.resize(out.len(), 0.0); // only when the device grows its buffer
+            self.voice_buf.resize(out.len(), 0.0);
         }
         let ch = self.channels;
         for bus in &mut self.buses {
@@ -96,7 +151,25 @@ impl Mixer {
             }
             let scratch = &mut self.scratch[..out.len()];
             scratch.fill(0.0);
-            bus.sources.retain_mut(|s| s.mix(scratch, ch, when));
+            let vbuf = &mut self.voice_buf[..out.len()];
+            bus.sources.retain_mut(|v| match &mut v.env {
+                None => v.src.mix(scratch, ch, when),
+                Some(env) => {
+                    vbuf.fill(0.0);
+                    let alive = v.src.mix(vbuf, ch, when);
+                    for (o, i) in scratch.chunks_mut(ch).zip(vbuf.chunks(ch)) {
+                        let g = env.advance();
+                        for (o, i) in o.iter_mut().zip(i) {
+                            *o += i * g;
+                        }
+                    }
+                    let faded_out = env.shape == Shape::Out && env.done();
+                    if env.shape == Shape::In && env.done() {
+                        v.env = None;
+                    }
+                    alive && !faded_out
+                }
+            });
             for (frame_out, frame_in) in out.chunks_mut(ch).zip(scratch.chunks(ch)) {
                 let g = bus.gain.advance();
                 for (o, i) in frame_out.iter_mut().zip(frame_in) {
@@ -106,6 +179,22 @@ impl Mixer {
         }
         for s in out.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
+        }
+    }
+}
+
+fn fade_out_all(bus: &mut Bus, frames: u32) {
+    for v in &mut bus.sources {
+        match v.env {
+            Some(Envelope { shape: Shape::Out, .. }) => {} // already leaving
+            Some(Envelope { shape: Shape::In, pos, len }) => {
+                // Mid fade-in: leave from the current level, not from full
+                // (sin(t·π/2) = cos((1-t)·π/2)).
+                let t = pos as f32 / len as f32;
+                let start = ((1.0 - t.clamp(0.0, 1.0)) * frames as f32) as u32;
+                v.env = Some(Envelope { shape: Shape::Out, pos: start.min(frames), len: frames.max(1) });
+            }
+            None => v.env = Some(Envelope::new(Shape::Out, frames)),
         }
     }
 }
@@ -147,12 +236,22 @@ impl MixerHandle {
     pub fn unduck(&self, ramp_ms: f64) -> bool {
         self.set_gain(BusId::Music, 1.0, ramp_ms)
     }
+
+    /// Equal-power crossfade on `bus` to `src` over `secs`.
+    pub fn crossfade(&self, bus: BusId, src: Box<dyn Source>, secs: f64) -> bool {
+        self.send(MixerCommand::Crossfade { bus, src, frames: ms_to_frames(secs * 1000.0, self.sample_rate) })
+    }
+
+    /// Fade everything on `bus` out over `ms`, then drop it.
+    pub fn fade_out(&self, bus: BusId, ms: f64) -> bool {
+        self.send(MixerCommand::FadeOut { bus, frames: ms_to_frames(ms, self.sample_rate) })
+    }
 }
 
 pub fn mixer(sample_rate: u32, channels: usize) -> (Mixer, MixerHandle) {
     let (tx, rx) = rtrb::RingBuffer::new(256);
     let bus = || Bus { gain: GainRamp::new(1.0), sources: Vec::new() };
-    let m = Mixer { channels, buses: [bus(), bus(), bus()], commands: rx, scratch: vec![0.0; 4096] };
+    let m = Mixer { channels, buses: [bus(), bus(), bus()], commands: rx, scratch: vec![0.0; 4096], voice_buf: vec![0.0; 4096] };
     (m, MixerHandle { tx: Arc::new(Mutex::new(tx)), sample_rate, channels })
 }
 

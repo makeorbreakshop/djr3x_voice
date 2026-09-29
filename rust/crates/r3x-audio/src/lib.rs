@@ -1,8 +1,11 @@
 //! R3X audio engine (plan D7, §3b, §7b).
 //!
 //! - [`mixer`]: named buses (`speech`, `music`, `sfx`) each with a ramped gain; ducking is a
-//!   ramp on the music bus (default 80 ms). Music sources slot in as [`mixer::Source`]s
-//!   (Phase 4); the speech bus is fed by a [`sink::LocalSink`].
+//!   ramp on the music bus (default 80 ms); per-source equal-power envelopes make a crossfade
+//!   one sample-accurate command. The speech bus is fed by a [`sink::LocalSink`].
+//! - [`decode`] (feature `decode`): symphonia + rubato, planar mono/stereo at any rate.
+//! - [`music`] (feature `decode`): a streamed file on the music bus with a playback position.
+//! - [`sfx`] (feature `decode`): one-shot clips on the sfx bus, kit-id resolution.
 //! - [`sink`]: where speech goes. [`sink::LocalSink`] plays through the mixer on a device and
 //!   reports exactly when each line becomes audible (device output latency included);
 //!   [`sink::RemoteSink`] paces 24 kHz PCM to a gateway client.
@@ -12,11 +15,17 @@
 //! - [`device`] (feature `device`): cpal output engine and 16 kHz / 20 ms mic capture.
 
 pub mod amplitude;
+#[cfg(feature = "decode")]
+pub mod decode;
 #[cfg(feature = "device")]
 pub mod device;
 pub mod mixer;
+#[cfg(feature = "decode")]
+pub mod music;
 pub mod ramp;
 pub mod resample;
+#[cfg(feature = "decode")]
+pub mod sfx;
 pub mod sink;
 
 /// Speech-to-text capture rate.

@@ -1,15 +1,17 @@
 [package]
 name = "r3x-audio"
-description = "Audio engine: device I/O (cpal), mixer with named buses and ramped ducking, speech sinks, mouth amplitude"
+description = "Audio engine: device I/O (cpal), mixer (speech/music/sfx buses, ramped ducking, equal-power crossfade), file decode, music streams, sfx, speech sinks, mouth amplitude"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [features]
-default = ["device"]
+default = ["device", "decode"]
 # Real audio devices through cpal. Off = pure logic (mixer, sinks, analysis) for tests/headless.
 device = ["dep:cpal"]
+# File decoding (symphonia) + resampling (rubato): music streams, sfx, analysis input.
+decode = ["dep:symphonia", "dep:rubato"]
 
 [dependencies]
 tokio.workspace = true
@@ -17,6 +19,8 @@ tracing.workspace = true
 anyhow.workspace = true
 rtrb = "0.3"
 cpal = { version = "0.18", optional = true }
+symphonia = { version = "0.5", optional = true, default-features = false, features = ["mp3", "aac", "isomp4", "wav", "pcm", "flac", "ogg", "vorbis", "alac"] }
+rubato = { version = "0.16", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
