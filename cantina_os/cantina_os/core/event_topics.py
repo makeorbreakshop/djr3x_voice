@@ -83,6 +83,7 @@ class EventTopics(str, Enum):
     SPEECH_GENERATION_REQUEST = "speech.generation.request"
     SPEECH_GENERATION_STARTED = "speech.generation.started"  # Added back
     SPEECH_GENERATION_COMPLETE = "speech.generation.complete"
+    SPEECH_ALIGNMENT = "speech.alignment"  # per-character timing of a spoken reply (v4 dialogue socket)
     SPEECH_GENERATION_ERROR = "speech.generation.error"  # Added back
     SPEECH_AMPLITUDE = "speech.amplitude"
     LLM_RESPONSE = "llm.response"

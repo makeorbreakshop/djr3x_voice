@@ -86,6 +86,7 @@ FORWARDED_TOPICS = [
 # What the control panel adds on top: the conversation, command traffic and health.
 PANEL_TOPICS = [
     EventTopics.TRANSCRIPTION_FINAL,
+    EventTopics.SPEECH_ALIGNMENT,
     EventTopics.INTENT_CONSUMED,
     EventTopics.CLI_COMMAND,
     EventTopics.CLI_RESPONSE,

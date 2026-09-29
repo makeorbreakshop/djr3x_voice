@@ -7,6 +7,7 @@ import queue
 from enum import Enum
 from typing import Dict, Optional, Union, List, Any
 import uuid
+import itertools
 
 import httpx
 from pydantic import BaseModel, ValidationError, Field
@@ -22,11 +23,13 @@ from cantina_os.event_payloads import (
     SpeechGenerationRequestPayload,
     SpeechGenerationCompletePayload,
     SpeechAmplitudePayload,
+    SpeechAlignmentPayload,
     ServiceStatus,
     LogLevel,
     LLMResponsePayload
 )
 from cantina_os.core.event_topics import EventTopics
+from .elevenlabs_dialogue_socket import DialogueSocket, supports_model, to_absolute, BYTES_PER_SECOND
 
 
 class SpeechPlaybackMethod(str, Enum):
@@ -171,6 +174,9 @@ class ElevenLabsService(BaseService):
 
         # Store original and adjusted values for logging
         self._model_id = model_id
+        # ELEVENLABS_DIALOGUE_SOCKET=false forces every line onto the HTTP stream.
+        self._use_dialogue_socket = str(config_dict.get(
+            "DIALOGUE_SOCKET", os.getenv("ELEVENLABS_DIALOGUE_SOCKET", "true"))).lower() in ("1", "true", "yes", "on")
         self._original_stability = stability
         self._adjusted_stability = adjusted_stability
         
@@ -183,6 +189,9 @@ class ElevenLabsService(BaseService):
         
         # New streaming-related variables
         self._speech_request_queue = queue.Queue()
+        #: Warm v4 dialogue socket (whole replies + per-char timing); None when the model
+        #: isn't v4 or it's disabled. The HTTP stream is always the fallback.
+        self._dialogue_socket: Optional[DialogueSocket] = None
         self._audio_thread = None
         self._stop_event = threading.Event()
         self._event_loop = None
@@ -270,6 +279,17 @@ class ElevenLabsService(BaseService):
                     )
                     self._audio_thread.start()
                     self.logger.info("Started audio streaming worker thread")
+
+                    if self._use_dialogue_socket and supports_model(self._config.model_id):
+                        self._dialogue_socket = DialogueSocket(
+                            api_key=self._config.api_key,
+                            voice_id=self._config.voice_id,
+                            model_id=self._config.model_id,
+                            stability=self._config.stability,
+                            logger=self.logger,
+                        )
+                        # Connect off the loop; a failure here only means the first reply connects.
+                        await asyncio.to_thread(self._dialogue_socket.start)
             
             # Log final playback method
             self.logger.info(f"ElevenLabsService final playback method: {self._config.playback_method}")
@@ -368,6 +388,10 @@ class ElevenLabsService(BaseService):
         # From here on the thread (even a stuck one) must not touch the loop.
         self._accepting_posts = False
         self._audio_thread = None
+
+        if self._dialogue_socket is not None:
+            await asyncio.to_thread(self._dialogue_socket.close)
+            self._dialogue_socket = None
         
         # Cancel any ongoing playback
         if self._current_playback_task and not self._current_playback_task.done():
@@ -509,14 +533,10 @@ class ElevenLabsService(BaseService):
                         self.logger.info(f"Starting streaming TTS with elevenlabs SDK for text: {text[:50]}...")
                         self.logger.info(f"Request details - Model: {model_id}, Voice: {voice_id}, Speed: {speed}")
 
-                        # Use PCM format for zero-latency streaming (no MP3 decoding overhead)
-                        audio_stream = eleven_client.text_to_speech.stream(
-                            text=text,
-                            voice_id=voice_id,
-                            model_id=model_id,
-                            voice_settings=voice_settings,
-                            output_format="pcm_24000"  # ✅ 24kHz PCM - raw audio, no decoding needed
-                        )
+                        # PCM chunks, each paired with its character timing when the dialogue
+                        # socket served it (None from the HTTP stream).
+                        audio_stream = self._open_audio_stream(
+                            eleven_client, text, voice_id, model_id, voice_settings)
 
                         self.logger.info("🔊 Streaming PCM audio with real-time amplitude calculation")
 
@@ -536,6 +556,8 @@ class ElevenLabsService(BaseService):
 
                             chunk_count = 0
                             start_time = time.time()
+                            audio_t0: Optional[float] = None  # wall clock of the first write
+                            bytes_before = 0  # audio already written, for rebasing alignment
 
                             # AGC (Automatic Gain Control) for dynamic range adaptation
                             recent_rms_values = []  # Track recent RMS values for AGC
@@ -543,7 +565,7 @@ class ElevenLabsService(BaseService):
                             min_dynamic_range_db = 12  # Minimum dB range to maintain visibility
 
                             # Process and play each PCM chunk immediately (true streaming)
-                            for chunk in audio_stream:
+                            for chunk, alignment in audio_stream:
                                 if self._stop_event.is_set():
                                     self.logger.info("Shutdown during speech: aborting the stream")
                                     break
@@ -601,7 +623,22 @@ class ElevenLabsService(BaseService):
                                     self._post_emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
 
                                     # Play chunk immediately (true streaming, no accumulation!)
+                                    if audio_t0 is None:
+                                        audio_t0 = time.time()
                                     stream.write(samples)
+
+                                    if alignment:
+                                        timing = to_absolute(alignment, bytes_before * 1000.0 / BYTES_PER_SECOND)
+                                        self._post_emit(EventTopics.SPEECH_ALIGNMENT, SpeechAlignmentPayload(
+                                            conversation_id=conversation_id,
+                                            text=text,
+                                            chars=timing["chars"],
+                                            char_start_ms=timing["char_start_ms"],
+                                            char_duration_ms=timing["char_duration_ms"],
+                                            audio_t0=audio_t0,
+                                            clip_id=clip_id,
+                                        ).model_dump())
+                                    bytes_before += len(chunk)
 
                                     self.logger.debug(f"🎵 Chunk {chunk_count}: {len(samples)} samples, RMS: {normalized_amplitude:.3f}")
 
@@ -659,6 +696,34 @@ class ElevenLabsService(BaseService):
         
         self.logger.info("Audio worker thread exiting")
     
+    def _open_audio_stream(self, eleven_client, text, voice_id, model_id, voice_settings):
+        """Iterator of (pcm bytes, alignment or None) for one line. Runs on the audio thread.
+
+        v4 lines go over the warm dialogue socket, whole, which also returns character
+        timing. If the socket fails before producing any audio the line falls back to the
+        HTTP stream; a failure after audio has started is raised, since replaying from the
+        start would repeat what was already heard.
+        """
+        sock = self._dialogue_socket
+        if sock is not None and sock.handles(model_id, voice_id):
+            chunks = sock.synthesize(text, should_stop=self._stop_event.is_set)
+            try:
+                first = next(chunks)
+            except StopIteration:
+                return iter(())
+            except Exception as e:
+                self.logger.warning(f"Dialogue socket failed before any audio ({e}); using the HTTP stream")
+            else:
+                return itertools.chain([first], chunks)
+        http_stream = eleven_client.text_to_speech.stream(
+            text=text,
+            voice_id=voice_id,
+            model_id=model_id,
+            voice_settings=voice_settings,
+            output_format="pcm_24000",  # raw 24 kHz PCM, no decoding
+        )
+        return ((chunk, None) for chunk in http_stream if isinstance(chunk, bytes))
+
     async def _handle_speech_generation_request(self, event_payload: Union[Dict[str, Any], BaseEventPayload]) -> None:
         """
         Handle a request to generate and play speech.
