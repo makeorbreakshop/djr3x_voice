@@ -145,3 +145,60 @@ async def test_runtime_error_expires_but_startup_failure_latches(chest):
     await settle(); svc.tick()
     await asyncio.sleep(0.08); svc.tick()
     assert svc.system_state() == "X3"
+
+
+# ---------------------------------------------------------------------------- show control
+
+@pytest.mark.asyncio
+async def test_show_override_holds_the_channel_then_status_resumes(chest):
+    bus, svc, sent = chest
+    emit(bus, EventTopics.SYSTEM_MODE_CHANGE, {"new_mode": "INTERACTIVE"})
+    await settle(); svc.tick()
+    sent.clear()
+
+    emit(bus, EventTopics.CHEST_OVERRIDE, {"command": "X2", "hold": 0.08})
+    await settle()
+    assert sent == ["X2"]  # out at once, not on the next tick
+    # the status logic wants X3 now, but the show owns the X channel for the hold
+    emit(bus, "service_status", {"service": "ClaudeService", "status": "error"})
+    await settle(); svc.tick()
+    assert "X3" not in sent
+    emit(bus, EventTopics.VOICE_LISTENING_STARTED)  # other channels keep working
+    await settle(); svc.tick()
+    assert "SL" in sent
+
+    await asyncio.sleep(0.1); svc.tick()
+    assert sent[-1] == "X3" or "X3" in sent[-3:]  # back to status after the hold
+
+
+@pytest.mark.asyncio
+async def test_show_override_with_no_hold_stays_until_status_changes(chest):
+    bus, svc, sent = chest
+    emit(bus, EventTopics.SYSTEM_MODE_CHANGE, {"new_mode": "INTERACTIVE"})
+    await settle(); svc.tick()
+    sent.clear()
+    emit(bus, EventTopics.CHEST_OVERRIDE, {"command": "SF", "hold": 0})
+    await settle()
+    for _ in range(3):
+        svc.tick()
+    assert sent == ["SF"]  # status unchanged -> the override is left alone
+    emit(bus, EventTopics.VOICE_LISTENING_STARTED)
+    await settle(); svc.tick()
+    assert sent[-1] == "SL"
+
+
+@pytest.mark.asyncio
+async def test_motion_freeze_holds_the_board_then_reasserts(chest):
+    bus, svc, sent = chest
+    emit(bus, EventTopics.SYSTEM_MODE_CHANGE, {"new_mode": "INTERACTIVE"})
+    await settle(); svc.tick()
+    sent.clear()
+    emit(bus, EventTopics.MOTION_FREEZE, {"on": True})
+    await settle()
+    emit(bus, EventTopics.VOICE_LISTENING_STARTED)
+    emit(bus, EventTopics.CHEST_OVERRIDE, {"command": "X2", "hold": 1})
+    await settle(); svc.tick()
+    assert sent == []  # frozen: nothing changes on the board
+    emit(bus, EventTopics.MOTION_FREEZE, {"on": False})
+    await settle(); svc.tick()
+    assert {"X0", "H1FF", "SL", "B000"} <= set(sent)  # every channel re-asserted

@@ -1,0 +1,18 @@
+{
+  "id": "idle_tinker",
+  "kind": "sequence",
+  "title": "Idle tinker",
+  "description": "Idle loop: tinkers with the decks, glancing up now and then",
+  "tags": ["idle", "tinker", "busy"],
+  "tier": "free",
+  "clock": "time",
+  "layer": "gesture",
+  "loop": true,
+  "length": 13,
+  "track": [
+    {"at": 0, "clip": "tinker_decks"},
+    {"at": 4.5, "clip": "glance_left", "intensity": 0.7},
+    {"at": 7.0, "clip": "tinker_decks", "intensity": 0.8},
+    {"at": 11.2, "clip": "visor_flutter", "intensity": 0.6}
+  ]
+}

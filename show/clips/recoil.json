@@ -1,0 +1,16 @@
+{
+  "id": "recoil",
+  "kind": "clip",
+  "title": "Recoil",
+  "description": "Startled recoil: snaps back and down, visor up, arm jerks",
+  "tags": ["startled", "whoa", "surprised"],
+  "tier": "free",
+  "duration": 1.7,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.45, -9], [1.0, -9], [1.7, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -8], [1.0, -8], [1.6, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.26, -10], [1.0, -10], [1.6, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.42, 15], [1.0, 15], [1.6, 0]]}
+  }
+}

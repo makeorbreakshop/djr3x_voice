@@ -1,0 +1,15 @@
+{
+  "id": "beat_bop",
+  "kind": "clip",
+  "title": "Beat bop",
+  "description": "One bop on the beat: lift, visor and chin (half a second)",
+  "tags": ["bop", "groove", "beat"],
+  "tier": "free",
+  "duration": 0.5,
+  "interruptible_after": 0.0,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.25, 3], [0.5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, -6], [0.5, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.25, -2], [0.5, 0]]}
+  }
+}

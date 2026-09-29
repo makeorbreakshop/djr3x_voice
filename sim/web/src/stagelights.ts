@@ -238,6 +238,9 @@ export class StageLights {
 
   private keyLift = 1;
   private keyLiftTarget = 1;
+  /** A show's cue hold (s left): the mode program is paused until it runs out. */
+  private holdLeft = 0;
+  private preHoldCue: string | null = null;
   /** Bumped whenever the output changed (booth skips GPU work when it has not). */
   version = 0;
 
@@ -299,8 +302,36 @@ export class StageLights {
       // Re-enter a list at the cue already up if it is in it (no jump when music resumes).
       const at = p.list.indexOf(this._cue);
       this.listIdx = at >= 0 ? at : 0;
-      this.goCue(p.list[this.listIdx], fadeS ?? p.fadeS);
+      // During a show's hold the new program takes over when the hold ends.
+      if (!this.holdLeft) this.goCue(p.list[this.listIdx], fadeS ?? p.fadeS);
     }
+  }
+
+  /**
+   * A show's `lights` action (SPEC stage.lights): fade to a cue. With holdS > 0 the mode
+   * program is paused for that long and then resumes (back to whatever it was running);
+   * hold 0 leaves the cue up until the program or a mode change moves on. Returns false
+   * when this rig has no such cue.
+   */
+  showCue(name: string, fadeS = 0, holdS = 0): boolean {
+    if (!this.rig.cues[name]) return false;
+    if (holdS > 0) {
+      if (!this.holdLeft) this.preHoldCue = this._cue;
+      this.holdLeft = holdS;
+    }
+    this.goCue(name, fadeS);
+    return true;
+  }
+
+  /** Seconds left on a show's cue hold (0 = the mode program is running). */
+  get holding() { return this.holdLeft; }
+
+  private resumeProgram() {
+    const p = this._mode ? this.rig.modes[this._mode] : null;
+    this.phase = 0;
+    if (p?.list?.length) this.goCue(p.list[this.listIdx % p.list.length], p.fadeS);
+    else if (this.preHoldCue && this.rig.cues[this.preHoldCue]) this.goCue(this.preHoldCue, p?.fadeS ?? 0.5);
+    this.preHoldCue = null;
   }
 
   /** Fade to a named cue over fadeS seconds (0 = snap). */
@@ -322,9 +353,17 @@ export class StageLights {
     this.time += dt;
     const p = this._mode ? this.rig.modes[this._mode] : null;
 
+    // ---- a show's cue hold pauses the program
+    if (this.holdLeft > 0) {
+      this.holdLeft = Math.max(0, this.holdLeft - dt);
+      if (!this.holdLeft) this.resumeProgram();
+    }
+
     // ---- program stepping
     let stepped = false;
-    if (p?.list && p.list.length > 1) {
+    if (this.holdLeft > 0) {
+      this.externalBeats = 0;
+    } else if (p?.list && p.list.length > 1) {
       let steps = 0;
       if (p.bars) {
         const beatS = 60 / this._bpm;

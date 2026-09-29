@@ -1,0 +1,14 @@
+{
+  "id": "double_nod",
+  "kind": "clip",
+  "title": "Double nod",
+  "description": "Two quick nods: an emphatic yes",
+  "tags": ["yes", "definitely", "agree"],
+  "tier": "free",
+  "duration": 1.75,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.17, -1.5], [0.52, 6], [0.86, -1], [1.2, 6], [1.54, -1], [1.75, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.52, -2], [0.86, 0], [1.2, -2], [1.75, 0]]}
+  }
+}

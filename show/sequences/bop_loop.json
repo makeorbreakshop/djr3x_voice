@@ -1,0 +1,20 @@
+{
+  "id": "bop_loop",
+  "kind": "sequence",
+  "title": "Bop loop",
+  "description": "Loop: bops along to the music, locked to the beat, accent on the one",
+  "tags": ["bop", "groove", "dance", "vibe"],
+  "tier": "free",
+  "clock": "beat",
+  "bpm": 120,
+  "layer": "gesture",
+  "owns": ["head_lift", "visor"],
+  "loop": true,
+  "length": 4,
+  "track": [
+    {"at": 0, "clip": "beat_bop", "intensity": 1.2},
+    {"at": 1, "clip": "beat_bop", "intensity": 0.8},
+    {"at": 2, "clip": "beat_bop", "intensity": 1.0},
+    {"at": 3, "clip": "beat_bop", "intensity": 0.8}
+  ]
+}

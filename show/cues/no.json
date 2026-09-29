@@ -1,0 +1,9 @@
+{
+  "id": "no",
+  "kind": "cue",
+  "title": "No",
+  "description": "Shakes his head no, chest blinks red",
+  "tags": ["no", "nope", "disagree"],
+  "tier": "free",
+  "actions": [{"at": 0, "do": "clip", "id": "head_shake"}, {"at": 0.2, "do": "chest", "command": "X3", "hold": 0.8}]
+}

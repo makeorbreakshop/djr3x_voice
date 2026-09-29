@@ -35,6 +35,42 @@
         <p class="hint">Drop any audio file on the droid to have him say it.</p>
       </section>
 
+      <section id="show-system">
+        <h2>Show system <small>clips · cues · sequences (show/)</small></h2>
+        <div class="show-now">
+          <span>show</span><b id="sh-show">-</b>
+          <span>gesture</span><b id="sh-gesture">-</b>
+          <span>background</span><b id="sh-background">-</b>
+        </div>
+        <div class="row">
+          <button id="sh-stop" title="show.stop {all}: everything blends out">Stop</button>
+          <button id="sh-freeze" title="motion.freeze: stop shows and gestures, stop idle, hold the setpoints (off blends back over 0.5 s)">Freeze motion</button>
+        </div>
+        <label class="inline">Intensity <input id="sh-int" type="range" min="0" max="1.5" step="0.05" value="1" /><output id="sh-int-out">1.00</output></label>
+        <label class="inline">Speed <input id="sh-speed" type="range" min="0.5" max="2" step="0.05" value="1" /><output id="sh-speed-out">1.00</output></label>
+        <label class="inline"><input id="sh-idle" type="checkbox" checked /> <span id="sh-idle-label">Idle policy</span></label>
+        <label class="inline" title="Background layer: an authored loop under gestures and shows, per activity">Loop <small>idle</small><select id="sh-bg-idle" aria-label="Background loop while idle"></select><small>DJ</small><select id="sh-bg-dj" aria-label="Background loop in DJ mode"></select></label>
+        <details open><summary>Sequences <small id="sh-n-sequence"></small></summary><ul id="sh-list-sequence" class="show-list"></ul></details>
+        <details open><summary>Cues <small id="sh-n-cue"></small></summary><ul id="sh-list-cue" class="show-list"></ul></details>
+        <details><summary>Clips <small id="sh-n-clip"></small></summary><ul id="sh-list-clip" class="show-list"></ul></details>
+        <p id="sh-status" class="hint"></p>
+      </section>
+
+      <section>
+        <h2>Puppeteer <small>command space · gamepad</small></h2>
+        <p id="pp-pad" class="hint">No gamepad. Connect one (left stick rings/lean, right stick gaze, d-pad lift/visor, triggers arm, A B X Y slots 1-4, Back+ for 5-8, Start = freeze), or use the sliders.</p>
+        <div id="pp-intents" class="pp-intents"></div>
+        <div class="row"><button id="pp-center">Center</button></div>
+        <div class="row" id="pp-modes"></div>
+        <div class="row wrap" id="pp-slots"></div>
+        <div class="row">
+          <button id="take-rec" title="Log the command stream at 50 Hz with show layers and events">Record take</button>
+          <button id="take-dl">Download take</button>
+        </div>
+        <p id="take-info" class="hint"></p>
+        <label class="inline"><input id="whine" type="checkbox" /> Servo whine (audio follows joint speed)</label>
+      </section>
+
       <section>
         <h2>CantinaOS events <small>host emulator</small></h2>
         <div class="row wrap">

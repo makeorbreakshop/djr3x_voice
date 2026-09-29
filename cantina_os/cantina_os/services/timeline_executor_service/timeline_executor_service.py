@@ -31,8 +31,18 @@ from cantina_os.core.event_schemas import (
     EventPayload, # Base for PlanReadyPayload
     TrackDataPayload,
     TrackEndingSoonPayload,
-    CrossfadeCompletePayload # Assuming this will be defined or updated
+    CrossfadeCompletePayload, # Assuming this will be defined or updated
+    PerformShowStep,
+    SequenceShowStep,
 )
+from cantina_os.core.event_payloads import (
+    MotionFreezePayload,
+    ShowPerformPayload,
+    ShowStopPayload,
+)
+from cantina_os.show.loader import ShowLibraryHandle
+from cantina_os.show.models import TIER_RANK
+from .show_player import ShowPlayer
 from cantina_os.event_payloads import (
     PlanStartedPayload,
     StepReadyPayload,
@@ -71,8 +81,13 @@ class _Config(BaseModel):
     layer_priorities: Dict[str, int] = {
         "ambient": 0,     # Lowest priority
         "foreground": 1,  # User-initiated content
+        # Plans that only trigger show elements (e.g. DJ start's dj_intro). Same priority as
+        # foreground so a spoken reply neither pauses nor cancels them; override still does.
+        "show": 1,
         "override": 2     # System messages, critical alerts
     }
+    #: Root of the show files (clips/, cues/, sequences/). None = SHOW_DIR env, else repo show/.
+    show_dir: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +129,17 @@ class TimelineExecutorService(BaseService):
             self._layer_events[layer] = asyncio.Event()
             self._layer_events[layer].set()  # Layers start unpaused
         
+        # ----- show player (show/SPEC.md): the timeline is the conductor -----
+        self._show = ShowPlayer(
+            ShowLibraryHandle(self._config.show_dir),
+            emit=lambda topic, payload: self._event_bus.emit(topic, payload),
+            logger=self.logger,
+            speech_budget=self._speech_timeout_for,
+            ducking_level=self._config.default_ducking_level,
+            ducking_fade_ms=self._config.ducking_fade_ms,
+            on_duck=self._set_ducked,
+        )
+
         # ----- audio state -----
         self._audio_ducked: bool = False
         self._current_music_playing: bool = False
@@ -161,6 +187,10 @@ class TimelineExecutorService(BaseService):
     async def _stop(self) -> None:
         """Clean up tasks and subscriptions."""
         self.logger.info(f"Stopping {self.service_name}")
+        try:
+            await self._show.shutdown()
+        except Exception as e:
+            self.logger.debug(f"Show player shutdown: {e}")
         # Cancel all running tasks (includes layer tasks)
         for task in self._tasks:
             if not task.done():
@@ -222,6 +252,16 @@ class TimelineExecutorService(BaseService):
         # Subscribe to DJ_MODE_CHANGED to cancel plans when DJ mode stops
         await self.subscribe(EventTopics.DJ_MODE_CHANGED, self._handle_dj_mode_changed)
 
+        # Show system (show/SPEC.md "Live bus contract")
+        await self.subscribe(EventTopics.SHOW_PERFORM, self._handle_show_perform)
+        await self.subscribe(EventTopics.SHOW_STOP, self._handle_show_stop)
+        await self.subscribe(EventTopics.MOTION_FREEZE, self._handle_motion_freeze)
+        await self.subscribe(EventTopics.SHOW_COMMAND, self._handle_show_command)
+        await self.subscribe(EventTopics.SPEECH_GENERATION_STARTED, self._handle_speech_generation_started)
+        # Live tempo for beat clocks: MusicController's track metadata carries bpm when known.
+        await self.subscribe(EventTopics.MUSIC_PLAYBACK_STARTED, self._handle_music_tempo)
+        await self.subscribe(EventTopics.MUSIC_PLAYBACK_STOPPED, self._handle_music_tempo_stopped)
+
     # ------------------------------------------------------------------
     # Plan handling
     # ------------------------------------------------------------------
@@ -262,6 +302,10 @@ class TimelineExecutorService(BaseService):
                     step_obj = MusicDuckStep(**step_dict)
                 elif step_type == 'music_unduck':
                     step_obj = MusicUnduckStep(**step_dict)
+                elif step_type == 'perform':
+                    step_obj = PerformShowStep(**step_dict)
+                elif step_type == 'sequence':
+                    step_obj = SequenceShowStep(**step_dict)
                 elif step_type == 'parallel_steps':
                     # Convert nested steps recursively
                     nested_steps = []
@@ -277,6 +321,10 @@ class TimelineExecutorService(BaseService):
                             nested_steps.append(MusicDuckStep(**nested_dict))
                         elif nested_type == 'music_unduck':
                             nested_steps.append(MusicUnduckStep(**nested_dict))
+                        elif nested_type == 'perform':
+                            nested_steps.append(PerformShowStep(**nested_dict))
+                        elif nested_type == 'sequence':
+                            nested_steps.append(SequenceShowStep(**nested_dict))
                         else:
                             nested_steps.append(nested_dict)  # Leave unknown as dict
                     step_obj = ParallelSteps(step_type='parallel_steps', steps=nested_steps)
@@ -444,6 +492,10 @@ class TimelineExecutorService(BaseService):
             # Clean up active plan entry and layer tracking
             self._active_plans.pop(plan.plan_id, None)
             self._timeline_layers.pop(plan.plan_id, None)
+            # Symmetric with the pause in _handle_plan_ready: whatever way this plan ended
+            # (completed, failed, cancelled, replaced), lift the pause it put on lower layers
+            # unless another pausing plan is still running.
+            self._refresh_layer_pauses(ended=asyncio.current_task())
 
     # ------------------------------------------------------------------
     # Step execution
@@ -514,6 +566,9 @@ class TimelineExecutorService(BaseService):
             elif step_type == "parallel_steps":
                 # Handle parallel execution of multiple steps
                 return await self._execute_parallel_steps(step, plan_id)
+            elif step_type in ("perform", "sequence"):
+                # Show elements (show/SPEC.md) inside a plan, e.g. BrainService's dj_intro.
+                return await self._execute_show_step(step, plan_id)
             elif step_type == "wait_for_event":
                 # TODO: Implement wait_for_event step logic
                 self.logger.warning(f"wait_for_event step type not yet implemented. Step: {step_type}")
@@ -774,7 +829,9 @@ class TimelineExecutorService(BaseService):
                 # Signal the waiting speak step using clip_id, step_id, or conversation_id
                 speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
                 
-                if speech_id and speech_id in self._speech_end_events:
+                if self._show.on_speech_complete(payload):
+                    self.logger.debug(f"Show speech {speech_id} complete")
+                elif speech_id and speech_id in self._speech_end_events:
                     self.logger.debug(f"Setting speech completion event for speech_id: {speech_id}")
                     self._speech_end_events[speech_id].set()
                 elif speech_id and speech_id in self._retired_speech_ids:
@@ -800,6 +857,7 @@ class TimelineExecutorService(BaseService):
                 
                 # Still signal completion even on failure so the plan can continue
                 speech_id = complete_payload.clip_id or complete_payload.step_id or complete_payload.conversation_id
+                self._show.on_speech_complete(payload)
                 if speech_id and speech_id in self._speech_end_events:
                     self.logger.debug(f"Setting speech completion event (failed) for speech_id: {speech_id}")
                     self._speech_end_events[speech_id].set()
@@ -817,6 +875,10 @@ class TimelineExecutorService(BaseService):
             self.logger.error(f"Validation error for SPEECH_GENERATION_COMPLETE payload: {e}")
         except Exception as e:
             self.logger.error(f"Error handling SPEECH_GENERATION_COMPLETE: {e}", exc_info=True)
+        finally:
+            # Safety net for the ambient-layer pause: speech ending must never leave a lower
+            # layer paused when no pausing plan is left to lift it.
+            self._refresh_layer_pauses()
 
     # ------------------------------------------------------------------
     # Layer management
@@ -864,6 +926,35 @@ class TimelineExecutorService(BaseService):
                         f"Pausing {other_layer} layer due to {layer} priority",
                         LogLevel.INFO
                     )
+
+    #: Layers whose plans pause every lower-priority layer while they run (see _handle_plan_ready).
+    _PAUSING_LAYERS = ("foreground",)
+
+    def _refresh_layer_pauses(self, ended: Optional[asyncio.Task] = None) -> None:
+        """Make each layer's pause state match the plans that are still running.
+
+        A foreground plan (every spoken reply is one: ElevenLabs wraps it in a single ``speak``
+        step) pauses the lower layers when it starts. Before 2026-09-29 nothing ever resumed
+        them, so after R3X spoke once, every later DJ transition plan on ``ambient`` blocked
+        forever at ``_layer_events[layer].wait()``. The resume is derived rather than
+        counted: a lower layer stays paused only while a pausing plan is actually running.
+
+        Args:
+            ended: a task that is finishing right now (called from its own ``finally``, so it
+                is not ``done()`` yet) and must not count as running.
+        """
+        priorities = self._config.layer_priorities
+        holding = -1
+        for layer in self._PAUSING_LAYERS:
+            task = self._layer_tasks.get(layer)
+            if task is not None and task is not ended and not task.done():
+                holding = max(holding, priorities.get(layer, 0))
+        for layer, priority in priorities.items():
+            event = self._layer_events.get(layer)
+            if event is None or event.is_set() or priority < holding:
+                continue
+            event.set()
+            self.logger.info(f"Resuming {layer} layer (no pausing plan is running)")
 
     async def _resume_layer(self, layer: str) -> None:
         """Resume a paused layer."""
@@ -1213,6 +1304,8 @@ class TimelineExecutorService(BaseService):
             is_active = payload.get('is_active', False)
             if not is_active:
                 self.logger.info("DJ mode deactivated, cancelling all DJ-related plans")
+                # Shows started by plans (e.g. dj_intro) belong to DJ mode too.
+                self._show.stop(source="timeline")
 
                 # Cancel all active plans on all layers
                 for layer_name, task in list(self._layer_tasks.items()):
@@ -1321,3 +1414,163 @@ class TimelineExecutorService(BaseService):
             self._audio_ducked = False
             # Small delay to ensure unducking has started
             await asyncio.sleep(0.15) 
+
+    # ------------------------------------------------------------------
+    # Show system (show/SPEC.md). The player does the work; these are the bus adapters.
+    # ------------------------------------------------------------------
+    @property
+    def show_player(self) -> ShowPlayer:
+        return self._show
+
+    def _set_ducked(self, ducked: bool) -> None:
+        self._audio_ducked = ducked
+
+    async def _handle_show_perform(self, payload: Dict[str, Any]) -> None:
+        try:
+            req = ShowPerformPayload(**(payload or {}))
+        except ValidationError as e:
+            self.logger.error(f"Invalid show.perform payload: {e}")
+            return
+        run = self._show.perform(
+            req.id, req.source,
+            req.params.model_dump() if req.params else None,
+            conversation_id=req.conversation_id,
+        )
+        if req.source == "cli":
+            if run is None:
+                await self._send_cli(f"Show '{req.id}' refused: {self._show.last_refusal}", True)
+            else:
+                await self._send_cli(f"Performing {run.kind} '{run.id}' on the {run.layer} layer (run {run.run_id[:8]})")
+
+    async def _handle_show_stop(self, payload: Dict[str, Any]) -> None:
+        try:
+            req = ShowStopPayload(**(payload or {}))
+        except ValidationError as e:
+            self.logger.error(f"Invalid show.stop payload: {e}")
+            return
+        n = self._show.stop(item_id=req.id, layer=req.layer, all_=req.all)
+        self.logger.info(f"show.stop {req.model_dump(exclude_none=True)}: ended {n} run(s)")
+
+    async def _handle_motion_freeze(self, payload: Dict[str, Any]) -> None:
+        try:
+            req = MotionFreezePayload(**(payload or {}))
+        except ValidationError as e:
+            self.logger.error(f"Invalid motion.freeze payload: {e}")
+            return
+        self._show.set_frozen(req.on)
+
+    async def _handle_speech_generation_started(self, payload: Dict[str, Any]) -> None:
+        self._show.on_speech_started(payload or {})
+
+    async def _handle_music_tempo(self, payload: Dict[str, Any]) -> None:
+        track = (payload or {}).get("track") or {}
+        bpm = None
+        if isinstance(track, dict):
+            bpm = track.get("bpm") or track.get("tempo")
+        try:
+            self._show.set_live_bpm(float(bpm) if bpm else None)
+        except (TypeError, ValueError):
+            self._show.set_live_bpm(None)
+
+    async def _handle_music_tempo_stopped(self, payload: Dict[str, Any]) -> None:
+        self._show.set_live_bpm(None)
+
+    async def _execute_show_step(self, step, plan_id: str) -> tuple[bool, Dict[str, Any]]:
+        """Run a ``perform``/``sequence`` plan step. Never fails the plan (see PerformShowStep)."""
+        data = step if isinstance(step, dict) else step.model_dump()
+        step_type = data.get("step_type")
+        item_id = data.get("id")
+        if not item_id:
+            return True, {"skipped": True, "reason": "no id"}
+        run = self._show.perform(
+            item_id, "timeline", data.get("params"),
+            expect_kind="sequence" if step_type == "sequence" else None,
+            optional=bool(data.get("optional")),
+        )
+        if run is None:
+            return True, {"id": item_id, "skipped": True, "reason": self._show.last_refusal}
+        if data.get("wait_for_completion"):
+            reason = await self._show.wait(run)
+            return True, {"id": item_id, "run_id": run.run_id, "reason": reason}
+        return True, {"id": item_id, "run_id": run.run_id, "status": "started"}
+
+    async def _send_cli(self, message: str, is_error: bool = False) -> None:
+        await self.emit(EventTopics.CLI_RESPONSE, {"message": message, "is_error": is_error})
+
+    async def _handle_show_command(self, payload: Dict[str, Any]) -> None:
+        """CLI: ``show [list]``, ``show <id> [intensity] [speed]``, ``show stop [id|layer|all]``,
+        ``show reload``, ``freeze``, ``unfreeze``.
+
+        Parsed from raw_input rather than registered as compound commands: the dispatcher
+        matches compound commands by string prefix, so "show list" would also swallow an id
+        like ``listen_up``, and a compound registration carries arg-count limits (the
+        max_args trap in CLAUDE.md section 3b).
+        """
+        raw = str((payload or {}).get("raw_input") or "").strip()
+        tokens = raw.split() or [str((payload or {}).get("command") or "show")]
+        head = tokens[0].lower()
+        args = tokens[1:]
+        try:
+            if head in ("freeze", "unfreeze"):
+                on = head == "freeze"
+                await self.emit(EventTopics.MOTION_FREEZE, MotionFreezePayload(on=on).model_dump())
+                await self._send_cli("Motion FROZEN: all shows stopped, new ones refused. 'unfreeze' to resume."
+                                     if on else "Motion unfrozen.")
+                return
+            sub = args[0].lower() if args else "list"
+            if sub == "list":
+                await self._send_cli(self._format_show_list())
+            elif sub == "reload":
+                lib = self._show.library.reload()
+                issues = "\n".join(f"  {i}" for i in lib.issues) or "  no issues"
+                await self._send_cli(f"Reloaded {len(lib)} show item(s) from {lib.root}\n{issues}")
+            elif sub == "stop":
+                target = args[1] if len(args) > 1 else "all"
+                if target == "all":
+                    req = ShowStopPayload(all=True)
+                elif target in ("show", "gesture"):
+                    req = ShowStopPayload(layer=target)
+                else:
+                    req = ShowStopPayload(id=target)
+                await self.emit(EventTopics.SHOW_STOP, req.model_dump(exclude_none=True))
+                await self._send_cli(f"Stopping {target}")
+            else:
+                params: Dict[str, float] = {}
+                nums = args[1:3]
+                try:
+                    if len(nums) > 0:
+                        params["intensity"] = min(1.5, max(0.0, float(nums[0])))
+                    if len(nums) > 1:
+                        params["speed"] = min(2.0, max(0.5, float(nums[1])))
+                except ValueError:
+                    await self._send_cli("Usage: show <id> [intensity 0-1.5] [speed 0.5-2]", True)
+                    return
+                req = ShowPerformPayload(id=args[0], source="cli", params=params or None)
+                await self.emit(EventTopics.SHOW_PERFORM, req.model_dump(exclude_none=True))
+        except Exception as e:
+            self.logger.error(f"show command failed: {e}", exc_info=True)
+            await self._send_cli(f"show command failed: {e}", True)
+
+    def _format_show_list(self) -> str:
+        lib = self._show.library.library
+        lines = [f"Show library ({lib.root}): {len(lib)} item(s)"
+                 + (f", {sum(1 for i in lib.issues if i.severity == 'error')} error(s)" if lib.issues else "")]
+        if not len(lib):
+            lines.append("  (empty - add clips/, cues/, sequences/ JSON files; see show/SPEC.md)")
+        for kind in ("sequence", "cue", "clip"):
+            items = lib.of_kind(kind)
+            if not items:
+                continue
+            lines.append(f"  {kind}s:")
+            for it in sorted(items, key=lambda i: (TIER_RANK[i.tier], i.id)):
+                flag = "" if lib.is_valid(it.id) else "  [INVALID]"
+                extra = f" {it.clock}" if kind == "sequence" else ""
+                lines.append(f"    {it.id:<22} {it.tier:<5}{extra:<5} {it.description}{flag}")
+        running = [r for r in self._show.runs if r.started]
+        if running:
+            lines.append("  running: " + ", ".join(f"{r.id} ({r.layer}, {r.source})" for r in running))
+        if self._show.frozen:
+            lines.append("  MOTION FROZEN ('unfreeze' to resume)")
+        lines.append("  usage: show <id> [intensity] [speed] | show stop [id|show|gesture|all] | show reload | freeze | unfreeze")
+        return "\n".join(lines)
+

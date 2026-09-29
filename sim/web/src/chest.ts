@@ -286,6 +286,8 @@ export class ChestHost {
   private sparkle = false;
   private lastAmp = -1;
   private readonly sent: Record<string, string> = {};
+  /** A show's chest.override: status output is paused until this time (ms), then resynced. */
+  private overrideUntil = 0;
 
   constructor(private readonly out: (cmd: string) => void, readonly defaultBpm = 120) {}
 
@@ -304,6 +306,17 @@ export class ChestHost {
   resync() {
     for (const k of Object.keys(this.sent)) delete this.sent[k];
     this.lastAmp = -1;
+  }
+
+  /**
+   * chest.override {command, hold}: send the word now; with hold > 0 s, pause the status
+   * output for that long and then return to status (resync). hold 0 leaves it until the
+   * status next changes. Live, the real ChestLightControllerService does this.
+   */
+  override(command: string, holdS: number, nowMs: number) {
+    if (this.muted) return;
+    this.out(command);
+    if (holdS > 0) this.overrideUntil = Math.max(this.overrideUntil, nowMs + holdS * 1000);
   }
 
   boot(nowMs: number) {
@@ -371,6 +384,11 @@ export class ChestHost {
 
   tick(nowMs: number) {
     this.nowMs = nowMs;
+    if (this.overrideUntil) {
+      if (nowMs < this.overrideUntil) return;
+      this.overrideUntil = 0;
+      this.resync();
+    }
     if (this.booting && this.bootedAt >= 0 && nowMs - this.bootedAt > 3000) {
       this.booting = false;
       this.bootedAt = -1;

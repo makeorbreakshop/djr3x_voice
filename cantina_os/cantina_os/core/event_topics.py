@@ -211,3 +211,15 @@ class EventTopics(str, Enum):
 
     # Speech Cache events
     CLEAR_SPEECH_CACHE = "speech.cache.clear"
+
+    # Show system (show/SPEC.md "Live bus contract"). TimelineExecutorService is the conductor.
+    SHOW_PERFORM = "show.perform"  # anyone -> timeline: perform a clip/cue/sequence by id
+    SHOW_STOP = "show.stop"  # anyone -> timeline: {id?, layer?, all?}
+    SHOW_STARTED = "show.started"  # timeline -> all
+    SHOW_ENDED = "show.ended"  # timeline -> all, with reason done|interrupted|rejected
+    SHOW_MOTION = "show.motion"  # timeline -> body: start a clip
+    SHOW_SFX = "show.sfx"  # timeline -> audio
+    STAGE_LIGHTS = "stage.lights"  # timeline -> stage lights desk
+    CHEST_OVERRIDE = "chest.override"  # timeline -> chest service: {command, hold}
+    MOTION_FREEZE = "motion.freeze"  # anyone -> body/timeline: the "motion stop" {on}
+    SHOW_COMMAND = "show.command"  # CLI 'show ...' / 'freeze' / 'unfreeze' -> timeline (not forwarded)

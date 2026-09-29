@@ -347,6 +347,11 @@ class TestResourceCleanup:
 
     @pytest.mark.skip(
         reason=(
+            "UPDATE 2026-09-29: the production bug below is fixed (ElevenLabsService._stop() "
+            "now delegates to _cleanup(); covered by tests/services/test_elevenlabs_service.py::"
+            "test_start_stop). Still skipped: the elevenlabs_service fixture's mocked "
+            "`elevenlabs` module has no __version__, so _start() raises before this test "
+            "runs; the fixture needs rework. Original reason: "
             "Production bug: ElevenLabsService defines a _cleanup() method "
             "(elevenlabs_service.py:325) that closes the httpx client, joins the "
             "audio worker thread, and removes the temp dir, but it is never "
@@ -422,6 +427,8 @@ class TestResourceCleanup:
 
     @pytest.mark.skip(
         reason=(
+            "UPDATE 2026-09-29: production bug fixed, fixture still broken - see "
+            "test_elevenlabs_service_cleanup_on_stop. Original reason: "
             "Same production bug as test_elevenlabs_service_cleanup_on_stop: "
             "ElevenLabsService._cleanup() (elevenlabs_service.py:325), which is "
             "responsible for cancelling _current_playback_task, is never invoked "

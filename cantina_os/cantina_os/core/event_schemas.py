@@ -19,7 +19,10 @@ class TrackDataPayload(BaseModel):
     genre: Optional[str] = None
     duration: Optional[float] = None # Duration in seconds
     filepath: Optional[str] = None # Path to the audio file
-    # Add other relevant track metadata
+    # Live tempo for beat clocks, the chest and the sim's light desk (show/SPEC.md "Clock").
+    # Absent until offline beat analysis has run for the file; consumers then fall back.
+    bpm: Optional[float] = None
+    first_beat_s: Optional[float] = None
 
 class TrackEndingSoonPayload(EventPayload):
     """Payload for the TRACK_ENDING_SOON event."""
@@ -147,6 +150,26 @@ class ParallelSteps(BasePlanStep):
     """Plan step to execute multiple steps concurrently."""
     step_type: str = "parallel_steps"
     steps: list[BasePlanStep] = Field(..., description="List of steps to execute concurrently")
+
+class PerformShowStep(BasePlanStep):
+    """Plan step: perform a show item (clip, cue or sequence) through the show player.
+
+    Fire-and-forget by default. A show step never fails its plan: an unknown, invalid or
+    refused item is logged and skipped, because BrainService treats a failed plan as a failed
+    DJ transition and starts emergency recovery.
+    """
+    step_type: str = "perform"
+    id: str = Field(..., description="Show item id (show/clips, show/cues, show/sequences).")
+    params: Optional[dict[str, float]] = Field(None, description="{intensity, speed}")
+    wait_for_completion: bool = Field(False, description="Hold the plan until the show ends.")
+    optional: bool = Field(False, description="Skip quietly (INFO, not WARNING) when the id does not exist.")
+
+
+class SequenceShowStep(PerformShowStep):
+    """Plan step: run a show sequence. Same as ``perform`` but must name a sequence."""
+    step_type: str = "sequence"
+    wait_for_completion: bool = Field(False, description="Hold the plan until the sequence ends.")
+
 
 class DjTransitionPlanPayload(BaseModel):
     """Represents a plan for a DJ transition (e.g., between tracks)."""

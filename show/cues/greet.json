@@ -1,0 +1,14 @@
+{
+  "id": "greet",
+  "kind": "cue",
+  "title": "Greet",
+  "description": "Waves hello and nods, eyes flash",
+  "tags": ["hello", "hi", "greeting"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "arm_wave"},
+    {"at": 0.5, "do": "clip", "id": "nod"},
+    {"at": 0, "do": "eyes", "pattern": "flash", "duration": 0.8},
+    {"at": 0, "do": "chest", "command": "SF"}
+  ]
+}

@@ -95,22 +95,9 @@ class TestElevenLabsService:
         assert service._status == ServiceStatus.INITIALIZING
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(
-        reason=(
-            "Production bug, not a stale test: ElevenLabsService defines "
-            "_cleanup() (elevenlabs_service.py:325) to close self._client "
-            "and remove self._temp_dir, but BaseService.stop() "
-            "(base_service.py:97-106) calls self._stop(), never "
-            "self._cleanup(). ElevenLabsService does not override _stop(), "
-            "so it inherits BaseService's no-op _stop() (base_service.py:"
-            "108-110) and _cleanup() is dead code -- stop() never closes "
-            "the HTTP client or removes the temp dir. Patching _cleanup() "
-            "here (as the original test did) papers over this: the patch "
-            "target is simply never invoked by the real lifecycle. Left "
-            "failing/skipped per instructions rather than silently "
-            "reworking the assertions to match the (buggy) real behavior."
-        )
-    )
+    # Unskipped 2026-09-29: this was skipped against a production bug (``_cleanup()`` was dead
+    # code because ElevenLabsService never overrode ``_stop()``). ``_stop()`` now delegates to
+    # ``_cleanup()``, so stop() closes the client - which is what this test asserts.
     async def test_start_stop(self, service):
         """Test the service start and stop lifecycle."""
         # Create a mock client

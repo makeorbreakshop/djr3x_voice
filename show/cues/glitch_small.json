@@ -1,0 +1,14 @@
+{
+  "id": "glitch_small",
+  "kind": "cue",
+  "title": "Small glitch",
+  "description": "A small glitch: twitch, eye flicker, chest fault blip",
+  "tags": ["glitch", "bzzt", "oops"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "glitch_twitch"},
+    {"at": 0, "do": "eyes", "pattern": "thinking", "duration": 0.7},
+    {"at": 0, "do": "chest", "command": "X3", "hold": 0.4},
+    {"at": 0.05, "do": "sfx", "id": "scratch"}
+  ]
+}

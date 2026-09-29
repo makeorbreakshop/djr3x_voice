@@ -1,0 +1,16 @@
+{
+  "id": "fist_pump",
+  "kind": "clip",
+  "title": "Fist pump",
+  "description": "Pumps the hero arm twice, bouncing",
+  "tags": ["yeah", "pump", "celebrate"],
+  "tier": "cheap",
+  "duration": 2.44,
+  "interruptible_after": 0.6,
+  "tracks": {
+    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.6, 30], [1.0, 18], [1.42, 32], [1.84, 18], [2.44, 0]]},
+    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.6, -30], [1.84, -30], [2.44, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.0, 1], [1.42, 6], [1.84, 1], [2.44, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, -3], [1.0, 2], [1.42, -3], [1.84, 2], [2.44, 0]]}
+  }
+}

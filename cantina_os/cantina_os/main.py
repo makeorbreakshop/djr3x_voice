@@ -247,6 +247,8 @@ class CantinaOS:
             "SEMANTIC_MUSIC_NEGATIVE_WEIGHT": float(
                 os.getenv("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", "0.5")
             ),
+            "ENABLE_BEAT_ANALYSIS": os.getenv("ENABLE_BEAT_ANALYSIS", "true"),
+            "BEAT_CACHE_DIR": os.getenv("BEAT_CACHE_DIR", ""),
         }
         
         # Log only credential presence. Even masked fragments do not belong in terminal or
@@ -344,6 +346,13 @@ class CantinaOS:
         for cmd in ["debug latency", "debug latency conversation", "debug latency reset"]:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "latency_tracker", EventTopics.LATENCY_COMMAND)
+
+        # Show system (show/SPEC.md): basic commands only. The timeline parses the rest of
+        # raw_input itself - "show list", "show stop", "show <id> [intensity] [speed]" - because
+        # compound registration matches by string prefix and carries arg limits (CLAUDE.md 3b).
+        for cmd in ["show", "freeze", "unfreeze"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command(cmd, "timeline_executor_service", EventTopics.SHOW_COMMAND)
 
         # Note: Camera commands are auto-registered by VisionService decorators
         # (camera list, camera select, camera status)
@@ -722,6 +731,10 @@ class CantinaOS:
             service_config["semantic_negative_weight"] = float(
                 self._config.get("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", 0.5)
             )
+            # Offline tempo analysis (beat_analysis.py): a background process, cached per file.
+            beats_enabled = self._config.get("ENABLE_BEAT_ANALYSIS", "true")
+            service_config["enable_beat_analysis"] = str(beats_enabled).lower() == "true"
+            service_config["beat_cache_dir"] = self._config.get("BEAT_CACHE_DIR") or None
 
         elif service_name == "textual_dashboard":
             # Configure textual dashboard

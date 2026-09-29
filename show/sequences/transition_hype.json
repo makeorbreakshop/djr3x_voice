@@ -1,0 +1,22 @@
+{
+  "id": "transition_hype",
+  "kind": "sequence",
+  "title": "Transition hype",
+  "description": "Talks over the drop: ducks the music, hype line, beat-locked drop and headbangs",
+  "tags": ["transition", "drop", "next track"],
+  "tier": "show",
+  "clock": "beat",
+  "bpm": 120,
+  "layer": "show",
+  "track": [
+    {"at": 0, "do": "duck"},
+    {"at": 0, "clip": "lean_in"},
+    {"at": 0.5, "do": "speak", "text": "Keep it locked, here comes the drop!"},
+    {"at": 0.5, "do": "wait", "for": "speech_end"},
+    {"at": 1, "cue": "beat_drop"},
+    {"at": 1, "do": "unduck"},
+    {"at": 3, "clip": "beat_headbang"},
+    {"at": 5, "clip": "beat_headbang"},
+    {"at": 7, "do": "lights", "mode": "dj"}
+  ]
+}

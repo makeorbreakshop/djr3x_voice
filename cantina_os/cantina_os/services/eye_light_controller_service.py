@@ -335,16 +335,25 @@ class EyeLightControllerService(RealtimeService):
         self.logger.info("Attempting to connect to Arduino hardware...")
         
         try:
+            if self.serial_port and not os.path.exists(self.serial_port):
+                self.logger.info(
+                    "Configured Arduino port %s is not present; trying auto-detection",
+                    self.serial_port,
+                )
+                self.serial_port = None
+
             # Attempt to auto-detect Arduino if port not specified
             if not self.serial_port:
                 self.logger.info("No serial port specified, attempting auto-detection")
                 self.serial_port = await self._auto_detect_arduino()
                 if not self.serial_port:
-                    self.logger.warning("Could not auto-detect Arduino, falling back to mock mode")
+                    self.logger.warning(
+                        "Arduino not connected; eye lights running in mock mode."
+                    )
                     await self.emit(EventTopics.DEBUG_LOG, {
                         "component": "eye_light_controller",
-                        "level": LogLevel.WARNING,
-                        "message": "Failed to auto-detect Arduino device. Falling back to mock mode."
+                        "level": LogLevel.INFO,
+                        "message": "Arduino not connected; eye lights running in mock mode."
                     })
                     # Switch to mock mode instead of failing
                     self.mock_mode = True
@@ -360,7 +369,7 @@ class EyeLightControllerService(RealtimeService):
                     if self.connected:
                         break
                     else:
-                        self.logger.warning(f"Connection attempt {attempt+1}/{self.retry_attempts} failed, retrying...")
+                        self.logger.debug(f"Connection attempt {attempt+1}/{self.retry_attempts} failed, retrying...")
                         await asyncio.sleep(self.retry_delay)
                 except Exception as e:
                     self.logger.error(f"Error in connection attempt {attempt+1}/{self.retry_attempts}: {e}")
@@ -468,7 +477,7 @@ class EyeLightControllerService(RealtimeService):
         if self.mock_mode or not self.connected or not self.adapter:
             # Only log once per startup to avoid spam
             if not hasattr(self, '_control_loop_skip_logged'):
-                self.logger.warning(
+                self.logger.debug(
                     f"Control loop skipping: mock_mode={self.mock_mode}, "
                     f"connected={self.connected}, adapter={self.adapter is not None}"
                 )
@@ -588,10 +597,10 @@ class EyeLightControllerService(RealtimeService):
         ports = list(serial.tools.list_ports.comports())
         
         if not ports:
-            self.logger.warning("No serial ports found at all")
+            self.logger.info("No serial ports found")
             await self.emit(EventTopics.DEBUG_LOG, {
                 "component": "eye_light_controller",
-                "level": LogLevel.WARNING,
+                "level": LogLevel.INFO,
                 "message": "No serial ports found on this system"
             })
             return None
@@ -674,10 +683,10 @@ class EyeLightControllerService(RealtimeService):
             })
             return ports[0].device
         
-        self.logger.warning("No Arduino device detected")
+        self.logger.info("No Arduino device detected")
         await self.emit(EventTopics.DEBUG_LOG, {
             "component": "eye_light_controller",
-            "level": LogLevel.WARNING,
+            "level": LogLevel.INFO,
             "message": "No Arduino device detected. If Arduino is connected, try specifying the port manually."
         })
         return None
@@ -1077,7 +1086,15 @@ class EyeLightControllerService(RealtimeService):
         Legacy CLI command handler - dispatches to appropriate methods.
         """
         self.logger.debug(f"Legacy CLI handler received: {payload}")
-        
+
+        # EYE_COMMAND also carries EyeCommandPayload ({pattern, color, intensity, duration},
+        # no "command" key) from IntentRouterService's set_eye_color and from show cues.
+        # Those used to fall through to "Unhandled CLI command payload format" below and
+        # were silently dropped; they belong to the payload handler.
+        if isinstance(payload, dict) and "command" not in payload and "pattern" in payload:
+            await self._handle_eye_command(payload)
+            return
+
         # Handle CLI command payloads - dispatch to decorated methods
         if isinstance(payload, dict) and "command" in payload:
             command = payload.get("command", "")
@@ -1322,4 +1339,4 @@ class EyeLightControllerService(RealtimeService):
         # Only change pattern if in interactive mode and we're currently in THINKING mode
         if self._is_in_interactive_mode() and self.current_pattern == EyePattern.THINKING:
             self.logger.info("LLM response started, immediately setting eye pattern to SPEAKING")
-            await self.set_pattern(EyePattern.SPEAKING) 
+            await self.set_pattern(EyePattern.SPEAKING)

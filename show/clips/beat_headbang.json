@@ -1,0 +1,15 @@
+{
+  "id": "beat_headbang",
+  "kind": "clip",
+  "title": "Headbang",
+  "description": "Headbang: chin slams down with the lift, visor on the offbeat (2 beats)",
+  "tags": ["headbang", "rock", "drop"],
+  "tier": "cheap",
+  "duration": 1.02,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.28, -2], [0.68, 8], [1.02, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.68, -4], [1.02, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -7], [0.68, 4], [1.02, 0]]}
+  }
+}

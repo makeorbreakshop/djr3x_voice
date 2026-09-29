@@ -9,6 +9,8 @@ export interface PerformContext {
   /** World-space point to look at (the camera), or null. */
   lookTarget: THREE.Vector3 | null;
   bpm: number;
+  /** Mood gain from the puppeteer's `energy` intent (1 = neutral): scales alive motion and saccade rate. */
+  energy?: number;
 }
 
 /**
@@ -27,6 +29,16 @@ export interface PerformContext {
  *
  * DJ mode reproduces the R-3X Animation Maestro show's choreography (lift bounce and
  * visor flap every beat, hand every 2, elbow and rings every 4) at any tempo.
+ *
+ * Borrowed from Reachy Mini's conversation app (moves.py):
+ *   - listening freeze: on listening start he orients to the listener once and then holds
+ *     still - no re-targeting saccades, alive motion damped to 15% - and eases back
+ *     (~1 s) when listening stops;
+ *   - speaking handoff: while speaking, gaze stays anchored on the listener (small drift,
+ *     an occasional short glance aside that comes straight back);
+ *   - speech wobble: small additive pan/tilt/lift micro-motion driven by the same speech
+ *     amplitude that feeds the mouth LEDs.
+ * Authored clips, cues and shows compose above this in show/body.ts.
  */
 export class Performer {
   activity: Activity = 'idle';
@@ -47,16 +59,28 @@ export class Performer {
   private accentAt = -10;
   private accentGain = 1;
 
+  // listening freeze / speaking handoff / wobble
+  private still = 0;
+  private anchor = { pan: 0, tilt: 0 };
+  private glanceBack = 0;
+  private wobblePhase = 0;
+
   private readonly tmp = new THREE.Vector3();
 
   constructor(private readonly rig: Rig, private readonly command: (joint: string, value: number) => void) {}
 
   setActivity(a: Activity, t: number) {
     if (a === this.activity) return;
+    // Speaking hands off from listening: keep looking where the listener was.
+    if (a === 'speaking') this.anchor = { ...this.gaze };
     this.activity = a;
     this.since = t;
     this.nextSaccade = t;
+    this.glanceBack = 0;
   }
+
+  /** 0..1: how frozen the listening hold is right now (for the UI / idle gating). */
+  get listeningHold() { return this.still; }
 
   /** Pan/tilt (deg) that would point the face at `p`, measured in the head_pan parent frame. */
   private aimAt(p: THREE.Vector3): [number, number] {
@@ -92,7 +116,8 @@ export class Performer {
 
   update(t: number, dt: number, ctx: PerformContext) {
     const since = t - this.since;
-    const jitter = () => THREE.MathUtils.randFloat(0.8, 1.2);
+    const energy = ctx.energy ?? 1;
+    const jitter = () => THREE.MathUtils.randFloat(0.8, 1.2) / (0.5 + 0.5 * energy);
     const pose: Record<string, number> = {};
     const look = ctx.lookTarget ? this.aimAt(ctx.lookTarget) : [0, 0];
 
@@ -127,9 +152,10 @@ export class Performer {
         break;
       }
       case 'listening':
+        // Orient to the listener once, then hold (Reachy's listening freeze).
         if (t >= this.nextSaccade) {
           this.look(t, look[0], look[1] - 4);
-          this.nextSaccade = t + 0.4 * jitter(); // keep tracking the listener
+          this.nextSaccade = Infinity;
         }
         pose.visor = -8; // brow up: attentive
         pose.head_lift = 6;
@@ -144,10 +170,23 @@ export class Performer {
         pose.hero_wrist = Math.sin(since * Math.PI * 1.6) * 25;
         pose.hero_claw_l = pose.hero_claw_r = pose.hero_claw_t = 3 + ((Math.sin(since * Math.PI * 5) + 1) / 2) * 12;
         break;
-      case 'speaking':
+      case 'speaking': {
+        // Handoff: the gaze stays anchored on the listener (the camera when we have one).
+        if (ctx.lookTarget) this.anchor = { pan: look[0], tilt: look[1] };
         if (t >= this.nextSaccade) {
-          this.look(t, look[0] + THREE.MathUtils.randFloatSpread(14), look[1]);
-          this.nextSaccade = t + 1.3 * jitter();
+          if (this.glanceBack) {
+            this.look(t, this.anchor.pan + THREE.MathUtils.randFloatSpread(4), this.anchor.tilt);
+            this.glanceBack = 0;
+            this.nextSaccade = t + 1.3 * jitter();
+          } else if (Math.random() < 0.2) {
+            const side = Math.random() < 0.5 ? -1 : 1;
+            this.look(t, this.anchor.pan + side * THREE.MathUtils.randFloat(8, 14), this.anchor.tilt + THREE.MathUtils.randFloatSpread(4));
+            this.glanceBack = 1;
+            this.nextSaccade = t + THREE.MathUtils.randFloat(0.5, 0.9);
+          } else {
+            this.look(t, this.anchor.pan + THREE.MathUtils.randFloatSpread(4), this.anchor.tilt);
+            this.nextSaccade = t + 1.3 * jitter();
+          }
         }
         pose.head_lift = 3 + this.bob * 5 + accent(0.3) * 6;
         pose.visor = -4 - this.bob * 4 - accent(0.25) * 9;
@@ -158,6 +197,7 @@ export class Performer {
         pose.throttle_elbow = -10 + Math.sin(t * 1.4) * 12;
         pose.poker_shoulder = -4 + this.bob * 8;
         break;
+      }
       case 'dj': {
         // R-3X Animation show: alternate lift/visor every beat.
         const beat = (t * ctx.bpm) / 60;
@@ -193,14 +233,28 @@ export class Performer {
       pose.torso_lower = (pose.torso_lower ?? 0) + this.delayed(t, 0.35) * 0.12;
     }
 
+    // ---------------------------------------------------------------- speech wobble
+    // Small, incommensurate sines whose rate and depth follow the speech envelope (the same
+    // amplitude that drives the mouth LEDs). Subtle: <= 1.8 deg pan, 1.2 deg tilt, 1 mm lift.
+    this.wobblePhase += dt * 2 * Math.PI * (1.6 + 2.2 * this.envFast);
+    const w = this.envFast;
+    if (w > 0.01) {
+      pose.head_pan += w * 1.8 * Math.sin(this.wobblePhase);
+      pose.head_tilt += w * 1.2 * Math.sin(1.37 * this.wobblePhase + 1.1);
+      pose.head_lift = (pose.head_lift ?? 0) + w * 1.0 * Math.sin(0.71 * this.wobblePhase + 2.3);
+    }
+
     // ---------------------------------------------------------------- L1 alive
+    // Damped while the listening freeze holds; eases back over ~1 s when it lets go.
+    this.still += ((this.activity === 'listening' ? 1 : 0) - this.still) * (1 - Math.exp(-dt / 0.35));
+    const alive = (1 - 0.85 * this.still) * energy;
     const breath = Math.sin(2 * Math.PI * 0.25 * t);
-    pose.head_lift = (pose.head_lift ?? 0) + breath * 1.5;
-    pose.head_tilt += Math.sin(2 * Math.PI * 0.25 * t + 1.2) * 1.2;
+    pose.head_lift = (pose.head_lift ?? 0) + breath * 1.5 * alive;
+    pose.head_tilt += Math.sin(2 * Math.PI * 0.25 * t + 1.2) * 1.2 * alive;
     if (this.activity === 'idle' || this.activity === 'engaged') {
-      pose.torso_middle = (pose.torso_middle ?? 0) + Math.sin(2 * Math.PI * 0.11 * t) * 3;
-      pose.hero_shoulder = (pose.hero_shoulder ?? 0) + Math.sin(2 * Math.PI * 0.17 * t + 2) * 2.5;
-      pose.throttle_elbow = (pose.throttle_elbow ?? 0) + Math.sin(2 * Math.PI * 0.13 * t + 4) * 2.5;
+      pose.torso_middle = (pose.torso_middle ?? 0) + Math.sin(2 * Math.PI * 0.11 * t) * 3 * alive;
+      pose.hero_shoulder = (pose.hero_shoulder ?? 0) + Math.sin(2 * Math.PI * 0.17 * t + 2) * 2.5 * alive;
+      pose.throttle_elbow = (pose.throttle_elbow ?? 0) + Math.sin(2 * Math.PI * 0.13 * t + 4) * 2.5 * alive;
     }
 
     for (const j of this.rig.joints.keys()) this.command(j, pose[j] ?? 0);

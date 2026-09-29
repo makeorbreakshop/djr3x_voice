@@ -100,3 +100,27 @@ table.servos td.bad { color: #ff6b6b; }
 
 .subs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .subs label.sub { margin: 2px 0; font-size: 12px; }
+
+/* ------------------------------------------------------------------ show system */
+.show-now { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0 0 8px; padding: 8px;
+  background: #07080b; border: 1px solid var(--line); border-radius: 8px; font: 11px/1.5 ui-monospace, Menlo, monospace; }
+.show-now span { color: #5b6170; }
+.show-now b { font-weight: 500; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.show-now b.on { color: var(--accent); }
+#show-system details { margin-top: 6px; }
+#show-system summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+#show-system summary small { opacity: .7; }
+#show-system select { width: auto; flex: 1; min-width: 0; background: #0f1117; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px; }
+.show-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.show-list li { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 6px; padding: 1px 0; }
+.show-list li button { padding: 2px 0; font-size: 11px; line-height: 1.2; }
+.show-list li .nm { font: 11px ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.show-list li .nm small { color: #5b6170; font-family: system-ui, sans-serif; margin-left: 4px; }
+.show-list li i { font: normal 9px ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.show-list li i.cheap { color: var(--accent-2); border-color: #23405e; }
+.show-list li i.show { color: var(--accent); border-color: #5a3418; }
+.show-list li.running .nm { color: var(--accent); }
+.pp-intents { display: grid; grid-template-columns: 70px 1fr 38px; gap: 2px 6px; align-items: center; margin-bottom: 6px; }
+.pp-intents span { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+.pp-intents input { width: 100%; }
+#pp-slots button { flex: 1 1 22%; font-size: 11px; padding: 5px 4px; overflow: hidden; text-overflow: ellipsis; }

@@ -46,6 +46,17 @@ FORWARDED_TOPICS = [
     EventTopics.DJ_MODE_CHANGED,
     EventTopics.INTENT_DETECTED,
     EventTopics.CHEST_COMMAND,  # the exact bytes sent to the chest board
+    # Show system (show/SPEC.md "Live bus contract"): SimBridge forwards all of them.
+    EventTopics.SHOW_PERFORM,
+    EventTopics.SHOW_STOP,
+    EventTopics.SHOW_STARTED,
+    EventTopics.SHOW_ENDED,
+    EventTopics.SHOW_MOTION,
+    EventTopics.SHOW_SFX,
+    EventTopics.STAGE_LIGHTS,
+    EventTopics.CHEST_OVERRIDE,
+    EventTopics.MOTION_FREEZE,
+    EventTopics.EYE_COMMAND,  # a cue's `eyes` action (EyeCommandPayload)
 ]
 
 MAX_STRING = 400  # keep chatty payloads (LLM text) small on the wire

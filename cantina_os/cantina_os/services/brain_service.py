@@ -48,7 +48,8 @@ from cantina_os.core.event_schemas import (
     MusicCrossfadeStep, # Import MusicCrossfadeStep
     MusicDuckStep, # Import MusicDuckStep for ducking music during speech
     MusicUnduckStep, # Import MusicUnduckStep for restoring music volume
-    ParallelSteps # Import ParallelSteps for concurrent step execution
+    ParallelSteps, # Import ParallelSteps for concurrent step execution
+    SequenceShowStep, # Show element step (show/SPEC.md), e.g. dj_intro on DJ start
 )
 from ..utils.command_decorators import compound_command, register_service_commands, validate_compound_command, command_error_handler
 
@@ -332,6 +333,11 @@ class BrainService(BaseService):
 
                 self.logger.info(f"DJ mode: Instructed MusicController to play '{track_name}'")
 
+                # Show element: the dj_intro sequence (show/sequences/dj_intro.json), if it
+                # exists. A plan on the timeline's "show" layer, so a spoken reply neither
+                # pauses nor cancels it; optional, so a missing file is skipped quietly.
+                await self._emit_dj_intro_show_plan()
+
                 # Generate initial commentary for the selected track asynchronously
                 # Music will start playing immediately, commentary will overlay when ready
                 self.logger.info(f"Starting async commentary generation for track: {self._current_track.title}")
@@ -369,6 +375,20 @@ class BrainService(BaseService):
 
         except Exception as e:
             self.logger.error(f"Error handling DJ mode change: {e}", exc_info=True)
+
+    async def _emit_dj_intro_show_plan(self) -> None:
+        """Emit a one-step plan that runs the ``dj_intro`` show sequence if it exists."""
+        try:
+            plan_id = f"dj-intro-{uuid.uuid4().hex[:8]}"
+            step = SequenceShowStep(id="dj_intro", optional=True)
+            payload = PlanReadyPayload(
+                timestamp=time.time(),
+                plan_id=plan_id,
+                plan={"plan_id": plan_id, "layer": "show", "steps": [step.model_dump()]},
+            )
+            await self.emit(EventTopics.PLAN_READY, payload.model_dump())
+        except Exception as e:  # a show element must never stop DJ mode starting
+            self.logger.warning(f"Could not emit dj_intro show plan: {e}")
 
     async def _generate_intro_commentary_async(self) -> None:
         """Generate intro commentary asynchronously without blocking music playback."""

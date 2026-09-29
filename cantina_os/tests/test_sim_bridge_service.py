@@ -77,3 +77,38 @@ async def test_disabled_does_not_listen():
         async with connect(f"ws://127.0.0.1:{port}", open_timeout=0.5):
             pass
     await svc.stop()
+
+
+@pytest.mark.asyncio
+async def test_forwards_every_show_topic():
+    bus = AsyncIOEventEmitter()
+    port = _free_port()
+    svc = SimBridgeService(bus, {"SIM_BRIDGE_PORT": port}, _ModeManager())
+    await svc.start()
+    show_topics = [
+        (EventTopics.SHOW_PERFORM, {"id": "nod", "params": None, "source": "claude", "conversation_id": "c1"}),
+        (EventTopics.SHOW_STOP, {"all": True}),
+        (EventTopics.SHOW_STARTED, {"id": "nod", "kind": "clip", "source": "claude", "run_id": "r1"}),
+        (EventTopics.SHOW_MOTION, {"run_id": "r1", "clip": "nod", "intensity": 1.0, "speed": 1.0,
+                                   "start_at": 1.5, "layer": "gesture", "owns": None}),
+        (EventTopics.STAGE_LIGHTS, {"cue": "red_flash", "mode": None, "fade": 0.1, "hold": 2.0, "rig": None}),
+        (EventTopics.CHEST_OVERRIDE, {"command": "X2", "hold": 1.5}),
+        (EventTopics.SHOW_SFX, {"id": "airhorn"}),
+        (EventTopics.EYE_COMMAND, {"pattern": "happy", "color": "#ffb000"}),
+        (EventTopics.MOTION_FREEZE, {"on": True}),
+        (EventTopics.SHOW_ENDED, {"id": "nod", "kind": "clip", "source": "claude", "run_id": "r1", "reason": "done"}),
+    ]
+    try:
+        async with connect(f"ws://127.0.0.1:{port}") as ws:
+            await asyncio.wait_for(ws.recv(), 2)  # hello
+            for _ in range(50):
+                if svc.client_count:
+                    break
+                await asyncio.sleep(0.01)
+            for topic, payload in show_topics:
+                bus.emit(topic.value, payload)
+            got = [json.loads(await asyncio.wait_for(ws.recv(), 2)) for _ in show_topics]
+            assert [m["topic"] for m in got] == [t.value for t, _ in show_topics]
+            assert [m["data"] for m in got] == [p for _, p in show_topics]
+    finally:
+        await svc.stop()

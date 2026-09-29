@@ -1,0 +1,16 @@
+{
+  "id": "glance_right",
+  "kind": "clip",
+  "title": "Glance right",
+  "description": "Quick glance to his right and back",
+  "tags": ["glance", "look", "right"],
+  "tier": "free",
+  "duration": 2.2,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.15, 2], [0.7, -28], [1.4, -28], [1.95, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, -3], [1.4, -3], [1.95, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -4], [1.4, -4], [1.9, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [0.9, -5], [1.5, -5], [2.2, 0]]}
+  }
+}

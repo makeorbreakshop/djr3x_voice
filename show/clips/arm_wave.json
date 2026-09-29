@@ -1,0 +1,15 @@
+{
+  "id": "arm_wave",
+  "kind": "clip",
+  "title": "Wave",
+  "description": "Friendly wave: arm up, hand waves three times",
+  "tags": ["hello", "hi", "bye", "wave"],
+  "tier": "free",
+  "duration": 3.4,
+  "interruptible_after": 0.8,
+  "tracks": {
+    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.7, 38], [2.7, 38], [3.4, 0]]},
+    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.7, 0], [1.12, 25], [1.7, -25], [2.28, 25], [2.7, 0], [3.4, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.0, 5], [2.7, 5], [3.4, 0]]}
+  }
+}

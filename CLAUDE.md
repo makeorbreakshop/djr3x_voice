@@ -63,7 +63,7 @@ The new architecture implements strict service decoupling with event-only inter-
 - `NervousSystemService`: Real-time operational state (sensor readings, runtime context)
 - `MemoryService`: Long-term memory (person profiles, event timeline)
 - `VisionService`: Scene understanding and continuous face recognition
-- `TimelineExecutorService`: Layered timeline execution for coordinated audio sequences
+- `TimelineExecutorService`: Layered timeline execution for coordinated audio sequences; also hosts the show player (section 3c)
 - `CachedSpeechService`: Pre-rendered speech caching for DJ commentary
 - `CLIService`: Command-line interface
 - `CommandDispatcherService`: Command routing from CLI/voice
@@ -332,6 +332,76 @@ partial transcript matches - the common case for short commands.
    - `next_track` still dispatches correctly and still does nothing outside DJ mode:
      `dj next` is the only skip capability and BrainService refuses it, because
      MusicControllerService understands only "play" and "stop". Open gap.
+
+---
+
+## 3c. The Show System (gestures, cues, sequences)
+
+**Contract: `show/SPEC.md`** (shared with the sim). Content lives in the repo-root `show/`:
+`clips/` (motion only), `cues/` (one moment across departments), `sequences/` (a timeline of
+cues/clips/actions on a `time` or `beat` clock), `idle.json`. `SHOW_DIR` overrides the folder.
+`show/tests/golden/*.json` are **hand-written** parity expectations - never regenerate them.
+
+| Where | What |
+|---|---|
+| `cantina_os/show/` | models, tolerant loader (missing/empty folder is fine), validation incl. tier rules, `expand()` (golden parity), Claude catalogue, tag parser/scheduler |
+| `services/timeline_executor_service/show_player.py` | the clock-driven player, owned by `TimelineExecutorService` (still the conductor) |
+
+**Topics** (Pydantic payloads in `core/event_payloads.py`, all forwarded by SimBridge):
+`show.perform {id, params?, source, conversation_id?}`, `show.stop {id?|layer?|all?}`,
+`show.started` / `show.ended {id, kind, source, run_id, reason: done|interrupted|rejected}`,
+`show.motion`, `show.sfx`, `stage.lights`, `chest.override {command, hold}` (the chest service
+sends it, then returns to status after `hold`), `motion.freeze {on}` (stops every run and
+refuses new ones; the chest holds its state). Cue `eyes` use the existing `EYE_COMMAND`, `speak`
+uses `TTS_GENERATE_REQUEST`, `duck`/`unduck` the existing ducking events.
+
+**Clock.** Every item is scheduled against a monotonic clock anchored at the start - never by
+accumulated sleeps. `beat` clocks chase the live tempo (`MUSIC_PLAYBACK_STARTED` `track.bpm`,
+when a track has one; else the sequence's `bpm`). `wait for speech_end` pauses every clock in
+the run, so everything later slides. A run's own `speak` line queued behind Claude's reply
+(ElevenLabs is one FIFO) holds the wait until *that line* ends; if nothing is speaking and the
+line never starts, the wait gives up after 1.5 s (`NO_SPEECH_GRACE_S`, = the sim's
+`waitGraceS`); a hard ceiling (30 s + line budgets) rules out a deadlock. Nesting <= 3 levels below the root. A new run on the same
+layer (`show`, `gesture`; lone clips/cues run on `gesture`) ends the current one, queued while
+a clip is inside its `interruptible_after`.
+
+**Live BPM source.** `music_controller_service/beat_analysis.py`: librosa `beat_track` tempo and
+beat-grid phase per local file, cached as JSON in `~/.cache/dj-r3x/beats/` keyed by path + mtime
++ size + analyser version. It runs in a separate, niced *process* over files the cache does
+not know (never on the playback path; ~16 s for the 22-track library, once), fails open to no
+bpm, and lands on `MusicTrack.bpm`/`first_beat_s` -> `TrackDataPayload` ->
+`MUSIC_PLAYBACK_STARTED` (a crossfade now announces its new track too). Followers: the show
+player's beat clock, the chest (`CHEST_DEFAULT_BPM` only when unknown) and the sim's light
+desk/bop loops. Env: `ENABLE_BEAT_ANALYSIS` (true), `BEAT_CACHE_DIR`. Known limit: octave
+ambiguity (e.g. a 92 vs 184 bpm reading). Upgrade path, deliberately not added yet (torch-scale
+deps): **Beat This!** (CPJKU, ISMIR 2024) or **All-In-One** (`allin1`, also gives sections for
+phrase-aligned transitions) behind `analyze_file` with an `ANALYZER_VERSION` bump.
+
+**Tiers by `source`**: `jev` <= cheap, `idle` = free, `claude`/`timeline`/`ui`/`cli` <= show.
+A violation emits only `show.ended reason=rejected`. Validation also forbids an item including
+a higher-tier item.
+
+**Claude.** A sorted catalogue of valid free/cheap clips and cues (+ cheap/show routines) is
+appended to the *cached* system prompt once at startup - new files reach Claude on restart,
+the timeline and CLI immediately. Claude may write `{cue:<id>}` / `{clip:<id>}` inline (max two
+per reply). `ClaudeService` strips them from the stream (an unclosed `{` is held across chunks),
+so the bus, CLI and TTS only ever see clean text; `SessionMemory` keeps the tagged text. On
+`SPEECH_GENERATION_STARTED` for that conversation, each tag fires `show.perform
+{source: "claude"}` at `char_offset / SHOW_TAG_CHARS_PER_SEC` (19, measured from real R3X speech). `show/tags.py
+timer_for_speech()` is the seam for ElevenLabs character timestamps. Routines use the
+`perform_show` tool (registered only when routines exist; no verbal-feedback turn). Under the
+Jev dedup (`tool_choice: none`) tags still work; the tool does not.
+
+**Plans**: step types `perform {id}` and `sequence {id}` (never fail a plan - BrainService
+treats a failed plan as a failed DJ transition). DJ start emits `sequence dj_intro`
+(`optional`) on the `show` plan layer.
+
+**CLI**: `show [list]`, `show <id> [intensity] [speed]`, `show stop [id|show|gesture|all]`,
+`show reload`, `freeze`, `unfreeze`. Registered as basic commands; the timeline parses
+`raw_input` itself (compound registration prefix-matches and carries `max_args`, see 3b).
+
+**Smoke**: `env -u ANTHROPIC_BASE_URL ../venv/bin/python scripts/system_smoke_run.py --show`
+(writes a temp show set when `show/` is empty; `--with-tts` for real ElevenLabs).
 
 ---
 

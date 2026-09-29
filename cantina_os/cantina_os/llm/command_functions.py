@@ -57,6 +57,13 @@ class AnalyzeSceneParams(BaseModel):
         description="The specific question to ask about the camera image. Examples: 'What do you see?', 'What is this object?', 'Read the text on this', 'Who is in the room?'"
     )
 
+class PerformShowParams(BaseModel):
+    """Parameters for running a show routine (a show/sequences/*.json file)."""
+    id: str = Field(
+        ...,
+        description="The routine id, exactly as listed under <routines> in the system prompt."
+    )
+
 class FunctionDefinition(BaseModel):
     """Model for OpenAI function definition structure."""
     type: str = "function"
@@ -125,6 +132,29 @@ def create_analyze_scene_function() -> Dict[str, Any]:
         }
     }
 
+def create_perform_show_function(routine_ids: List[str]) -> Dict[str, Any]:
+    """The perform_show tool, for show-tier routines ("do your intro", "malfunction!").
+
+    Built at startup from the show catalogue and registered by ClaudeService only when
+    routines exist, so it is not in AVAILABLE_FUNCTIONS. ``routine_ids`` must be sorted: the
+    tool block is part of the cached prompt prefix.
+    """
+    schema = PerformShowParams.schema()
+    if routine_ids:
+        schema["properties"]["id"]["enum"] = list(routine_ids)
+    return {
+        "type": "function",
+        "function": {
+            "name": "perform_show",
+            "description": (
+                "Perform one of your show routines - a choreographed piece with motion, "
+                "lights and sound. Use it when someone asks for your intro, a routine or a "
+                "big moment. Keep speaking normally; the routine runs alongside your words."
+            ),
+            "parameters": schema,
+        },
+    }
+
 # Collection of all available functions
 AVAILABLE_FUNCTIONS = [
     create_play_music_function(),
@@ -145,5 +175,6 @@ def function_name_to_model_map() -> Dict[str, Any]:
         "search_music": SearchMusicParams,
         "stop_music": StopMusicParams,
         "set_eye_color": SetEyeColorParams,
-        "analyze_scene": AnalyzeSceneParams
+        "analyze_scene": AnalyzeSceneParams,
+        "perform_show": PerformShowParams,
     }

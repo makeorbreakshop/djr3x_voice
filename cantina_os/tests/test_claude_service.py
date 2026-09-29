@@ -208,8 +208,13 @@ class TestClaudeServiceLifecycle:
         assert len(service._config["SYSTEM_PROMPT"]) > 0
 
     @pytest.mark.asyncio
-    async def test_start_initializes_anthropic_client(self, mock_event_bus, mock_config):
+    async def test_start_initializes_anthropic_client(self, mock_event_bus, mock_config, monkeypatch):
         """Test _start method initializes Anthropic client."""
+        # anthropic_provider honours ANTHROPIC_BASE_URL from the process env (CLAUDE.md 9a),
+        # and a Claude Code shell exports it, which added a base_url kwarg and failed this
+        # test only when run from an agent. The override path has its own tests in
+        # test_anthropic_provider.py; this one asserts the plain direct-to-Anthropic client.
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
         service = ClaudeService(mock_event_bus, mock_config)
 
         with patch('cantina_os.services.claude_service.claude_service.Anthropic') as mock_anthropic:

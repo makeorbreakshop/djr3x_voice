@@ -1,0 +1,7 @@
+[
+  {"t": 0.0, "do": "clip", "id": "fx_nod", "intensity": 1.0, "speed": 1.0},
+  {"t": 0.0, "do": "lights", "cue": "red_flash", "fade": 0.1, "hold": 2.0},
+  {"t": 0.0, "do": "eyes", "pattern": "excited", "color": "#ffb000", "duration": 1.5},
+  {"t": 0.0, "do": "chest", "command": "X2", "hold": 1.5},
+  {"t": 0.05, "do": "sfx", "id": "airhorn"}
+]

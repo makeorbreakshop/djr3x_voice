@@ -1,0 +1,13 @@
+{ "fixture": { "root": "fx_hype", "bpm": 120 },
+  "items": [
+    { "id": "fx_hype", "kind": "cue", "tier": "cheap", "description": "fixture cue",
+      "actions": [
+        { "at": 0.05, "do": "sfx", "id": "airhorn" },
+        { "at": 0, "do": "clip", "id": "fx_nod" },
+        { "at": 0, "do": "lights", "cue": "red_flash", "fade": 0.1, "hold": 2 },
+        { "at": 0, "do": "eyes", "pattern": "excited", "color": "#ffb000", "duration": 1.5 },
+        { "at": 0, "do": "chest", "command": "X2", "hold": 1.5 }
+      ] },
+    { "id": "fx_nod", "kind": "clip", "tier": "free", "description": "fixture clip", "duration": 0.9,
+      "tracks": { "head_tilt": { "mode": "additive", "keys": [[0,0],[0.25,-8],[0.5,4],[0.9,0]] } } }
+  ] }

@@ -1,0 +1,19 @@
+{
+  "id": "crowd_hype",
+  "kind": "sequence",
+  "title": "Crowd hype",
+  "description": "Works the crowd: points, 'Make some noise!', fist pump, drop, then grooves",
+  "tags": ["crowd", "make some noise", "hype"],
+  "tier": "show",
+  "clock": "beat",
+  "bpm": 120,
+  "layer": "show",
+  "track": [
+    {"at": 0, "clip": "point_forward"},
+    {"at": 0, "do": "speak", "text": "Make some noise!"},
+    {"at": 2, "do": "lights", "cue": "red_flash", "fade": 0.1, "hold": 1.0},
+    {"at": 4, "cue": "excited"},
+    {"at": 8, "cue": "hype_drop"},
+    {"at": 12, "clip": "ring_twist_groove"}
+  ]
+}

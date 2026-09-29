@@ -170,6 +170,9 @@ class ElevenLabsService(BaseService):
         self._audio_thread = None
         self._stop_event = threading.Event()
         self._event_loop = None
+        #: False from the moment shutdown begins. The worker thread checks it before posting
+        #: anything to the loop, so nothing is scheduled onto a loop that is about to close.
+        self._accepting_posts = False
 
         # Buffer for accumulating LLM responses before sending to TTS
         self._llm_response_buffer: str = ""
@@ -228,6 +231,7 @@ class ElevenLabsService(BaseService):
             
             # Store event loop reference for thread communication
             self._event_loop = asyncio.get_running_loop()
+            self._accepting_posts = True
             
             # Start audio streaming thread if using streaming playback
             if self._config.playback_method == SpeechPlaybackMethod.STREAMING:
@@ -322,16 +326,32 @@ class ElevenLabsService(BaseService):
 
         self.logger.info("ElevenLabsService event subscriptions complete")
     
+    async def _stop(self) -> None:
+        """BaseService.stop() calls this. Until 2026-09-29 ElevenLabsService only defined
+        ``_cleanup()``, which nothing called: the audio worker thread was never stopped, so at
+        interpreter shutdown it posted coroutines onto a closed loop (``RuntimeError: Event
+        loop is closed`` from ``run_coroutine_threadsafe`` plus "coroutine ... was never
+        awaited"), and the HTTP client and temp dir leaked."""
+        await self._cleanup()
+
     async def _cleanup(self) -> None:
         """Stop the service and clean up resources."""
         self.logger.info("Stopping ElevenLabsService")
         
-        # Signal audio thread to stop
+        # Signal audio thread to stop. It aborts any in-flight stream at the next chunk. The
+        # join runs in a worker thread so this loop keeps running and can still deliver the
+        # thread's last events (e.g. an aborted line's completion) while we wait.
+        self._stop_event.set()
         if self._audio_thread and self._audio_thread.is_alive():
-            self._stop_event.set()
             self._speech_request_queue.put(None)  # Sentinel to unblock queue
-            self._audio_thread.join(timeout=5.0)
-            self.logger.info("Audio worker thread stopped")
+            await asyncio.to_thread(self._audio_thread.join, 5.0)
+            if self._audio_thread.is_alive():
+                self.logger.warning("Audio worker thread did not stop within 5 s; detaching it")
+            else:
+                self.logger.info("Audio worker thread stopped")
+        # From here on the thread (even a stuck one) must not touch the loop.
+        self._accepting_posts = False
+        self._audio_thread = None
         
         # Cancel any ongoing playback
         if self._current_playback_task and not self._current_playback_task.done():
@@ -363,6 +383,32 @@ class ElevenLabsService(BaseService):
         
         await self._emit_status(ServiceStatus.STOPPED, "Service stopped successfully")
     
+    def _post_to_loop(self, coro_fn) -> bool:
+        """Run ``coro_fn()`` on the service's event loop from the audio thread, if it is safe.
+
+        Takes the coroutine *function*, not a coroutine, so when the loop is closed, closing
+        or not running nothing is created - which is what produced the "coroutine ... was never
+        awaited" warnings at shutdown. Returns whether it was scheduled.
+        """
+        loop = self._event_loop
+        if not self._accepting_posts or loop is None or loop.is_closed() or not loop.is_running():
+            return False
+        coro = coro_fn()
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return True
+        except RuntimeError:  # the loop closed between the check and the call
+            coro.close()
+            return False
+
+    def _post_emit(self, topic, payload: Dict[str, Any]) -> bool:
+        """Emit ``payload`` on the loop from the audio thread. The payload is built *now*, in
+        the thread, and bound as an argument - never read later from the worker loop's
+        variables. (Until 2026-09-29 the ``emit_*`` closures read ``clip_id`` etc. when they
+        ran on the loop, by which time the thread had dequeued the next request: a show line
+        queued behind Claude's reply completed carrying the *reply's* clip_id.)"""
+        return self._post_to_loop(lambda: self.emit(topic, payload))
+
     def _audio_worker_loop(self):
         """Dedicated thread for streaming audio from ElevenLabs and playing it."""
         self.logger.info("Audio worker thread started")
@@ -407,30 +453,27 @@ class ElevenLabsService(BaseService):
                         self.logger.warning("Received empty text for TTS. Skipping synthesis.")
                         
                         # Emit completion event for empty text
-                        async def emit_empty_complete():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,
-                                success=True,
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_empty_complete(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,
+                            success=True,
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                         # Mark task as done
                         self._speech_request_queue.task_done()
                         continue
                     
                     # Emit event that we're starting audio generation
-                    async def emit_started():
-                        await self.emit(EventTopics.SPEECH_GENERATION_STARTED, {
-                            "conversation_id": conversation_id,
-                            "text": text,
-                        })
-                    asyncio.run_coroutine_threadsafe(emit_started(), self._event_loop)
+                    self._post_emit(EventTopics.SPEECH_GENERATION_STARTED, {
+                        "conversation_id": conversation_id,
+                        "text": text,
+                        # How the show player knows its own `speak` line left the queue.
+                        "clip_id": clip_id,
+                    })
                     
                     # Get audio stream from ElevenLabs
                     # Build voice settings - v3 doesn't support speed parameter
@@ -487,6 +530,9 @@ class ElevenLabsService(BaseService):
 
                             # Process and play each PCM chunk immediately (true streaming)
                             for chunk in audio_stream:
+                                if self._stop_event.is_set():
+                                    self.logger.info("Shutdown during speech: aborting the stream")
+                                    break
                                 # Only process bytes (filter out metadata)
                                 if isinstance(chunk, bytes):
                                     chunk_count += 1
@@ -538,10 +584,7 @@ class ElevenLabsService(BaseService):
                                         "event_id": f"amp_{datetime.now().timestamp()}"
                                     }
 
-                                    async def emit_amplitude():
-                                        await self.emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
-
-                                    asyncio.run_coroutine_threadsafe(emit_amplitude(), self._event_loop)
+                                    self._post_emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
 
                                     # Play chunk immediately (true streaming, no accumulation!)
                                     stream.write(samples)
@@ -560,35 +603,29 @@ class ElevenLabsService(BaseService):
                             raise
                         
                         # Emit completion event
-                        async def emit_complete():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,  # Hard to calculate exact length
-                                success=True,
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_complete(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,  # Hard to calculate exact length
+                            success=True,
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                     except Exception as e:
                         self.logger.error(f"Error in audio thread streaming: {e}")
                         # Emit error event
-                        async def emit_error():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,
-                                success=False,
-                                error=str(e),
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_error(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,
+                            success=False,
+                            error=str(e),
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                     # Mark task as done
                     self._speech_request_queue.task_done()
@@ -601,13 +638,10 @@ class ElevenLabsService(BaseService):
             # Log any unexpected errors
             self.logger.error(f"Unexpected error in audio worker thread: {e}")
             # Notify main thread of critical error
-            async def notify_critical_error():
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    f"Critical error in audio thread: {e}",
-                    severity=LogLevel.ERROR
-                )
-            asyncio.run_coroutine_threadsafe(notify_critical_error(), self._event_loop)
+            message = f"Critical error in audio thread: {e}"
+            self._post_to_loop(lambda: self._emit_status(
+                ServiceStatus.ERROR, message, severity=LogLevel.ERROR
+            ))
         
         self.logger.info("Audio worker thread exiting")
     

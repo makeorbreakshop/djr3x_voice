@@ -28,6 +28,20 @@ const PATTERN_CMD: Record<Pattern, string> = {
   idle: 'SI', engaged: 'SE', listening: 'SL', thinking: 'ST', speaking: 'SS', flash: 'SF',
 };
 
+/** EyePattern values EyeLightControllerService accepts (anything else it logs and drops). */
+const EYE_PATTERNS = new Set(['idle', 'startup', 'engaged', 'listening', 'thinking', 'speaking', 'flash', 'happy', 'sad', 'angry', 'surprised', 'error', 'custom']);
+
+/**
+ * An EYE_COMMAND pattern as the firmware will show it. SimpleEyeAdapter.set_pattern maps
+ * any pattern it has no serial word for (happy, sad, angry, surprised, error, ...) to
+ * "idle"; an unknown name is rejected by the service (null).
+ */
+export function eyePattern(name: string): Pattern | null {
+  const p = name.toLowerCase();
+  if (!EYE_PATTERNS.has(p)) return null;
+  return p in PATTERN_CMD ? (p as Pattern) : 'idle';
+}
+
 export interface SerialTap {
   (dir: 'tx' | 'rx', line: string, atMs: number): void;
 }
@@ -49,6 +63,11 @@ export class CantinaHostEmulator {
 
   private lastControlTick = -Infinity;
   droppedMouthResets = 0;
+
+  // A show's eye command: shown until its duration ends or the interaction state changes.
+  private shown: Pattern | null = null;
+  private shownUntil = 0;
+  private shownOver: Pattern = 'idle';
 
   constructor(private readonly fw: RexFaceFirmware, private readonly tap?: SerialTap) {}
 
@@ -119,14 +138,31 @@ export class CantinaHostEmulator {
     return true;
   }
 
+  /**
+   * EYE_COMMAND {pattern, duration?} (a show's `eyes` action): the pattern goes out through
+   * the same control loop, for `duration` s (0/absent: until the interaction state next
+   * changes), then the loop returns to its target. Returns false for an unknown pattern.
+   */
+  eyeCommand(pattern: string, durationS = 0): boolean {
+    const p = eyePattern(pattern);
+    if (!p) return false;
+    this.shown = p;
+    this.shownUntil = durationS > 0 ? this.fw.now + durationS * 1000 : Infinity;
+    this.shownOver = this.targetPattern;
+    this.currentPattern = null; // re-send even if it is the same word (a second flash)
+    return true;
+  }
+
   /** 60 Hz control loop: send the pattern when the target changed. */
   tick() {
     const now = this.fw.now;
     if (now - this.lastControlTick < 1000 / 60) return;
     this.lastControlTick = now;
-    if (this.targetPattern !== this.currentPattern) {
-      this.send(PATTERN_CMD[this.targetPattern]);
-      this.currentPattern = this.targetPattern;
+    if (this.shown && (now >= this.shownUntil || this.targetPattern !== this.shownOver)) this.shown = null;
+    const want = this.shown ?? this.targetPattern;
+    if (want !== this.currentPattern) {
+      this.send(PATTERN_CMD[want]);
+      this.currentPattern = want;
     }
   }
 }

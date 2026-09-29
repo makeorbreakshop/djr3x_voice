@@ -1,0 +1,15 @@
+{
+  "id": "excited",
+  "kind": "cue",
+  "title": "Excited",
+  "description": "Visor pops, fist pump, fast chest chase and a yahoo",
+  "tags": ["excited", "yeah", "awesome"],
+  "tier": "cheap",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "visor_flip"},
+    {"at": 0.2, "do": "clip", "id": "fist_pump"},
+    {"at": 0, "do": "eyes", "pattern": "flash", "duration": 0.8},
+    {"at": 0, "do": "chest", "command": "B180", "hold": 2.5},
+    {"at": 0.15, "do": "sfx", "id": "yahoo"}
+  ]
+}

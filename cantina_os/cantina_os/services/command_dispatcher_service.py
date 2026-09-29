@@ -417,6 +417,7 @@ class CommandDispatcherService(BaseService):
                 "Eye Commands": ["eye pattern", "eye test", "eye status"],
                 "Music Commands": ["play music", "stop music", "list music"],
                 "DJ Mode Commands": ["dj start", "dj stop", "dj next", "dj queue"],
+                "Show Commands": ["show", "freeze", "unfreeze"],
                 "Camera Commands": ["camera list", "camera status", "camera select"],
                 "System Commands": ["help", "status", "reset"],
                 "Debug Commands": ["debug level", "debug trace"]
@@ -453,6 +454,14 @@ class CommandDispatcherService(BaseService):
                             "    • dj stop         - Stop DJ mode and return to normal playback",
                             "    • dj next         - Skip to next track with DJ commentary",
                             "    • dj queue <track> - Queue a specific track to play next"
+                        ])
+                    elif category == "Show Commands":
+                        help_lines.extend([
+                            "  • show [list]                      - List clips, cues and sequences",
+                            "  • show <id> [intensity] [speed]    - Perform one",
+                            "  • show stop [id|show|gesture|all]  - Stop running shows",
+                            "  • show reload                      - Re-read show/ and report issues",
+                            "  • freeze / unfreeze                - Motion stop: end all shows, refuse new ones",
                         ])
                     elif category == "Camera Commands":
                         help_lines.extend([f"  • {cmd}" for cmd in sorted(category_commands)])

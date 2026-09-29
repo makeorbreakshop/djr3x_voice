@@ -1,5 +1,6 @@
 import asyncio
 import io
+import re
 
 import pytest
 from cantina_os.services.cli_service import CLIService
@@ -13,6 +14,12 @@ class QueueReader:
 
     async def readline(self) -> bytes:
         return await self.lines.get()
+
+
+# The prompt is intentionally coloured (cli_formatter_minimal.format_prompt wraps it in
+# Fore.GREEN ... RESET_ALL) unless NO_COLOR or TERM=dumb is set. The assertions are about
+# ordering, not colour, so compare the text a person reads.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 async def wait_for_text(stream: io.StringIO, needle: str) -> None:
@@ -47,7 +54,7 @@ async def test_help_renders_once_and_returns_one_prompt(monkeypatch) -> None:
         await wait_for_text(output, "Available commands:")
         await cli._output_queue.join()
 
-        rendered = output.getvalue()
+        rendered = _ANSI.sub("", output.getvalue())
         assert rendered.count("Available commands:") == 1
         assert rendered.count("dj-r3x>") == 2, (
             "expected the initial prompt and one prompt after help"

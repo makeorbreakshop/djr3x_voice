@@ -18,6 +18,14 @@ This service keeps it in lockstep with the eyes and shows the machine's overall 
   counts for CHEST_FAULT_HOLD_S (60 s) unless repeated; a failure to start or initialise
   stays until the service reports running again.
 
+Show control (show/SPEC.md):
+* ``chest.override {command, hold}`` - the timeline sends a chest word (``X2``, ``SF``,
+  ``M200``...). It goes out at once; for ``hold`` seconds the status logic above is kept off
+  that channel (keyed by the command's letter), then the current status is re-sent. A hold
+  of 0 keeps the override until the status on that channel next changes.
+* ``motion.freeze {on}`` - while frozen the board holds whatever it shows (nothing is sent);
+  on release every channel is re-asserted.
+
 Every command is also emitted on CHEST_COMMAND, so the 3D sim mirrors the real board's
 input byte for byte. Fail-open: with no board (or CHEST_ENABLED=false) it runs in mock
 mode and still emits CHEST_COMMAND.
@@ -36,7 +44,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base_service import BaseService
-from ..core.event_payloads import ChestCommandPayload
+from ..core.event_payloads import ChestCommandPayload, ChestOverridePayload, MotionFreezePayload
 from ..core.event_topics import EventTopics
 
 # Panel-major window order, matching the sketch's WINDOW_PIXEL order (and the sim).
@@ -54,6 +62,8 @@ WINDOW_SUBSYSTEMS: List[Tuple[str, Tuple[str, ...]]] = [
 # In error, R3X cannot hold a conversation -> fault alarm.
 CRITICAL_SERVICES = {"DeepgramDirectMicService", "ClaudeService"}
 UNHEALTHY = {"error", "degraded"}
+#: Channels the status logic drives, keyed by the command letter (see tick()).
+STATUS_CHANNELS = ("X", "H", "S", "B", "M")
 
 ARDUINO_NAME_HINTS = ("usbmodem", "usbserial", "ttyacm", "ttyusb", "wchusbserial")
 
@@ -142,6 +152,10 @@ class ChestLightControllerService(BaseService):
         # last sent
         self._sent: Dict[str, str] = {}
         self._last_amp_level = -1
+        # show control: channel letter -> monotonic time the override expires
+        self._overrides: Dict[str, float] = {}
+        self._reassert_all_at: Optional[float] = None
+        self.frozen = False
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -177,6 +191,8 @@ class ChestLightControllerService(BaseService):
             (EventTopics.MUSIC_PLAYBACK_STOPPED, self._on_music_stopped),
             (EventTopics.DJ_MODE_CHANGED, self._on_dj_mode),
             ("service_status", self._on_service_status),  # BaseService emits this literal
+            (EventTopics.CHEST_OVERRIDE, self._on_override),
+            (EventTopics.MOTION_FREEZE, self._on_freeze),
         ]
         for topic, handler in subs:
             await self.subscribe(topic, handler)
@@ -232,6 +248,8 @@ class ChestLightControllerService(BaseService):
                              ChestCommandPayload(command=cmd, connected=ok).model_dump())
 
     def _send_if_changed(self, key: str, cmd: str) -> None:
+        if key in self._overrides:  # a show owns this channel for now
+            return
         if self._sent.get(key) != cmd:
             self._sent[key] = cmd
             self._send(cmd)
@@ -254,18 +272,35 @@ class ChestLightControllerService(BaseService):
             return "X3"
         return "X0"
 
+    def _expire_overrides(self) -> None:
+        now = time.monotonic()
+        for key, until in list(self._overrides.items()):
+            if now >= until:
+                del self._overrides[key]
+                self._sent.pop(key, None)  # force the current status back out
+                if key == "S":
+                    self._last_amp_level = -1
+        if self._reassert_all_at is not None and now >= self._reassert_all_at:
+            self._reassert_all_at = None
+            self._sent.clear()
+            self._last_amp_level = -1
+
     def tick(self) -> None:
         """One control-loop step (20 Hz): send whatever changed."""
+        if self.frozen:
+            return  # hold the board exactly as it is
+        self._expire_overrides()
         if self.booting and time.monotonic() - self._boot_started > 20:
             self.booting = False  # never boot-sweep forever
         self._send_if_changed("X", self.system_state())
         self._send_if_changed("H", f"H{health_mask(self.statuses):03X}")
         if self._sparkle:
             self._sparkle = False
-            self._send("SF")
+            if "S" not in self._overrides:
+                self._send("SF")
         self._send_if_changed("S", self.target_pattern)
         self._send_if_changed("B", f"B{max(0, min(999, self.bpm)):03d}")
-        if self.target_pattern == "SS":
+        if self.target_pattern == "SS" and "S" not in self._overrides and "M" not in self._overrides:
             level = int(max(0.0, min(1.0, self.amplitude)) * 255)
             if level != self._last_amp_level:
                 self._last_amp_level = level
@@ -323,14 +358,20 @@ class ChestLightControllerService(BaseService):
         # Unlike the face adapter's throttle, the reset is never dropped: send it now.
         self.amplitude = 0.0
         self._last_amp_level = 0
-        self._send("M000")
+        if not self.frozen and "M" not in self._overrides:
+            self._send("M000")
         self._sparkle = True  # alongside the eyes' green flash
         self.target_pattern = "SE"
 
     async def _on_music_started(self, payload: Any = None) -> None:
+        # The real tempo from offline beat analysis when the track has one (MusicTrack.bpm);
+        # CHEST_DEFAULT_BPM only when it does not. A crossfade re-announces the new track.
         track = (payload or {}).get("track") or {}
         bpm = track.get("bpm") if isinstance(track, dict) else None
-        self.bpm = int(bpm) if bpm else self._default_bpm
+        try:
+            self.bpm = int(round(float(bpm))) if bpm and float(bpm) > 0 else self._default_bpm
+        except (TypeError, ValueError):
+            self.bpm = self._default_bpm
 
     async def _on_music_stopped(self, payload: Any = None) -> None:
         self.bpm = 0
@@ -352,3 +393,41 @@ class ChestLightControllerService(BaseService):
             message = str(payload.get("message", ""))
             latched = message.startswith(("Failed to start", "Failed to initialize"))
             self._svc_status[service] = (status, time.monotonic(), latched)
+
+    # ------------------------------------------------------------------ show control
+
+    async def _on_override(self, payload: Any = None) -> None:
+        try:
+            req = ChestOverridePayload(**(payload or {}))
+        except Exception as e:
+            self.logger.warning(f"Invalid chest.override payload: {e}")
+            return
+        if self.frozen:
+            return
+        cmd = req.command.strip()
+        if not cmd:
+            return
+        self._send(cmd)
+        key = cmd[0].upper()
+        if req.hold and req.hold > 0:
+            until = time.monotonic() + req.hold
+            if key in STATUS_CHANNELS:
+                self._overrides[key] = until
+            else:  # e.g. "R": no single channel; re-assert everything afterwards
+                self._reassert_all_at = max(self._reassert_all_at or 0.0, until)
+        # hold 0: nothing to schedule. _sent still holds the status value from before the
+        # override, so tick() stays quiet on this channel until that status changes.
+
+    async def _on_freeze(self, payload: Any = None) -> None:
+        try:
+            on = MotionFreezePayload(**(payload or {})).on
+        except Exception as e:
+            self.logger.warning(f"Invalid motion.freeze payload: {e}")
+            return
+        if on == self.frozen:
+            return
+        self.frozen = on
+        if not on:
+            self._overrides.clear()
+            self._sent.clear()  # re-assert every channel on release
+            self._last_amp_level = -1

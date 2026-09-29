@@ -1,0 +1,21 @@
+{
+  "id": "dj_intro",
+  "kind": "sequence",
+  "title": "DJ intro",
+  "description": "Opens the set: visor reveal, ring sweep, 'Time to boogie!', lights to DJ, crowd hype",
+  "tags": ["intro", "start the set", "opening"],
+  "tier": "show",
+  "clock": "beat",
+  "bpm": 120,
+  "layer": "show",
+  "owns": ["visor", "hero_shoulder", "hero_wrist", "torso_lower", "torso_top"],
+  "track": [
+    {"at": 0, "cue": "visor_reveal"},
+    {"at": 6, "clip": "ring_sweep", "speed": 1.2},
+    {"at": 10, "do": "speak", "text": "Time to boogie!"},
+    {"at": 10, "do": "wait", "for": "speech_end"},
+    {"at": 11, "cue": "hype_drop"},
+    {"at": 11, "do": "lights", "mode": "dj"},
+    {"at": 16, "sequence": "crowd_hype"}
+  ]
+}

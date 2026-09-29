@@ -193,6 +193,86 @@ Open the printed URL.
   `?offline` to a tab to keep it on the demo.
 - **Disable the bridge:** set `SIM_BRIDGE_ENABLED=false`.
 
+## Show system
+
+R3X's performance content lives in the repo-root `show/` folder and follows `show/SPEC.md`.
+CantinaOS reads the same files. There are three kinds:
+
+- **Clips** (`show/clips/`): motion only, as joint keyframes.
+- **Cues** (`show/cues/`): one moment across every department: clip, eyes, chest, lights,
+  sfx.
+- **Sequences** (`show/sequences/`): show elements on a time or beat clock.
+
+`show/idle.json` holds the weighted idle policy. The sim code is in `web/src/show/`.
+
+- **Offline:** `ShowPlayer` conducts, standing in for TimelineExecutor.
+  - It schedules every item against a monotonic clock anchored at the start.
+  - `wait for speech_end` pauses that clock.
+  - `beat` clocks chase the BPM slider while music or DJ mode is on.
+  - Each layer runs one item. A gesture inside its `interruptible_after` window queues
+    the next request.
+  - Departments dispatch locally:
+    - clips go to the body;
+    - `eyes` goes through the host emulator's EYE_COMMAND path;
+    - `chest` goes to the chest firmware, which holds and then resyncs;
+    - `lights` goes to the light desk, which holds and then resumes its program;
+    - `sfx` plays the kit sounds in `public/sfx`, matched by name ignoring case and spaces;
+    - `speak` shows a caption and runs the fake-amplitude mouth.
+- **Live:** CantinaOS conducts and the sim's player stays idle. The sim renders
+  `show.motion`, `stage.lights`, `show.sfx` and `motion.freeze`. It uses `show.started` and
+  `show.ended` for ownership and the UI. Eyes and chest arrive on their existing topics.
+- **Body compositor** (`show/body.ts`). The layers, bottom to top:
+  1. procedural (`behavior.ts`);
+  2. background: an authored loop per activity;
+  3. gesture;
+  4. show;
+  5. puppeteer;
+  6. freeze.
+
+  Tracks are `additive` or `override`. Override weights ramp by joint class: visor 0.1 s,
+  head 0.2 s, body 0.35 s. `intensity` scales an override's offset from the pose it
+  started over. An interrupt freezes the clip and fades it out; it never cuts.
+
+  A sequence's `owns` holds those joints and masks its overrides to them. Every other joint
+  stays live (gaze, breathing). Keys use min-jerk easing, and the output still goes through
+  the jerk-limited follower and the servo plant.
+- **From Reachy Mini:**
+  - **Listening freeze:** orient once, hold still, then ease back.
+  - **Speaking handoff:** the gaze stays anchored on the listener while he talks.
+  - **Speech wobble:** small head micro-motion from the mouth-LED amplitude.
+  - **Weighted idle policy** (`show/idle.json`), with a separate `while_music` list.
+- **Freeze** (`motion.freeze`) stops shows, gestures and idle, holds the servos where they
+  are, and blends back over 0.5 s.
+- **Puppeteer** (`show/puppeteer.ts`): a gamepad, or the sliders.
+  - **Why the command space is fixed:** it is 8 named continuous intents in [-1, 1]
+    (`gaze_yaw`, `gaze_pitch`, `lift`, `body_yaw`, `lean`, `visor`, `arm_raise`,
+    `energy`), plus 8 cue slots and a mode. Disney trained an operator-imitation policy for
+    BD-X on under an hour of exactly this kind of stream (arXiv 2504.02724). It transferred
+    to another robot with the same interface, so this space is our future action space.
+    Renaming or remapping a signal breaks every recorded take; add new ones at the end.
+  - **Record take** logs the stream at 50 Hz as JSONL. The log includes the show layers,
+    `show.*` events and any live `vision.*` events.
+- **Servo whine** (optional, off by default): a quiet hum that follows the summed servo
+  speed.
+- **UI:** the Show system section has the lists, Play and Stop, intensity and speed, the
+  layer readout, the idle toggle and the background loops.
+- **Debug handle:** `__r3x.show.play(id, {intensity, speed, source})`, `.stop()`,
+  `.running()`, `.freeze(on)` and `.expand(id, bpm)`, plus `__r3x.puppet.*`.
+
+`npm test` lints every show file against `servo_map.json`:
+
+- the channel soft limits and the joint-side `vMax`/`aMax`;
+- `requires: "extended"` for extended joints;
+- that every id resolves;
+- nesting depth of at most 3;
+- that tiers never escalate through nesting;
+- that idle items are free tier.
+
+It also checks that `expand()` and the clock-driven player both reproduce
+`show/tests/golden/`. `web/src/show/rig_limits.json` and `kit_sfx.json` are committed copies
+of the gitignored `rig.json` and sfx list, and the tests assert that they still match
+whenever the originals exist.
+
 ## Tests
 
 ```bash
@@ -208,6 +288,8 @@ The tests cover:
 - **Pipeline:** channel map, frame rate and resolution, prismatic lift, script
   override, and servo lag.
 - **Show-script (Maestro format) interpreter.**
+- **Show system:** golden parity, the show linter, player timing (waits, beat chase,
+  loops, interruption, tiers, freeze) and the body compositor.
 
 ## Render regression check
 
