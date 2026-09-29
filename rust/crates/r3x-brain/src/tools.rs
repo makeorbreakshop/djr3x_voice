@@ -34,6 +34,9 @@ impl Brain {
     pub(crate) async fn execute_tool(&self, tool: &str, params: &Map<String, Value>, turn: Option<&str>, source: Source) -> Value {
         let s = |k: &str| params.get(k).and_then(Value::as_str).map(str::trim).unwrap_or("").to_string();
         let cid = turn.map(str::to_owned);
+        if self.inner.cfg.public && !crate::PUBLIC_TOOLS.contains(&tool) {
+            return json!({"success": false, "error": format!("{tool} is not available to web visitors")});
+        }
         match tool {
             "play_music" => self.play_music(&s("track"), cid).await,
             "search_music" => {

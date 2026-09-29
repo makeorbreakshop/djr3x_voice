@@ -129,8 +129,8 @@ async fn command_ack_round_trip_with_stamped_source() {
 async fn tier_and_class_rejections() {
     let (_bus, url) = start().await;
     let mut ws = connect(&url, Some("pub-secret"), None).await.unwrap();
-    // public <= cheap + intent.say only
-    send(&mut ws, "p1", Command::Perf(PerfCommand::Play { id: "hype_drop".into(), intensity: 1.0, speed: 1.0, layer: None })).await;
+    // public: cheap perf (tier checked by the performer) + say + ptt; never puppet/freeze
+    send(&mut ws, "p1", Command::Perf(PerfCommand::Freeze { on: true })).await;
     assert!(!ack_for(&mut ws, "p1").await.is_accepted());
     send(&mut ws, "p2", Command::Intent(IntentCommand::Say { text: "hi".into() })).await;
     assert!(ack_for(&mut ws, "p2").await.is_accepted());

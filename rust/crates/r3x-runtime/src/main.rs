@@ -1,7 +1,11 @@
-//! `r3x-runtime [--standalone | --bridge] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Standalone (the default): the whole robot in this process - voice, the Rust brain, the
 //! Rust music engine, vision (fail-open), performer and drivers - with no CantinaOS.
+//! `--headless`: no local audio device, LED/servo drivers, camera or vision (remote clients
+//! only). `--public` (implies headless): the public server (plan Phase 10,
+//! `r3x_runtime::public`) - one brain per visitor, visitor tokens, `public` tier, rate limits
+//! and budget caps (`R3X_PUBLIC_*`), no music; nothing else runs.
 //! `--bridge` is the legacy mode: CantinaOS is the brain (and, unless `--music rust` /
 //! `--voice`, music and voice), reached through its bus tap.
 //!
@@ -26,7 +30,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -42,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut voice, mut vision) = (on("R3X_VOICE"), on("R3X_VISION"));
     let mut music: Option<r3x_runtime::music::MusicMode> = env("R3X_MUSIC").map(|v| v.parse()).transpose().map_err(anyhow::Error::msg)?;
     let mut mouse = false;
+    let (mut headless, mut public) = (false, false);
     // Who drives the face/chest boards: r3x (default; run CantinaOS with R3X_EXTERNAL_BODY=1)
     // or CantinaOS (`--leds cantina` / R3X_LEDS=cantina).
     let mut leds = env("R3X_LEDS").is_none_or(|v| v != "cantina");
@@ -54,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
             "--bind" => bind = val()?,
             "--bridge" => bridge = true,
             "--standalone" => bridge = false,
+            "--headless" => headless = true,
+            "--public" => public = true,
             "--voice" => voice = Some(true),
             "--no-voice" => voice = Some(false),
             "--vision" => vision = Some(true),
@@ -80,12 +87,29 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    if public {
+        anyhow::ensure!(!bridge && !mouse, "--public runs alone: no --bridge or --mouse");
+        let profile = RobotProfile::load(&profile_path).with_context(|| format!("profile {}", profile_path.display()))?;
+        let cfg = r3x_runtime::public::PublicConfig::from_env(Arc::new(profile), show_dir, voice.unwrap_or(true))?;
+        let listener = tokio::net::TcpListener::bind(&bind).await.with_context(|| format!("bind {bind}"))?;
+        return tokio::select! {
+            r = r3x_runtime::public::PublicServer::new(cfg).serve(listener) => r.map_err(Into::into),
+            _ = tokio::signal::ctrl_c() => Ok(()),
+        };
+    }
+    if headless {
+        // = --audio null (no device; remote clients still get speech). Read by the voice
+        // settings and the music engine; set before any other thread starts.
+        std::env::set_var("R3X_AUDIO", "null");
+        anyhow::ensure!(!mouse, "--headless has no local mouse");
+    }
+
     use r3x_runtime::{brain::BrainMode, music::MusicMode};
     let standalone = !bridge;
     let brain = brain.unwrap_or(if standalone { BrainMode::Rust } else { BrainMode::Cantina });
     let music = music.unwrap_or(if standalone { MusicMode::Rust } else { MusicMode::Cantina });
     let voice = voice.unwrap_or(standalone);
-    let vision = vision.unwrap_or(standalone);
+    let vision = !headless && vision.unwrap_or(standalone);
     // Read by boot(); set before any other thread starts.
     std::env::set_var("R3X_MUSIC", if music == MusicMode::Rust { "rust" } else { "cantina" });
     std::env::set_var("R3X_VISION", if vision { "1" } else { "0" });
@@ -113,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
         voice: if voice { Some(r3x_voice::VoiceSettings::from_env()?) } else { None },
         mouse,
         show_dir,
-        drivers: Some(r3x_runtime::performer::DriverOptions { leds }),
+        drivers: (!headless).then_some(r3x_runtime::performer::DriverOptions { leds }),
     };
     let bus = Bus::default();
     tokio::select! {

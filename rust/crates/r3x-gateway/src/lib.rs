@@ -58,6 +58,10 @@ pub struct AudioOut {
     pub pcm: axum::body::Bytes,
 }
 
+/// Runs after the class/tier gate, before a command reaches the bus: `Some(ack)` answers the
+/// command here (rate limits, budgets - the public server's hooks).
+pub type CommandFilter = Arc<dyn Fn(&ClientInfo, &Command) -> Option<r3x_contracts::Ack> + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub struct GatewayConfig {
     pub clients: Vec<ClientAuth>,
@@ -67,6 +71,7 @@ pub struct GatewayConfig {
     pub profile: Option<Arc<RobotProfile>>,
     pub logs: Option<broadcast::Sender<LogLine>>,
     pub audio: AudioHooks,
+    pub filter: Option<CommandFilter>,
 }
 
 #[derive(Clone)]
@@ -188,6 +193,12 @@ pub fn refuse(info: &ClientInfo, cmd: &Command) -> Option<String> {
     None
 }
 
+/// Serve one already-authenticated socket on `bus` (the public server gives each visitor its
+/// own bus). Returns when the client goes away.
+pub async fn serve_socket(socket: WebSocket, bus: Bus, cfg: Arc<GatewayConfig>, info: ClientInfo) {
+    connection(socket, Shared { bus, cfg }, info).await;
+}
+
 async fn connection(socket: WebSocket, sh: Shared, info: ClientInfo) {
     let (mut sink, mut stream) = socket.split();
     let (out, mut out_rx) = mpsc::channel::<Message>(OUT_QUEUE);
@@ -284,6 +295,10 @@ fn on_command(
     };
     if let Some(reason) = refuse(info, &cmd) {
         let _ = out.try_send(reply(r3x_contracts::Ack::rejected(reason)));
+        return;
+    }
+    if let Some(ack) = sh.cfg.filter.as_ref().and_then(|f| f(info, &cmd)) {
+        let _ = out.try_send(reply(ack));
         return;
     }
     // Per-connection: answered here, never reaches the bus.

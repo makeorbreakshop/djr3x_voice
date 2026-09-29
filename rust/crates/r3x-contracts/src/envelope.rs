@@ -64,11 +64,18 @@ impl Source {
         tier <= self.max_tier()
     }
 
-    /// Class-level gate: `public` may only say things. Tier checks on the performed item
-    /// happen where the item is known (the performer).
+    /// Command-level gate. `public` (plan Phase 10): `intent.say`, push-to-talk, and perf
+    /// `play` / `stop` / `emote` (the performer holds a play to the `cheap` ceiling), plus
+    /// its own frame stream - never stage, music, DJ, console, puppet, freeze or calibration.
     pub fn may_issue(self, cmd: &Command) -> bool {
+        use crate::{IntentCommand as I, PerfCommand as P, TelemetryCommand as T};
         match self {
-            Source::Public => matches!(cmd, Command::Intent(crate::IntentCommand::Say { .. })),
+            Source::Public => matches!(
+                cmd,
+                Command::Intent(I::Say { .. } | I::PttStart | I::PttStop)
+                    | Command::Perf(P::Play { .. } | P::Stop(_) | P::Emote { .. })
+                    | Command::Telemetry(T::Frames { .. })
+            ),
             _ => true,
         }
     }
@@ -226,11 +233,17 @@ mod tests {
     }
 
     #[test]
-    fn public_may_only_say() {
+    fn public_command_gate() {
         let say = Command::Intent(IntentCommand::Say { text: "hi".into() });
         let freeze = Command::Perf(PerfCommand::Freeze { on: true });
         assert!(Source::Public.may_issue(&say));
+        assert!(Source::Public.may_issue(&Command::Intent(IntentCommand::PttStart)));
+        assert!(Source::Public.may_issue(&Command::Perf(PerfCommand::Emote { slot: 0 })));
         assert!(!Source::Public.may_issue(&freeze));
+        assert!(!Source::Public.may_issue(&Command::Intent(IntentCommand::Music(crate::MusicCommand::Stop))));
+        assert!(!Source::Public.may_issue(&Command::Intent(IntentCommand::Dj { active: true })));
+        assert!(!Source::Public.may_issue(&Command::Intent(IntentCommand::Console { line: "reset".into() })));
+        assert!(!Source::Public.may_issue(&Command::Telemetry(crate::TelemetryCommand::SetLogLevel { level: "debug".into() })));
         assert!(Source::Ui.may_issue(&freeze));
     }
 

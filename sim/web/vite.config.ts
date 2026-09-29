@@ -9,18 +9,19 @@ const SHOW = fileURLToPath(new URL('../../show', import.meta.url));
 // The Robot Profile the embedded performer loads (src/performer.ts).
 const PROFILES = fileURLToPath(new URL('../../profiles', import.meta.url));
 
-export default defineConfig({
+const page = (f: string) => fileURLToPath(new URL(f, import.meta.url));
+
+export default defineConfig(({ mode }) => ({
   plugins: [studioLibrary()],
-  // voice.html: standalone hold-to-talk page (Phase 2 remote voice), iframe-able.
-  build: {
-    rollupOptions: {
-      input: {
-        main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        voice: fileURLToPath(new URL('./voice.html', import.meta.url)),
-      },
-    },
-  },
+  // `--mode visit` (npm run build:visit): only the public page (plan Phase 10), with relative
+  // asset paths so it can be hosted statically under any prefix or iframed. Otherwise the
+  // panel/sim, voice.html (Phase 2 hold-to-talk, iframe-able) and visit.html together.
+  base: mode === 'visit' ? './' : '/',
+  build:
+    mode === 'visit'
+      ? { outDir: 'dist-visit', rollupOptions: { input: { visit: page('./visit.html') } } }
+      : { rollupOptions: { input: { main: page('./index.html'), voice: page('./voice.html'), visit: page('./visit.html') } } },
   server: {
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), SHOW, PROFILES] },
   },
-});
+}));

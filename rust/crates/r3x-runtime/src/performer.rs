@@ -40,6 +40,9 @@ pub struct PerformerHostConfig {
     pub show_dir: PathBuf,
     /// Hardware drivers (virtual frames always). `None` = frames only (tests).
     pub drivers: Option<DriverOptions>,
+    /// A catalogue shared read-only between performers (the public server's sessions): used
+    /// as is, never reloaded. `None` = load `show_dir` and hot-reload it.
+    pub catalog: Option<Arc<Catalog>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -356,7 +359,8 @@ impl Host {
 /// Start the performer: takes the `perf` command class.
 pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<()>> {
     let mut commands = bus.take_commands(MessageClass::Perf).ok_or_else(|| anyhow::anyhow!("perf class taken"))?;
-    let catalog = Arc::new(load_catalog(&cfg.show_dir));
+    let fixed = cfg.catalog.is_some();
+    let catalog = cfg.catalog.clone().unwrap_or_else(|| Arc::new(load_catalog(&cfg.show_dir)));
     tracing::info!(dir = %cfg.show_dir.display(), items = catalog.items.len(), "show catalogue");
     let p = Performer::new(
         catalog,
@@ -415,7 +419,7 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
                     Some(Received::Lagged { missed, .. }) => tracing::warn!(missed, "performer lagged behind the bus"),
                     None => break,
                 },
-                _ = reload.tick() => {
+                _ = reload.tick(), if !fixed => {
                     let now = fingerprint(&show_dir);
                     if now != print {
                         print = now;

@@ -61,7 +61,8 @@ writes a rolling summary when engagement leaves INTERACTIVE. The DJ commentary c
 voice's: lines are synthesised ahead (HTTP) and played through the speech FIFO, so they move
 the mouth and carry character timings like any reply.
 
-Acceptance: `cargo test -p r3x-runtime --test standalone_acceptance -- --nocapture` (~90 s)
+Acceptance (slow, `#[ignore]`d so `cargo test --workspace` stays quick):
+`cargo test -p r3x-runtime --test standalone_acceptance -- --ignored --nocapture` (~90 s)
 boots the standalone runtime (scripted STT, replayed TTS on a 6x null device, replayed
 Claude/Jev, the real music engine and library, performer + mock drivers), speaks the smoke
 corpus through push-to-talk, compares every turn with the CantinaOS recording
@@ -170,12 +171,82 @@ heartbeat mask). Bench calibration: Drive tab -> Calibrate (`perf cal_jog` / `ca
 mode, panel/CLI only) writes `calibrated: measured` into the profile (`R3X_PROFILE`, else
 `profiles/r3x/robot.json`); it applies at the next start.
 
+## Public hosting (Phase 10)
+
+```bash
+R3X_PUBLIC_SECRET=<32+ random chars> R3X_PUBLIC_ADMIN_TOKEN=<random> \
+R3X_ALLOWED_ORIGINS=https://r3x.example.com,https://lobot.example.com \
+R3X_PUBLIC_TRUST_PROXY=1 cargo run --release -p r3x-runtime -- --public --bind 127.0.0.1:8780
+cd ../sim/web && npm run build:visit     # static page -> sim/web/dist-visit (needs public/model built)
+```
+
+`--public` (implies `--headless`: no audio device, drivers, camera, vision or music) runs only
+the public server (`r3x-runtime/src/public/`): every WebSocket visitor gets its own bus,
+stage, frames-only performer (shared read-only show catalogue), a public brain (own
+`SessionMemory`, no memory DB, no Jev router, eye tools only, show tags as `public`) and, unless
+`--no-voice`, its own Deepgram + ElevenLabs stack whose speech goes to that visitor only. A
+session runs on its own thread/runtime; disconnect, idle or token expiry tears all of it down.
+Remote clients never get music (plan Q5). `--headless` without `--public` is the normal
+standalone runtime on the null audio device with no drivers or vision.
+
+- **Tier**: `public` may send `intent.say`, `ptt_start/stop` (+ mic audio), perf
+  `play`/`stop`/`emote` (the performer holds plays to `cheap`) and its own frame stream.
+  Stage, music, DJ, console, puppet, freeze and log level are refused.
+- **Tokens**: `v1.<exp>.<visitor id>.<hmac-sha256>` signed with `R3X_PUBLIC_SECRET`, TTL
+  `R3X_PUBLIC_TOKEN_TTL_S` (900). Mint server-side: `curl -X POST -H "Authorization: Bearer
+  $R3X_PUBLIC_ADMIN_TOKEN" https://r3x.example.com/api/token` -> `{token, expires_at}`.
+  Never put the admin token in a page. `GET /healthz` = session counts.
+- **Limits** (env `R3X_PUBLIC_*`, defaults conservative): per visitor token
+  `VISITOR_LLM_TOKENS` 30000 (cost-weighted: input + cache writes + output + reads/10) and
+  `VISITOR_TTS_CHARS` 1500; all visitors per UTC day `DAILY_LLM_TOKENS` 600000 and
+  `DAILY_TTS_CHARS` 20000; `TURNS_PER_MIN` 6, `COMMANDS_PER_MIN` 120, `MAX_PTT_S` 15,
+  `IDLE_S` 300; per IP `CONNECTS_PER_MIN` 10 and `SESSIONS_PER_IP` 2; `MAX_SESSIONS` 8. A
+  spent cap refuses the turn with an in-character line shown as the reply (not synthesised);
+  a line over the TTS cap is shown but not spoken. Caps live in memory (a restart resets
+  them): check the provider dashboards for real spend.
+- **Open question (plan §12 Q3): who pays** for public Claude/Deepgram/ElevenLabs traffic,
+  and the real per-visitor budget. Until answered, run it with its own low-limit keys.
+- **TLS**: not in the binary. Put Caddy in front (bind the runtime to loopback, set
+  `R3X_PUBLIC_TRUST_PROXY=1` so limits key on `X-Forwarded-For`):
+
+```caddyfile
+r3x.example.com {
+    handle_path /api/* {
+        reverse_proxy 127.0.0.1:8780    # websocket upgrade is automatic
+    }
+    root * /srv/r3x/dist-visit
+    file_server
+}
+```
+
+**The page** (`sim/web/visit.html`, built by `npm run build:visit` with relative paths):
+the sim renderer + the WASM performer. Without a token it is standalone (idle life, looks at
+you, emote buttons; no server, no cost). With `#token=` it follows the visitor's session
+(frames, captions, hold-to-talk, typed turns, emotes) and falls back to standalone when the
+link drops. `?gw=host[:port][/path]` names the server (`wss` on an https page). Embed
+(plan Q2 default: token in the fragment, which browsers never send to a server):
+
+```html
+<iframe src="https://r3x.example.com/visit.html?gw=r3x.example.com/api#token=TOKEN_FROM_YOUR_BACKEND"
+        allow="microphone; autoplay" style="width:100%;height:600px;border:0"></iframe>
+```
+
+The embedding page's origin and the page's own origin both go in `R3X_ALLOWED_ORIGINS`
+(the WebSocket `Origin` is the iframe document's, i.e. `https://r3x.example.com`).
+
 ## Build and test
 
 ```bash
 cd rust
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Slow / acceptance (not in `--workspace`; run before merging runtime/brain/voice/music work
+and before the live check):
+
+```bash
+cargo test -p r3x-runtime --test standalone_acceptance -- --ignored --nocapture   # ~90 s
 ```
 
 ## Regenerate TS types and JSON Schema

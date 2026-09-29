@@ -1,7 +1,7 @@
 # Live check before retiring CantinaOS
 
 Everything below has passed offline (replay fixtures, null audio, mock drivers:
-`cargo test --workspace`, including `r3x-runtime --test standalone_acceptance`). What is left
+`cargo test --workspace`, plus the `#[ignore]`d `r3x-runtime --test standalone_acceptance`). What is left
 needs real keys, real audio, and the real robot. **Nothing here has been run yet.** It is the
 Phase 2-7 deferred checks merged into one pass. Budget: about **12 paid requests** plus
 ~20 s of Deepgram audio (the optional DJ step adds ~8). Stop at the first failure and keep
@@ -12,6 +12,7 @@ Phase 2-7 deferred checks merged into one pass. Budget: about **12 paid requests
 ```bash
 cd ~/DJ-R3X\ Voice && git pull
 cd rust && cargo test --workspace && cd ..        # green, offline
+cargo test --manifest-path rust/Cargo.toml -p r3x-runtime --test standalone_acceptance -- --ignored   # ~90 s, offline
 ls ~/.cache/dj-r3x/vision     # YuNet + SFace present (else rust/crates/r3x-vision/scripts/download_models.sh)
 cargo run --release --manifest-path rust/Cargo.toml -p r3x-vision -- enroll cantina_os/vision_data/training
 ```
@@ -75,7 +76,27 @@ to the first transition (~30 s before the track ends): music ducks, commentary, 
 crossfade, unduck. Then "stop dj mode". Switch the panel to **Bench** first to confirm no
 transition happens there (autonomy off), then back to Show.
 
-## 6. Headless voice roundtrip (2 paid, only if step 3 fails)
+## 6. Optional: public mode (~3 paid, own low-limit keys)
+
+Offline first (free): `cargo test -p r3x-runtime --test public`. Then, on the Mac with
+`R3X_PUBLIC_SECRET` (32+ chars), `R3X_PUBLIC_ADMIN_TOKEN` and the tailnet page origin in
+`R3X_ALLOWED_ORIGINS`:
+
+```bash
+cargo run --release --manifest-path rust/Cargo.toml -p r3x-runtime -- --public --bind 127.0.0.1:8790
+tailscale serve --bg --https=8444 http://127.0.0.1:8790
+curl -s -X POST -H "Authorization: Bearer $R3X_PUBLIC_ADMIN_TOKEN" http://127.0.0.1:8790/token   # -> token
+```
+
+On the phone: `https://<mac>.<tailnet>.ts.net/visit.html?gw=<mac>.<tailnet>.ts.net:8444#token=<token>`
+(the panel's dev server serves `visit.html`). Check: R3X idles and follows frames; type
+"what is your favourite cantina band" -> a reply, spoken on the phone only (the Mac stays
+silent, no music anywhere); "play some music" -> R3X says it can't here, nothing plays; a
+second phone with its own token does not see the first one's turns. Set
+`R3X_PUBLIC_VISITOR_LLM_TOKENS=1`, restart, one turn -> the next is refused in character.
+`tailscale serve reset` afterwards.
+
+## 7. Headless voice roundtrip (2 paid, only if step 3 fails)
 
 ```bash
 cd rust && cargo run -p r3x-voice -- roundtrip     # ElevenLabs -> Deepgram, prints both legs

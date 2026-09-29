@@ -45,6 +45,7 @@ async fn performer_on_the_bus() {
         profile,
         show_dir: performer::default_show_dir(),
         drivers: Some(DriverOptions { leds: false }),
+        catalog: None,
     };
     performer::spawn(&bus, cfg).unwrap();
 

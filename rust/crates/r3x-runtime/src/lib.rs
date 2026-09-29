@@ -5,6 +5,7 @@ pub mod brain;
 pub mod bridge;
 pub mod music;
 pub mod performer;
+pub mod public;
 pub mod replay;
 pub mod studio;
 pub mod vision;
@@ -183,7 +184,7 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         anyhow::bail!("--mouse needs r3x-runtime built with --features mouse");
     }
     if let Some(profile) = cfg.profile.clone() {
-        let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers };
+        let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers, catalog: None };
         performer::spawn(&bus, pc)?;
     }
     let choices = replay::Choices::from_env();
@@ -229,6 +230,7 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         profile: cfg.profile,
         logs: cfg.logs,
         audio: voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default(),
+        filter: None,
     };
     Ok(Runtime { bus, voice, music, brain, vision, gateway, bridged: cfg.bridge.is_some() })
 }

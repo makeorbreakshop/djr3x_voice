@@ -52,6 +52,10 @@ async fn wait_for(log: &Log, from: usize, secs: u64, pred: impl Fn(&Envelope) ->
     false
 }
 
+// ~90 s (the corpus replays at recorded pace): kept out of `cargo test --workspace`. Run it
+// before merging runtime/brain/voice/music changes and before the live check:
+// `cargo test -p r3x-runtime --test standalone_acceptance -- --ignored --nocapture`.
+#[ignore = "slow acceptance (~90 s): cargo test -p r3x-runtime --test standalone_acceptance -- --ignored"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn standalone_runs_the_corpus_end_to_end() {
     if std::env::var_os("R3X_TEST_LOG").is_some() {

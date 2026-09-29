@@ -143,7 +143,7 @@ Envelope `{v:1, kind, seq, t_mono, t_wall, source, id?, re?, body}`;
 `kind: hello | state | event | command | ack | result | frames | audio | log`.
 - `hello` carries full retained state; `state` deltas follow.
 - Tiers: `jev ≤ cheap`, `claude/timeline/ui/cli ≤ show`, `idle = free`,
-  `public ≤ cheap` + `intent.say` only.
+  `public ≤ cheap`: `intent.say`, push-to-talk, perf play/stop/emote, own frames (Phase 10).
 - **Token auth and an `Origin` allow-list on every bind, loopback included.** A web page can
   reach localhost; loopback is not a trust boundary.
 - `frames` `{t_mono, joints{}, lights{}}` at 50 Hz (sim/virtual/log).
@@ -496,6 +496,22 @@ after a stop, in an overlapped recording) - check before relying on per-turn att
 
 ### Phase 10 — Public hosting
 - `--public`: per-session brains, rate limits, `public` tier, per-visitor LLM/TTS budget caps.
+
+#### Phase 10 — what exists (2026-09-29)
+- `r3x-runtime --public` (implies `--headless`): `r3x-runtime/src/public/`. One bus + stage +
+  frames-only performer (shared catalogue) + public brain (own `SessionMemory`, no memory DB,
+  no Jev, eye tools only) + optional own voice stack per WebSocket visitor, on its own
+  thread/runtime; torn down on disconnect, idle or token expiry. No music (Q5).
+- `public` tier widened to say + push-to-talk + perf play/stop/emote (performer caps plays at
+  `cheap`) + own frames. HMAC visitor tokens minted by an admin-bearer `POST /token`; Origin
+  allow-list from `R3X_ALLOWED_ORIGINS` only; per-IP connect/session limits, per-visitor
+  turn/command rates and max hold-to-talk, per-visitor and daily LLM-token/TTS-char caps
+  (in-character refusal). TLS via a reverse proxy (Caddy recipe in `rust/README.md`).
+- Page: `sim/web/visit.html` (`npm run build:visit`): standalone WASM life without a token,
+  follower + hold-to-talk with `#token=` (Q2 default); iframe snippet in the README.
+- Tests: `r3x-runtime/tests/public.rs` (tier, budget refusal, rate limits, token expiry and
+  origin, isolation incl. audio and teardown), replayed fixtures. **Q3 (who pays) is still
+  open**; the default caps are deliberately low.
 
 ### Checkpoint after Phase 3
 Phases 0–3 deliver value whatever happens next. Before Phase 4, compare actual effort for

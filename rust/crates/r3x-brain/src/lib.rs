@@ -77,7 +77,17 @@ pub struct BrainConfig {
     pub playback_confirm_wait: Duration,
     pub warmup_cooldown: Duration,
     pub dj: dj::DjConfig,
+    /// A public-site visitor's brain (plan Phase 10): only [`PUBLIC_TOOLS`], no routines, show
+    /// tags performed as `public` (the performer holds them to `cheap`), and a note in the
+    /// system prompt that music and the stage are not available.
+    pub public: bool,
 }
+
+/// The tools a public brain keeps: nothing that plays music, runs DJ mode or uses the camera.
+pub const PUBLIC_TOOLS: &[&str] = &["set_eye_color", "set_eye_animation"];
+
+const PUBLIC_NOTE: &str = "<public_visitor>You are talking to an anonymous visitor on R3X's web page, not someone in the room. \
+Music, DJ mode and the camera are not available here; if asked, say so in character. Keep replies short.</public_visitor>";
 
 impl Default for BrainConfig {
     fn default() -> Self {
@@ -89,6 +99,7 @@ impl Default for BrainConfig {
             playback_confirm_wait: Duration::from_millis(800),
             warmup_cooldown: Duration::from_secs(30),
             dj: dj::DjConfig::default(),
+            public: false,
         }
     }
 }
@@ -185,9 +196,13 @@ impl Brain {
             system = format!("{}\n\n{}", system.trim_end(), catalog.prompt_block);
         }
         let mut tools = r3x_llm::request::default_tools();
-        if !catalog.tool_ids.is_empty() {
+        if cfg.public {
+            tools.retain(|t| PUBLIC_TOOLS.contains(&t.name.as_str()));
+            system = format!("{}\n\n{PUBLIC_NOTE}", system.trim_end());
+        } else if !catalog.tool_ids.is_empty() {
             tools.push(r3x_llm::request::perform_show_tool(&catalog.tool_ids));
         }
+        let tag_source = if cfg.public { Source::Public } else { Source::Claude };
         let gate = Arc::new(FastRouterGate::new());
         if deps.router.active() {
             gate.register_router();
@@ -201,7 +216,7 @@ impl Brain {
                 let bus = perform_bus.clone();
                 tokio::spawn(async move {
                     let cmd = Command::Perf(PerfCommand::Play { id: id.clone(), intensity: 1.0, speed: 1.0, layer: None });
-                    let ack = bus.command(Source::Claude, None, cmd).await;
+                    let ack = bus.command(tag_source, None, cmd).await;
                     if !ack.is_accepted() {
                         tracing::info!(id, ?ack, "show tag not performed");
                     }
@@ -276,6 +291,11 @@ impl Brain {
 
     pub fn executor(&self) -> &Executor {
         &self.inner.exec
+    }
+
+    /// The conversation so far (what the next turn sends Claude).
+    pub fn history(&self) -> Vec<r3x_llm::Message> {
+        self.inner.session.lock().unwrap().messages()
     }
 
     pub fn system_prompt(&self) -> &str {

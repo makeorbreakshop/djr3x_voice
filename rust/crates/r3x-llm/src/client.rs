@@ -54,9 +54,13 @@ enum Backend {
     Replay(Arc<ClaudeFixtures>),
 }
 
+/// Sees the usage of every completed call (streamed or not): the public server's budgets.
+pub type UsageMeter = Arc<dyn Fn(&crate::stream::Usage) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct LlmClient {
     backend: Arc<Backend>,
+    meter: Option<UsageMeter>,
     requested_model: String,
     wire_model: String,
     effort: String,
@@ -71,6 +75,7 @@ impl LlmClient {
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
         Ok(Self {
+            meter: None,
             requested_model: cfg.requested_model.clone(),
             wire_model: cfg.wire_model.clone(),
             effort: cfg.effort.clone(),
@@ -86,11 +91,18 @@ impl LlmClient {
     /// Replays recorded Claude streams; no network.
     pub fn replay(fixtures: Arc<ClaudeFixtures>, model: &str) -> Self {
         Self {
+            meter: None,
             backend: Arc::new(Backend::Replay(fixtures)),
             requested_model: model.into(),
             wire_model: model.into(),
             effort: "low".into(),
         }
+    }
+
+    /// This client with `meter` called on every completed call's usage.
+    pub fn with_meter(mut self, meter: UsageMeter) -> Self {
+        self.meter = Some(meter);
+        self
     }
 
     pub fn model(&self) -> &str {
@@ -185,11 +197,19 @@ impl LlmClient {
                 })
             }
         };
-        Ok(LlmStream { rx, task })
+        Ok(LlmStream { rx, task, meter: self.meter.clone() })
     }
 
     /// Non-streaming call (verbal feedback, summaries, scene description).
     pub async fn create(&self, req: &MessagesRequest) -> Result<FinalMessage, LlmError> {
+        let m = self.create_inner(req).await?;
+        if let Some(meter) = &self.meter {
+            meter(&m.usage);
+        }
+        Ok(m)
+    }
+
+    async fn create_inner(&self, req: &MessagesRequest) -> Result<FinalMessage, LlmError> {
         match &*self.backend {
             Backend::Http { http, cfg } => {
                 let resp = self.post(http, cfg, &self.body(req, false)).await?;
@@ -219,11 +239,16 @@ impl LlmClient {
 pub struct LlmStream {
     rx: mpsc::Receiver<Result<StreamEvent, LlmError>>,
     task: JoinHandle<()>,
+    meter: Option<UsageMeter>,
 }
 
 impl LlmStream {
     pub async fn next(&mut self) -> Option<Result<StreamEvent, LlmError>> {
-        self.rx.recv().await
+        let ev = self.rx.recv().await;
+        if let (Some(Ok(StreamEvent::Done(m))), Some(meter)) = (&ev, &self.meter) {
+            meter(&m.usage);
+        }
+        ev
     }
 
     /// Drain to the final message.

@@ -21,7 +21,7 @@ pub mod pyjson;
 pub mod request;
 pub mod stream;
 
-pub use client::{LlmClient, LlmConfig, LlmStream, DEFAULT_MODEL};
+pub use client::{LlmClient, LlmConfig, LlmStream, UsageMeter, DEFAULT_MODEL};
 pub use fixture::ClaudeFixtures;
 pub use prompt::{SessionMemory, TurnContext};
 pub use provider::{ProviderConfig, ProviderKind};
