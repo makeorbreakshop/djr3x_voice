@@ -34,7 +34,7 @@ pub struct EngineConfig {
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { ending_threshold_s: 30.0, crossfade_s: 3.0, duck_level: 0.5, duck_ramp_ms: 80.0, stop_fade_ms: 150.0, tick: Duration::from_millis(250) }
+        Self { ending_threshold_s: 30.0, crossfade_s: 3.0, duck_level: 0.2, duck_ramp_ms: 80.0, stop_fade_ms: 150.0, tick: Duration::from_millis(250) }
     }
 }
 

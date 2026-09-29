@@ -3,12 +3,15 @@
 //! mode-change ding) on the sfx bus.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use r3x_audio::sfx::SfxBank;
 use r3x_bus::{Bus, Received};
-use r3x_contracts::{Ack, Body, Domain, EngagementState, Event, MusicCommand, MusicEvent, MusicState, PerfEvent, Source};
+use r3x_contracts::{
+    Ack, Body, ConversationEvent, Domain, EngagementState, Event, MusicCommand, MusicEvent, MusicState, PerfEvent, Source,
+};
 
 use crate::engine::{Engine, EngineEvent, Reply, Status};
 
@@ -134,7 +137,31 @@ pub fn default_sfx_dirs() -> Vec<PathBuf> {
 
 /// Play `perf.sfx` cues and the mode-change ding on the sfx bus (plan §7b: audible with no
 /// sim open). Decoding happens off the runtime; a missing file is logged, never fatal.
+/// Kit sfx that are not a voice. Every other kit clip is a line from the original actor, so it
+/// never plays while R3X is speaking (one voice at a time).
+const NON_VOCAL_SFX: &[&str] = &["airhorn", "scratch", "synth"];
+
+fn is_vocal(id: &str) -> bool {
+    let key: String = id.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    !NON_VOCAL_SFX.contains(&key.as_str())
+}
+
 pub fn spawn_sfx(bus: &Bus, bank: Arc<SfxBank>, mode_sound: Option<PathBuf>) {
+    let speaking = Arc::new(AtomicBool::new(false));
+    {
+        let speaking = speaking.clone();
+        let mut rx = bus.subscribe(Domain::Conversation);
+        tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                let Received::Message(env) = m else { continue };
+                match &env.body {
+                    Body::Event(Event::Conversation(ConversationEvent::SpeechStarted)) => speaking.store(true, Ordering::SeqCst),
+                    Body::Event(Event::Conversation(ConversationEvent::SpeechEnded)) => speaking.store(false, Ordering::SeqCst),
+                    _ => {}
+                }
+            }
+        });
+    }
     {
         let bank = bank.clone();
         let mut rx = bus.subscribe(Domain::Perf);
@@ -142,6 +169,10 @@ pub fn spawn_sfx(bus: &Bus, bank: Arc<SfxBank>, mode_sound: Option<PathBuf>) {
             while let Some(m) = rx.recv().await {
                 let Received::Message(env) = m else { continue };
                 if let Body::Event(Event::Perf(PerfEvent::Sfx { id })) = &env.body {
+                    if speaking.load(Ordering::SeqCst) && is_vocal(id) {
+                        tracing::info!(sfx = %id, "vocal sfx skipped: R3X is speaking");
+                        continue;
+                    }
                     let (bank, id) = (bank.clone(), id.clone());
                     tokio::task::spawn_blocking(move || match bank.play(&id, 1.0) {
                         Ok(p) => tracing::debug!(sfx = %id, file = %p.display(), "sfx"),
@@ -169,5 +200,20 @@ pub fn spawn_sfx(bus: &Bus, bank: Arc<SfxBank>, mode_sound: Option<PathBuf>) {
                 });
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod sfx_tests {
+    use super::is_vocal;
+
+    #[test]
+    fn only_kit_voice_lines_are_vocal() {
+        for id in ["yahoo", "Hi There", "bad_feeling"] {
+            assert!(is_vocal(id), "{id}");
+        }
+        for id in ["airhorn", "Air Horn", "air_horn", "scratch", "synth"] {
+            assert!(!is_vocal(id), "{id}");
+        }
     }
 }

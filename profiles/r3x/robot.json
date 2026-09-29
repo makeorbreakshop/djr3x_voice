@@ -1401,7 +1401,7 @@
       }
     ],
     "ducking": {
-      "level": 0.5,
+      "level": 0.2,
       "ramp_ms": 80
     },
     "mouth_hz": 30

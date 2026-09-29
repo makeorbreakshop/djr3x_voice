@@ -26,8 +26,9 @@ use tokio::time::Instant;
 pub const LAYERS: &[(&str, u8)] = &[("ambient", 0), ("foreground", 1), ("show", 1), ("override", 2)];
 /// Layers whose plans pause every lower layer while they run.
 const PAUSING: &[&str] = &["foreground"];
-pub const DUCK_LEVEL: f64 = 0.5;
-pub const DUCK_FADE_MS: f64 = 500.0;
+/// Music under speech: -14 dB. 0.5 (-6 dB) was inaudible as ducking in the first live run.
+pub const DUCK_LEVEL: f64 = 0.2;
+pub const DUCK_FADE_MS: f64 = 250.0;
 /// Speech budget: synthesis + playback is ~linear in characters (measured ~61 ms/char).
 pub const SPEECH_WAIT_BASE_S: f64 = 8.0;
 pub const SPEECH_WAIT_PER_CHAR_S: f64 = 0.060;

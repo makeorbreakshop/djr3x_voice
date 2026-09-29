@@ -307,7 +307,7 @@ impl Brain {
         };
         if intro {
             let steps = vec![
-                Step::MusicDuck { duck_level: 0.5, fade_duration_ms: 500.0 },
+                Step::MusicDuck { duck_level: crate::plan::DUCK_LEVEL, fade_duration_ms: crate::plan::DUCK_FADE_MS },
                 Step::Delay { duration: 0.5 },
                 Step::PlayCachedSpeech { cache_key: key.into(), wait_for_completion: true },
                 Step::MusicUnduck { fade_duration_ms: 500.0 },
@@ -379,7 +379,7 @@ impl Brain {
         let xf = Step::MusicCrossfade { next_track_id: next.clone(), crossfade_duration: self.inner.cfg.dj.crossfade_s };
         let steps = match &key {
             Some((_, k)) => vec![
-                Step::MusicDuck { duck_level: 0.5, fade_duration_ms: 500.0 },
+                Step::MusicDuck { duck_level: crate::plan::DUCK_LEVEL, fade_duration_ms: crate::plan::DUCK_FADE_MS },
                 Step::Delay { duration: 0.5 },
                 Step::PlayCachedSpeech { cache_key: k.clone(), wait_for_completion: false },
                 Step::Delay { duration: 3.0 },
