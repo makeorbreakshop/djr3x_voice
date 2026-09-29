@@ -498,6 +498,167 @@
             "audio_t0"
           ],
           "type": "object"
+        },
+        {
+          "description": "Brain -> voice: queue this line on the one speech FIFO. `reply` = the turn's reply (the\nenvelope's `conversation_id` is the turn); plan lines carry their `clip_id` instead.",
+          "properties": {
+            "clip_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "plan_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reply": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speak",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tool the brain executed (router or Claude, per the envelope `source`) and its outcome.",
+          "properties": {
+            "parameters": true,
+            "result": true,
+            "success": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool",
+            "parameters",
+            "success",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Brain -> speech cache: synthesise `text` now and hold it under `key`.",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "cache_speech",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speech_cached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "duration_s"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speech_cache_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Play a cached line; exactly one `CachedPlaybackEnded` with the same `playback_id` follows.",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "playback_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "play_cached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "playback_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "playback_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "cached_playback_ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "playback_id",
+            "ok"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -1304,6 +1465,132 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "description": "Play `query` (a title, words of one, or `@semantic ...`); none = engine's choice.",
+          "properties": {
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "play",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Music owns `next` (plan 7b); DJ mode layers its own transition on top.",
+          "properties": {
+            "type": {
+              "const": "next",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Crossfade to `track` (library title) over `duration_s`; `CrossfadeComplete{id}` follows.",
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "track": {
+              "type": "string"
+            },
+            "type": {
+              "const": "crossfade",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "track",
+            "duration_s",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Duck to `level` (0..1) over `fade_ms`.",
+          "properties": {
+            "fade_ms": {
+              "format": "double",
+              "type": "number"
+            },
+            "level": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "duck",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level",
+            "fade_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "fade_ms": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "unduck",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "fade_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "crossfade_complete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -1438,6 +1725,52 @@
             "type",
             "message",
             "is_error"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Brain plan executor: a plan started on `layer` (ambient / foreground / show / override).",
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "plan_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "plan_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plan_id",
+            "layer"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`status`: completed | failed | cancelled | paused.",
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "plan_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "type": {
+              "const": "plan_ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plan_id",
+            "layer",
+            "status"
           ],
           "type": "object"
         },
