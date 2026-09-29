@@ -44,10 +44,13 @@ export function applyState(s: RetainedState, u: StateUpdate): RetainedState {
   return { ...s, [u.domain]: u.state } as RetainedState;
 }
 
+/** `?gw=host:port` overrides the gateway; a page served over HTTPS (a remote browser, which
+ *  needs a secure context for the mic) must reach it as wss:// too. */
 export function gatewayUrl(token: string): string {
   const override = new URLSearchParams(location.search).get('gw');
   const host = override ?? `${location.hostname || '127.0.0.1'}:8780`;
-  return `ws://${host}/?token=${encodeURIComponent(token)}`;
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${host}/?token=${encodeURIComponent(token)}`;
 }
 
 export class GatewayClient {

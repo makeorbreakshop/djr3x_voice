@@ -159,3 +159,59 @@ async fn refusals_and_debug_latency() {
     assert_eq!(consoles.len(), 1);
     assert!(consoles[0].starts_with("No latency data"), "{consoles:?}");
 }
+
+/// Vision attached: the turn carries the latest scene, `analyze_scene` asks the camera, and the
+/// description comes back into the conversation for a spoken answer (tools not callable).
+#[tokio::test(start_paused = true)]
+async fn vision_scene_context_and_analyze_scene() {
+    struct Eyes(f64);
+    impl r3x_brain::SceneSource for Eyes {
+        fn scene(&self) -> Option<(String, f64)> {
+            Some(("a droid workshop".into(), self.0))
+        }
+        fn analyze<'a>(&'a self, q: &'a str, _: Option<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+            Box::pin(async move { Ok(format!("{q}: a Wookiee waving")) })
+        }
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    let memory = Arc::new(r3x_memory::Memory::open_in_memory().unwrap());
+    let ctx = memory.turn_context(Some(("a droid workshop", now)), 5).unwrap();
+    let dir = std::env::temp_dir().join(format!("r3x-brain-vision-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let turn = prompt::turn_request("sys", vec![Message::user(prompt::user_message("what do you see", None, &ctx))], request::default_tools(), false);
+    let answer = prompt::turn_request("sys", vec![Message::user("[Vision system response to 'who is here']: who is here: a Wookiee waving")], vec![], true);
+    let lines = [
+        json!({"key": ClaudeFixtures::key_for("stream", &turn), "method": "stream", "chunks": [{"wait": 0.1, "text": "Let me look."}],
+               "final": {"content": [{"type": "text", "text": "Let me look."},
+                                     {"type": "tool_use", "id": "v1", "name": "analyze_scene", "input": {"question": "who is here"}}]}}),
+        json!({"key": ClaudeFixtures::key_for("create", &answer), "method": "create", "wait": 0.2,
+               "final": {"content": [{"type": "text", "text": "A Wookiee! Hi there!"}]}}),
+    ];
+    std::fs::write(dir.join("claude.jsonl"), lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+
+    let bus = Bus::default();
+    bus.update(Source::System, |s: &mut StageState| s.brain = true);
+    stubs(&bus);
+    let rec = log(&bus);
+    let deps = BrainDeps {
+        llm: Some(LlmClient::replay(Arc::new(ClaudeFixtures::load(&dir, 1.0).unwrap()), "claude-sonnet-5-5")),
+        router: IntentRouter::new(JevClient::new("", Duration::from_millis(800)), RouterConfig::default()),
+        memory: Some(memory),
+        latency: None,
+        ptt: None,
+        chooser: random_chooser(),
+    };
+    let brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+    brain.attach_vision(Arc::new(Eyes(now)));
+    let say = Command::Intent(IntentCommand::Say { text: "what do you see".into() });
+    assert!(bus.command(Source::Cli, None, say).await.is_accepted());
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    let spoken: Vec<String> = rec
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| if let Body::Event(Event::Conversation(ConversationEvent::Speak { text, .. })) = &e.body { Some(text.clone()) } else { None })
+        .collect();
+    assert_eq!(spoken, ["Let me look.", "A Wookiee! Hi there!"], "scene in the turn (fixture hit), then the vision answer");
+}

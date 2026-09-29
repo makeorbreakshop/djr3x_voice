@@ -1,9 +1,11 @@
-//! The `r3x` runtime: bus + gateway + ops + stage manager, optionally bridged to CantinaOS.
+//! The `r3x` runtime: bus + gateway + ops + stage manager + performer, and either the whole
+//! robot in-process (standalone: voice, brain, music, vision) or bridged to CantinaOS.
 
 pub mod brain;
 pub mod bridge;
 pub mod music;
 pub mod performer;
+pub mod replay;
 pub mod studio;
 pub mod vision;
 
@@ -114,6 +116,36 @@ pub async fn run_with_brain(
     listener: tokio::net::TcpListener,
     brain_mode: brain::BrainMode,
 ) -> anyhow::Result<()> {
+    boot(bus, cfg, level, brain_mode).await?.serve(listener).await
+}
+
+/// A booted runtime: every service wired onto the bus, the gateway not yet serving. Holds
+/// the stacks (and their audio devices) for as long as it lives.
+pub struct Runtime {
+    pub bus: Bus,
+    pub voice: Option<r3x_voice::VoiceStack>,
+    pub music: Option<music::MusicStack>,
+    pub brain: Option<r3x_brain::Brain>,
+    pub vision: Option<r3x_vision::Vision>,
+    gateway: GatewayConfig,
+    bridged: bool,
+}
+
+impl Runtime {
+    /// Serve the gateway until it fails.
+    pub async fn serve(self, listener: tokio::net::TcpListener) -> anyhow::Result<()> {
+        tracing::info!(addr = %listener.local_addr()?, bridge = self.bridged, "r3x gateway listening");
+        r3x_ops::report(&self.bus, "gateway", ServiceStatus::Running, None);
+        r3x_gateway::serve(listener, self.bus.clone(), self.gateway.clone()).await?;
+        drop(self); // the stacks (and their audio devices) live as long as the gateway
+        Ok(())
+    }
+}
+
+/// Wire everything onto `bus`. Standalone (no `cfg.bridge`, `--brain rust`, `--music rust`):
+/// voice -> brain -> music / performer / drivers / audio, all in-process, the voice serving
+/// the commentary cache with mouth and timings.
+pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelControl>, brain_mode: brain::BrainMode) -> anyhow::Result<Runtime> {
     if let Some(dir) = &cfg.session_log {
         let (path, _task) = bus.attach_session_log(dir).await?;
         tracing::info!(path = %path.display(), "session log");
@@ -134,6 +166,9 @@ pub async fn run_with_brain(
             let stack = r3x_voice::start(&bus, v)?;
             // Bridge mode: the turn/speech lifecycle comes back from CantinaOS via the tap.
             r3x_voice::voice::spawn_bus_adapter(&stack.voice, bus.clone(), cfg.bridge.is_none());
+            if cfg.bridge.is_none() {
+                r3x_voice::commentary::spawn(&bus, stack.voice.clone(), stack.tts.clone());
+            }
             r3x_ops::report(&bus, "voice", ServiceStatus::Running, None);
             Some(stack)
         }
@@ -151,23 +186,30 @@ pub async fn run_with_brain(
         let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers };
         performer::spawn(&bus, pc)?;
     }
+    let choices = replay::Choices::from_env();
     // Before the bridge: the brain takes the `intent` class.
-    let (_brain, memory) = match brain_mode {
+    let (brain, memory) = match brain_mode {
         brain::BrainMode::Rust => {
             anyhow::ensure!(cfg.bridge.is_none(), "--brain rust replaces the CantinaOS bridge; drop --bridge");
-            let (b, m) = brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()))?;
+            let ducking = cfg.profile.as_ref().map(|p| p.audio.ducking.clone()).unwrap_or_default();
+            let (b, m) = brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()), choices.clone(), ducking)?;
             (Some(b), Some(m))
         }
         brain::BrainMode::Cantina => (None, None),
     };
-    // `--vision` (R3X_VISION): fail-open; presence goes to the brain's memory.
-    let _vision = if vision::enabled_from_env() { vision::start(&bus, memory) } else { None };
+    // `--vision` (R3X_VISION): fail-open; presence goes to the brain's memory, scenes and
+    // `analyze_scene` to the brain.
+    let vision = if vision::enabled_from_env() { vision::start(&bus, memory) } else { None };
+    if let (Some(b), Some(v)) = (&brain, &vision) {
+        b.attach_vision(Arc::new(vision::BrainEyes(v.clone())));
+    }
     // `--music rust` (R3X_MUSIC): the r3x engine plays; in bridge mode it speaks
     // MusicController's topics over the tap (CantinaOS runs with R3X_EXTERNAL_MUSIC=1).
     let music = match music::MusicMode::from_env() {
         music::MusicMode::Rust => {
             let mixer = voice.as_ref().and_then(|v| v.output.as_ref()).map(|o| o.mixer.clone());
-            Some(music::start(&bus, mixer, None, cfg.profile.as_deref()).await?)
+            let commentary = voice.is_none() || cfg.bridge.is_some();
+            Some(music::start(&bus, mixer, cfg.profile.as_deref(), commentary, choices).await?)
         }
         music::MusicMode::Cantina => None,
     };
@@ -181,18 +223,14 @@ pub async fn run_with_brain(
     let stage_cfg = cfg.profile.as_deref().map(r3x_stage::StageConfig::from_profile).unwrap_or_default();
     r3x_stage::spawn(&bus, stage_cfg, backend).ok_or_else(|| anyhow::anyhow!("stage class taken"))?;
 
-    let gw = GatewayConfig {
+    let gateway = GatewayConfig {
         clients: cfg.clients,
         origins: cfg.origins,
         profile: cfg.profile,
         logs: cfg.logs,
         audio: voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default(),
     };
-    tracing::info!(addr = %listener.local_addr()?, bridge = cfg.bridge.is_some(), "r3x gateway listening");
-    r3x_ops::report(&bus, "gateway", ServiceStatus::Running, None);
-    r3x_gateway::serve(listener, bus, gw).await?;
-    drop((music, voice)); // the stacks (and their audio devices) live as long as the gateway
-    Ok(())
+    Ok(Runtime { bus, voice, music, brain, vision, gateway, bridged: cfg.bridge.is_some() })
 }
 
 /// `R3X_PROFILE`, else `profiles/r3x/robot.json` in the repo this binary was built from.

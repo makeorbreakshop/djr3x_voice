@@ -84,8 +84,9 @@ impl Brain {
         if let Some(a) = &action {
             tracing::info!(tool = a.intent_name, "fast router already acted; tools suppressed for this turn");
         }
+        let scene = self.inner.vision.get().and_then(|v| v.scene());
         let ctx = match &self.inner.memory {
-            Some(m) => m.turn_context(None, HISTORY_TURNS).unwrap_or_default(),
+            Some(m) => m.turn_context(scene.as_ref().map(|(s, at)| (s.as_str(), *at)), HISTORY_TURNS).unwrap_or_default(),
             None => Default::default(),
         };
         let block = action.as_ref().map(ActionTaken::context_block);
@@ -193,7 +194,10 @@ impl Brain {
     /// Claude called a tool: record its result for the next turn and, unless the eyes or a
     /// routine speak for themselves, generate the verbal-feedback line.
     async fn after_claude_tool(&self, turn: &str, tool: &str, params: &Map<String, Value>, result: &Value) {
-        if VISUAL_ONLY_TOOLS.contains(&tool) || VISION_TOOLS.contains(&tool) {
+        if VISION_TOOLS.contains(&tool) {
+            return self.after_vision(turn, result).await;
+        }
+        if VISUAL_ONLY_TOOLS.contains(&tool) {
             return;
         }
         let success = result.get("success").and_then(Value::as_bool).unwrap_or(true);
@@ -221,5 +225,32 @@ impl Brain {
             }
         };
         self.emit_reply(turn, &text);
+    }
+
+    /// `analyze_scene` answered (`claude_service.py` `_generate_vision_response`): the
+    /// description joins the conversation and Claude answers again with it, in the main
+    /// persona. Tools are kept (prompt cache) but not callable, so it cannot loop.
+    async fn after_vision(&self, turn: &str, result: &Value) {
+        let Some(description) = result.get("description").and_then(Value::as_str).filter(|d| !d.is_empty()) else {
+            tracing::info!(?result, "analyze_scene: nothing seen");
+            return;
+        };
+        let Some(llm) = self.inner.llm.clone() else { return };
+        let question = result.get("question").and_then(Value::as_str).unwrap_or("What do you see?");
+        let history = {
+            let mut s = self.inner.session.lock().unwrap();
+            s.add(Role::User, format!("[Vision system response to '{question}']: {description}"));
+            s.messages()
+        };
+        let req = prompt::turn_request(&self.inner.system, history, self.inner.tools.clone(), true);
+        match llm.create(&req).await {
+            Ok(m) if !m.text().is_empty() => {
+                let text = m.text();
+                self.inner.session.lock().unwrap().add(Role::Assistant, text.clone());
+                self.emit_reply(turn, &text);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::error!("vision reply failed: {e}"),
+        }
     }
 }

@@ -41,7 +41,10 @@ fn fixtures() -> std::path::PathBuf {
 #[tokio::test(start_paused = true)]
 async fn dj_start_transition_fallback_and_stop() {
     let bus = Bus::default();
-    bus.update(Source::System, |s: &mut StageState| s.brain = true);
+    bus.update(Source::System, |s: &mut StageState| {
+        s.brain = true;
+        s.autonomy = true; // Show mode: DJ transitions are autonomy
+    });
     bus.update(Source::System, |m: &mut MusicState| m.library = vec!["A".into(), "B".into(), "C".into()]);
     let rec = Arc::new(Mutex::new(Vec::<Arc<Envelope>>::new()));
     let (r, mut all) = (rec.clone(), bus.subscribe_all());

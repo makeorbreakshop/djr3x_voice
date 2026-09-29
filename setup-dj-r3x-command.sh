@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install a `dj-r3x` command that runs ./r3x (CantinaOS + control panel) from anywhere.
+# Install a `dj-r3x` command that runs ./r3x (the Rust runtime + control panel) from anywhere.
 #   ./setup-dj-r3x-command.sh            installs to /usr/local/bin (or ~/.local/bin if not writable)
-# Any arguments to dj-r3x are passed through: dj-r3x --no-open, dj-r3x --panel-only.
+# Any arguments to dj-r3x are passed through: dj-r3x --no-open, dj-r3x --panel-only, dj-r3x --legacy.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

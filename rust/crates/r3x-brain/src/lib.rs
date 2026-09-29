@@ -52,6 +52,19 @@ pub type PttHook = Arc<dyn Fn(Ptt) -> Pin<Box<dyn Future<Output = Ack> + Send>> 
 /// default; the parity harness replays the recorded picks.
 pub type Chooser = Arc<dyn Fn(&str, &[String]) -> Option<String> + Send + Sync>;
 
+/// Vision as the brain sees it (`r3x-vision`, attached with [`Brain::attach_vision`]): the
+/// latest scene description for the turn context, and the `analyze_scene` tool.
+pub trait SceneSource: Send + Sync + 'static {
+    /// The last description and when it was captured (unix s).
+    fn scene(&self) -> Option<(String, f64)>;
+    /// Describe the current frame, answering `question`; `turn` correlates the capture event.
+    fn analyze<'a>(&'a self, question: &'a str, turn: Option<String>) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+    /// A console line vision answers (`camera list|status|select N`), else `None`.
+    fn console(&self, _line: &str) -> Option<String> {
+        None
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BrainConfig {
     /// `show/` root (`SHOW_DIR`).
@@ -147,6 +160,7 @@ pub(crate) struct Inner {
     pub last_warmup: Mutex<Option<tokio::time::Instant>>,
     /// Title of the track the engine last reported started (cleared on stop).
     pub now_playing: Mutex<Option<String>>,
+    pub vision: std::sync::OnceLock<Arc<dyn SceneSource>>,
 }
 
 /// A running brain. Dropping it stops nothing; call [`Brain::shutdown`].
@@ -217,6 +231,7 @@ impl Brain {
             dj: Mutex::default(),
             last_warmup: Mutex::default(),
             now_playing: Mutex::default(),
+            vision: std::sync::OnceLock::new(),
             cfg,
         });
         tracing::info!(
@@ -251,6 +266,12 @@ impl Brain {
         }
         self.inner.exec.cancel_all();
         self.inner.tags.cancel_all();
+    }
+
+    /// Give the brain eyes: scene context in every turn and a working `analyze_scene`.
+    /// Once; a second call is ignored.
+    pub fn attach_vision(&self, vision: Arc<dyn SceneSource>) {
+        let _ = self.inner.vision.set(vision);
     }
 
     pub fn executor(&self) -> &Executor {
@@ -351,7 +372,10 @@ impl Brain {
                 self.inner.session.lock().unwrap().clear();
                 ("Conversation reset".into(), false)
             }
-            _ => (format!("'{line}' is not handled by the rust brain"), true),
+            _ => match self.inner.vision.get().and_then(|v| v.console(line)) {
+                Some(reply) => (reply, false),
+                None => (format!("'{line}' is not handled by the rust brain"), true),
+            },
         }
     }
 
@@ -392,7 +416,8 @@ impl Brain {
                 }
                 Event::Conversation(ConversationEvent::SpeechCached { key, duration_s }) => self.dj_speech_cached(key, *duration_s),
                 Event::Conversation(ConversationEvent::SpeechCacheFailed { key, error }) => self.dj_speech_cache_failed(key, error),
-                Event::Music(MusicEvent::TrackEndingSoon { .. }) => {
+                // DJ transitions are autonomy (plan §4): not in Bench/Studio.
+                Event::Music(MusicEvent::TrackEndingSoon { .. }) if bus.get::<StageState>().autonomy => {
                     let me = self.clone();
                     tokio::spawn(async move { me.dj_track_ending_soon().await });
                 }

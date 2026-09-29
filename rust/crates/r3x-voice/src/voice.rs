@@ -44,6 +44,22 @@ impl MicOpener for DeviceMic {
     }
 }
 
+/// A mic that hears silence (`--audio null`): 20 ms chunks in real time until closed.
+pub struct SilentMic;
+
+impl MicOpener for SilentMic {
+    fn open(&self) -> anyhow::Result<MicStream> {
+        let (tx, chunks) = mpsc::channel(64);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_millis(u64::from(r3x_audio::CHUNK_MS)));
+            while tx.send(vec![0i16; r3x_audio::MIC_CHUNK]).await.is_ok() {
+                tick.tick().await;
+            }
+        });
+        Ok(MicStream { chunks, guard: Box::new(()) })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum VoiceEvent {
     ListeningStarted { turn: String, owner: String },

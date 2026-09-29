@@ -17,7 +17,7 @@ mouse = ["dep:rdev"]
 r3x-contracts.workspace = true
 r3x-bus.workspace = true
 r3x-gateway.workspace = true
-r3x-audio = { path = "../r3x-audio", default-features = false }
+r3x-audio = { path = "../r3x-audio", default-features = false, features = ["decode"] }
 tokio = { workspace = true, features = ["net"] }
 serde.workspace = true
 serde_json.workspace = true

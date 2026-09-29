@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Start the whole DJ R3X: the CantinaOS backend plus the control panel (3D R3X, push-to-talk,
-# logs, controls) in the browser. Ctrl-C stops both.
+# Start the whole DJ R3X: the Rust runtime (voice, brain, music, vision, performer, LED/servo
+# drivers - no CantinaOS) plus the control panel (3D R3X, push-to-talk, logs, controls) in the
+# browser. Ctrl-C stops both.
 #
-#   ./r3x               backend + panel, opens the browser
-#   ./r3x --no-open     don't open a browser tab
-#   ./r3x --panel-only  just the panel (it runs its own demo until a backend connects)
+#   ./r3x                 runtime + panel, opens the browser
+#   ./r3x --no-open       don't open a browser tab
+#   ./r3x --panel-only    just the panel (it runs its own demo until a backend connects)
+#   ./r3x --legacy        CantinaOS instead of the Rust runtime (until the live check retires it)
+#   ./r3x -- ARGS         extra r3x-runtime arguments, e.g. -- --no-vision, -- --audio null
 #
-# The terminal keeps the CantinaOS CLI, so typed commands still work here too.
+# Typed commands: cargo run -p r3x-cli (in rust/). With --legacy the terminal keeps the
+# CantinaOS CLI.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,17 +18,23 @@ PY="$ROOT/venv/bin/python"
 WEB="$ROOT/sim/web"
 PANEL_PORT="${R3X_PANEL_PORT:-5391}"
 BRIDGE_PORT="${SIM_BRIDGE_PORT:-8765}"
+GATEWAY_PORT="${R3X_GATEWAY_PORT:-8780}"
 PANEL_URL="http://localhost:$PANEL_PORT/"
 OPEN=1
 BACKEND=1
+LEGACY=0
+RUNTIME_ARGS=()
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --no-open) OPEN=0 ;;
     --panel-only) BACKEND=0 ;;
-    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
+    --legacy) LEGACY=1 ;;
+    --) shift; RUNTIME_ARGS=("$@"); break ;;
+    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
+  shift
 done
 
 say() { printf '\033[38;5;208m[r3x]\033[0m %s\n' "$*"; }
@@ -33,11 +43,17 @@ port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------- preflight
 command -v npm >/dev/null || die "npm not found - install Node.js first"
-if [ "$BACKEND" = 1 ]; then
+if [ "$BACKEND" = 1 ] && [ "$LEGACY" = 1 ]; then
   [ -x "$PY" ] || die "no virtualenv at $ROOT/venv - create it and pip install -r requirements.txt"
   [ -f "$ROOT/.env" ] || die "no .env at $ROOT/.env (API keys)"
   if port_busy "$BRIDGE_PORT"; then
     die "port $BRIDGE_PORT is taken - is CantinaOS already running? (lsof -iTCP:$BRIDGE_PORT)"
+  fi
+elif [ "$BACKEND" = 1 ]; then
+  command -v cargo >/dev/null || die "cargo not found - install Rust (rustup.rs) first"
+  [ -f "$ROOT/.env" ] || say "no .env at $ROOT/.env - voice needs DEEPGRAM/ELEVENLABS keys, the brain ANTHROPIC or OPENROUTER"
+  if port_busy "$GATEWAY_PORT"; then
+    die "port $GATEWAY_PORT is taken - is r3x-runtime already running? (lsof -iTCP:$GATEWAY_PORT)"
   fi
 fi
 if [ ! -d "$WEB/node_modules" ]; then
@@ -70,16 +86,23 @@ else
   done
   port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
 fi
-# The backend's websockets need a token and an allowed Origin (cantina_os/tap/auth.py). The
-# panel gets the token in the URL fragment (never sent to a server) and keeps it.
-if [ -x "$PY" ]; then
-  R3X_TOKEN="$("$PY" "$ROOT/cantina_os/cantina_os/tap/auth.py")" || die "could not read/create the R3X access token"
-  export R3X_TAP_TOKEN="$R3X_TOKEN"
-  export R3X_ALLOWED_ORIGINS="${R3X_ALLOWED_ORIGINS:+$R3X_ALLOWED_ORIGINS,}http://localhost:$PANEL_PORT,http://127.0.0.1:$PANEL_PORT"
-  PANEL_LINK="$PANEL_URL#token=$R3X_TOKEN"
+# The backend's websockets need a token and an allowed Origin. One local token for both
+# backends (~/.config/dj-r3x/tap_token, 0600, as r3x-runtime and cantina_os/tap/auth.py make
+# it). The panel gets it in the URL fragment (never sent to a server) and keeps it.
+TOKEN_FILE="${R3X_TOKEN_FILE:-$HOME/.config/dj-r3x/tap_token}"
+if [ -n "${R3X_TAP_TOKEN:-}" ]; then
+  R3X_TOKEN="$R3X_TAP_TOKEN"
 else
-  PANEL_LINK="$PANEL_URL"
+  if [ ! -s "$TOKEN_FILE" ]; then
+    mkdir -p "$(dirname "$TOKEN_FILE")"
+    (umask 077 && head -c 32 /dev/urandom | xxd -p -c 64 > "$TOKEN_FILE") || die "could not create $TOKEN_FILE"
+  fi
+  R3X_TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 fi
+[ -n "$R3X_TOKEN" ] || die "empty access token in $TOKEN_FILE"
+export R3X_TAP_TOKEN="$R3X_TOKEN"
+export R3X_ALLOWED_ORIGINS="${R3X_ALLOWED_ORIGINS:+$R3X_ALLOWED_ORIGINS,}http://localhost:$PANEL_PORT,http://127.0.0.1:$PANEL_PORT"
+PANEL_LINK="$PANEL_URL#token=$R3X_TOKEN"
 say "panel: $PANEL_URL (open it once via ./r3x so it picks up the access token)"
 [ "$OPEN" = 1 ] && open "$PANEL_LINK"
 
@@ -91,6 +114,22 @@ if [ "$BACKEND" = 0 ]; then
   say "panel only - Ctrl-C to stop"
   wait "$PANEL_PID"
   exit 0
+fi
+
+if [ "$LEGACY" = 0 ]; then
+  # Build (incrementally) and run the Rust runtime. `mouse` = global left-click push-to-talk
+  # (needs Accessibility for Terminal.app; without it the click is simply off).
+  say "building r3x-runtime (release; the first build takes a few minutes)"
+  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime --features mouse -q \
+    || die "r3x-runtime did not build"
+  say "starting the Rust runtime on :$GATEWAY_PORT (log: logs/r3x-runtime.log) - Ctrl-C stops everything"
+  set +e
+  "$ROOT/rust/target/release/r3x-runtime" --standalone --mouse --session-log "$ROOT/logs" \
+    ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} 2>&1 | tee "$ROOT/logs/r3x-runtime.log"
+  status=${PIPESTATUS[0]}
+  set -e
+  say "r3x-runtime exited ($status)"
+  exit "$status"
 fi
 
 cd "$ROOT/cantina_os"

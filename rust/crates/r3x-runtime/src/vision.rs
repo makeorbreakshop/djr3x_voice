@@ -38,3 +38,24 @@ pub fn start(bus: &Bus, memory: Option<Arc<r3x_memory::Memory>>) -> Option<Visio
     }
     Some(vision)
 }
+
+/// Vision as the brain's [`r3x_brain::SceneSource`]: scene context for turns, `analyze_scene`.
+pub struct BrainEyes(pub Vision);
+
+impl r3x_brain::SceneSource for BrainEyes {
+    fn scene(&self) -> Option<(String, f64)> {
+        self.0.scene()
+    }
+
+    fn analyze<'a>(
+        &'a self,
+        question: &'a str,
+        turn: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(async move { self.0.analyze_scene(question, turn).await.map_err(|e| e.to_string()) })
+    }
+
+    fn console(&self, line: &str) -> Option<String> {
+        self.0.console(line)
+    }
+}

@@ -12,6 +12,14 @@ use serde_json::{json, Map, Value};
 use crate::plan::wait_for;
 use crate::Brain;
 
+/// The face firmware's own state words (`SI SE SL ST SS SF`); every other request is shown
+/// as a flash.
+pub fn face_pattern(requested: &str) -> &'static str {
+    const WORDS: [&str; 6] = ["idle", "engaged", "listening", "thinking", "speaking", "flash"];
+    let r = requested.trim().to_ascii_lowercase();
+    WORDS.into_iter().find(|w| *w == r).unwrap_or("flash")
+}
+
 impl Brain {
     /// Run a tool on behalf of a gateway command or the console (`source` is the caller), and
     /// publish its result. Returns the result.
@@ -54,13 +62,17 @@ impl Brain {
                 }
                 let pattern = params.get("pattern").and_then(Value::as_str).unwrap_or("custom").to_string();
                 let intensity = params.get("intensity").cloned().unwrap_or(json!(1.0));
-                // The face firmware has no colour channel; the pattern is what it can show.
-                let ack = self.inner.bus.command(source, None, Command::Perf(PerfCommand::Eyes { pattern: pattern.clone(), duration: None })).await;
+                // The face firmware has no colour channel, only its six state words; anything
+                // else (`solid`, `custom`, a mood) would be refused or fall back to an
+                // invisible idle, so a colour request flashes the eyes as the acknowledgement.
+                let shown = face_pattern(&pattern);
+                let ack = self.inner.bus.command(source, None, Command::Perf(PerfCommand::Eyes { pattern: shown.into(), duration: None })).await;
                 if !ack.is_accepted() {
-                    tracing::info!(pattern, ?ack, "eye pattern not shown");
+                    tracing::info!(shown, ?ack, "eye pattern not shown");
                 }
+                // `shown` is extra: the router's outcome (Claude's prompt) keeps CantinaOS's keys.
                 json!({"success": true, "color": color, "pattern": pattern, "intensity": intensity,
-                       "message": format!("Set eyes to {color} with {pattern} pattern")})
+                       "message": format!("Set eyes to {color} with {pattern} pattern"), "shown": shown})
             }
             "perform_show" => {
                 let id = s("id");
@@ -74,9 +86,16 @@ impl Brain {
                 }
                 json!({"success": true, "id": id, "message": format!("Performing {id}")})
             }
-            // Vision is Phase 6: say so instead of pretending to look.
-            "analyze_scene" => json!({"success": false, "action": "analyze_scene", "question": s("question"),
-                                      "message": "Vision is not available yet"}),
+            "analyze_scene" => {
+                let q = Some(s("question")).filter(|q| !q.is_empty()).unwrap_or_else(|| "What do you see?".into());
+                match self.inner.vision.get() {
+                    None => json!({"success": false, "action": "analyze_scene", "question": q, "message": "Vision is not running"}),
+                    Some(v) => match v.analyze(&q, cid).await {
+                        Ok(d) => json!({"success": true, "action": "analyze_scene", "question": q, "description": d}),
+                        Err(e) => json!({"success": false, "action": "analyze_scene", "question": q, "message": e}),
+                    },
+                }
+            }
             other => json!({"success": false, "message": format!("No handler for intent: {other}")}),
         }
     }

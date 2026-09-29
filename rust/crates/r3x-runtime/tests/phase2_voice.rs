@@ -131,6 +131,8 @@ async fn browser_hold_to_talk_and_hear_r3x() {
         output_device: None,
         mouth_hz: 30.0,
         client_buffer: Duration::from_millis(100),
+        replay: None,
+        null_audio: None,
     };
 
     let profile = RobotProfile::load(r3x_runtime::default_profile_path()).unwrap();

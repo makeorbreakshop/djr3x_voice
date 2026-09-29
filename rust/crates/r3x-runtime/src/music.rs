@@ -45,32 +45,24 @@ pub struct MusicStack {
     _output: Option<r3x_audio::device::OutputEngine>,
 }
 
-/// Commentary TTS through the voice's ElevenLabs backend (HTTP stream, whole line).
-struct VoiceSynth(Arc<dyn r3x_voice::eleven::TtsBackend>);
-
-impl Synthesize for VoiceSynth {
-    fn synthesize<'a>(&'a self, text: &'a str) -> SynthFuture<'a> {
-        Box::pin(async move {
-            let mut rx = self.0.http(text);
-            let mut pcm = Vec::new();
-            while let Some(c) = rx.recv().await {
-                pcm.extend(c?.pcm);
-            }
-            Ok(pcm)
-        })
-    }
-}
-
-/// Start the engine, its bus service, the commentary cache and sfx. `mixer` = the voice's
-/// output mixer when there is one.
+/// Start the engine, its bus service, sfx and (`commentary`, when there is no voice to do it
+/// with mouth and timings) the mixer-level commentary cache. `mixer` = the voice's output
+/// mixer when there is one; otherwise its own device, or the null device (`R3X_AUDIO=null`).
+/// `choices`: a replay's recorded picks.
 pub async fn start(
     bus: &Bus,
     mixer: Option<MixerHandle>,
-    tts: Option<Arc<dyn r3x_voice::eleven::TtsBackend>>,
     profile: Option<&RobotProfile>,
+    commentary: bool,
+    choices: Option<crate::replay::Choices>,
 ) -> anyhow::Result<MusicStack> {
     let (mixer, output) = match mixer {
         Some(m) => (m, None),
+        None if std::env::var("R3X_AUDIO").is_ok_and(|a| a == "null") => {
+            let speed = std::env::var("R3X_NULL_AUDIO_SPEED").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
+            let out = r3x_audio::device::OutputEngine::null(speed);
+            (out.mixer.clone(), Some(out))
+        }
         None => {
             let dev = profile.and_then(|p| p.audio.outputs.first()).and_then(|o| o.device.clone());
             let out = r3x_audio::device::OutputEngine::start(dev.as_deref())?;
@@ -84,27 +76,32 @@ pub async fn start(
         settings.engine.duck_ramp_ms = p.audio.ducking.ramp_ms;
     }
     let engine = r3x_music::start(mixer.clone(), settings).await;
+    if let Some(c) = choices {
+        engine.set_picker(c.music_picker());
+    }
     r3x_music::service::spawn(bus, &engine);
 
     let bank = Arc::new(r3x_audio::sfx::SfxBank::new(mixer.clone(), r3x_music::service::default_sfx_dirs()));
     r3x_music::service::spawn_sfx(bus, bank, Some(r3x_music::service::default_mode_sound()));
 
-    // Commentary cache: replayed fixtures (R3X_FIXTURES=replay, no paid calls), else the
-    // voice's TTS; neither = cache requests fail fast and the DJ falls back to a plain fade.
-    let replay = std::env::var("R3X_FIXTURES").is_ok_and(|v| v == "replay");
-    let synth: Option<Arc<dyn Synthesize>> = match (replay, std::env::var_os("R3X_FIXTURE_DIR"), tts) {
-        (true, Some(dir), _) => match FixtureSynth::load(std::path::Path::new(&dir)) {
-            Ok(f) => Some(Arc::new(f)),
-            Err(e) => {
-                tracing::warn!("commentary fixtures: {e}");
-                None
-            }
-        },
-        (false, _, Some(t)) => Some(Arc::new(VoiceSynth(t))),
-        _ => None,
-    };
-    let cache = Arc::new(r3x_audio::speech_cache::SpeechCache::new(mixer.clone()));
-    r3x_music::commentary::spawn(bus, cache, synth.unwrap_or_else(|| Arc::new(NoSynth)));
+    // Commentary without a voice (bridge mode): replayed fixtures (R3X_FIXTURES=replay, no
+    // paid calls) or nothing, in which case cache requests fail fast and the DJ falls back to
+    // a plain fade.
+    if commentary {
+        let replay = std::env::var("R3X_FIXTURES").is_ok_and(|v| v == "replay");
+        let synth: Arc<dyn Synthesize> = match (replay, std::env::var_os("R3X_FIXTURE_DIR")) {
+            (true, Some(dir)) => match FixtureSynth::load(std::path::Path::new(&dir)) {
+                Ok(f) => Arc::new(f),
+                Err(e) => {
+                    tracing::warn!("commentary fixtures: {e}");
+                    Arc::new(NoSynth)
+                }
+            },
+            _ => Arc::new(NoSynth),
+        };
+        let cache = Arc::new(r3x_audio::speech_cache::SpeechCache::new(mixer.clone()));
+        r3x_music::commentary::spawn(bus, cache, synth);
+    }
     r3x_ops::report(bus, "music", ServiceStatus::Running, None);
     Ok(MusicStack {
         engine,
@@ -117,6 +114,6 @@ struct NoSynth;
 
 impl Synthesize for NoSynth {
     fn synthesize<'a>(&'a self, _: &'a str) -> SynthFuture<'a> {
-        Box::pin(async { Err(anyhow::anyhow!("no TTS for commentary (run with --voice, or R3X_FIXTURES=replay)")) })
+        Box::pin(async { Err(anyhow::anyhow!("no TTS for commentary (the voice caches it; or R3X_FIXTURES=replay)")) })
     }
 }

@@ -325,6 +325,52 @@ fn on_message(raw: &str, turn: &mut Option<Turn>, events: &broadcast::Sender<Tra
     t.finish.is_some() && v["from_finalize"].as_bool().unwrap_or(false)
 }
 
+/// What the scripted STT will "hear" on the next turn(s) (replay/tests; see [`Stt::scripted`]).
+#[derive(Clone)]
+pub struct SttScript(mpsc::UnboundedSender<String>);
+
+impl SttScript {
+    /// Queue the final transcript of the next turn that finishes.
+    pub fn hear(&self, text: impl Into<String>) {
+        let _ = self.0.send(text.into());
+    }
+}
+
+impl Stt {
+    /// An STT with no socket (`R3X_FIXTURES=replay`, tests): always up; each finished turn's
+    /// transcript is the next line queued on the returned [`SttScript`] (empty if none). Mic
+    /// audio is accepted and ignored, so the capture path runs exactly as it does live.
+    pub fn scripted() -> (Self, SttScript) {
+        let (cmd, mut rx) = mpsc::channel::<Cmd>(512);
+        let (script_tx, mut script) = mpsc::unbounded_channel::<String>();
+        let (_conn_tx, connected) = watch::channel(true);
+        let events = broadcast::channel(256).0;
+        let ev = events.clone();
+        tokio::spawn(async move {
+            let _keep_up = _conn_tx;
+            let mut turn: Option<String> = None;
+            while let Some(c) = rx.recv().await {
+                match c {
+                    Cmd::Begin(id, tx) => {
+                        turn = Some(id);
+                        let _ = tx.send(Ok(()));
+                    }
+                    Cmd::Audio(_) => {}
+                    Cmd::Finish(tx) => {
+                        let text = script.try_recv().unwrap_or_default();
+                        if let Some(id) = turn.take().filter(|_| !text.is_empty()) {
+                            let _ = ev.send(Transcript { turn: id, text: text.clone(), is_final: true, confidence: 1.0 });
+                        }
+                        let _ = tx.send(text);
+                    }
+                    Cmd::Cancel => turn = None,
+                }
+            }
+        });
+        (Self { cmd, connected, events }, SttScript(script_tx))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

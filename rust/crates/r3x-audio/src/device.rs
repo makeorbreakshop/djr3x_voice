@@ -103,6 +103,37 @@ impl OutputEngine {
         tracing::info!(%device, rate = mixer.sample_rate(), channels = mixer.channels(), "audio output started");
         Ok(Self { mixer, device, _stop: stop_tx })
     }
+
+    /// No device (`--audio null`): a thread renders the mixer into nothing at 48 kHz stereo,
+    /// in 10 ms blocks, `speed` times faster than real time (1.0 = real time; tests go faster
+    /// so speech and music finish sooner). Everything downstream (speech timing, mouth,
+    /// music position, crossfades, ducking) runs exactly as on a device.
+    pub fn null(speed: f64) -> Self {
+        const RATE: u32 = 48_000;
+        let (mut m, mixer) = mixer(RATE, 2);
+        let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
+        let block = std::time::Duration::from_millis(10);
+        let pause = block.div_f64(speed.max(0.01));
+        thread::Builder::new()
+            .name("r3x-audio-null".into())
+            .spawn(move || {
+                let mut out = vec![0.0f32; (RATE / 100) as usize * 2];
+                let mut next = Instant::now();
+                while matches!(stop_rx.try_recv(), Err(std_mpsc::TryRecvError::Empty)) {
+                    out.fill(0.0);
+                    m.render(&mut out, &RenderTime::now());
+                    next += pause;
+                    if let Some(d) = next.checked_duration_since(Instant::now()) {
+                        thread::sleep(d);
+                    } else {
+                        next = Instant::now();
+                    }
+                }
+            })
+            .expect("spawn null audio thread");
+        tracing::info!(speed, "audio output: null device");
+        Self { mixer, device: "null".into(), _stop: stop_tx }
+    }
 }
 
 /// An open microphone. Chunks are 16 kHz mono i16, 20 ms each. Dropping it closes the device.

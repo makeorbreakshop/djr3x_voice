@@ -1,15 +1,22 @@
-//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--standalone | --bridge] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//!
+//! Standalone (the default): the whole robot in this process - voice, the Rust brain, the
+//! Rust music engine, vision (fail-open), performer and drivers - with no CantinaOS.
+//! `--bridge` is the legacy mode: CantinaOS is the brain (and, unless `--music rust` /
+//! `--voice`, music and voice), reached through its bus tap.
 //!
 //! Env: `R3X_GATEWAY_ADDR`, `R3X_TAP_URL`, `R3X_PROFILE`, `R3X_ALLOWED_ORIGINS`,
 //! `R3X_GATEWAY_TOKEN` / `R3X_TAP_TOKEN`, `R3X_CLI_TOKEN`, `R3X_PUBLIC_TOKEN`, `RUST_LOG`,
-//! `R3X_VOICE=1` (= `--voice`: mic/STT/TTS in r3x; run CantinaOS with `R3X_EXTERNAL_VOICE=1`),
+//! `R3X_AUDIO=null` (= `--audio null`: no device, silent mic; `R3X_NULL_AUDIO_SPEED`),
+//! `R3X_VOICE` (`--voice`; `0` = `--no-voice`), `R3X_VISION` (`--vision`; `0` = `--no-vision`),
 //! `R3X_LEDS=cantina` (= `--leds cantina`: CantinaOS keeps the face/chest boards; otherwise run
 //! it with `R3X_EXTERNAL_BODY=1`), `SHOW_DIR` (= `--show-dir`), `ARDUINO_SERIAL_PORT`,
 //! `CHEST_SERIAL_PORT`, `R3X_SERVO_PORT`, `FORCE_MOCK_LED_CONTROLLER`, `FORCE_MOCK_CHEST`,
-//! `R3X_BRAIN=rust` (= `--brain rust`: r3x-brain answers turns instead of CantinaOS; not with
-//! `--bridge`), `R3X_MEMORY_DB`, `R3X_PERSONA_DIR`, `R3X_MUSIC=rust` (= `--music rust`: the r3x
-//! music engine plays music/sfx; run CantinaOS with `R3X_EXTERNAL_MUSIC=1`), `MUSIC_DIR`,
-//! `R3X_SFX_DIR`, `R3X_CLAP_DIR`, `R3X_BEAT_CACHE_DIR`.
+//! `R3X_BRAIN` (= `--brain`; `rust` not with `--bridge`), `R3X_MEMORY_DB`, `R3X_PERSONA_DIR`,
+//! `R3X_CANTINA_DIR` (one-time memory import), `R3X_MUSIC` (= `--music`; with `--bridge` run
+//! CantinaOS with `R3X_EXTERNAL_MUSIC=1`), `MUSIC_DIR`, `R3X_SFX_DIR`, `R3X_CLAP_DIR`,
+//! `R3X_BEAT_CACHE_DIR`, `R3X_FIXTURES=replay` + `R3X_FIXTURE_DIR` (no paid calls: Claude,
+//! Jev, TTS and the recorded picks replay; STT is scripted).
 
 use std::sync::Arc;
 
@@ -19,7 +26,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,31 +37,38 @@ async fn main() -> anyhow::Result<()> {
     let mut tap_url = env("R3X_TAP_URL").unwrap_or_else(|| r3x_runtime::DEFAULT_TAP_URL.into());
     let mut profile_path = r3x_runtime::default_profile_path();
     let (mut bridge, mut session_log) = (false, None);
-    let mut voice = env("R3X_VOICE").is_some_and(|v| !matches!(v.as_str(), "0" | "false" | "no" | "off"));
+    let on = |k: &str| env(k).map(|v| !matches!(v.as_str(), "0" | "false" | "no" | "off"));
+    // Resolved after the arguments: the defaults depend on --bridge.
+    let (mut voice, mut vision) = (on("R3X_VOICE"), on("R3X_VISION"));
+    let mut music: Option<r3x_runtime::music::MusicMode> = env("R3X_MUSIC").map(|v| v.parse()).transpose().map_err(anyhow::Error::msg)?;
     let mut mouse = false;
     // Who drives the face/chest boards: r3x (default; run CantinaOS with R3X_EXTERNAL_BODY=1)
     // or CantinaOS (`--leds cantina` / R3X_LEDS=cantina).
     let mut leds = env("R3X_LEDS").is_none_or(|v| v != "cantina");
     let mut show_dir = r3x_runtime::performer::default_show_dir();
-    let mut brain: r3x_runtime::brain::BrainMode = env("R3X_BRAIN").map_or(Ok(Default::default()), |v| v.parse()).map_err(anyhow::Error::msg)?;
+    let mut brain: Option<r3x_runtime::brain::BrainMode> = env("R3X_BRAIN").map(|v| v.parse()).transpose().map_err(anyhow::Error::msg)?;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut val = || args.next().with_context(|| format!("{a} needs a value\n{USAGE}"));
         match a.as_str() {
             "--bind" => bind = val()?,
             "--bridge" => bridge = true,
-            "--voice" => voice = true,
+            "--standalone" => bridge = false,
+            "--voice" => voice = Some(true),
+            "--no-voice" => voice = Some(false),
+            "--vision" => vision = Some(true),
+            "--no-vision" => vision = Some(false),
+            "--audio" => match val()?.as_str() {
+                // Read by the voice settings and the music engine; set before any thread starts.
+                "null" => std::env::set_var("R3X_AUDIO", "null"),
+                "device" => std::env::remove_var("R3X_AUDIO"),
+                o => anyhow::bail!("--audio {o}: expected device or null"),
+            },
             "--mouse" => mouse = true,
             "--leds" => leds = val()? != "cantina",
             "--show-dir" => show_dir = val()?.into(),
-            "--brain" => brain = val()?.parse().map_err(anyhow::Error::msg)?,
-            "--music" => {
-                let m: r3x_runtime::music::MusicMode = val()?.parse().map_err(anyhow::Error::msg)?;
-                // Read by run(); set before any other thread starts.
-                std::env::set_var("R3X_MUSIC", if m == r3x_runtime::music::MusicMode::Rust { "rust" } else { "cantina" });
-            }
-            // Read by run(), like --music.
-            "--vision" => std::env::set_var("R3X_VISION", "1"),
+            "--brain" => brain = Some(val()?.parse().map_err(anyhow::Error::msg)?),
+            "--music" => music = Some(val()?.parse().map_err(anyhow::Error::msg)?),
             "--tap-url" => tap_url = val()?,
             "--profile" => profile_path = val()?.into(),
             "--session-log" => session_log = Some(val()?.into()),
@@ -65,6 +79,17 @@ async fn main() -> anyhow::Result<()> {
             other => anyhow::bail!("unknown argument {other}\n{USAGE}"),
         }
     }
+
+    use r3x_runtime::{brain::BrainMode, music::MusicMode};
+    let standalone = !bridge;
+    let brain = brain.unwrap_or(if standalone { BrainMode::Rust } else { BrainMode::Cantina });
+    let music = music.unwrap_or(if standalone { MusicMode::Rust } else { MusicMode::Cantina });
+    let voice = voice.unwrap_or(standalone);
+    let vision = vision.unwrap_or(standalone);
+    // Read by boot(); set before any other thread starts.
+    std::env::set_var("R3X_MUSIC", if music == MusicMode::Rust { "rust" } else { "cantina" });
+    std::env::set_var("R3X_VISION", if vision { "1" } else { "0" });
+    tracing::info!(standalone, ?brain, ?music, voice, vision, "r3x runtime");
 
     let profile = RobotProfile::load(&profile_path).with_context(|| format!("profile {}", profile_path.display()))?;
     let bridge = if bridge {

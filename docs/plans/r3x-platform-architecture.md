@@ -466,6 +466,22 @@ after a stop, in an overlapped recording) - check before relying on per-turn att
 ### Phase 7 — Retire CantinaOS
 - Remove bridge mode; archive `cantina_os/` and `src/`; repoint `./r3x`; rewrite CLAUDE.md.
 
+#### Integration pass — what exists (2026-09-29)
+- `r3x-runtime` defaults to **standalone**: voice -> brain -> music / performer / drivers /
+  audio in one process, vision fail-open; `--bridge` is the legacy mode. `./r3x` (and so
+  `dj-r3x`) builds and starts it with the panel; `./r3x --legacy` starts CantinaOS.
+- Closed: brain <-> vision (`analyze_scene`, scene in the turn context, `camera ...` console);
+  memory import once + summary catch-up + rolling summary on leaving INTERACTIVE; commentary
+  cached by the voice and played through the FIFO (mouth + timings); show `speak`/`duck` in
+  standalone; DJ transitions gated on autonomy; colour requests shown as an eye flash (the
+  face firmware has no colour channel - a real colour needs a new named command, D5);
+  `--audio null`; replay drives the whole runtime (scripted STT, recorded TTS and picks).
+- Acceptance (`r3x-runtime/tests/standalone_acceptance.rs`, replayed externals at recorded
+  pace): every smoke turn matches CantinaOS except the allow-listed ones (`next` now works
+  outside DJ mode, so turns 2-3 have no recorded reply; the eye flash); a DJ transition with
+  cached commentary; legs within a few ms of the recording (Rust adds 0-10 ms; stop -> first
+  audible sample e.g. 3,153 -> 3,166 and 2,571 -> 2,541 ms). Live pass: `live-check.md`.
+
 ### Phase 8 — Servo hardware (may start any time after Phase 3)
 - Controller firmware + `r3x_servo` driver per D6; Bench calibration wizard writes
   `calibrated: measured`.

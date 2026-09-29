@@ -20,6 +20,12 @@ pub struct VoiceSettings {
     pub mouth_hz: f64,
     /// How far ahead of playback remote clients are sent audio.
     pub client_buffer: Duration,
+    /// `R3X_FIXTURES=replay` + `R3X_FIXTURE_DIR`: TTS replays the recorded audio and STT is
+    /// scripted (no Deepgram/ElevenLabs, no keys needed).
+    pub replay: Option<(std::path::PathBuf, f64)>,
+    /// `--audio null` (`R3X_AUDIO=null`): no device; the mixer renders into nothing at this
+    /// speed (1.0 = real time) and the mic is silence.
+    pub null_audio: Option<f64>,
 }
 
 /// `KEY=VALUE` lines; quotes stripped; `#` comments skipped.
@@ -48,8 +54,18 @@ impl VoiceSettings {
         let file = read_dotenv(&repo_dotenv());
         let get = |k: &str| std::env::var(k).ok().or_else(|| file.get(k).cloned()).filter(|v| !v.trim().is_empty());
         let flag = |k: &str, d: bool| get(k).map_or(d, |v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"));
-        let deepgram = DeepgramConfig::new(get("DEEPGRAM_API_KEY").ok_or_else(|| anyhow::anyhow!("DEEPGRAM_API_KEY is not set"))?);
-        let mut eleven = ElevenConfig::new(get("ELEVENLABS_API_KEY").ok_or_else(|| anyhow::anyhow!("ELEVENLABS_API_KEY is not set"))?);
+        let replay = std::env::var("R3X_FIXTURES")
+            .is_ok_and(|m| m == "replay")
+            .then(|| std::env::var_os("R3X_FIXTURE_DIR"))
+            .flatten()
+            .map(|d| (d.into(), std::env::var("R3X_FIXTURE_PACE").ok().and_then(|p| p.parse().ok()).unwrap_or(1.0)));
+        let key = |k: &str| match (get(k), &replay) {
+            (Some(v), _) => Ok(v),
+            (None, Some(_)) => Ok("replay".to_owned()),
+            (None, None) => Err(anyhow::anyhow!("{k} is not set")),
+        };
+        let deepgram = DeepgramConfig::new(key("DEEPGRAM_API_KEY")?);
+        let mut eleven = ElevenConfig::new(key("ELEVENLABS_API_KEY")?);
         if let Some(v) = get("ELEVENLABS_VOICE_ID") {
             eleven.voice_id = v;
         }
@@ -65,6 +81,10 @@ impl VoiceSettings {
             output_device: get("R3X_AUDIO_OUTPUT"),
             mouth_hz: r3x_audio::DEFAULT_MOUTH_HZ,
             client_buffer: Duration::from_millis(150),
+            replay,
+            null_audio: get("R3X_AUDIO")
+                .filter(|a| a == "null")
+                .map(|_| get("R3X_NULL_AUDIO_SPEED").and_then(|s| s.parse().ok()).unwrap_or(1.0)),
         })
     }
 }

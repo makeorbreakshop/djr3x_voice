@@ -76,6 +76,10 @@ impl Default for Status {
     }
 }
 
+/// Chooses the track for a play that names none, from the candidate keys (`None` = the
+/// engine's own random pick). Replays install the recorded picks.
+pub type Picker = Arc<dyn Fn(&[String]) -> Option<String> + Send + Sync>;
+
 /// Reply text for the console (`cli.response`); `Err` is an error reply.
 pub type Reply = Result<String, String>;
 
@@ -91,6 +95,7 @@ enum Cmd {
     List,
     Beats(PathBuf, BeatInfo),
     SetSearch(Arc<dyn Search>),
+    SetPicker(Picker),
     CrossfadeDone(String),
 }
 
@@ -123,6 +128,7 @@ impl Engine {
             dj: false,
             last_semantic: Vec::new(),
             search: None,
+            picker: None,
             rng: seed(),
         };
         tokio::spawn(actor.run(rx));
@@ -198,6 +204,10 @@ impl Engine {
     pub fn set_search(&self, s: Arc<dyn Search>) {
         self.tell(Cmd::SetSearch(s));
     }
+
+    pub fn set_picker(&self, p: Picker) {
+        self.tell(Cmd::SetPicker(p));
+    }
 }
 
 fn seed() -> u64 {
@@ -226,6 +236,7 @@ struct Actor {
     dj: bool,
     last_semantic: Vec<String>,
     search: Option<Arc<dyn Search>>,
+    picker: Option<Picker>,
     rng: u64,
 }
 
@@ -363,6 +374,10 @@ impl Actor {
                 self.search = Some(s);
                 Ok(String::new())
             }
+            Cmd::SetPicker(p) => {
+                self.picker = Some(p);
+                Ok(String::new())
+            }
             Cmd::CrossfadeDone(id) => {
                 if self.crossfading.as_deref() == Some(id.as_str()) {
                     self.crossfading = None;
@@ -404,6 +419,12 @@ impl Actor {
         }
         if choices.is_empty() {
             return None;
+        }
+        if let Some(p) = &self.picker {
+            let keys: Vec<String> = choices.iter().map(|t| t.key.clone()).collect();
+            if let Some(k) = p(&keys).filter(|k| keys.contains(k)) {
+                return Some(k);
+            }
         }
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 7;
