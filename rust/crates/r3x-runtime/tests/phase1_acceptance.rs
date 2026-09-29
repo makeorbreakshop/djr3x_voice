@@ -60,6 +60,8 @@ async fn start_runtime(tap_url: String) -> String {
         profile: Some(Arc::new(profile)),
         session_log: None,
         logs: None,
+        voice: None,
+        mouse: false,
     };
     tokio::spawn(r3x_runtime::run_on(Bus::default(), cfg, None, listener));
     url

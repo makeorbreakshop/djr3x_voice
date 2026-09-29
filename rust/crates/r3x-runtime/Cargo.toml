@@ -10,12 +10,17 @@ publish.workspace = true
 name = "r3x-runtime"
 path = "src/main.rs"
 
+[features]
+# Global left-click push-to-talk (`--mouse`; macOS Accessibility permission).
+mouse = ["r3x-voice/mouse"]
+
 [dependencies]
 r3x-contracts.workspace = true
 r3x-bus.workspace = true
 r3x-ops.workspace = true
 r3x-stage.workspace = true
 r3x-gateway.workspace = true
+r3x-voice = { path = "../r3x-voice" }
 tokio = { workspace = true, features = ["signal"] }
 serde_json.workspace = true
 tracing.workspace = true
@@ -26,3 +31,4 @@ futures-util.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+base64 = "0.23"

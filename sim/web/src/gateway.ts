@@ -8,6 +8,7 @@
  */
 
 import type { Ack } from './generated/Ack';
+import type { AudioMeta } from './generated/AudioMeta';
 import type { ClientMessage } from './generated/ClientMessage';
 import type { Command } from './generated/Command';
 import type { Envelope } from './generated/Envelope';
@@ -17,7 +18,7 @@ import type { LogLine } from './generated/LogLine';
 import type { RetainedState } from './generated/RetainedState';
 import type { StateUpdate } from './generated/StateUpdate';
 
-export type { Ack, Command, Event, Hello, LogLine, RetainedState };
+export type { Ack, AudioMeta, Command, Event, Hello, LogLine, RetainedState };
 
 /** Where the event came from: the turn id and backend wall clock ride on the envelope. */
 export interface EventMeta {
@@ -31,6 +32,8 @@ export interface GatewayHandlers {
   onEvent?(e: Event, meta: EventMeta): void;
   onLog?(l: LogLine, wall: number): void;
   onStatus?(connected: boolean): void;
+  /** Runtime TTS audio (Phase 2): the latest `audio` meta and one binary frame. */
+  onAudio?(meta: AudioMeta | null, pcm: ArrayBuffer): void;
 }
 
 /** Apply a `state` delta; whole-domain replacement, as the bus sends it. */
@@ -53,6 +56,7 @@ export class GatewayClient {
   private seq = 0;
   private readonly pending = new Map<string, (a: Ack) => void>();
   private readonly handlers: GatewayHandlers[] = [];
+  private audioMeta: AudioMeta | null = null;
 
   constructor(private readonly url: string) {}
 
@@ -85,6 +89,22 @@ export class GatewayClient {
     });
   }
 
+  /** Mic audio for the current push-to-talk: an `audio` meta, then binary PCM frames. */
+  sendAudioMeta(meta: AudioMeta): boolean {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    const msg: ClientMessage = { kind: 'audio', body: meta };
+    ws.send(JSON.stringify(msg));
+    return true;
+  }
+
+  sendAudio(pcm: Int16Array<ArrayBuffer> | ArrayBuffer): boolean {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(pcm);
+    return true;
+  }
+
   private each(fn: (h: GatewayHandlers) => void) {
     for (const h of this.handlers) {
       try {
@@ -104,12 +124,18 @@ export class GatewayClient {
       return;
     }
     this.ws = ws;
+    ws.binaryType = 'arraybuffer';
     ws.onmessage = (m) => {
+      if (m.data instanceof ArrayBuffer) {
+        const pcm = m.data;
+        this.each((h) => h.onAudio?.(this.audioMeta, pcm));
+        return;
+      }
       let env: Envelope;
       try {
         env = JSON.parse(String(m.data)) as Envelope;
       } catch {
-        return; // binary audio (Phase 2) or garbage
+        return; // garbage
       }
       this.onEnvelope(env);
     };
@@ -144,6 +170,9 @@ export class GatewayClient {
         this.each((h) => h.onEvent?.(env.body, meta));
         break;
       }
+      case 'audio':
+        this.audioMeta = env.body;
+        break;
       case 'log':
         this.each((h) => h.onLog?.(env.body, env.t_wall));
         break;

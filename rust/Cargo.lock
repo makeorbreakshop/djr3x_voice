@@ -1586,12 +1586,14 @@ name = "r3x-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.23.1",
  "futures-util",
  "r3x-bus",
  "r3x-contracts",
  "r3x-gateway",
  "r3x-ops",
  "r3x-stage",
+ "r3x-voice",
  "serde_json",
  "tokio",
  "tokio-tungstenite",

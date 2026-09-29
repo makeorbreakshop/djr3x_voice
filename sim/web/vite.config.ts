@@ -6,6 +6,15 @@ import { defineConfig, searchForWorkspaceRoot } from 'vite';
 const SHOW = fileURLToPath(new URL('../../show', import.meta.url));
 
 export default defineConfig({
+  // voice.html: standalone hold-to-talk page (Phase 2 remote voice), iframe-able.
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        voice: fileURLToPath(new URL('./voice.html', import.meta.url)),
+      },
+    },
+  },
   server: {
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), SHOW] },
   },

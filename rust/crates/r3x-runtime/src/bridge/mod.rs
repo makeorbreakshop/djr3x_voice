@@ -78,6 +78,14 @@ impl TapLink {
         }
     }
 
+    /// Emit without waiting for the tap's confirmation (high-rate voice topics).
+    fn send(&self, topic: &str, payload: Value) {
+        let msg = json!({ "topic": topic, "payload": payload, "source": "r3x-voice" }).to_string();
+        if let Some(t) = self.tx.lock().unwrap().as_ref() {
+            let _ = t.send(msg);
+        }
+    }
+
     fn on_ack(&self, msg: &Value) {
         let Some(re) = msg.get("re").and_then(Value::as_str) else { return };
         if let Some(tx) = self.pending.lock().unwrap().remove(re) {
@@ -103,11 +111,14 @@ struct Bridge {
     tap: TapLink,
     tap_state: Mutex<TapState>,
     ptt_held: AtomicBool,
+    /// Phase 2: r3x owns mic/STT/TTS (CantinaOS runs with `R3X_EXTERNAL_VOICE=1`).
+    voice: Option<r3x_voice::Voice>,
+    cantina_voice: std::sync::OnceLock<Arc<r3x_voice::cantina::CantinaVoice>>,
 }
 
 /// Start the bridge. Takes the `intent` and `perf` command classes; returns the engagement
 /// backend for the StageManager.
-pub fn spawn(bus: &Bus, cfg: BridgeConfig) -> anyhow::Result<r3x_stage::EngagementBackend> {
+pub fn spawn(bus: &Bus, cfg: BridgeConfig, voice: Option<r3x_voice::Voice>) -> anyhow::Result<r3x_stage::EngagementBackend> {
     let intent = bus.take_commands(MessageClass::Intent).ok_or_else(|| anyhow::anyhow!("intent class taken"))?;
     let perf = bus.take_commands(MessageClass::Perf).ok_or_else(|| anyhow::anyhow!("perf class taken"))?;
     let b = Arc::new(Bridge {
@@ -116,7 +127,18 @@ pub fn spawn(bus: &Bus, cfg: BridgeConfig) -> anyhow::Result<r3x_stage::Engageme
         tap: TapLink::default(),
         tap_state: Mutex::default(),
         ptt_held: AtomicBool::new(false),
+        voice,
+        cantina_voice: Default::default(),
     });
+    if let Some(v) = &b.voice {
+        let tap = Arc::downgrade(&b);
+        let emit = move |topic: &str, payload: Value| {
+            if let Some(b) = tap.upgrade() {
+                b.tap.send(topic, payload);
+            }
+        };
+        let _ = b.cantina_voice.set(r3x_voice::cantina::CantinaVoice::attach(v, Arc::new(emit)));
+    }
     let (eng_tx, mut eng_rx) = mpsc::channel::<(Engagement, oneshot::Sender<Ack>)>(8);
 
     tokio::spawn(b.clone().run_tap());
@@ -197,6 +219,9 @@ impl Bridge {
                 let topic = msg.get("topic").and_then(Value::as_str).unwrap_or("");
                 let payload = msg.get("payload").unwrap_or(&Value::Null);
                 translate(&self.bus, &mut self.tap_state.lock().unwrap(), topic, payload);
+                if let Some(cv) = self.cantina_voice.get() {
+                    cv.on_tap(topic, payload);
+                }
             }
             Some("ack") => self.tap.on_ack(&msg),
             _ => {}
@@ -239,6 +264,8 @@ impl Bridge {
                 Ack::rejected(format!("the brain is off in {:?} mode", stage.mode))
             }
             IntentCommand::Say { text } => self.say(text.trim()).await,
+            IntentCommand::PttStart if self.voice.is_some() => self.voice_ptt_start(source).await,
+            IntentCommand::PttStop if self.voice.is_some() => self.voice_ptt_stop().await,
             IntentCommand::PttStart => self.ptt_start(source).await,
             IntentCommand::PttStop => self.ptt_stop().await,
             IntentCommand::Music(m) => {
@@ -296,6 +323,21 @@ impl Bridge {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let stopped = json!({ "transcript": text, "conversation_id": id, "has_transcript": true, "source": "panel" });
         to_ack(self.emit("voice.listening.stopped", stopped).await)
+    }
+
+    /// Push-to-talk on r3x-voice: engage, then open the turn (local mic or the client's
+    /// streamed audio). Ownership lives in `state.conversation.ptt_owner`.
+    async fn voice_ptt_start(&self, source: Source) -> Ack {
+        let ack = self.engage(Engagement::Interactive).await;
+        if !ack.is_accepted() {
+            return ack;
+        }
+        let owner = format!("{source:?}").to_ascii_lowercase();
+        self.voice.as_ref().expect("guarded").ptt_start(&owner).await
+    }
+
+    async fn voice_ptt_stop(&self) -> Ack {
+        self.voice.as_ref().expect("guarded").ptt_stop(None).await
     }
 
     async fn ptt_start(&self, source: Source) -> Ack {

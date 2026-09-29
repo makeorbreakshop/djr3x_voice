@@ -5,6 +5,7 @@
 //! r3x-voice say "text"              speak through the default output (real ElevenLabs)
 //! r3x-voice roundtrip "text"        ElevenLabs -> Deepgram, headless; prints transcript + timings
 //! r3x-voice listen [secs]           one turn from the local mic (real Deepgram)
+//! r3x-voice synth "text" OUT.raw    ElevenLabs line as 16 kHz s16le (a test utterance)
 //! r3x-voice bridge [--tap-url URL] [--mouse]
 //!                                   voice for a running CantinaOS (R3X_EXTERNAL_VOICE=1):
 //!                                   the runtime's --bridge does the same once it hosts voice
@@ -39,9 +40,10 @@ async fn main() -> Result<()> {
         }
         Some("say") => say(args.get(1).context("say needs text")?).await,
         Some("roundtrip") => roundtrip(args.get(1).map_or("Hello from the cantina. Play some music.", String::as_str)).await,
+        Some("synth") => synth(args.get(1).context("synth needs text")?, args.get(2).context("synth needs an output path")?).await,
         Some("listen") => listen(args.get(1).and_then(|s| s.parse().ok()).unwrap_or(4.0)).await,
         Some("bridge") => bridge(&args[1..]).await,
-        _ => bail!("usage: r3x-voice devices | say TEXT | roundtrip [TEXT] | listen [SECS] | bridge [--tap-url URL] [--mouse]"),
+        _ => bail!("usage: r3x-voice devices | say TEXT | roundtrip [TEXT] | listen [SECS] | synth TEXT OUT | bridge [--tap-url URL] [--mouse]"),
     }
 }
 
@@ -69,22 +71,43 @@ async fn say(text: &str) -> Result<()> {
     }
 }
 
-/// One real ElevenLabs line, fed to one real Deepgram turn, no devices.
-async fn roundtrip(text: &str) -> Result<()> {
+/// All of a line's 24 kHz PCM, and how many characters carried timing.
+async fn synthesize(s: &VoiceSettings, text: &str) -> Result<(Vec<i16>, usize)> {
     use r3x_voice::eleven::{open_speech, Eleven};
-    let s = VoiceSettings::from_env()?;
     let eleven = Eleven::start(s.eleven.clone());
-    let t0 = Instant::now();
     let (first, mut rest) = open_speech(eleven.as_ref(), text).await?;
     let first = first.context("no audio")?;
-    println!("tts first chunk after {} ms", t0.elapsed().as_millis());
+    let mut timed = first.alignment.map_or(0, |a| a.chars.len());
     let mut pcm = first.pcm;
-    let mut timed_chars = first.alignment.map_or(0, |a| a.chars.len());
     while let Some(c) = rest.recv().await {
         let c = c?;
-        timed_chars += c.alignment.as_ref().map_or(0, |a| a.chars.len());
+        timed += c.alignment.as_ref().map_or(0, |a| a.chars.len());
         pcm.extend(c.pcm);
     }
+    Ok((pcm, timed))
+}
+
+fn to_16k(pcm: &[i16]) -> Vec<i16> {
+    let mut rs = r3x_audio::resample::Resampler::new(24_000, 16_000);
+    let mut out = Vec::new();
+    let f: Vec<f32> = pcm.iter().map(|&s| r3x_audio::i16_to_f32(s)).collect();
+    rs.process(&f, &mut out);
+    out.iter().map(|&s| r3x_audio::f32_to_i16(s)).collect()
+}
+
+async fn synth(text: &str, out: &str) -> Result<()> {
+    let (pcm, _) = synthesize(&VoiceSettings::from_env()?, text).await?;
+    let bytes: Vec<u8> = to_16k(&pcm).iter().flat_map(|s| s.to_le_bytes()).collect();
+    std::fs::write(out, &bytes)?;
+    println!("wrote {out}: {:.2} s of 16 kHz s16le", bytes.len() as f64 / 32_000.0);
+    Ok(())
+}
+
+/// One real ElevenLabs line, fed to one real Deepgram turn, no devices.
+async fn roundtrip(text: &str) -> Result<()> {
+    let s = VoiceSettings::from_env()?;
+    let t0 = Instant::now();
+    let (pcm, timed_chars) = synthesize(&s, text).await?;
     println!("tts done after {} ms: {:.2} s of audio, {timed_chars} timed chars", t0.elapsed().as_millis(), pcm.len() as f64 / 24_000.0);
 
     let bus = Bus::default();
@@ -93,11 +116,7 @@ async fn roundtrip(text: &str) -> Result<()> {
     let mut up = stt.connected();
     tokio::time::timeout(Duration::from_secs(10), up.wait_for(|u| *u)).await??;
     stt.begin("roundtrip").await?;
-    let mut rs = r3x_audio::resample::Resampler::new(24_000, 16_000);
-    let mut f16 = Vec::new();
-    let f: Vec<f32> = pcm.iter().map(|&s| r3x_audio::i16_to_f32(s)).collect();
-    rs.process(&f, &mut f16);
-    let pcm16: Vec<i16> = f16.iter().map(|&s| r3x_audio::f32_to_i16(s)).collect();
+    let pcm16 = to_16k(&pcm);
     // Real time, 20 ms chunks, as the mic would.
     let mut tick = tokio::time::interval(Duration::from_millis(20));
     for c in pcm16.chunks(r3x_audio::MIC_CHUNK) {

@@ -33,6 +33,11 @@ pub struct RuntimeConfig {
     pub bridge: Option<bridge::BridgeConfig>,
     pub session_log: Option<PathBuf>,
     pub logs: Option<broadcast::Sender<LogLine>>,
+    /// `Some` = r3x owns voice I/O (Phase 2). In bridge mode CantinaOS must run with
+    /// `R3X_EXTERNAL_VOICE=1`.
+    pub voice: Option<r3x_voice::VoiceSettings>,
+    /// Global left-click push-to-talk (needs the `mouse` feature).
+    pub mouse: bool,
 }
 
 pub fn all_classes() -> Vec<MessageClass> {
@@ -98,8 +103,32 @@ pub async fn run_on(
     if let Some(level) = level {
         r3x_ops::spawn_telemetry(&bus, level);
     }
+    let voice = match cfg.voice.clone() {
+        Some(mut v) => {
+            if let Some(p) = &cfg.profile {
+                v.mouth_hz = p.audio.mouth_hz;
+                if v.output_device.is_none() {
+                    v.output_device = p.audio.outputs.first().and_then(|o| o.device.clone());
+                }
+            }
+            let stack = r3x_voice::start(&bus, v)?;
+            // Bridge mode: the turn/speech lifecycle comes back from CantinaOS via the tap.
+            r3x_voice::voice::spawn_bus_adapter(&stack.voice, bus.clone(), cfg.bridge.is_none());
+            r3x_ops::report(&bus, "voice", ServiceStatus::Running, None);
+            Some(stack)
+        }
+        None => None,
+    };
+    if cfg.mouse {
+        #[cfg(feature = "mouse")]
+        if let Some(v) = &voice {
+            r3x_voice::mouse::spawn(bus.clone(), v.voice.clone())?;
+        }
+        #[cfg(not(feature = "mouse"))]
+        anyhow::bail!("--mouse needs r3x-runtime built with --features mouse");
+    }
     let backend = match cfg.bridge.clone() {
-        Some(b) => Some(bridge::spawn(&bus, b)?),
+        Some(b) => Some(bridge::spawn(&bus, b, voice.as_ref().map(|v| v.voice.clone()))?),
         None => None,
     };
     let stage_cfg = cfg.profile.as_deref().map(r3x_stage::StageConfig::from_profile).unwrap_or_default();
@@ -110,11 +139,12 @@ pub async fn run_on(
         origins: cfg.origins,
         profile: cfg.profile,
         logs: cfg.logs,
-        audio: Default::default(),
+        audio: voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default(),
     };
     tracing::info!(addr = %listener.local_addr()?, bridge = cfg.bridge.is_some(), "r3x gateway listening");
     r3x_ops::report(&bus, "gateway", ServiceStatus::Running, None);
     r3x_gateway::serve(listener, bus, gw).await?;
+    drop(voice); // the stack (and its audio device) lives as long as the gateway
     Ok(())
 }
 
