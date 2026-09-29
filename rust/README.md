@@ -10,7 +10,7 @@ crates/
   r3x-gateway     axum WS, protocol v1: token + Origin on every bind, stamped source, class/tier gates
   r3x-ops         health -> state.services, runtime log fan-out, log-level control
   r3x-stage       StageManager: Show/Bench/Studio, outputs, alive layers, brain, autonomy, freeze, engagement
-  r3x-runtime     the binary; --bridge drives a running CantinaOS through its bus tap
+  r3x-runtime     the binary: the whole robot in-process (default), or --bridge to a running CantinaOS
   r3x-cli         terminal gateway client (CantinaOS command set + shortcuts, history)
   r3x-brain       turns (Jev router || Claude + dedup), tool dispatch, show tags, plan executor,
                   DJ planner + commentary cache; `--brain rust` (default `cantina` until Phase 5)
@@ -30,10 +30,49 @@ contracts-schema/ generated JSON Schema (do not edit)
 Generated TypeScript lives in `sim/web/src/generated/` (do not edit). The robot profile is
 `profiles/r3x/robot.json` at the repo root.
 
+## Run (standalone: the default, no CantinaOS)
+
+```bash
+./r3x                                     # repo root: builds + starts r3x-runtime and the panel
+./r3x -- --no-vision                      # extra runtime flags after --
+./r3x --legacy                            # CantinaOS instead, until the live check retires it
+cargo run -p r3x-runtime                  # just the runtime (= --standalone)
+cargo run -p r3x-cli                      # typed commands against it
+```
+
+Standalone = voice (Deepgram + ElevenLabs, local mic/speaker, remote browsers through the
+gateway) -> the Rust brain (Jev router + Claude, memory, tools, show tags, DJ) -> the Rust music
+engine on the same mixer -> performer -> face/chest/servo drivers, plus vision (fail-open) and
+the gateway the panel talks to. Stage modes gate it (§4): Show = brain + DJ autonomy on;
+Bench/Studio = brain off, no DJ transitions. `--no-voice`, `--no-vision`, `--brain`, `--music`
+override one part; `--mouse` (feature `mouse`) = global click push-to-talk; `--audio null` =
+no sound device (silent mic, `R3X_NULL_AUDIO_SPEED`).
+
+No paid calls: `R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice` replays Claude,
+Jev, ElevenLabs audio and the recorded picks; STT is scripted (typed turns). With `--audio
+null` and `FORCE_MOCK_LED_CONTROLLER=1 FORCE_MOCK_CHEST=1 FORCE_MOCK_SERVO=1` nothing touches
+hardware.
+
+Memory: `R3X_MEMORY_DB` (default `~/.config/dj-r3x/memory.sqlite`); on first start it imports
+CantinaOS's `memory_data/` + DJ keys once (`R3X_CANTINA_DIR`), catches up visit summaries, and
+writes a rolling summary when engagement leaves INTERACTIVE. The DJ commentary cache is the
+voice's: lines are synthesised ahead (HTTP) and played through the speech FIFO, so they move
+the mouth and carry character timings like any reply.
+
+Acceptance: `cargo test -p r3x-runtime --test standalone_acceptance -- --nocapture` (~90 s)
+boots the standalone runtime (scripted STT, replayed TTS on a 6x null device, replayed
+Claude/Jev, the real music engine and library, performer + mock drivers), speaks the smoke
+corpus through push-to-talk, compares every turn with the CantinaOS recording
+(`r3x-brain/tests/common/parity.rs`, allow-lists with reasons), runs a DJ transition with
+cached commentary, and prints the latency legs against the Phase 0 baseline turns.
+
+Live check before `cantina_os/` is archived: `docs/plans/live-check.md`.
+
 ## Run (Phase 1, bridged to CantinaOS)
 
 ```bash
 cargo run -p r3x-runtime -- --bridge      # gateway on 127.0.0.1:8780, tap at ws://127.0.0.1:8766/
+                                          # (--bridge: brain/music/voice default to CantinaOS)
 cargo run -p r3x-cli                      # or: cargo run -p r3x-cli -- -c "mode bench" -c "emote greet"
 ```
 
@@ -44,7 +83,7 @@ servers plus `R3X_ALLOWED_ORIGINS`.
 ## Run (Phase 2, r3x owns voice)
 
 ```bash
-R3X_EXTERNAL_VOICE=1 ./r3x ...            # CantinaOS without its mouse/Deepgram/ElevenLabs services
+R3X_EXTERNAL_VOICE=1 ./r3x --legacy       # CantinaOS without its mouse/Deepgram/ElevenLabs services
 cargo run -p r3x-runtime -- --bridge --voice            # add --features mouse and --mouse for click PTT
 open "http://localhost:5173/voice.html#token=$(cat ~/.config/dj-r3x/tap_token)"   # hold-to-talk page
 cargo run -p r3x-voice -- roundtrip       # headless ElevenLabs -> Deepgram check (2 paid requests)
@@ -77,8 +116,8 @@ performer as WASM with `?offline` (`npm run build:wasm` in `sim/web` first).
 ## Rust brain (Phase 5, instead of CantinaOS)
 
 ```bash
-cargo run -p r3x-runtime -- --voice --brain rust        # not with --bridge
-R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice cargo run -p r3x-runtime -- --brain rust
+cargo run -p r3x-runtime                                 # standalone: --brain rust is the default
+R3X_FIXTURES=replay R3X_FIXTURE_DIR=../fixtures/smoke-voice cargo run -p r3x-runtime -- --audio null --no-vision
 ```
 
 Env: `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `R3X_MEMORY_DB`,
@@ -88,7 +127,7 @@ Env: `ANTHROPIC_API_KEY`/`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `R3X_MEMORY_D
 ## Music engine (Phase 4)
 
 ```bash
-R3X_EXTERNAL_MUSIC=1 ./r3x ...                       # CantinaOS without MusicController / mode sound
+R3X_EXTERNAL_MUSIC=1 ./r3x --legacy                  # CantinaOS without MusicController / mode sound
 cargo run -p r3x-runtime -- --bridge --music rust    # r3x plays music + sfx (default: cantina)
 cargo run --release -p r3x-beats -- compare --out ../docs/plans/beat-analyzer-comparison.md
 venv/bin/python scripts/export_clap_onnx.py          # once: CLAP ONNX into ~/.cache/dj-r3x/clap
@@ -108,7 +147,7 @@ with `position_s`@`position_t` (the performer's beat-clock anchor, with `track.b
 crates/r3x-vision/scripts/download_models.sh     # YuNet + SFace -> ~/.cache/dj-r3x/vision (sha256-checked)
 cargo run -p r3x-vision --release -- enroll ../cantina_os/vision_data/training   # <root>/<Name>/*.jpg
 cargo run -p r3x-vision --release -- eval ../cantina_os/vision_data/training --negatives <lfw dir>
-cargo run -p r3x-runtime -- --voice --brain rust --vision
+cargo run -p r3x-runtime                        # standalone includes vision (--no-vision to skip)
 ```
 
 Gallery at `R3X_VISION_GALLERY` (default `~/.local/share/dj-r3x/vision/gallery.json`). Env:
