@@ -10,11 +10,15 @@ pub mod messages;
 pub mod profile;
 pub mod state;
 
-pub use envelope::{Body, Envelope, Kind, LogLine, Source, Tier, PROTOCOL_VERSION};
+pub use envelope::{
+    AudioDirection, AudioMeta, Body, ClientBody, ClientInfo, ClientMessage, Envelope, Hello, Kind, LogLine, Source, Tier,
+    PROTOCOL_VERSION,
+};
 pub use frames::{Frames, Rgb};
 pub use messages::{
     Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, IntentCommand,
-    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, RunKind, StageCommand,
+    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind,
+    StageCommand,
     StageEvent, StopTarget, TelemetryCommand,
 };
 pub use profile::{ProfileError, RobotProfile};

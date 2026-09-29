@@ -52,6 +52,9 @@ pub enum IntentCommand {
     PttStop,
     Music(MusicCommand),
     Dj { active: bool },
+    /// A line for the legacy command console (CantinaOS `help`, `status`, `eye ...`).
+    /// Bridge-only; retired with CantinaOS in Phase 7.
+    Console { line: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -108,7 +111,8 @@ pub enum PerfCommand {
     },
     /// Fire an emote slot from the profile's `emotes`.
     Emote { slot: u8 },
-    /// Stop every run, refuse new ones; `on: false` releases.
+    /// Stop every run, refuse new ones; `on: false` releases. Same switch as
+    /// `StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.
     Freeze { on: bool },
 }
 
@@ -126,6 +130,9 @@ pub enum StageCommand {
     SetOutput { output: String, enabled: bool },
     /// Toggle a procedural alive layer (e.g. `breathing`).
     SetLayer { layer: String, enabled: bool },
+    SetBrain { enabled: bool },
+    SetAutonomy { enabled: bool },
+    Freeze { on: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -226,7 +233,14 @@ pub enum ConversationEvent {
     ListeningStarted,
     ListeningStopped { transcript: String },
     Transcript { text: String, is_final: bool },
-    IntentDetected { tool: String, confidence: f64 },
+    IntentDetected {
+        tool: String,
+        #[ts(optional = nullable)]
+        confidence: Option<f64>,
+    },
+    /// Streaming reply text (a delta).
+    ReplyDelta { text: String },
+    /// The whole reply, show tags stripped.
     Reply { text: String },
     /// First audible sample.
     SpeechStarted,
@@ -295,6 +309,8 @@ pub enum OpsEvent {
     },
     /// One measured latency leg of a turn.
     Latency { leg: String, ms: f64 },
+    /// Reply to an `intent.console` line.
+    Console { message: String, is_error: bool },
 }
 
 #[cfg(test)]

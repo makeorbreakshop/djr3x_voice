@@ -4,6 +4,8 @@
 //!   [`Received::Lagged`] carrying a fresh [`RetainedState`] snapshot to resync from.
 //! - Retained state: one `watch` per state domain ([`StateDomain`]); late joiners see the latest.
 //! - Commands: one `mpsc` per [`MessageClass`] with a `oneshot` [`Ack`].
+//! - Frames: one small `broadcast` of 50 Hz body snapshots (sim, virtual driver). Unstamped and
+//!   kept off the tap and the session log; a lagging receiver just skips to the newest.
 //! - Every message is stamped here with `seq`, `t_mono`, `t_wall`, `source`, and optionally
 //!   written to a JSONL session log ([`Bus::attach_session_log`]).
 
@@ -16,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use r3x_contracts::{
-    Ack, Body, Command, Domain, Envelope, Event, MessageClass, RetainedState, Source,
+    Ack, Body, Command, Domain, Envelope, Event, Frames, MessageClass, RetainedState, Source,
     PROTOCOL_VERSION,
 };
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -74,6 +76,7 @@ struct Inner {
     events: HashMap<Domain, broadcast::Sender<Arc<Envelope>>>,
     /// Every stamped envelope (events, state, commands, acks), for the gateway.
     tap: broadcast::Sender<Arc<Envelope>>,
+    frames: broadcast::Sender<Arc<Frames>>,
     states: States,
     /// Present only once a handler has taken the class.
     commands: Mutex<HashMap<MessageClass, mpsc::Sender<CommandRequest>>>,
@@ -97,6 +100,7 @@ impl Bus {
                 clock: Clock::new(),
                 events,
                 tap: broadcast::channel(cfg.event_capacity * 4).0,
+                frames: broadcast::channel(8).0,
                 states: States::default(),
                 commands: Mutex::default(),
                 command_capacity: cfg.command_capacity,
@@ -154,6 +158,17 @@ impl Bus {
     /// Every stamped envelope on the bus (events, state updates, commands, acks).
     pub fn subscribe_all(&self) -> EventReceiver {
         EventReceiver { rx: self.inner.tap.subscribe(), bus: Arc::downgrade(&self.inner), what: "all" }
+    }
+
+    // ---- frames ----
+
+    pub fn publish_frames(&self, frames: Frames) {
+        let _ = self.inner.frames.send(Arc::new(frames));
+    }
+
+    /// `Lagged` on this receiver is harmless: skip to the newest frame.
+    pub fn subscribe_frames(&self) -> broadcast::Receiver<Arc<Frames>> {
+        self.inner.frames.subscribe()
     }
 
     // ---- retained state ----

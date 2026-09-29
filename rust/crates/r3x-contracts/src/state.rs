@@ -26,6 +26,12 @@ pub struct StageState {
     pub outputs: BTreeMap<String, bool>,
     /// Procedural alive layer -> enabled.
     pub layers: BTreeMap<String, bool>,
+    /// Voice/LLM brain accepts turns.
+    pub brain: bool,
+    /// Idle policy and DJ autonomy.
+    pub autonomy: bool,
+    /// Every run stopped, new ones refused; the chest holds its state.
+    pub frozen: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
@@ -87,6 +93,8 @@ pub struct MusicState {
     /// 0..1
     pub volume: f64,
     pub ducked: bool,
+    /// Track titles in the local library, sorted.
+    pub library: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

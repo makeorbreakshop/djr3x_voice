@@ -1,0 +1,13 @@
+[package]
+name = "r3x-stage"
+description = "StageManager: operating mode, output and alive-layer enables, freeze, engagement"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use r3x_contracts::{envelope::Envelope, profile::RobotProfile};
+use r3x_contracts::{envelope::Envelope, profile::RobotProfile, ClientMessage};
 use ts_rs::{Config, TS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,9 +26,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Config::new().with_out_dir(&ts_out).with_large_int("number");
     Envelope::export_all(&cfg)?;
     RobotProfile::export_all(&cfg)?;
+    ClientMessage::export_all(&cfg)?;
 
     write_schema(&schema_out, "envelope", schemars::schema_for!(Envelope))?;
     write_schema(&schema_out, "robot_profile", schemars::schema_for!(RobotProfile))?;
+    write_schema(&schema_out, "client_message", schemars::schema_for!(ClientMessage))?;
 
     if check {
         for (committed, fresh) in [(&ts_dir, &ts_out), (&schema_dir, &schema_out)] {

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::frames::Frames;
-use crate::messages::{Ack, Command, Event};
+use crate::messages::{Ack, Command, Event, MessageClass};
+use crate::profile::RobotProfile;
 use crate::state::{RetainedState, StateUpdate};
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -92,8 +93,8 @@ pub enum Kind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 #[serde(tag = "kind", content = "body", rename_all = "snake_case")]
 pub enum Body {
-    /// Full retained state, first message on connect.
-    Hello(Box<RetainedState>),
+    /// First message on connect.
+    Hello(Box<Hello>),
     State(StateUpdate),
     Event(Event),
     Command(Command),
@@ -121,6 +122,23 @@ impl Body {
     }
 }
 
+/// `hello` body: who the gateway thinks you are, full retained state, the robot profile.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Hello {
+    pub client: ClientInfo,
+    pub state: RetainedState,
+    #[ts(optional = nullable)]
+    pub profile: Option<RobotProfile>,
+}
+
+/// An authenticated gateway client. `source` is stamped on everything it sends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClientInfo {
+    pub name: String,
+    pub source: Source,
+    pub classes: Vec<MessageClass>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct AudioMeta {
     /// `in` = client mic to runtime, `out` = runtime TTS to client.
@@ -134,6 +152,25 @@ pub struct AudioMeta {
 pub enum AudioDirection {
     In,
     Out,
+}
+
+/// What a gateway client sends. The gateway stamps `seq`, clocks and `source`; a client never
+/// declares them. `id` comes back as `re` on the command's ack.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct ClientMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub body: ClientBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(tag = "kind", content = "body", rename_all = "snake_case")]
+pub enum ClientBody {
+    Command(Command),
+    /// Metadata for the binary audio frames that follow (Phase 2).
+    Audio(AudioMeta),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]

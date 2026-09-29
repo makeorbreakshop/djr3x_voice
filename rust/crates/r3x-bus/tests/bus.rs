@@ -141,3 +141,14 @@ async fn session_log_writes_jsonl() {
     assert_eq!(recs[3].payload["status"], "rejected");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[tokio::test]
+async fn frames_fan_out_off_the_tap() {
+    let bus = Bus::default();
+    let mut all = bus.subscribe_all();
+    let mut frames = bus.subscribe_frames();
+    bus.publish_frames(r3x_contracts::Frames { t_mono: 0.5, ..Default::default() });
+    assert_eq!(frames.recv().await.unwrap().t_mono, 0.5);
+    bus.publish(Source::Idle, None, sfx("after"));
+    assert!(matches!(&expect_msg(all.recv().await).body, Body::Event(_)), "frames never hit the tap");
+}

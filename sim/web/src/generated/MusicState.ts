@@ -5,4 +5,8 @@ export type MusicState = { playing: boolean, track?: Track | null,
 /**
  * 0..1
  */
-volume: number, ducked: boolean, };
+volume: number, ducked: boolean, 
+/**
+ * Track titles in the local library, sorted.
+ */
+library: Array<string>, };

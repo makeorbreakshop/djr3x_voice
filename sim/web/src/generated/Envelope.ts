@@ -4,8 +4,8 @@ import type { AudioMeta } from "./AudioMeta";
 import type { Command } from "./Command";
 import type { Event } from "./Event";
 import type { Frames } from "./Frames";
+import type { Hello } from "./Hello";
 import type { LogLine } from "./LogLine";
-import type { RetainedState } from "./RetainedState";
 import type { Source } from "./Source";
 import type { StateUpdate } from "./StateUpdate";
 import type { JsonValue } from "./serde_json/JsonValue";
@@ -23,4 +23,4 @@ id?: string, re?: string,
 /**
  * Turn id minted at capture and adopted downstream.
  */
-conversation_id?: string, } & ({ "kind": "hello", "body": RetainedState } | { "kind": "state", "body": StateUpdate } | { "kind": "event", "body": Event } | { "kind": "command", "body": Command } | { "kind": "ack", "body": Ack } | { "kind": "result", "body": JsonValue } | { "kind": "frames", "body": Frames } | { "kind": "audio", "body": AudioMeta } | { "kind": "log", "body": LogLine });
+conversation_id?: string, } & ({ "kind": "hello", "body": Hello } | { "kind": "state", "body": StateUpdate } | { "kind": "event", "body": Event } | { "kind": "command", "body": Command } | { "kind": "ack", "body": Ack } | { "kind": "result", "body": JsonValue } | { "kind": "frames", "body": Frames } | { "kind": "audio", "body": AudioMeta } | { "kind": "log", "body": LogLine });

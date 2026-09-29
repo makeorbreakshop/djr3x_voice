@@ -3,4 +3,4 @@
 /**
  * Turn lifecycle. The turn id rides on the envelope's `conversation_id`.
  */
-export type ConversationEvent = { "type": "listening_started" } | { "type": "listening_stopped", transcript: string, } | { "type": "transcript", text: string, is_final: boolean, } | { "type": "intent_detected", tool: string, confidence: number, } | { "type": "reply", text: string, } | { "type": "speech_started" } | { "type": "speech_ended" };
+export type ConversationEvent = { "type": "listening_started" } | { "type": "listening_stopped", transcript: string, } | { "type": "transcript", text: string, is_final: boolean, } | { "type": "intent_detected", tool: string, confidence?: number | null, } | { "type": "reply_delta", text: string, } | { "type": "reply", text: string, } | { "type": "speech_started" } | { "type": "speech_ended" };

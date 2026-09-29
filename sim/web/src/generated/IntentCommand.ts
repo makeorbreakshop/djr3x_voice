@@ -4,4 +4,4 @@ import type { MusicCommand } from "./MusicCommand";
 /**
  * Things you ask the character to do; the brain decides how.
  */
-export type IntentCommand = { "type": "say", text: string, } | { "type": "ptt_start" } | { "type": "ptt_stop" } | { "type": "music" } & MusicCommand | { "type": "dj", active: boolean, };
+export type IntentCommand = { "type": "say", text: string, } | { "type": "ptt_start" } | { "type": "ptt_stop" } | { "type": "music" } & MusicCommand | { "type": "dj", active: boolean, } | { "type": "console", line: string, };

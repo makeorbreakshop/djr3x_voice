@@ -9,4 +9,16 @@ outputs: { [key in string]: boolean },
 /**
  * Procedural alive layer -> enabled.
  */
-layers: { [key in string]: boolean }, };
+layers: { [key in string]: boolean }, 
+/**
+ * Voice/LLM brain accepts turns.
+ */
+brain: boolean, 
+/**
+ * Idle policy and DJ autonomy.
+ */
+autonomy: boolean, 
+/**
+ * Every run stopped, new ones refused; the chest holds its state.
+ */
+frozen: boolean, };
