@@ -214,6 +214,7 @@ class CantinaOS:
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
+            "ELEVENLABS_MODEL_ID": os.getenv("ELEVENLABS_MODEL_ID", ""),  # empty = eleven_v4_turbo
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
             # Fast-router tuning. Thresholds are configuration, not constants inferred by
             # the runtime, so preserve them in the final config dictionary.
@@ -667,6 +668,8 @@ class CantinaOS:
                 service_config["ELEVENLABS_API_KEY"] = self._config.get("ELEVENLABS_API_KEY", "")
             if "VOICE_ID" not in service_config:
                 service_config["VOICE_ID"] = self._config.get("ELEVENLABS_VOICE_ID", "")
+            if "MODEL_ID" not in service_config and self._config.get("ELEVENLABS_MODEL_ID"):
+                service_config["MODEL_ID"] = self._config["ELEVENLABS_MODEL_ID"]
                 
         elif service_name == "deepgram_direct_mic":
             # Ensure Deepgram service has API key and audio configuration

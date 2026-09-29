@@ -36,17 +36,33 @@ class SpeechPlaybackMethod(str, Enum):
     STREAMING = "streaming"  # Add new streaming option
 
 
+#: Every spoken line - live replies and cached DJ commentary - uses this model unless a
+#: request names another. Measured 2026-09-29 on R3X's voice: first audio ~220 ms (Flash v2.5
+#: ~170, Turbo v2.5 ~225, plain v4 ~1150, far too slow for replies). ELEVENLABS_MODEL_ID overrides.
+DEFAULT_TTS_MODEL = "eleven_v4_turbo"
+
+
+def _takes_speed_and_style(model_id: str) -> bool:
+    """v3 and the v4 family don't take `speed` or `style` in voice_settings (ElevenLabs docs).
+
+    The API accepts them without error and ignores them, so this keeps requests honest
+    rather than preventing a 400.
+    """
+    return not (model_id == "eleven_v3" or model_id.startswith("eleven_v4"))
+
+
 class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service.
 
     Supports multiple models:
+    - eleven_v4_turbo: default. Low latency, most emotive; no speed/style settings
     - eleven_turbo_v2_5: High-quality, ~300ms TTFB, continuous stability 0.0-1.0
     - eleven_flash_v2_5: Real-time, ~75ms TTFB, continuous stability 0.0-1.0
     - eleven_v3: Expressive, 1.7-3.6s, discrete stability [0.0, 0.5, 1.0]
     """
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X (quick voice clone)")
-    model_id: str = Field("eleven_turbo_v2_5", description="Model ID - Turbo v2.5 (balanced quality/speed), Flash v2.5 (real-time), or v3 (background)")
+    model_id: str = Field(DEFAULT_TTS_MODEL, description="Model ID - v4 Turbo (default), Turbo/Flash v2.5, or v3")
     stability: float = Field(0.60, description="Voice stability - v2.5: 0.0-1.0 (continuous), v3: [0.0, 0.5, 1.0] (discrete)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2) - NOT supported in v3")
@@ -126,7 +142,7 @@ class ElevenLabsService(BaseService):
         self.logger.info(f"Using streaming playback method for ElevenLabs: {playback_method}")
         
         # Get model_id and validate compatibility
-        model_id = config_dict.get("MODEL_ID", "eleven_flash_v2_5")
+        model_id = config_dict.get("MODEL_ID") or DEFAULT_TTS_MODEL
         stability = config_dict.get("STABILITY", 0.60)
 
         # Validate and adjust parameters for selected model
@@ -269,8 +285,8 @@ class ElevenLabsService(BaseService):
                 if self._original_stability != self._adjusted_stability:
                     self.logger.info(f"  - Note: Stability adjusted from {self._original_stability} to {self._adjusted_stability} for V3 compatibility")
             else:
-                self.logger.info(f"ElevenLabs V2.5 Flash Configuration (Real-time, Low Latency):")
-                self.logger.info(f"  - Model: {self._config.model_id} (Flash v2.5 = 75ms TTFB)")
+                self.logger.info(f"ElevenLabs streaming configuration:")
+                self.logger.info(f"  - Model: {self._config.model_id}")
                 self.logger.info(f"  - Latency optimization level: {self._config.latency_optimization}/4 (~75% improvement)")
                 self.logger.info(f"  - Stability: {self._config.stability} (continuous range 0.0-1.0)")
                 self.logger.info(f"  - Speed: {self._config.speed}x (1.2 = faster speech, within limits)")
@@ -480,15 +496,13 @@ class ElevenLabsService(BaseService):
                     voice_settings = {
                         "stability": stability,
                         "similarity_boost": similarity_boost,
-                        "style": 0.25,
                         "use_speaker_boost": True,
                     }
 
-                    # Only add speed for v2.5 and other models (v3 doesn't support it)
-                    if model_id != "eleven_v3":
+                    # style and speed only exist on the v2.5-era models
+                    if _takes_speed_and_style(model_id):
+                        voice_settings["style"] = 0.25
                         voice_settings["speed"] = speed
-                    elif speed != 1.0:
-                        self.logger.debug(f"V3 model: speed parameter ignored (requested {speed}x, v3 uses fixed rate)")
                     
                     try:
                         # Get a streaming response from ElevenLabs
@@ -947,12 +961,12 @@ class ElevenLabsService(BaseService):
                     "stability": stability,
                     "similarity_boost": similarity_boost,
                     "use_speaker_boost": True,  # Ensure consistent energy levels
-                    "style": 0.25,  # Add slight style emphasis for DJ personality
                 }
             }
 
-            # Only add speed for non-v3 models
-            if model_id != "eleven_v3":
+            # style and speed only exist on the v2.5-era models
+            if _takes_speed_and_style(model_id):
+                payload["voice_settings"]["style"] = 0.25  # slight emphasis for DJ personality
                 payload["voice_settings"]["speed"] = speed  # Control speech rate
 
             # Add latency optimization parameter (new in 2025 API)
@@ -1182,13 +1196,14 @@ class ElevenLabsService(BaseService):
                     voice_settings = {
                         "stability": adjusted_stability,  # Use adjusted stability for model compatibility
                         "similarity_boost": self._config.similarity_boost,
-                        "style": 0.25,
                         "use_speaker_boost": True,
                     }
 
-                    # Only add speed for non-v3 models
-                    if model_id != "eleven_v3" and adjusted_speed is not None:
-                        voice_settings["speed"] = adjusted_speed
+                    # style and speed only exist on the v2.5-era models
+                    if _takes_speed_and_style(model_id):
+                        voice_settings["style"] = 0.25
+                        if adjusted_speed is not None:
+                            voice_settings["speed"] = adjusted_speed
                     
                     # Use modern convert method instead of old generate()
                     audio_generator = eleven_client.text_to_speech.convert(
