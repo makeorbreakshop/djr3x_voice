@@ -60,6 +60,12 @@ if [ ! -d "$WEB/node_modules" ]; then
   say "installing panel dependencies (first run)"
   npm --prefix "$WEB" install --silent
 fi
+WASM="$WEB/src/wasm/r3x_performer_bg.wasm"
+if [ ! -f "$WASM" ] || [ -n "$(find "$ROOT/rust/crates/r3x-performer-core" "$ROOT/rust/crates/r3x-performer-wasm" "$ROOT/rust/crates/r3x-motion" -newer "$WASM" -name '*.rs' -print -quit 2>/dev/null)" ]; then
+  command -v wasm-pack >/dev/null || die "wasm-pack not found - cargo install wasm-pack"
+  say "building the panel's WASM performer"
+  npm --prefix "$WEB" run -s build:wasm >/dev/null 2>&1 || die "WASM build failed - run: npm --prefix sim/web run build:wasm"
+fi
 [ -f "$WEB/public/model/r3x.glb" ] || say "no 3D model yet - the panel works, but build R3X with sim/model/build.sh to see him"
 mkdir -p "$ROOT/logs"
 
