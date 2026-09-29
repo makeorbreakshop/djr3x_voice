@@ -75,6 +75,9 @@ say "panel: $PANEL_URL"
 
 # ---------------------------------------------------------------- backend
 if [ "$BACKEND" = 0 ]; then
+  if [ -z "$PANEL_PID" ]; then
+    exit 0  # an already-running panel belongs to whoever started it
+  fi
   say "panel only - Ctrl-C to stop"
   wait "$PANEL_PID"
   exit 0
