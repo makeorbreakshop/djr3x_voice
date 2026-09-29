@@ -102,7 +102,8 @@ impl Camera for FfmpegCamera {
         let (w, h) = (self.width, self.height);
         let vf = format!("fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2");
         let child = Command::new(&self.ffmpeg)
-            .args(["-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", "30", "-i"])
+            // nv12: a native format of Mac cameras; the default (yuv420p) makes ffmpeg complain.
+            .args(["-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", "30", "-pixel_format", "nv12", "-i"])
             .arg(format!("{index}:none"))
             .args(["-vf", &vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
             .stdin(Stdio::null())

@@ -4,6 +4,7 @@
 //! JSON Schema are generated from these types (`cargo run -p r3x-contracts --bin export`);
 //! never hand-mirror them.
 
+pub mod dotenv;
 pub mod envelope;
 pub mod frames;
 pub mod messages;

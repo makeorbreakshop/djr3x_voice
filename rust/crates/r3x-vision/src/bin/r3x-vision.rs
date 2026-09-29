@@ -17,6 +17,7 @@ use r3x_vision::gallery::{self, embed_photos, images_in, Evaluation, Gallery};
 use r3x_vision::{face, FaceEngine, FfmpegCamera, Frame};
 
 fn main() -> anyhow::Result<()> {
+    r3x_contracts::dotenv::load();
     tracing_subscriber_init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1)).cloned();

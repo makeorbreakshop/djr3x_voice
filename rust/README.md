@@ -35,7 +35,8 @@ Generated TypeScript lives in `sim/web/src/generated/` (do not edit). The robot 
 ## Run (standalone: the default, no CantinaOS)
 
 ```bash
-./r3x                                     # repo root: builds + starts r3x-runtime and the panel
+./r3x                                     # repo root: runtime (background, logs/r3x-runtime.log) + panel + r3x-cli here
+./r3x --logs                              # follow the runtime log instead of the CLI
 ./r3x -- --no-vision                      # extra runtime flags after --
 ./r3x --legacy                            # CantinaOS instead, until the live check retires it
 cargo run -p r3x-runtime                  # just the runtime (= --standalone)
@@ -92,7 +93,8 @@ open "http://localhost:5173/voice.html#token=$(cat ~/.config/dj-r3x/tap_token)" 
 cargo run -p r3x-voice -- roundtrip       # headless ElevenLabs -> Deepgram check (2 paid requests)
 ```
 
-Keys from the env or the repo-root `.env`. Devices: `R3X_MIC_DEVICE`, `R3X_AUDIO_OUTPUT` (name
+Keys from the env or the repo-root `.env` (every binary loads it at startup without overriding
+the shell: `r3x_contracts::dotenv`; `R3X_DOTENV=path|off`). Devices: `R3X_MIC_DEVICE`, `R3X_AUDIO_OUTPUT` (name
 substrings; `r3x-voice devices` lists them), `R3X_LOCAL_AUDIO=0` for headless. Another machine
 needs `--bind 0.0.0.0:8780`, its origin in `R3X_ALLOWED_ORIGINS`, and HTTPS/WSS for the page
 (browsers only open the mic in a secure context).

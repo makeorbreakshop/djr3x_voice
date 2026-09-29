@@ -1,8 +1,6 @@
-//! Settings from the environment, with the repo-root `.env` as a fallback (never overriding
-//! a variable that is already set).
+//! Settings from the process environment (binaries load the repo-root `.env` into it at
+//! startup: `r3x_contracts::dotenv::load`).
 
-use std::collections::HashMap;
-use std::path::Path;
 use std::time::Duration;
 
 use crate::deepgram::DeepgramConfig;
@@ -28,31 +26,9 @@ pub struct VoiceSettings {
     pub null_audio: Option<f64>,
 }
 
-/// `KEY=VALUE` lines; quotes stripped; `#` comments skipped.
-pub fn read_dotenv(path: &Path) -> HashMap<String, String> {
-    let Ok(text) = std::fs::read_to_string(path) else { return HashMap::new() };
-    text.lines()
-        .filter_map(|l| {
-            let l = l.trim();
-            if l.starts_with('#') {
-                return None;
-            }
-            let (k, v) = l.strip_prefix("export ").unwrap_or(l).split_once('=')?;
-            let v = v.trim().trim_matches('"').trim_matches('\'');
-            Some((k.trim().to_owned(), v.to_owned()))
-        })
-        .collect()
-}
-
-/// The repo-root `.env` this crate was built in.
-pub fn repo_dotenv() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.env")
-}
-
 impl VoiceSettings {
     pub fn from_env() -> anyhow::Result<Self> {
-        let file = read_dotenv(&repo_dotenv());
-        let get = |k: &str| std::env::var(k).ok().or_else(|| file.get(k).cloned()).filter(|v| !v.trim().is_empty());
+        let get = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let flag = |k: &str, d: bool| get(k).map_or(d, |v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off"));
         let replay = std::env::var("R3X_FIXTURES")
             .is_ok_and(|m| m == "replay")
@@ -86,19 +62,5 @@ impl VoiceSettings {
                 .filter(|a| a == "null")
                 .map(|_| get("R3X_NULL_AUDIO_SPEED").and_then(|s| s.parse().ok()).unwrap_or(1.0)),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dotenv_parsing() {
-        let dir = std::env::temp_dir().join(format!("r3x-dotenv-{}", std::process::id()));
-        std::fs::write(&dir, "# c\nA=1\nexport B=\"two\"\n\nC='x=y'\n").unwrap();
-        let m = read_dotenv(&dir);
-        std::fs::remove_file(&dir).ok();
-        assert_eq!((m["A"].as_str(), m["B"].as_str(), m["C"].as_str()), ("1", "two", "x=y"));
     }
 }

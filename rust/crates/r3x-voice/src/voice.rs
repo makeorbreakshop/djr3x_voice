@@ -4,7 +4,9 @@
 //! - The turn id is minted here, at capture, and carried by every event of the turn.
 //! - `state.conversation.ptt_owner` is the single owner of push-to-talk (replaces the
 //!   "panel announces itself so the mouse yields" handshake). Another owner is refused.
-//! - A start is refused while R3X speaks (the mic would record R3X) and while STT is down.
+//! - A start is refused while R3X speaks (the mic would record R3X). Outside INTERACTIVE it
+//!   asks for INTERACTIVE first, then waits (bounded) for STT to connect; refused only if
+//!   engaging is refused or STT does not come up.
 //! - Input: the local mic opens at once, but its first `remote_grace` is held back; if a
 //!   remote client starts streaming in that window the local mic is closed and the turn is
 //!   the client's. So one `ptt.start` works for the Mac panel and a browser elsewhere alike.
@@ -14,7 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use r3x_bus::Bus;
-use r3x_contracts::{Ack, ConversationEvent, ConversationPhase, ConversationState, Engagement, EngagementState, Event, Source};
+use r3x_contracts::{
+    Ack, Command, ConversationEvent, ConversationPhase, ConversationState, Engagement, EngagementState, Event, Source,
+    StageCommand,
+};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -194,6 +199,15 @@ impl Voice {
         }
         if inner.speaker.is_speaking() {
             return Ack::rejected("R3X is speaking; the mic would record R3X");
+        }
+        // Starting a recording engages (CantinaOS did the same): STT only connects while
+        // INTERACTIVE, so ask the StageManager, then wait (bounded) for the socket below.
+        if inner.bus.get::<EngagementState>().engagement != Engagement::Interactive {
+            let engage = Command::Stage(StageCommand::SetEngagement { engagement: Engagement::Interactive });
+            let ack = inner.bus.command(Source::System, None, engage).await;
+            if !ack.is_accepted() {
+                return ack;
+            }
         }
         if !inner.stt.is_up() {
             let mut up = inner.stt.connected();
@@ -469,5 +483,62 @@ mod tests {
         assert!(!ack.is_accepted(), "mic refuses while R3X speaks: {ack:?}");
         voice.speaker().speaking().wait_for(|s| !*s).await.unwrap();
         assert!(voice.ptt_start("mouse").await.is_accepted(), "released on completion");
+    }
+
+    /// A StageManager stand-in: engagement requests succeed unless `allow` is false.
+    fn stage_stub(bus: &Bus, allow: bool) {
+        let mut rx = bus.take_commands(r3x_contracts::MessageClass::Stage).unwrap();
+        let bus = bus.clone();
+        tokio::spawn(async move {
+            while let Some(req) = rx.recv().await {
+                match (&req.command, allow) {
+                    (Command::Stage(StageCommand::SetEngagement { engagement }), true) => {
+                        bus.set(Source::System, EngagementState { engagement: *engagement });
+                        req.ack(Ack::Accepted);
+                    }
+                    _ => req.ack(Ack::rejected("the brain is off in this mode")),
+                }
+            }
+        });
+    }
+
+    #[tokio::test]
+    async fn ptt_from_idle_engages_and_waits_for_stt() {
+        let (port, _) = mock_deepgram().await;
+        let bus = Bus::default();
+        bus.set(Source::System, EngagementState { engagement: Engagement::Idle });
+        stage_stub(&bus, true);
+        let mut cfg = DeepgramConfig::new("k");
+        cfg.url = format!("ws://127.0.0.1:{port}/v1/listen");
+        let stt = Stt::spawn(cfg, interactive(&bus));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!stt.is_up(), "no socket while IDLE");
+        let speaker = Speaker::spawn(Arc::new(Beep), Arc::new(NullSink::new(1.0)), 30.0);
+        let voice = Voice::new(bus.clone(), stt, speaker, None, VoiceOptions::default());
+        let ack = voice.ptt_start("panel").await;
+        assert!(ack.is_accepted(), "{ack:?}");
+        assert_eq!(bus.get::<EngagementState>().engagement, Engagement::Interactive);
+        assert!(voice.stt().is_up());
+        assert!(voice.ptt_stop(Some("panel")).await.is_accepted());
+    }
+
+    #[tokio::test]
+    async fn ptt_refused_when_engaging_is_refused_or_stt_never_connects() {
+        let bus = Bus::default();
+        bus.set(Source::System, EngagementState { engagement: Engagement::Idle });
+        stage_stub(&bus, false);
+        let dead = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port(); // closed again
+        let mut cfg = DeepgramConfig::new("k");
+        cfg.url = format!("ws://127.0.0.1:{dead}/v1/listen");
+        let speaker = Speaker::spawn(Arc::new(Beep), Arc::new(NullSink::new(1.0)), 30.0);
+        let opts = VoiceOptions { connect_wait: Duration::from_millis(300), ..Default::default() };
+        let voice = Voice::new(bus.clone(), Stt::spawn(cfg, interactive(&bus)), speaker, None, opts);
+        let ack = voice.ptt_start("panel").await;
+        assert_eq!(ack, Ack::rejected("the brain is off in this mode"));
+
+        bus.set(Source::System, EngagementState { engagement: Engagement::Interactive });
+        let ack = voice.ptt_start("panel").await;
+        assert!(!ack.is_accepted(), "STT down: refused after the bounded wait");
+        assert!(voice.listening().await.is_none());
     }
 }

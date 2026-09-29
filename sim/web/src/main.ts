@@ -448,8 +448,11 @@ function setConnected(on: boolean) {
   showUiDirty = true;
 }
 
-// CantinaOS's SimBridge feed: the panel still reads its log lines; the 3D view no longer does.
+// CantinaOS's SimBridge feed (`./r3x --legacy` opens the panel with ?legacy): the panel reads
+// its log lines; the 3D view no longer does. The standalone runtime's logs come from the gateway.
 const liveEl = $('st-live');
+const legacy = params.has('legacy');
+liveEl.hidden = !legacy;
 const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=${encodeURIComponent(accessToken())}`, {
   onHello: () => {},
   onEvent: () => {},
@@ -509,7 +512,7 @@ function setLocalStage(mode: string) {
 if (studio.wantsOpen()) setLocalStage('studio');
 
 // ?offline keeps a tab on the embedded performer even while the runtime is running.
-if (!params.has('offline')) link.start();
+if (legacy && !params.has('offline')) link.start();
 
 // ------------------------------------------------------------------ load model
 async function load() {

@@ -34,7 +34,10 @@ const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--headless] [
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // The repo-root `.env` (API keys, hardware ports), never overriding the shell.
+    let dotenv = r3x_contracts::dotenv::load();
     let (hub, level) = r3x_ops::init_tracing("info");
+    tracing::info!(vars = dotenv.len(), "loaded .env");
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
 
     let mut bind = env("R3X_GATEWAY_ADDR").unwrap_or_else(|| r3x_runtime::DEFAULT_BIND.into());

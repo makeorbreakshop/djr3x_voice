@@ -4,13 +4,14 @@
 //! which case each is sent in order, its ack printed, and the client exits. Token:
 //! `R3X_CLI_TOKEN` or `~/.config/dj-r3x/cli_token` (the runtime reads the same file).
 
+use std::io::IsTerminal;
 use std::time::Duration;
 
 use anyhow::Context;
 use futures_util::{SinkExt, StreamExt};
 use r3x_cli::{parse, Parsed, HELP};
 use r3x_contracts::{
-    Ack, Body, ConversationEvent, DjEvent, Envelope, Event, MusicEvent, OpsEvent, PerfEvent,
+    Ack, Body, Command, ConversationEvent, IntentCommand, MusicCommand, DjEvent, Envelope, Event, MusicEvent, OpsEvent, PerfEvent,
     RetainedState, ServiceStatus, StageEvent,
 };
 use r3x_gateway::tokens;
@@ -46,7 +47,18 @@ async fn main() -> anyhow::Result<()> {
     // Lines in: from rustyline on its own thread, or the -c script.
     let (line_tx, mut lines) = mpsc::unbounded_channel::<String>();
     let interactive = script.is_empty();
-    let mut printer: Box<dyn FnMut(String) + Send> = if interactive {
+    let mut printer: Box<dyn FnMut(String) + Send> = if interactive && !std::io::stdin().is_terminal() {
+        // Piped input (no line editor): read lines as they come.
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lines().map_while(Result::ok) {
+                if line_tx.send(line).is_err() {
+                    return;
+                }
+            }
+            let _ = line_tx.send("quit".into());
+        });
+        Box::new(|s: String| println!("{s}"))
+    } else if interactive {
         let mut rl = rustyline::DefaultEditor::new()?;
         let history = tokens::config_dir().join("cli_history");
         let _ = rl.load_history(&history);
@@ -72,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
         Box::new(|s: String| println!("{s}"))
     };
     if interactive {
-        printer(format!("connected to {url}. `?` lists r3x commands; `help` is CantinaOS's."));
+        printer(format!("connected to {url}. `help` lists commands, `quit` or Ctrl-C stops."));
     }
 
     let mut state = RetainedState::default();
@@ -90,9 +102,19 @@ async fn main() -> anyhow::Result<()> {
                     Parsed::Empty => {}
                     Parsed::Quit => break,
                     Parsed::Help => printer(HELP.into()),
+                    Parsed::Status => printer(status(&state)),
+                    Parsed::ListMusic => printer(
+                        state.music.library.iter().enumerate().map(|(i, t)| format!("{:>3}. {t}", i + 1)).collect::<Vec<_>>().join("\n"),
+                    ),
                     Parsed::State => printer(serde_json::to_string_pretty(&state)?),
                     Parsed::Error(e) => printer(e),
-                    Parsed::Send(cmd) => {
+                    Parsed::Send(mut cmd) => {
+                        // `play music 3` = the 3rd title of `list music`, as in CantinaOS.
+                        if let Command::Intent(IntentCommand::Music(MusicCommand::Play { query: Some(q) })) = &mut cmd {
+                            if let Some(t) = q.parse::<usize>().ok().and_then(|n| state.music.library.get(n.wrapping_sub(1))) {
+                                *q = t.clone();
+                            }
+                        }
                         next_id += 1;
                         let id = format!("cli{next_id}");
                         let msg = json!({ "kind": "command", "id": id, "body": cmd });
@@ -137,6 +159,26 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn status(s: &RetainedState) -> String {
+    let mut out = format!(
+        "engagement {:?} | mode {:?} | brain {} | autonomy {}{}\nmusic: {}{}",
+        s.engagement.engagement,
+        s.stage.mode,
+        if s.stage.brain { "on" } else { "off" },
+        if s.stage.autonomy { "on" } else { "off" },
+        if s.stage.frozen { " | FROZEN" } else { "" },
+        match (&s.music.track, s.music.playing) {
+            (Some(t), true) => t.title.clone(),
+            _ => "nothing playing".into(),
+        },
+        if s.dj.active { " (DJ mode)" } else { "" },
+    );
+    for (name, h) in &s.services.services {
+        out += &format!("\n  {name:<14} {:?}{}", h.status, h.detail.as_deref().map(|d| format!(" - {d}")).unwrap_or_default());
+    }
+    out
 }
 
 fn describe(e: &Event) -> Option<String> {

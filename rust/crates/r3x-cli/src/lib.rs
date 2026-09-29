@@ -1,6 +1,7 @@
 //! Line parsing for `r3x-cli`: the CantinaOS command set and shortcuts, as typed commands.
-//! Lines with no typed equivalent (`help`, `status`, `eye ...`, `debug ...`, `list music`,
-//! `camera ...`) go to the legacy console (`intent.console`) unchanged.
+//! `help`, `status` and `list music` are answered locally from retained state. Other lines
+//! with no typed equivalent (`debug ...`, `dj next`, `camera ...`, `reset`) go to the brain's
+//! console (`intent.console`) unchanged.
 
 use r3x_contracts::{
     Command, Engagement, IntentCommand, MusicCommand, OperatingMode, PerfCommand, PerfLayer,
@@ -23,27 +24,29 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
 ];
 
 pub const HELP: &str = "\
-r3x commands (typed, acked):
+r3x commands:
   engage | ambient | disengage | idle      engagement (e, a, d)
-  record | done                            push-to-talk on/off (rec)
+  record | done                            push-to-talk on/off (rec; engages if needed)
   say <text>                               a typed turn
-  play music [query] | stop music | next music     (p, s)
-  dj start | dj stop
+  list music | play music [n|query] | stop music | next music     (l, p, s)
+  dj start | dj stop | dj next
   show <id> [intensity] [speed] | show stop [id|show|gesture|all]
   freeze | unfreeze
   emote <slot|cue>                         a profile emote
   mode show|bench|studio                   operating mode
   brain on|off | autonomy on|off | output <name> on|off | layer <name> on|off
   log <filter>                             runtime log filter (debug, info, r3x_gateway=trace)
-  state                                    print retained state
-  quit                                     (q)
-anything else goes to the CantinaOS console: help, status, list music, eye ..., debug ...";
+  status | state                           summary (st) | full retained state
+  debug latency | reset                    brain console
+  help | quit                              (h, q)";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Parsed {
     Send(Command),
     Quit,
     Help,
+    Status,
+    ListMusic,
     State,
     Error(String),
     Empty,
@@ -84,7 +87,9 @@ pub fn parse(line: &str, emotes: &[String]) -> Parsed {
     match (w(0), w(1)) {
         (None, _) => Parsed::Empty,
         (Some("quit" | "exit"), _) => Parsed::Quit,
-        (Some("?"), _) => Parsed::Help,
+        (Some("?" | "help"), _) => Parsed::Help,
+        (Some("status"), None) => Parsed::Status,
+        (Some("list"), Some("music")) => Parsed::ListMusic,
         (Some("state"), None) => Parsed::State,
         (Some("engage"), None) => engage(Engagement::Interactive),
         (Some("ambient"), None) => engage(Engagement::Ambient),
@@ -191,8 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn everything_else_goes_to_the_console() {
-        for line in ["help", "status", "eye pattern happy red", "debug latency", "l", "dj next", "show list"] {
+    fn local_lines_and_everything_else_to_the_console() {
+        for (line, p) in [("h", Parsed::Help), ("help", Parsed::Help), ("st", Parsed::Status), ("l", Parsed::ListMusic)] {
+            assert_eq!(parse(line, &[]), p, "{line}");
+        }
+        for line in ["eye pattern happy red", "debug latency", "dj next", "show list", "reset"] {
             let Command::Intent(IntentCommand::Console { line: l }) = send(line) else { panic!("{line}") };
             assert_eq!(l, expand(line));
         }

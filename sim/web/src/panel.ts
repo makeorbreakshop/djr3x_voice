@@ -4,8 +4,8 @@
  * music / DJ, an advanced console, service health, and the live log + event stream.
  *
  * Every action is a typed command to the r3x gateway and waits for its ack; state comes from
- * the gateway's retained state. The SimBridge LiveLink is only read here, for CantinaOS's own
- * log lines (the 3D view follows the gateway's performer frames, see main.ts).
+ * the gateway's retained state, and the runtime's log lines come from the gateway too. The
+ * SimBridge LiveLink (legacy CantinaOS only) is read here for CantinaOS's own log lines.
  */
 
 import { GatewayClient, gatewayUrl } from './gateway';
@@ -197,7 +197,7 @@ export class ControlPanel {
       : p === 'engaging' ? 'Starting the mic…'
       : p === 'thinking' ? 'Thinking…'
       : p === 'speaking' ? 'R3X is talking'
-      : p === 'offline' ? 'CantinaOS offline'
+      : p === 'offline' ? 'R3X offline'
       : 'Hold to talk';
   }
 
