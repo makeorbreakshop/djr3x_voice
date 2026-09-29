@@ -39,19 +39,50 @@ pub enum Role {
     Assistant,
 }
 
-/// A plain-text turn. Tool results are folded in as user text, as CantinaOS does.
+/// A plain-text turn. Tool results are folded in as user text, as CantinaOS does. `images`
+/// (scene description only) go on the wire as image blocks ahead of the text block; they are
+/// never kept in session memory or fixture keys.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    #[serde(skip)]
+    pub images: Vec<Image>,
+}
+
+/// A base64 image for a user message (`vision_service.py` `_analyze_scene`: JPEG q85).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub media_type: String,
+    pub data_b64: String,
 }
 
 impl Message {
+    pub fn new(role: Role, t: impl Into<String>) -> Self {
+        Self { role, content: t.into(), images: Vec::new() }
+    }
     pub fn user(t: impl Into<String>) -> Self {
-        Self { role: Role::User, content: t.into() }
+        Self::new(Role::User, t)
     }
     pub fn assistant(t: impl Into<String>) -> Self {
-        Self { role: Role::Assistant, content: t.into() }
+        Self::new(Role::Assistant, t)
+    }
+    /// A user turn carrying one image and a question about it.
+    pub fn user_image(media_type: impl Into<String>, data_b64: impl Into<String>, t: impl Into<String>) -> Self {
+        Self { images: vec![Image { media_type: media_type.into(), data_b64: data_b64.into() }], ..Self::user(t) }
+    }
+
+    fn to_json(&self) -> Value {
+        if self.images.is_empty() {
+            return serde_json::to_value(self).unwrap_or_default();
+        }
+        let mut blocks: Vec<Value> = self
+            .images
+            .iter()
+            .map(|i| json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data_b64}}))
+            .collect();
+        blocks.push(json!({"type": "text", "text": self.content}));
+        json!({"role": self.role, "content": blocks})
     }
 }
 
@@ -149,7 +180,7 @@ impl MessagesRequest {
             };
             b.insert("system".into(), v);
         }
-        b.insert("messages".into(), serde_json::to_value(&self.messages).unwrap_or_default());
+        b.insert("messages".into(), Value::Array(self.messages.iter().map(Message::to_json).collect()));
         if !self.tools.is_empty() {
             let mut tools: Vec<Value> = self.tools.iter().map(|t| serde_json::to_value(t).unwrap_or_default()).collect();
             if let Some(Value::Object(last)) = tools.last_mut() {
@@ -246,5 +277,17 @@ mod tests {
         let ps = perform_show_tool(&["a".into(), "b".into()]);
         assert_eq!(ps.input_schema["properties"]["id"]["enum"], json!(["a", "b"]));
         assert!(perform_show_tool(&[]).input_schema["properties"]["id"].get("enum").is_none());
+    }
+
+    #[test]
+    fn image_message_is_image_then_text_blocks() {
+        let req = MessagesRequest::new(200).messages(vec![Message::user_image("image/jpeg", "QUJD", "Describe")]);
+        let b = req.to_body("m", "m", "low", false);
+        assert_eq!(
+            b["messages"],
+            json!([{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}},
+                {"type": "text", "text": "Describe"}]}])
+        );
     }
 }

@@ -49,7 +49,7 @@ impl SessionMemory {
     pub fn add(&mut self, role: Role, content: impl Into<String>) {
         let content = content.into();
         self.tokens += estimate(&content);
-        self.messages.push_back(Message { role, content });
+        self.messages.push_back(Message::new(role, content));
         while self.messages.len() > self.max_messages
             || (self.tokens > self.max_tokens && self.messages.len() > 1)
         {

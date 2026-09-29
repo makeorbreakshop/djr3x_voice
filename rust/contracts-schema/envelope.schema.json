@@ -919,6 +919,19 @@
             "domain"
           ],
           "type": "object"
+        },
+        {
+          "$ref": "#/$defs/VisionEvent",
+          "properties": {
+            "domain": {
+              "const": "vision",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3035,6 +3048,82 @@
         "mm"
       ],
       "type": "string"
+    },
+    "VisionEvent": {
+      "description": "`r3x-vision` (Phase 6): presence transitions and scene descriptions, never per frame.",
+      "oneOf": [
+        {
+          "description": "An enrolled person appeared (edge, not per frame). `confidence` is cosine similarity.",
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "person_detected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "They were absent for the exit hysteresis (10 frames at 5 fps).",
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "person_exited",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "duration_s"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A Claude description of the current frame; `reason` is why it was taken.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "person": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "scene_captured",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "description",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",

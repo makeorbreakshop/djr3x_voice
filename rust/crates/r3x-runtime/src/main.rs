@@ -1,4 +1,4 @@
-//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Env: `R3X_GATEWAY_ADDR`, `R3X_TAP_URL`, `R3X_PROFILE`, `R3X_ALLOWED_ORIGINS`,
 //! `R3X_GATEWAY_TOKEN` / `R3X_TAP_TOKEN`, `R3X_CLI_TOKEN`, `R3X_PUBLIC_TOKEN`, `RUST_LOG`,
@@ -19,7 +19,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--bind ADDR] [--bridge] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -53,6 +53,8 @@ async fn main() -> anyhow::Result<()> {
                 // Read by run(); set before any other thread starts.
                 std::env::set_var("R3X_MUSIC", if m == r3x_runtime::music::MusicMode::Rust { "rust" } else { "cantina" });
             }
+            // Read by run(), like --music.
+            "--vision" => std::env::set_var("R3X_VISION", "1"),
             "--tap-url" => tap_url = val()?,
             "--profile" => profile_path = val()?.into(),
             "--session-log" => session_log = Some(val()?.into()),

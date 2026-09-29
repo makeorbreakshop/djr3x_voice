@@ -25,7 +25,7 @@ pub use client::{LlmClient, LlmConfig, LlmStream, DEFAULT_MODEL};
 pub use fixture::ClaudeFixtures;
 pub use prompt::{SessionMemory, TurnContext};
 pub use provider::{ProviderConfig, ProviderKind};
-pub use request::{Message, MessagesRequest, Role, Tool, ToolChoice};
+pub use request::{Image, Message, MessagesRequest, Role, Tool, ToolChoice};
 pub use stream::{ContentBlock, FinalMessage, StreamEvent, ToolUse, Usage};
 
 #[derive(Debug, thiserror::Error)]

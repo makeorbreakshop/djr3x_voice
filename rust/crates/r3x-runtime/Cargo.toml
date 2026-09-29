@@ -29,6 +29,7 @@ r3x-brain = { path = "../r3x-brain" }
 r3x-llm = { path = "../r3x-llm" }
 r3x-intent = { path = "../r3x-intent" }
 r3x-memory = { path = "../r3x-memory" }
+r3x-vision = { path = "../r3x-vision" }
 tokio = { workspace = true, features = ["signal"] }
 serde_json.workspace = true
 tracing.workspace = true

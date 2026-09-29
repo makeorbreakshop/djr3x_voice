@@ -4,6 +4,7 @@ pub mod brain;
 pub mod bridge;
 pub mod music;
 pub mod performer;
+pub mod vision;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -150,13 +151,16 @@ pub async fn run_with_brain(
         performer::spawn(&bus, pc)?;
     }
     // Before the bridge: the brain takes the `intent` class.
-    let _brain = match brain_mode {
+    let (_brain, memory) = match brain_mode {
         brain::BrainMode::Rust => {
             anyhow::ensure!(cfg.bridge.is_none(), "--brain rust replaces the CantinaOS bridge; drop --bridge");
-            Some(brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()))?)
+            let (b, m) = brain::spawn(&bus, voice.as_ref().map(|v| v.voice.clone()))?;
+            (Some(b), Some(m))
         }
-        brain::BrainMode::Cantina => None,
+        brain::BrainMode::Cantina => (None, None),
     };
+    // `--vision` (R3X_VISION): fail-open; presence goes to the brain's memory.
+    let _vision = if vision::enabled_from_env() { vision::start(&bus, memory) } else { None };
     // `--music rust` (R3X_MUSIC): the r3x engine plays; in bridge mode it speaks
     // MusicController's topics over the tap (CantinaOS runs with R3X_EXTERNAL_MUSIC=1).
     let music = match music::MusicMode::from_env() {

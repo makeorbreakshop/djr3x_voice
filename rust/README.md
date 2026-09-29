@@ -21,6 +21,8 @@ crates/
   r3x-beats       tempo + beat grid (librosa beat_track ported), cache, background analysis
   r3x-music       library + matching, playback engine (crossfade, ducking, next, ending-soon),
                   CLAP search (ort), sfx, commentary cache on the bus, CantinaOS music adapter
+  r3x-vision      camera (AVFoundation via ffmpeg), YuNet + SFace on ort, gallery enrolment,
+                  presence, Claude scene description; `r3x-vision` tool binary
   r3x-performer-core, ...   see the plan, section 5
 contracts-schema/ generated JSON Schema (do not edit)
 ```
@@ -99,6 +101,21 @@ with `position_s`@`position_t` (the performer's beat-clock anchor, with `track.b
 `perf.sfx` cues and the mode-change ding. Env: `MUSIC_DIR`, `R3X_SFX_DIR` (default
 `sim/web/public/sfx`), `R3X_MODE_SOUND`, `R3X_CLAP_DIR`, `R3X_BEAT_CACHE_DIR`,
 `ENABLE_BEAT_ANALYSIS`, `R3X_SEMANTIC`. Spotify is an interface stub (plan D7: ported last).
+
+## Vision (Phase 6)
+
+```bash
+crates/r3x-vision/scripts/download_models.sh     # YuNet + SFace -> ~/.cache/dj-r3x/vision (sha256-checked)
+cargo run -p r3x-vision --release -- enroll ../cantina_os/vision_data/training   # <root>/<Name>/*.jpg
+cargo run -p r3x-vision --release -- eval ../cantina_os/vision_data/training --negatives <lfw dir>
+cargo run -p r3x-runtime -- --voice --brain rust --vision
+```
+
+Gallery at `R3X_VISION_GALLERY` (default `~/.local/share/dj-r3x/vision/gallery.json`). Env:
+`R3X_CAMERA_INDEX` (else the first non-Continuity camera), `R3X_VISION_FPS` (5),
+`R3X_VISION_SCENES=0` (no automatic paid scene captures), `R3X_VISION_EP=cpu` (skip CoreML).
+Missing models/gallery/camera leave vision off (fail-open). Threshold 0.50 cosine: training
+photos leave-one-out 0.747-0.889, 5,749 LFW impostors max 0.472.
 
 ## Build and test
 

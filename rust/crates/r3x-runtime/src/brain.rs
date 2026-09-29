@@ -44,7 +44,9 @@ impl std::str::FromStr for BrainMode {
 ///
 /// `R3X_FIXTURES=replay` + `R3X_FIXTURE_DIR` (as in CantinaOS): Claude and Jev replay a
 /// recorded corpus instead (`R3X_FIXTURE_PACE`, default 1 = recorded timing); no network.
-pub fn spawn(bus: &Bus, voice: Option<Voice>) -> anyhow::Result<Brain> {
+/// Also returns the brain's `Memory`, for vision's presence link (same instance, so the turn
+/// context sees who is present).
+pub fn spawn(bus: &Bus, voice: Option<Voice>) -> anyhow::Result<(Brain, Arc<r3x_memory::Memory>)> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
     let replay = env("R3X_FIXTURES").filter(|m| m == "replay").and(env("R3X_FIXTURE_DIR"));
     let pace = env("R3X_FIXTURE_PACE").and_then(|p| p.parse().ok()).unwrap_or(1.0);
@@ -73,15 +75,17 @@ pub fn spawn(bus: &Bus, voice: Option<Voice>) -> anyhow::Result<Brain> {
     if let Some(v) = &voice {
         speech_glue(bus, v.clone());
     }
+    let memory = Arc::new(memory);
     let deps = BrainDeps {
         llm,
         router,
-        memory: Some(Arc::new(memory)),
+        memory: Some(memory.clone()),
         latency: Some(latency),
         ptt: voice.map(ptt_hook),
         chooser: r3x_brain::random_chooser(),
     };
-    Brain::spawn(bus, BrainConfig::from_env(), deps).ok_or_else(|| anyhow::anyhow!("intent class taken (is --bridge on?)"))
+    let brain = Brain::spawn(bus, BrainConfig::from_env(), deps).ok_or_else(|| anyhow::anyhow!("intent class taken (is --bridge on?)"))?;
+    Ok((brain, memory))
 }
 
 fn ptt_hook(voice: Voice) -> PttHook {

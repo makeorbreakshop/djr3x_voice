@@ -19,7 +19,7 @@ pub use messages::{
     Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, IntentCommand,
     MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind, ServoChannelTelemetry,
     StageCommand,
-    StageEvent, StopTarget, TelemetryCommand,
+    StageEvent, StopTarget, TelemetryCommand, VisionEvent,
 };
 pub use profile::{ProfileError, RobotProfile};
 pub use state::{

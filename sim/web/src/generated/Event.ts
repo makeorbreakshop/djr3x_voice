@@ -5,5 +5,6 @@ import type { MusicEvent } from "./MusicEvent";
 import type { OpsEvent } from "./OpsEvent";
 import type { PerfEvent } from "./PerfEvent";
 import type { StageEvent } from "./StageEvent";
+import type { VisionEvent } from "./VisionEvent";
 
-export type Event = { "domain": "conversation" } & ConversationEvent | { "domain": "perf" } & PerfEvent | { "domain": "music" } & MusicEvent | { "domain": "dj" } & DjEvent | { "domain": "stage" } & StageEvent | { "domain": "ops" } & OpsEvent;
+export type Event = { "domain": "conversation" } & ConversationEvent | { "domain": "perf" } & PerfEvent | { "domain": "music" } & MusicEvent | { "domain": "dj" } & DjEvent | { "domain": "stage" } & StageEvent | { "domain": "ops" } & OpsEvent | { "domain": "vision" } & VisionEvent;

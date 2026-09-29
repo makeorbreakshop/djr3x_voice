@@ -181,16 +181,18 @@ pub enum Domain {
     Dj,
     Stage,
     Ops,
+    Vision,
 }
 
 impl Domain {
-    pub const ALL: [Domain; 6] = [
+    pub const ALL: [Domain; 7] = [
         Domain::Conversation,
         Domain::Perf,
         Domain::Music,
         Domain::Dj,
         Domain::Stage,
         Domain::Ops,
+        Domain::Vision,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -201,6 +203,7 @@ impl Domain {
             Domain::Dj => "dj",
             Domain::Stage => "stage",
             Domain::Ops => "ops",
+            Domain::Vision => "vision",
         }
     }
 }
@@ -214,6 +217,7 @@ pub enum Event {
     Dj(DjEvent),
     Stage(StageEvent),
     Ops(OpsEvent),
+    Vision(VisionEvent),
 }
 
 impl Event {
@@ -225,6 +229,7 @@ impl Event {
             Event::Dj(_) => Domain::Dj,
             Event::Stage(_) => Domain::Stage,
             Event::Ops(_) => Domain::Ops,
+            Event::Vision(_) => Domain::Vision,
         }
     }
 
@@ -376,6 +381,24 @@ pub enum DjEvent {
     Started,
     Stopped,
     NextSelected { track: Track },
+}
+
+/// `r3x-vision` (Phase 6): presence transitions and scene descriptions, never per frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum VisionEvent {
+    /// An enrolled person appeared (edge, not per frame). `confidence` is cosine similarity.
+    PersonDetected { name: String, confidence: f64 },
+    /// They were absent for the exit hysteresis (10 frames at 5 fps).
+    PersonExited { name: String, duration_s: f64 },
+    /// A Claude description of the current frame; `reason` is why it was taken.
+    SceneCaptured {
+        description: String,
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        person: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
