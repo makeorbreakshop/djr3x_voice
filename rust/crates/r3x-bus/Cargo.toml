@@ -1,0 +1,18 @@
+[package]
+name = "r3x-bus"
+description = "Typed in-process bus: broadcast events, watch state, commands with acks, JSONL session log"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
