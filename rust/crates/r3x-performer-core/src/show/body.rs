@@ -52,6 +52,8 @@ struct Play {
     base: Option<BTreeMap<String, f64>>,
     /// Longest fade among the clip's tracks, for the tail.
     tail: f64,
+    /// Studio scrub: evaluate at this clip time, fully weighted, until replaced.
+    hold: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -123,7 +125,27 @@ impl BodyCompositor {
             stop_at: None,
             base: None,
             tail,
+            hold: None,
         });
+    }
+
+    /// Studio preview: replace run `run_id` (cut, not blended) with `clip` at clip time
+    /// `at`; `hold` pins it there (scrubbing), else it plays on from `at`. Actuation still
+    /// follows downstream, so a scrub moves the body as the servos would.
+    pub fn scrub(&mut self, run_id: &str, clip: Arc<Clip>, layer: RunLayer, at: f64, hold: bool, now: f64) {
+        self.plays.retain(|p| p.run_id != run_id);
+        self.play(PlayRequest {
+            run_id: run_id.into(),
+            clip,
+            intensity: None,
+            speed: None,
+            layer,
+            owns: None,
+            t0: now - at,
+        });
+        if let Some(p) = self.plays.last_mut() {
+            p.hold = hold.then_some(at);
+        }
     }
 
     /// A run takes ownership of joints (sequence `owns`).
@@ -228,7 +250,7 @@ impl BodyCompositor {
         // Retire what has fully blended out.
         self.plays.retain(|p| {
             let end = p.stop_at.unwrap_or(p.t0 + p.clip.duration / p.speed);
-            t < end + p.tail + 0.05
+            (p.hold.is_some() && p.stop_at.is_none()) || t < end + p.tail + 0.05
         });
         self.owns.retain(|o| o.stop_at.is_none_or(|s| t < s + 0.4));
     }
@@ -267,8 +289,9 @@ fn apply_own(o: &mut Own, pose: &mut Pose, t: f64) {
 
 fn apply_play(p: &mut Play, pose: &mut Pose, t: f64) {
     let t_eval = p.stop_at.map_or(t, |s| t.min(s));
-    let u = (t_eval - p.t0) * p.speed;
-    let end = p.t0 + p.clip.duration / p.speed;
+    let u = p.hold.unwrap_or((t_eval - p.t0) * p.speed);
+    let held = p.hold.is_some();
+    let end = if held { f64::INFINITY } else { p.t0 + p.clip.duration / p.speed };
     let clip = &p.clip;
     let base = p.base.get_or_insert_with(|| {
         clip.tracks
@@ -292,7 +315,7 @@ fn apply_play(p: &mut Play, pose: &mut Pose, t: f64) {
         let b = tr.blend.unwrap_or_else(|| default_blend(j));
         let base = base.get(j).copied().unwrap_or(0.0);
         let target = base + p.intensity * (value - base);
-        let w_in = if b > 0.0 { ramp((t - p.t0) / b) } else { 1.0 };
+        let w_in = if b > 0.0 && !held { ramp((t - p.t0) / b) } else { 1.0 };
         let w_out = if t > end {
             if b > 0.0 {
                 1.0 - ramp((t - end) / b)

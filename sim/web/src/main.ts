@@ -27,6 +27,7 @@ import { limitControls, setupStage } from './booth'; // before any material comp
 import { prepareDroidMaterials, tameHighlights } from './look';
 import { Ghosts } from './ghost';
 import { ServoWhine } from './servowhine';
+import { Studio } from './studio/studio';
 import {
   INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
   type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
@@ -59,6 +60,8 @@ limitControls(controls, set.booth);
 // AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
 const post = new PostPipeline(renderer, scene, camera);
 
+/** Height of the Studio dock over the stage bottom (0 = closed); the droid centres above it. */
+let viewInset = 0;
 /** Centre the droid in the space left of the control panel (full width on phones). */
 function fitView() {
   const w = window.innerWidth;
@@ -67,7 +70,7 @@ function fitView() {
   const panel = w > 720 && !STILL && panelEl ? panelEl.offsetWidth + 24 : 0;
   document.documentElement.style.setProperty('--panel-space', `${panel}px`);
   camera.aspect = w / h;
-  camera.setViewOffset(w, h, panel / 2, 0, w, h);
+  camera.setViewOffset(w, h, panel / 2, viewInset / 2, w, h);
   camera.updateProjectionMatrix();
   post.setSize(w, h);
 }
@@ -263,6 +266,8 @@ Performer.create(Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31
     if (cat.errors.length) console.warn(`show: ${cat.errors.length} problem(s)\n  ${cat.errors.join('\n  ')}`);
     buildShowUi(cat.items, cat.idle_after_s);
     p.command({ cmd: 'tempo', bpm });
+    if (studioLocal) studioPerformer();
+    studio.refresh();
   })
   .catch((e) => {
     console.error('performer (wasm) failed to load - run `npm run build:wasm`', e);
@@ -331,7 +336,7 @@ function pollGamepad() {
 }
 
 function tickPerformer(t: number) {
-  if (!performer || connected) return;
+  if (!performer || (connected && !studioLocal)) return studio.tick(null);
   if (speaking || audio.micOn) {
     let a = 0;
     if (audio.active) a = agc.next(audio.rmsInt16());
@@ -341,18 +346,20 @@ function tickPerformer(t: number) {
     }
     perf({ cmd: 'amplitude', value: a });
   }
-  if (lookAtCamera) {
+  if (lookAtCamera && !studio.active) {
     const pt = aimAt(camera.position);
     if (pt) perf({ cmd: 'look', pan_tilt: pt });
   }
   pollGamepad();
   const f = performer.tick(t);
   for (const o of performer.events()) onPerfOut(o);
+  studio.tick(f);
   view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets };
 }
 
 // ------------------------------------------------------------------ gateway follower
 function onFrames(f: Frames) {
+  if (studioLocal) return; // Studio previews on the embedded performer
   const px = (k: string) => f.lights[k] ?? [];
   view = {
     joints: f.joints, eyes: px('eyes'), mouth: px('mouth'), chest: px('chest'),
@@ -411,6 +418,7 @@ function onGatewayState(s: RetainedState) {
   $('btn-dj').classList.toggle('on', s.dj.active);
   $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
   stMode.textContent = s.engagement.engagement.toUpperCase();
+  studio.setActive(s.stage.mode === 'studio');
   ghosts?.apply(s.stage.outputs);
   showUiDirty = true;
 }
@@ -462,6 +470,44 @@ panel.gw.subscribe({
   onEvent: (e) => onGatewayEvent(e),
   onFrames,
 });
+// ------------------------------------------------------------------ Studio (plan Phase 9)
+/** Studio open with the embedded performer as its preview: the 3D view follows it, not the gateway. */
+let studioLocal = false;
+const studio = new Studio({
+  performer: () => performer,
+  connected: () => connected,
+  send: (c) => panel.gw.send(c),
+  studioView(open, local, inset) {
+    const was = studioLocal;
+    studioLocal = open && local;
+    document.body.classList.toggle('studio-open', open);
+    viewInset = open ? inset : 0;
+    fitView();
+    if (open && !was && studioLocal) studioPerformer();
+    else if (was && !studioLocal) {
+      performer?.command({ cmd: 'alive', breathing: true, saccades: true, gaze_wander: true, speech_bob: true });
+      if (!connected) performer?.command({ cmd: 'autonomy', on: autonomy });
+    }
+  },
+});
+/** Studio: alive layers and autonomy off; only the clip moves the body. */
+function studioPerformer() {
+  performer?.command({ cmd: 'stop', all: true });
+  performer?.command({ cmd: 'autonomy', on: false });
+  performer?.command({ cmd: 'alive', breathing: false, saccades: false, gaze_wander: false, speech_bob: false });
+}
+// Offline there is no StageManager: the mode switch is local (Studio only; Show/Bench need the runtime).
+document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) => b.addEventListener('click', (e) => {
+  if (connected) return;
+  e.stopPropagation();
+  setLocalStage(b.dataset.stageMode ?? 'show');
+}));
+function setLocalStage(mode: string) {
+  document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
+  studio.setActive(mode === 'studio');
+}
+if (studio.wantsOpen()) setLocalStage('studio');
+
 // ?offline keeps a tab on the embedded performer even while the runtime is running.
 if (!params.has('offline')) link.start();
 

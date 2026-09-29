@@ -124,6 +124,26 @@ pub enum PerfCommand {
         #[ts(optional)]
         duration: Option<f64>,
     },
+    /// Studio: play an unsaved clip document (SPEC clip JSON) from clip time `at`; `hold`
+    /// pins it there (scrubbing). The runtime takes it only from `ui`/`cli`, in Studio or
+    /// Bench, and only when the clip lints clean against the profile (Bench-safe limits).
+    Preview {
+        clip: serde_json::Value,
+        #[serde(default)]
+        at: f64,
+        #[serde(default)]
+        hold: bool,
+    },
+    /// Studio: blend the preview out.
+    PreviewStop,
+    /// Studio: write a clip or cue into the show folder as `<kind>s/<id>.json`. The runtime
+    /// validates and lints it first (it may add no new lint error); the folder reload
+    /// picks it up. `overwrite` is needed to replace an existing file.
+    SaveShow {
+        doc: serde_json::Value,
+        #[serde(default)]
+        overwrite: bool,
+    },
 }
 
 fn one() -> f64 {

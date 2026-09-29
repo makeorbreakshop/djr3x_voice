@@ -41,7 +41,8 @@ export type PerfCmd =
   | { cmd: 'service_status'; service: string; status: string; detail?: string; latched?: boolean }
   | { cmd: 'autonomy'; on: boolean }
   | { cmd: 'jog'; joint: string; value: number | null }
-  | { cmd: 'eyes'; pattern: string; duration?: number };
+  | { cmd: 'eyes'; pattern: string; duration?: number }
+  | { cmd: 'alive'; breathing: boolean; saccades: boolean; gaze_wander: boolean; speech_bob: boolean };
 
 export interface RunInfo {
   run_id: string;
@@ -125,6 +126,10 @@ export class Performer {
   catalog(): { items: CatalogItem[]; idle_after_s: number | null; errors: string[] } {
     return JSON.parse(this.w.catalog());
   }
+
+  /** Studio: an unsaved clip document on the show layer from clip time `at`; `hold` pins it (scrub). Throws on an invalid clip. */
+  preview(doc: unknown, at: number, hold: boolean) { this.w.preview(JSON.stringify(doc), at, hold); }
+  previewStop() { this.w.previewStop(); }
 
   takeStart() { this.w.takeStart(new Date().toISOString()); }
   takeStop() { this.w.takeStop(); }

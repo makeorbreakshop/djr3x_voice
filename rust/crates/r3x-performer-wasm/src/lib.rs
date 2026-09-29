@@ -131,6 +131,19 @@ impl WasmPerformer {
         self.inner.take.to_jsonl()
     }
 
+    /// Studio preview: a clip document (JSON, unsaved) on the show layer from clip time
+    /// `at`; `hold` pins it there (scrub). Same compositor + actuation as a performed clip.
+    pub fn preview(&mut self, clip_json: &str, at: f64, hold: bool) -> Result<(), JsError> {
+        let doc: Value = serde_json::from_str(clip_json).map_err(err)?;
+        self.inner.preview(&doc, at, hold).map_err(err)
+    }
+
+    /// Blend the Studio preview out.
+    #[wasm_bindgen(js_name = previewStop)]
+    pub fn preview_stop(&mut self) {
+        self.inner.preview_stop();
+    }
+
     /// Runs on each layer: `[{run_id, id, kind, source, layer, ...}]`.
     pub fn running(&self) -> String {
         serde_json::to_string(&self.inner.player.running()).unwrap_or_default()

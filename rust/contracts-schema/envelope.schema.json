@@ -1978,6 +1978,62 @@
             "pattern"
           ],
           "type": "object"
+        },
+        {
+          "description": "Studio: play an unsaved clip document (SPEC clip JSON) from clip time `at`; `hold`\npins it there (scrubbing). The runtime takes it only from `ui`/`cli`, in Studio or\nBench, and only when the clip lints clean against the profile (Bench-safe limits).",
+          "properties": {
+            "at": {
+              "default": 0.0,
+              "format": "double",
+              "type": "number"
+            },
+            "clip": true,
+            "hold": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "clip"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Studio: blend the preview out.",
+          "properties": {
+            "type": {
+              "const": "preview_stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Studio: write a clip or cue into the show folder as `<kind>s/<id>.json`. The runtime\nvalidates and lints it first (it may add no new lint error); the folder reload\npicks it up. `overwrite` is needed to replace an existing file.",
+          "properties": {
+            "doc": true,
+            "overwrite": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "save_show",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc"
+          ],
+          "type": "object"
         }
       ]
     },

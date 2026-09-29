@@ -437,3 +437,28 @@ fn idle_performs_after_quiet() {
         .collect();
     assert!(!idle.is_empty());
 }
+
+#[test]
+fn studio_preview_scrubs_on_the_real_body_path() {
+    let mut p = performer();
+    p.command(Command::Alive(AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false }));
+    p.command(Command::Autonomy { on: false });
+    run(&mut p, 0.0, 0.5);
+    let base = p.tick(0.5).targets["head_pan"];
+    let clip = serde_json::json!({"id": "s", "kind": "clip", "description": "d", "tags": [], "tier": "free", "duration": 2.0,
+        "tracks": {"head_pan": {"mode": "override", "keys": [[0, 0], [1.0, 20], [2.0, 20]], "ease": "linear"}}});
+    // Held at 0.5 s: the target is the curve there, and stays until replaced.
+    p.perf_command(&PerfCommand::Preview { clip: clip.clone(), at: 0.5, hold: true }, r3x_contracts::Source::Ui).unwrap();
+    run(&mut p, 0.52, 3.0);
+    let f = p.tick(3.0);
+    assert!((f.targets["head_pan"] - 10.0).abs() < 1e-6, "{}", f.targets["head_pan"]);
+    assert!((f.joints["head_pan"] - 10.0).abs() < 0.5, "actuation follows the scrub");
+    // Playing from 1.5 s: at +0.25 s the curve is at 1.75 s (20); the stop blends out to the base.
+    p.perf_command(&PerfCommand::Preview { clip, at: 1.5, hold: false }, r3x_contracts::Source::Ui).unwrap();
+    assert!((p.tick(3.25).targets["head_pan"] - 20.0).abs() < 1e-6);
+    p.perf_command(&PerfCommand::PreviewStop, r3x_contracts::Source::Ui).unwrap();
+    run(&mut p, 3.27, 4.5);
+    assert!((p.tick(4.5).targets["head_pan"] - base).abs() < 1e-6);
+    let bad = serde_json::json!({"id": "s", "kind": "cue"});
+    assert!(p.perf_command(&PerfCommand::Preview { clip: bad, at: 0.0, hold: true }, r3x_contracts::Source::Ui).is_err());
+}

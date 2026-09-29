@@ -4,6 +4,7 @@ pub mod brain;
 pub mod bridge;
 pub mod music;
 pub mod performer;
+pub mod studio;
 pub mod vision;
 
 use std::net::SocketAddr;

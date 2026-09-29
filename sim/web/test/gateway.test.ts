@@ -30,7 +30,7 @@ const state = {
   stage: { mode: 'show', outputs: { neck: true }, layers: {}, brain: true, autonomy: true, frozen: false },
   conversation: { phase: 'idle', conversation_id: null, ptt_owner: null },
   engagement: { engagement: 'idle' },
-  music: { playing: false, track: null, volume: 1, ducked: false, library: [] },
+  music: { playing: false, track: null, volume: 1, ducked: false, library: [], position_s: 0, position_t: 0, paused: false },
   dj: { active: false, current: null, next: null },
   perf: { frozen: false, runs: [], puppet: {} },
   lights: { eye_pattern: null, eye_color: null, chest_mode: null, stage_cue: null },

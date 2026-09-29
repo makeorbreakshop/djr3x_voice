@@ -24,7 +24,8 @@ use crate::show::player::{
 };
 use crate::show::puppeteer::{PadState, PuppetEvent, PuppetMode, Puppeteer};
 use crate::show::take::{TakeRecorder, TakeSample};
-use crate::show::types::{Action, Params, Source};
+use crate::show::types::{Action, Clip, Params, ShowItem, Source};
+use crate::show::validate::validate_item;
 use crate::stagelights::{LightMode, Output, StageLights, GROUPS};
 use indexmap::IndexMap;
 use r3x_contracts::messages::{PerfCommand, PerfLayer, StopTarget};
@@ -35,6 +36,19 @@ use std::sync::Arc;
 
 /// Fallback pace for show tags when the TTS gave no character timings (chars/s).
 pub const TAG_CHARS_PER_SEC: f64 = 13.0;
+
+/// The body run a Studio preview occupies (show layer).
+pub const PREVIEW_RUN: &str = "studio#preview";
+
+/// A SPEC clip document (unsaved, no file) -> a validated clip.
+pub fn parse_clip(doc: &serde_json::Value) -> Result<Arc<Clip>, String> {
+    let errs = validate_item(doc, None);
+    if !errs.is_empty() {
+        return Err(errs.join("; "));
+    }
+    let item = ShowItem::from_value(doc)?;
+    item.clip().cloned().ok_or_else(|| format!("{} is a {}, not a clip", item.id, item.kind().as_str()))
+}
 
 /// Output enables gate drivers, not layers: frames are always computed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -677,6 +691,9 @@ impl Performer {
                     return Err(format!("no eye pattern {pattern:?}"));
                 }
             }
+            PerfCommand::Preview { clip, at, hold } => self.preview(clip, *at, *hold)?,
+            PerfCommand::PreviewStop => self.preview_stop(),
+            PerfCommand::SaveShow { .. } => return Err("saving is the runtime's job".into()),
         }
         Ok(())
     }
@@ -752,6 +769,22 @@ impl Performer {
             .perform(&mut c, id, source, params, self.now, layer);
         self.apply_player(c.ev);
         run
+    }
+
+    /// Studio preview (Phase 9): the clip document on the show layer from clip time `at`;
+    /// `hold` pins it there. The same compositor and actuation as a performed clip.
+    pub fn preview(&mut self, doc: &serde_json::Value, at: f64, hold: bool) -> Result<(), String> {
+        if self.frozen {
+            return Err("motion is frozen".into());
+        }
+        let clip = parse_clip(doc)?;
+        let at = at.clamp(0.0, clip.duration);
+        self.body.scrub(PREVIEW_RUN, clip, RunLayer::Show, at, hold, self.now);
+        Ok(())
+    }
+
+    pub fn preview_stop(&mut self) {
+        self.body.release(PREVIEW_RUN, self.now);
     }
 
     /// SPEC `show.stop`.

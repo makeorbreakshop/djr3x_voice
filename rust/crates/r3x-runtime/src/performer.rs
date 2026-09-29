@@ -17,7 +17,7 @@ use r3x_bus::{Bus, CommandRequest, Received};
 use r3x_contracts::{
     Ack, Body, Command, ConversationEvent, DjEvent, Domain, EndReason, Engagement, EngagementState,
     Event, LightsState, MessageClass, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer,
-    PerfState, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState,
+    OperatingMode, PerfState, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState,
 };
 use r3x_drivers::DriverSet;
 use r3x_performer_core::behavior::AliveLayers;
@@ -54,7 +54,7 @@ pub fn default_show_dir() -> PathBuf {
 }
 
 /// Show files as `(path relative to the folder's parent, e.g. "show/clips/nod.json", text)`.
-fn show_files(dir: &Path) -> Vec<(String, String, SystemTime)> {
+pub(crate) fn show_files(dir: &Path) -> Vec<(String, String, SystemTime)> {
     let mut out = Vec::new();
     let root = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "show".into());
     let mut push = |rel: String, p: &Path| {
@@ -174,6 +174,7 @@ struct Host {
     p: Performer,
     drivers: Option<DriverSet>,
     stage: StageState,
+    show_dir: PathBuf,
 }
 
 impl Host {
@@ -245,6 +246,27 @@ impl Host {
                 tokio::spawn(async move {
                     req.ack(bus.command(Source::System, None, Command::Stage(StageCommand::Freeze { on })).await)
                 });
+            }
+            // Studio authoring: the panel/CLI only; saving is file I/O, previews are Bench-safe.
+            PerfCommand::SaveShow { .. } | PerfCommand::Preview { .. } if !matches!(source, Source::Ui | Source::Cli) => {
+                req.ack(Ack::rejected("Studio commands come from the panel or the CLI"));
+            }
+            PerfCommand::SaveShow { doc, overwrite } => {
+                let ack = match crate::studio::save_show(&self.show_dir, &self.profile, doc, *overwrite) {
+                    Ok(path) => {
+                        tracing::info!(path = %path.display(), "studio: saved");
+                        Ack::Accepted
+                    }
+                    Err(e) => Ack::rejected(e),
+                };
+                req.ack(ack);
+            }
+            PerfCommand::Preview { .. } if self.stage.mode == OperatingMode::Show => {
+                req.ack(Ack::rejected("preview runs in Studio or Bench, not Show"));
+            }
+            PerfCommand::Preview { clip, .. } if crate::studio::check_preview(&self.profile, clip).is_err() => {
+                let e = crate::studio::check_preview(&self.profile, clip).unwrap_err();
+                req.ack(Ack::rejected(format!("not Bench-safe: {e}")));
             }
             _ => {
                 let ack = match self.p.perf_command(cmd, source) {
@@ -336,7 +358,14 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
     )
     .map_err(|e| anyhow::anyhow!("performer: {e}"))?;
     let drivers = cfg.drivers.map(|o| DriverSet::from_profile(&cfg.profile, bus, p.actuation.us_per_unit, o.leds));
-    let mut host = Host { bus: bus.clone(), profile: cfg.profile.clone(), p, drivers, stage: StageState::default() };
+    let mut host = Host {
+        bus: bus.clone(),
+        profile: cfg.profile.clone(),
+        p,
+        drivers,
+        stage: StageState::default(),
+        show_dir: cfg.show_dir.clone(),
+    };
     let mut events = bus.subscribe_all();
     let mut stage = bus.watch::<StageState>();
     let mut engagement = bus.watch::<EngagementState>();

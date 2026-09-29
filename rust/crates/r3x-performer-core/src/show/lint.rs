@@ -259,7 +259,8 @@ fn fmt_num(x: f64) -> String {
     }
 }
 
-fn lint_clip(c: &Clip, limits: &BTreeMap<String, JointLimit>, errors: &mut Vec<String>) {
+/// One clip against the limits: joints, extended/coupled rules, key range, peak v/a.
+pub fn lint_clip(c: &Clip, limits: &BTreeMap<String, JointLimit>, errors: &mut Vec<String>) {
     for (j, tr) in &c.tracks {
         let w = format!("{}.{j}", c.id);
         let Some(lim) = limits.get(j) else {
