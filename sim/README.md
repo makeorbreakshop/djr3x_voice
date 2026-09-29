@@ -27,7 +27,8 @@ repository is public. `web/public/{model,sfx,shows}/` are gitignored. Build them
 
 ## Build the model
 
-Requires Blender 4.2+ (tested on 5.2):
+Requires Blender 4.2+ (tested on 5.2), Node with `sim/web` installed, and basisu for the
+texture compression (`brew install basis_universal`):
 
 ```bash
 sim/model/build.sh
@@ -38,27 +39,145 @@ The script reads three inputs:
 - the kit zip, default `~/Desktop/DJ-R3X/3D Models/DJ R3X - v2.zip`;
 - the Mic-Mouth-Split and R-3X Animation folders on Google Drive
   (`MOB/Projects/DJ-R3X/`), when they are synced;
-- optional flags: `--mouth <dir>`, `--budget <tris>`, `--preview`.
+- optional flags: `--mouth <dir>`, `--budget <tris>` (default 700k), `--preview`,
+  `--no-bake`, `--keep-passes`.
 
-It writes `web/public/model/r3x.glb` (Draco, about 3 MB) and `rig.json`. The rig file holds
-the joints, the LED anchors and the mass/torque/inertia model. It also bakes two
-weathering masks into a shared UV atlas, `r3x_occlusion.jpg` and `r3x_edges.jpg`, in about
-20 s. Pass `--no-bake` to skip them; the sim then uses procedural wear only.
+It runs in two steps, about 7.5 minutes on an M1 Max:
+
+1. **Blender** (`model/build_r3x.py`) builds the geometry and `rig.json`, and bakes the
+   textures. Intermediates go to `model/.work/`, which is gitignored.
+2. **Node** (`web/scripts/pack-model.mjs`) puts the textures into the glTF material slots,
+   compresses them to KTX2, compresses the meshes with Draco and writes
+   `web/public/model/r3x.glb`. The file is about 13.8 MB: 9.5 MB of textures and 4.3 MB
+   of mesh.
+
+`rig.json` holds the joints, the LED anchors and the mass/torque/inertia model. Its
+pivots and anchors are measured on copies of the parts decimated as the original
+600k-triangle build did, so changing the visual triangle budget never moves the rig.
+
+**Geometry.** Collapse decimation spends the triangle budget where it is seen. Hero parts
+get 2.5 times the density: the head, visor, headphone cups, face plate, mouth, the RX-24
+plate and the arms. Parts buried inside the rings get less. Visibility is ray-cast from
+all directions. Every mesh then gets Smooth by Angle plus Weighted Normal (face area,
+keep sharp), which removes the blotchy shading of long CAD triangles on large panels.
+
+**Textures.** There are two UV atlases, one for the head and one for the body. Each has
+three maps:
+
+- **baseColor:** the paint and its weathering, 4K. The KTX2 codec is ETC1S.
+- **ORM:** occlusion, roughness and metalness. The body's is 2K ETC1S. The head's is 1K
+  UASTC, because close-ups look at the head and ETC1S blocks show in its highlights. The
+  pack script's `--uastc-orm` flag makes both UASTC, for about 3 MB more.
+- **Normal map:** tangent space, 2K, UASTC. It is baked from the undecimated STLs onto
+  the decimated meshes. Each part is baked against its own high-poly twin, with a cage as
+  deep as that part's measured surface gap, so a ray never picks up a neighbouring part.
+
+xatlas packs the UV charts. It is pip-installed into `model/.work/pydeps` on first use.
+It fills about 75% of each atlas, where Blender's packer managed 20% with these ~13k
+CAD charts.
+
+Pass `--no-bake` to skip the textures. The GLB then carries flat palette colours.
 
 ## The look
 
-`web/src/look.ts` owns the materials, the lights and the environment. The target is the
-Oga's Cantina animatronic: semi-gloss burnt-orange body, grey head and arms, blue cups and
-RX-24 plate. The paint is worn to silver on exposed edges and dirty in the seams. It sits
-in a dim booth under a warm tungsten spot, with teal and magenta practicals behind it.
+The paint is in the GLB. The build bakes it into standard glTF PBR textures: baseColor,
+ORM and normal maps, plus clearcoat through `KHR_materials_clearcoat`. GLTFLoader turns
+these into plain `MeshStandardMaterial` and `MeshPhysicalMaterial`. Anything that renders
+glTF sees the same droid with no custom shader, including Blender, a path tracer and a
+future WebGPU port.
 
-- **Weathering:** comes from the baked masks plus 3D noise in each part's own space, so the
-  wear moves with the part. It covers chips (a primer rim around bare metal), crevice
-  grime, streaks, scuffs, dust on the tops and patchy fading. There are no texture
-  downloads; the cantina environment is procedural.
-- **LEDs:** lit surfaces pass through a soft knee below 1.0, so only the LEDs cross the bloom
-  threshold.
-- **Debugging:** `?look=occ|edge|wear|grime` shows one mask.
+The target is the Oga's Cantina animatronic, with colours taken from neutral-light
+references of the Hasbro figure:
+
+- weathered orange rings and base;
+- charcoal middle ring, top cap and head shell;
+- an orange visor with cream bars;
+- blue headphone cups;
+- blue RX-24 letters on a dark plate;
+- light-grey arms with orange wrist cuffs.
+
+- **Palette:** `web/src/palette.json` holds every class's colour and weathering amounts. It
+  is the one place to edit them. The build reads it, so rebuild after a change.
+  `sim/model/build.sh --keep-passes` keeps the raw bake passes, so the paint can be
+  re-tuned without baking again.
+- **Weathering (baked):** the same model the old runtime shader used, computed per texel
+  from baked masks: ambient occlusion, exposed edges, position and normal, plus 3D noise.
+  - Colour drifts and fades in patches.
+  - Grime packs into crevices and runs down from them in streaks.
+  - Paint chips on exposed edges, in clusters, down to a primer rim and bare metal. The
+    chips are recessed in the normal map.
+  - Scuffs, and dust on up-facing surfaces.
+
+  The clearcoat takes its strength and roughness from the ORM map, so dust, grime and
+  primer are not glossy.
+- **Runtime:** `web/src/look.ts` only tunes texture sampling. It also adds a soft knee
+  below 1.0 on lit surfaces, so only the LEDs cross the bloom threshold. `leds.ts` clones
+  the eye-lens and light-pipe materials and adds its diffuser glow to them.
+- **Debugging:** `?look=albedo|occ|rough|metal|normal` shows one baked channel.
+
+## The booth
+
+`web/src/booth.ts` builds the set and lights it. It recreates Oga's Cantina's DJ booth from
+the reference photos, scaled to the droid, as procedural geometry (nothing downloaded):
+
+- **The set:** a rock alcove with a low dome, seen through an arch in a rock facade. It
+  holds the machinery panel behind the droid, four hanging six-driver speakers, cable
+  bundles, flexible ducting, stepped cassette racks with a lit monitor, the bar counter
+  that hides the pedestal, and the glowing ring under the base.
+- **The light:** a warm tungsten lamp hangs in front of the droid. It is the key and the
+  only shadow caster. Saturated red uplight washes the rock, a blue-violet fill comes
+  through the arch, and small practicals add colour. The rock is plain tan stucco, so all
+  of the red is light, as in the park.
+- **Bounce:** a `LightProbeGrid` (three r186) is baked once at startup from the lit booth,
+  so the moving droid picks up the red bounce wherever it is. The environment map is the
+  booth itself, captured from the droid's head. While the grid is present, the map adds
+  only specular light.
+- **Haze:** a screen-blended cone in the key beam. It cannot push a surface over 1.0, so
+  it never blooms.
+- **Camera:** OrbitControls stay inside the open front. A move that would put the camera in
+  the rock, the counter or behind the facade dollies in along the sight line instead.
+- **`?booth=0`:** a clean turntable stage (dark floor, studio-style cantina lights) for
+  neutral views of the model.
+
+## Rendering
+
+`web/src/post.ts` owns everything after the scene is lit. The passes run in this order:
+
+1. **Ambient occlusion:** N8AO at half resolution with depth-aware upsampling. It fades
+   out where a pixel is already past 1.0, because emitted light is not occluded.
+2. **Bloom:** threshold 1.0, so only the LEDs glow.
+3. **Tone mapping:** Neutral. AgX whitens LED cores more readily, but it also turns the
+   burnt-orange paint salmon.
+4. **SMAA:** edges. The canvas has no MSAA, since it only ever receives full-screen passes.
+5. **Grade:** a built-in 3D LUT, generated in code. It adds a gentle S-curve, cool
+   shadows and warm highlights.
+6. **Film:** vignette, chromatic aberration at the frame edges only, and grain. The grain
+   also dithers the dark booth against banding.
+
+LED channel values are PWM duty cycles, which is linear light. The LEDs are decoded that
+way, so their cores run hot enough for the tone mapper to whiten them the way a camera
+does.
+
+Resolution is dynamic. The render scale starts at 1.5x on a 2x display. It drops in
+0.125 steps when frames run over about 17.8 ms and climbs back when there is headroom.
+
+The **Render quality** control in the Camera section switches between two levels. Your
+browser remembers the choice.
+
+- **High:** AO on, scale up to 1.5x.
+- **Low:** no AO, scale up to 1.25x.
+
+URL flags:
+
+| Flag | Effect |
+|---|---|
+| `?quality=low\|high` | Set the quality level. |
+| `?tonemap=agx` | Compare against AgX. |
+| `?dpr=1` | Fix the scale. |
+| `?grain=0` | Turn off grain. |
+| `?lut=/my.cube` | Grade from a `.cube` file instead. |
+| `?post=hot` | Magenta marks every pixel above 1.0 before bloom, i.e. everything that blooms. |
+| `?post=ao` | Show the AO term alone. |
 
 ## Run
 
@@ -89,6 +208,44 @@ The tests cover:
 - **Pipeline:** channel map, frame rate and resolution, prismatic lift, script
   override, and servo lag.
 - **Show-script (Maestro format) interpreter.**
+
+## Render regression check
+
+```bash
+cd sim/web
+npm run render:check     # render every shot and diff it against the baselines
+npm run render:update    # accept the current renders as the new baselines
+npm run render:perf      # fps at 1440x900 @2x with vsync off, high and low quality
+```
+
+`scripts/render-harness.mjs` drives headless Chrome over the DevTools protocol. It uses
+the dev server on :5391 if one is running; otherwise it starts its own. The page runs in
+still mode (`?still`, `web/src/still.ts`), which makes every shot deterministic:
+
+- a virtual clock that only advances when the harness asks;
+- a seeded `Math.random`;
+- a fixed render scale and no grain;
+- a fixed pose and LED state: idle, or speaking with the mouth held steady.
+
+The named cameras are `full`, `face`, `face-speaking`, `chest`, `arms` and
+`photo-oga-front-low`, plus an 8-angle turntable (`turn-000` to `turn-315`).
+`photo-oga-front-low` is matched to the WDWNT reference photo.
+
+Each shot is compared with pixelmatch and SSIM. The check fails when more than 0.5% of
+pixels differ or SSIM drops below 0.98. Adjust these with `--max-diff` and `--min-ssim`.
+
+Other options:
+
+- `--only face,turn`: run only some shots.
+- `--quality low`: render at low quality.
+- `--extra tonemap=agx`: add any URL flags.
+
+The contact sheet, `web/.render-out/index.html`, shows each render next to its baseline,
+the diff and the reference photo.
+
+Renders show the kit-derived model, so `web/.render-out/` and `web/.render-baselines/`
+are gitignored. Keep your baselines locally. The reference photos are linked from
+`~/Desktop/DJ-R3X/Reference Photos` (`--refs <dir>`) and never copied.
 
 ## Things the sim surfaced about the real system
 

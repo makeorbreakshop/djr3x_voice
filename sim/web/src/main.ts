@@ -2,10 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { STILL } from './still'; // first: ?still swaps the clock and RNG before anything reads them
+import { PostPipeline } from './post';
 
 import { RexFaceFirmware, RGB, OUTPUT_BRIGHTNESS } from './firmware';
 import { CantinaHostEmulator, DualHost, SystemMode, TtsAmplitudeAgc } from './host';
@@ -17,47 +16,45 @@ import { LiveEvent, LiveLink } from './link';
 import { ChestFirmware, ChestHost, ChestLights, WINDOW_SUBSYSTEMS } from './chest';
 import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
 import { MaestroScript, MaestroScriptError } from './actuation/maestro';
-import { loadWeatherMaps, makeMaterial, setupBooth, tameHighlights } from './look';
+import { limitControls, setupStage } from './booth'; // before any material compiles (patches a chunk)
+import { prepareDroidMaterials, tameHighlights } from './look';
 
 // ------------------------------------------------------------------ renderer / scene
-// The look - per-class materials with baked + procedural weathering, the cantina booth
-// lights, environment and tone mapping - lives in look.ts.
+// The droid's look (per-class materials, weathering) lives in look.ts; the booth set and
+// its lights in booth.ts; tone mapping and the rest of the image in post.ts.
 const stage = document.getElementById('stage')!;
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// No MSAA: the canvas only ever receives full-screen post quads; SMAA does the edges and
+// post.ts owns the pixel ratio (dynamic resolution).
+const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in r18x; soft edges via shadow.radius
 stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-setupBooth(renderer, scene);
+// The set - Oga's Cantina DJ booth, its lights, baked bounce and reflections - is booth.ts.
+// ?booth=0 swaps it for a clean turntable stage.
+const set = setupStage(renderer, scene, new URLSearchParams(location.search).get('booth') !== '0');
 
 const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.02, 30);
-camera.position.set(0.9, 0.85, 1.9);
+camera.position.copy(set.cams.full[0]);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.5, 0);
+controls.target.copy(set.cams.full[1]);
 controls.enableDamping = true;
-controls.minDistance = 0.25;
-controls.maxDistance = 5;
+limitControls(controls, set.booth);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-// Threshold above 1: only the LEDs (unlit, not tone-mapped, driven past 1.0) bloom.
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.85, 0.35, 1.0);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
+// AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
+const post = new PostPipeline(renderer, scene, camera);
 
 /** Centre the droid in the space left of the control panel (full width on phones). */
 function fitView() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const panel = w > 720 ? 364 : 0;
+  const panel = w > 720 && !STILL ? 364 : 0;
   camera.aspect = w / h;
   camera.setViewOffset(w, h, panel / 2, 0, w, h);
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  composer.setSize(w, h);
+  post.setSize(w, h);
 }
 addEventListener('resize', fitView);
 fitView();
@@ -105,28 +102,27 @@ const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
 // ------------------------------------------------------------------ load model
 async function load() {
+  // Meshes are Draco, textures KTX2 (transcoded to the GPU's own format); both decoders are
+  // copied into public/ by scripts/copy-draco.mjs.
   const draco = new DRACOLoader().setDecoderPath('/draco/');
-  const loader = new GLTFLoader().setDRACOLoader(draco);
-  const [gltf, doc, clipList, weatherMaps] = await Promise.all([
+  const ktx2 = new KTX2Loader().setTranscoderPath('/basis/').detectSupport(renderer);
+  const loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2);
+  const [gltf, doc, clipList] = await Promise.all([
     loader.loadAsync('/model/r3x.glb'),
     fetch('/model/rig.json').then((r) => r.json() as Promise<RigDoc>),
     fetch('/sfx/index.json').then((r) => (r.ok ? r.json() : []), () => []),
-    loadWeatherMaps(renderer),
   ]);
   clips = clipList as string[];
+  ktx2.dispose(); // frees the transcoder workers; the textures are on the GPU
 
-  const mats = new Map<string, THREE.Material>();
+  // The paint (baked PBR textures) comes with the GLB's materials - see look.ts.
   gltf.scene.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
     m.castShadow = true;
     m.receiveShadow = true;
-    const name = (m.material as THREE.Material).name;
-    if (!mats.has(name)) {
-      mats.set(name, makeMaterial(name, weatherMaps));
-    }
-    m.material = mats.get(name)!;
   });
+  prepareDroidMaterials(gltf.scene, renderer);
   scene.add(gltf.scene);
 
   rig = new Rig(gltf.scene, doc);
@@ -210,6 +206,7 @@ async function fakeSpeech(seconds: number) {
 // Arduino would. Motion follows the same events.
 let musicPlaying = false;
 let liveSpeaking = false;
+let liveDj = false;
 const capHeard = document.getElementById('cap-heard')!;
 const capSaid = document.getElementById('cap-said')!;
 const caption = document.getElementById('caption')!;
@@ -220,7 +217,7 @@ function liveMode(raw: unknown): SystemMode {
 }
 
 function restingActivity(): Activity {
-  if (musicPlaying || djOn) return 'dj';
+  if (musicPlaying || djOn || liveDj) return 'dj';
   return host.mode === 'IDLE' ? 'idle' : 'engaged';
 }
 
@@ -289,6 +286,10 @@ function onLiveEvent(ev: LiveEvent) {
       host.chest.music(false);
       if (!liveSpeaking) setActivity(restingActivity());
       break;
+    case 'dj.mode.changed':
+      liveDj = Boolean(d.is_active);
+      if (!liveSpeaking) setActivity(restingActivity());
+      break;
   }
   caption.hidden = !(capHeard.textContent || capSaid.textContent);
 }
@@ -306,6 +307,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
     if (!on) {
       liveSpeaking = false;
       musicPlaying = false;
+      liveDj = false;
       host.chest.muted = false; // back to the offline port of the chest service
       host.chest.resync();
     }
@@ -315,7 +317,7 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
 if (!new URLSearchParams(location.search).has('offline')) link.start();
 
 // Devtools: __r3x.fw.write('ST\n'), __r3x.actuation.command('head_pan', 40)
-Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; }, camera, controls } });
+Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; }, get chest() { return chestFw; }, camera, controls, post } });
 
 // ------------------------------------------------------------------ frame loop
 let last = clock();
@@ -366,8 +368,14 @@ function frame() {
     updateServoTable();
   }
 
+  // Stage lights: the venue's separate light desk, following the show state.
+  set.lights?.setMode(liveSpeaking || speaking ? 'speaking' : djOn || liveDj ? 'dj' : musicPlaying ? 'music' : 'idle');
+  set.lights?.setBpm(bpm);
+  set.lights?.update(dt);
+
   controls.update();
-  composer.render();
+  set.constrain(camera, controls.target);
+  post.render();
   drawLeds();
   updateStatus();
 }
@@ -481,13 +489,9 @@ $<HTMLInputElement>('axes').onchange = (e) => {
   pivots.forEach((p) => (p.visible = on));
 };
 
-const CAMS: Record<string, [THREE.Vector3, THREE.Vector3]> = {
-  full: [new THREE.Vector3(0.9, 0.85, 1.9), new THREE.Vector3(0, 0.5, 0)],
-  face: [new THREE.Vector3(0.16, 0.84, 0.9), new THREE.Vector3(0, 0.77, 0.08)],
-  arms: [new THREE.Vector3(0.1, 0.6, 1.2), new THREE.Vector3(0, 0.5, 0.1)],
-  // The logic panels sit on the droid's right-front quarter of the middle ring.
-  chest: [new THREE.Vector3(-0.55, 0.5, 0.42), new THREE.Vector3(-0.1, 0.45, 0.06)],
-};
+// Presets come from the set (booth.ts): in the booth they frame the droid through the arch.
+// The chest preset looks at the logic panels on the droid's right-front quarter.
+const CAMS = set.cams;
 document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) => {
   b.onclick = () => {
     const [p, tgt] = CAMS[b.dataset.cam!];

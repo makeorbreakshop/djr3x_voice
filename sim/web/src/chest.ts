@@ -230,8 +230,9 @@ export class ChestLights {
 
   update(pixels: RGB[]) {
     pixels.forEach((p, i) => {
-      // Addressable LEDs at the same global brightness as the face (128/255).
-      this.c.setRGB((p[0] / 255) * 0.5, (p[1] / 255) * 0.5, (p[2] / 255) * 0.5, THREE.SRGBColorSpace);
+      // Addressable LEDs at the same global brightness as the face (128/255). Channel
+      // values are PWM duty, i.e. linear light (see leds.ts ledColor).
+      this.c.setRGB((p[0] / 255) * 0.5, (p[1] / 255) * 0.5, (p[2] / 255) * 0.5, THREE.LinearSRGBColorSpace);
       this.mats[i].color.copy(this.c).multiplyScalar(this.gain);
     });
   }

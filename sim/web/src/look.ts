@@ -1,23 +1,30 @@
 import * as THREE from 'three';
 
+import palette from './palette.json';
+
 /**
- * The droid's look: painted, used, slightly dirty animatronic in a dim cantina booth.
+ * The droid's look: painted, used, slightly dirty animatronic.
  *
- * The GLB only carries material *class names*. Each class becomes a MeshPhysicalMaterial
- * with a weathering layer injected by onBeforeCompile:
+ * The paint and its weathering are BAKED into the GLB's standard glTF PBR textures by the
+ * model build (sim/model/build_r3x.py + sim/web/scripts/pack-model.mjs): per UV atlas
+ * (head, body) a baseColor (paint, visor bars, chips to primer and bare metal, crevice
+ * grime, rain streaks, scuffs, dust, colour drift), an ORM map (occlusion, roughness,
+ * metalness) and a tangent-space normal map baked from the full-resolution STLs, plus
+ * per-class clearcoat. GLTFLoader turns those into ordinary MeshStandard/Physical
+ * materials, so anything that renders glTF (a path tracer, the WebGPU renderer) sees the
+ * same paint with no custom shader.
  *
- * - Baked masks (sim/model/build_r3x.py, shared UV atlas): `r3x_occlusion.jpg` (ambient
- *   occlusion, broad x crevice) and `r3x_edges.jpg` (exposed-edge mask from Cycles' Bevel
- *   node). Occlusion is also the material's aoMap, so it darkens ambient/env light.
- * - Procedural 3D value noise in the mesh's *own* space, so wear stays glued to a part
- *   when its joint moves. No downloaded textures.
+ * Colours and weathering amounts live in ./palette.json - the one place to edit them; the
+ * build reads it (rebuild the model to see a change). At runtime this module only:
+ * - tunes texture sampling (anisotropy) - prepareDroidMaterials();
+ * - adds the highlight knee that keeps glossy highlights below the bloom threshold, so the
+ *   LEDs stay the only bloom sources - tameHighlights();
+ * - `?look=albedo|occ|rough|metal|normal` shows one baked channel instead of the shading.
  *
- * Layers, bottom to top: base colour variation / fading, crevice grime and rain-down
- * streaks, chipped paint (a primer rim around bare metal) on exposed edges, fine scuffs,
- * and a dust film on up-facing surfaces. Each also moves roughness/metalness/clearcoat.
+ * leds.ts clones the eye-lens and light-pipe materials and gives them its diffuser shader.
  *
- * leds.ts clones the eye-lens and light-pipe materials and replaces onBeforeCompile with
- * its diffuser shader; those two classes are deliberately left unweathered here.
+ * The procedural weathering shader below (applyWeathering) is what the droid used before
+ * the bake; the bake is a port of it. It stays for procedural surfaces (setupBooth's floor).
  */
 
 export interface Weathering {
@@ -54,111 +61,40 @@ export interface MaterialClass {
   stripes?: { color: number; periodM: number; duty: number; dir: [number, number]; mirrorX: boolean };
 }
 
-const DUST = 0x8a7f70;
-const GRIME = 0x1f1810;
+interface PaletteClass {
+  color: string; roughness: number; metalness: number; clearcoat?: number; clearcoatRoughness?: number;
+  weather?: Record<string, number | string | null>;
+  stripes?: { color: string; periodM: number; duty: number; dir: number[]; mirrorX: boolean };
+}
+const hex = (s: string | number | null | undefined) => (typeof s === 'string' ? parseInt(s.slice(1), 16) : 0);
 
-// Oga's Cantina R-3X paint, from neutral-light references (the Hasbro Black Series figure,
-// painted to match; park photos are too tinted by the amber stage lights to judge colour -
-// ~/Desktop/DJ-R3X/Reference Photos): weathered orange top/bottom rings and base; charcoal
-// middle ring, top cap, pedestal and head shell; orange visor with cream bars; blue
-// headphone cups; blue RX-24 letters on a dark plate; light-grey arms with orange wrist
-// cuffs. Chips show silver metal under the paint; dirt sits in the seams.
-const PAINT_WEAR: Weathering = {
-  wear: 0.6, wearColor: 0xa9aaa6, wearRoughness: 0.38, wearMetalness: 0.85, primerColor: 0x6b675f,
-  grime: 0.8, grimeColor: GRIME, streaks: 0.35, dust: 0.3, variation: 0.15, fade: 0.15,
-  roughVar: 0.4, scuffs: 0.45,
-};
+/** Per-class paint, from palette.json (flat params; the weathering is baked). */
+export const CLASSES: Record<string, MaterialClass> = Object.fromEntries(
+  Object.entries(palette.classes as Record<string, PaletteClass>).map(([name, c]) => {
+    const w = c.weather;
+    return [name, {
+      params: {
+        color: hex(c.color), roughness: c.roughness, metalness: c.metalness,
+        clearcoat: c.clearcoat ?? 0, clearcoatRoughness: c.clearcoatRoughness ?? 0,
+      },
+      weather: w && {
+        wear: w.wear as number, wearColor: hex(w.wearColor), wearRoughness: w.wearRoughness as number,
+        wearMetalness: w.wearMetalness as number, primerColor: w.primerColor ? hex(w.primerColor) : null,
+        grime: w.grime as number, grimeColor: hex(w.grimeColor), streaks: w.streaks as number, dust: w.dust as number,
+        variation: w.variation as number, fade: w.fade as number, roughVar: w.roughVar as number, scuffs: w.scuffs as number,
+      },
+      stripes: c.stripes && { ...c.stripes, color: hex(c.stripes.color), dir: [c.stripes.dir[0], c.stripes.dir[1]] },
+    } satisfies MaterialClass];
+  }),
+);
+const DUST = hex(palette.dust);
 
-export const CLASSES: Record<string, MaterialClass> = {
-  // Charcoal paint: middle ring, top cap, head shell.
-  paint_charcoal: {
-    params: { color: 0x3c3f44, roughness: 0.55, metalness: 0.15, clearcoat: 0.15, clearcoatRoughness: 0.5 },
-    weather: { ...PAINT_WEAR, wearColor: 0x9a9c9e, primerColor: 0x55575a, streaks: 0.25 },
-  },
-  // Light grey paint: the arms.
-  paint_lightgrey: {
-    params: { color: 0xa8a8a2, roughness: 0.55, metalness: 0.05, clearcoat: 0.15, clearcoatRoughness: 0.5 },
-    weather: { ...PAINT_WEAR, wear: 0.5, wearColor: 0xc4c6c8, primerColor: 0x7a7a74 },
-  },
-  // The visor: orange with parallel cream bars slanting across it (as on the figure).
-  visor_stripes: {
-    params: { color: 0xd0621f, roughness: 0.5, metalness: 0.0, clearcoat: 0.25, clearcoatRoughness: 0.45 },
-    weather: { ...PAINT_WEAR, wear: 0.55 },
-    stripes: { color: 0xe6dcc6, periodM: 0.03, duty: 0.28, dir: [0.94, 0.34], mirrorX: false },
-  },
-  paint_orange: {
-    params: { color: 0xc55a1e, roughness: 0.5, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.45 },
-    weather: {
-      wear: 0.65, wearColor: 0xa9aaa6, wearRoughness: 0.38, wearMetalness: 0.85, primerColor: 0x6b675f,
-      grime: 0.75, grimeColor: GRIME, streaks: 0.35, dust: 0.35, variation: 0.18, fade: 0.25,
-      roughVar: 0.35, scuffs: 0.45,
-    },
-  },
-  metal_grey: {
-    // Grey paint with a metallic flake: reads as metal but not chrome.
-    params: { color: 0x8e959d, roughness: 0.46, metalness: 0.22, clearcoat: 0.15, clearcoatRoughness: 0.5 },
-    weather: {
-      wear: 0.45, wearColor: 0xc4c6c8, wearRoughness: 0.3, wearMetalness: 0.95, primerColor: 0x55575a,
-      grime: 0.8, grimeColor: GRIME, streaks: 0.25, dust: 0.3, variation: 0.1, fade: 0.1,
-      roughVar: 0.45, scuffs: 0.3,
-    },
-  },
-  metal_dark: {
-    params: { color: 0x2e3034, roughness: 0.55, metalness: 0.55 },
-    weather: {
-      wear: 0.4, wearColor: 0x8e9194, wearRoughness: 0.32, wearMetalness: 0.9, primerColor: null,
-      grime: 0.6, grimeColor: 0x15110c, streaks: 0.15, dust: 0.3, variation: 0.1, fade: 0.0,
-      roughVar: 0.5, scuffs: 0.25,
-    },
-  },
-  rubber: {
-    params: { color: 0x121213, roughness: 0.9, metalness: 0 },
-    weather: {
-      wear: 0.0, wearColor: 0x2a2a2a, wearRoughness: 0.9, wearMetalness: 0, primerColor: null,
-      grime: 0.3, grimeColor: 0x0a0806, streaks: 0.0, dust: 0.6, variation: 0.12, fade: 0.25,
-      roughVar: 0.1, scuffs: 0.0,
-    },
-  },
-  accent_blue: {
-    params: { color: 0x2a67c8, roughness: 0.42, metalness: 0.1, clearcoat: 0.35, clearcoatRoughness: 0.4 },
-    weather: {
-      wear: 0.35, wearColor: 0xa9aaa6, wearRoughness: 0.35, wearMetalness: 0.85, primerColor: 0x5d5c58,
-      grime: 0.7, grimeColor: GRIME, streaks: 0.2, dust: 0.3, variation: 0.12, fade: 0.2,
-      roughVar: 0.35, scuffs: 0.35,
-    },
-  },
-  // H_*Eye_4 'diffusion bulbs': frosted, lit from behind by the WS2812 jewel (leds.ts).
-  eye_lens: { params: { color: 0x3a4048, roughness: 0.35, metalness: 0, clearcoat: 0.6 } },
-  // Mic-Mouth-Split light pipe: translucent print, lit by the mouth V behind it (leds.ts).
-  light_pipe: { params: { color: 0x2a2622, roughness: 0.55, metalness: 0 } },
-};
+// ------------------------------------------------------------------ procedural masks
 
-// ------------------------------------------------------------------ baked masks
-
+/** Optional baked masks for applyWeathering (occlusion + exposed edges on a UV atlas). */
 export interface WeatherMaps {
   occlusion: THREE.Texture;
   edges: THREE.Texture;
-}
-
-/** The build's baked masks, or null when the model was built with --no-bake. */
-export async function loadWeatherMaps(renderer: THREE.WebGLRenderer): Promise<WeatherMaps | null> {
-  const loader = new THREE.TextureLoader();
-  const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  const load = async (url: string) => {
-    const t = await loader.loadAsync(url);
-    t.flipY = false; // glTF UV convention
-    t.colorSpace = THREE.NoColorSpace;
-    t.anisotropy = aniso;
-    t.needsUpdate = true;
-    return t;
-  };
-  try {
-    const [occlusion, edges] = await Promise.all([load('/model/r3x_occlusion.jpg'), load('/model/r3x_edges.jpg')]);
-    return { occlusion, edges };
-  } catch {
-    console.info('[r3x] no baked weathering maps; procedural wear only (rebuild the model to bake them)');
-    return null;
-  }
 }
 
 // ------------------------------------------------------------------ shader
@@ -196,10 +132,10 @@ interface WeatherUniforms {
 }
 
 /**
- * `?look=occ|edge|wear|grime` shows one weathering mask instead of the shaded colour
- * (for tuning the bake and the thresholds).
+ * `?weather=occ|edge|wear|grime` shows one procedural weathering mask instead of the
+ * shaded colour (for tuning applyWeathering's thresholds).
  */
-const DEBUG_VIEW = { occ: 1, edge: 2, wear: 3, grime: 4 }[new URLSearchParams(location.search).get('look') ?? ''] ?? 0;
+const DEBUG_VIEW = { occ: 1, edge: 2, wear: 3, grime: 4 }[new URLSearchParams(location.search).get('weather') ?? ''] ?? 0;
 
 function weatherUniforms(w: Weathering, maps: WeatherMaps | null): WeatherUniforms {
   const c = (hex: number) => new THREE.Color(hex);
@@ -341,8 +277,8 @@ ${stripes ? `  // Painted bands (anti-aliased), under the weathering so grime an
 
 
 /**
- * Apply the highlight knee to lit materials made elsewhere (e.g. rig.ts's piston rod),
- * skipping anything with its own shader patch (leds.ts diffusers must keep blooming)
+ * Apply the highlight knee to lit materials (the droid's baked materials, rig.ts's piston
+ * rod, ...), skipping anything with its own shader patch (leds.ts diffusers must keep blooming)
  * and unlit materials (LED sprites, chest lights).
  */
 export function tameHighlights(root: THREE.Object3D) {
@@ -358,130 +294,47 @@ export function tameHighlights(root: THREE.Object3D) {
   });
 }
 
-/** One material per class, shared by every mesh of that class. */
-export function makeMaterial(name: string, maps: WeatherMaps | null): THREE.MeshPhysicalMaterial {
-  const cls = CLASSES[name] ?? CLASSES.metal_grey;
-  const material = new THREE.MeshPhysicalMaterial({ name, ...cls.params });
-  if (cls.weather) {
-    if (maps) {
-      material.aoMap = maps.occlusion;
-      material.aoMapIntensity = 1.0;
-    }
-    applyWeathering(material, cls.weather, maps, cls.stripes);
-  }
-  return material;
-}
-
-// ------------------------------------------------------------------ environment
+/**
+ * `?look=albedo|occ|rough|metal|normal` shows one baked texture channel of the droid
+ * instead of its shading (for checking the bake).
+ */
+const BAKE_VIEW = ({ albedo: 1, occ: 2, rough: 3, metal: 4, normal: 5 } as Record<string, number>)[
+  new URLSearchParams(location.search).get('look') ?? ''] ?? 0;
 
 /**
- * A procedural cantina for image-based light: a dark, warm room with a few practicals
- * (amber pendants overhead, a teal wall strip, a red-magenta neon behind the booth).
- * It is what metal and clearcoat reflect, so the droid picks up coloured cantina
- * reflections instead of a white studio. Built once into a PMREM; no downloads.
+ * The droid's materials as GLTFLoader made them from the baked textures: sharpen texture
+ * sampling at grazing angles, and wire up the ?look= debug views. Run before FaceLeds
+ * (it clones the lens materials) and before tameHighlights.
  */
-export function cantinaEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
-  const env = new THREE.Scene();
-  const room = new THREE.Mesh(
-    new THREE.BoxGeometry(14, 6, 14),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0.028, 0.02, 0.015), side: THREE.BackSide }),
-  );
-  room.position.y = 2.5;
-  env.add(room);
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(14, 14),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(0.012, 0.01, 0.008) }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -0.49;
-  env.add(floor);
-  const panel = (w: number, h: number, rgb: [number, number, number], pos: [number, number, number], rotY = 0, rotX = 0) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(...rgb), side: THREE.DoubleSide }));
-    m.position.set(...pos);
-    m.rotation.set(rotX, rotY, 0);
-    env.add(m);
-  };
-  // Warm pendant pools overhead (front-right of the droid, where the key comes from).
-  panel(1.6, 1.0, [4.0, 2.7, 1.6], [1.8, 4.5, 2.2], 0, Math.PI / 2);
-  panel(0.8, 0.8, [2.4, 1.6, 0.9], [-2.2, 4.5, 1.0], 0, Math.PI / 2);
-  // Teal strip on the left wall.
-  panel(0.25, 3.5, [0.15, 1.3, 1.6], [-6.9, 2.0, -1.0], Math.PI / 2);
-  // Red-magenta neon behind the booth.
-  panel(3.0, 0.2, [2.2, 0.25, 0.7], [1.0, 2.6, -6.9]);
-  // Dim warm bar glow in front, low (what the droid "sees").
-  panel(6.0, 0.6, [0.5, 0.28, 0.12], [0, 0.6, 6.9]);
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const tex = pmrem.fromScene(env, 0.03).texture;
-  pmrem.dispose();
-  env.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (m.isMesh) {
-      m.geometry.dispose();
-      (m.material as THREE.Material).dispose();
+export function prepareDroidMaterials(root: THREE.Object3D, renderer: THREE.WebGLRenderer) {
+  const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const seen = new Set<THREE.Material>();
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const m = mesh.material as THREE.MeshPhysicalMaterial;
+    if (seen.has(m) || !(m instanceof THREE.MeshStandardMaterial)) return;
+    seen.add(m);
+    for (const t of [m.map, m.normalMap, m.roughnessMap, m.metalnessMap, m.aoMap,
+      (m as THREE.MeshPhysicalMaterial).clearcoatMap, (m as THREE.MeshPhysicalMaterial).clearcoatRoughnessMap]) {
+      if (t) t.anisotropy = aniso;
+    }
+    if (BAKE_VIEW && m.map) {
+      m.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+  ${[
+    '',
+    'gl_FragColor = vec4(texture2D(map, vMapUv).rgb, 1.0);',
+    'gl_FragColor = vec4(vec3(texture2D(aoMap, vAoMapUv).r), 1.0);',
+    'gl_FragColor = vec4(vec3(texture2D(roughnessMap, vRoughnessMapUv).g), 1.0);',
+    'gl_FragColor = vec4(vec3(texture2D(metalnessMap, vMetalnessMapUv).b), 1.0);',
+    'gl_FragColor = vec4(texture2D(normalMap, vNormalMapUv).rgb, 1.0);',
+  ][BAKE_VIEW]}`);
+      };
+      m.customProgramCacheKey = () => `r3x-bakeview-${BAKE_VIEW}`;
+      m.needsUpdate = true;
     }
   });
-  return tex;
 }
 
-// ------------------------------------------------------------------ the booth
-
-/**
- * Dim cantina DJ booth: a warm tungsten spot as key (a pool of light on a dark floor),
- * cool teal and red-magenta rims from the room's practicals, very little fill, and a
- * matching coloured environment for reflections. Values keep every lit surface below
- * 1.0 linear, so only the LEDs cross the bloom threshold.
- */
-export function setupBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene) {
-  renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 1.0;
-
-  const bg = new THREE.Color(0x07080a);
-  scene.background = bg;
-  scene.fog = new THREE.Fog(bg, 3.2, 7.5);
-  scene.environment = cantinaEnvironment(renderer);
-  scene.environmentIntensity = 0.55;
-
-  const key = new THREE.SpotLight(0xffdcbc, 34, 9, 0.42, 0.75, 1.6);
-  key.position.set(1.3, 3.1, 2.1);
-  key.target.position.set(0, 0.5, 0);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.near = 1.5;
-  key.shadow.camera.far = 6;
-  key.shadow.bias = -0.0002;
-  key.shadow.normalBias = 0.004;
-  key.shadow.radius = 3;
-  scene.add(key, key.target);
-
-  // Teal from the wall strip, behind-left; red-magenta neon behind-right. Narrow spots
-  // aimed at the droid, so they outline it without washing the floor.
-  const rim = (color: number, intensity: number, pos: [number, number, number]) => {
-    const l = new THREE.SpotLight(color, intensity, 7, 0.3, 0.9, 1.6);
-    l.position.set(...pos);
-    l.target.position.set(0, 0.6, 0);
-    scene.add(l, l.target);
-  };
-  rim(0x5ab0ff, 12, [-2.2, 1.9, -1.9]);
-  rim(0xff4f78, 8, [2.0, 1.5, -2.3]);
-  // Cool room fill from the front-left, so the grey paint still reads grey under tungsten.
-  const fill = new THREE.DirectionalLight(0x9fb8d8, 0.5);
-  fill.position.set(-2, 1.2, 2.2);
-  scene.add(fill);
-  // Low bounce from the booth console in front, and a whisper of room fill.
-  const console_ = new THREE.PointLight(0xff9a50, 0.5, 2.5, 2);
-  console_.position.set(0.0, 0.25, 0.9);
-  scene.add(console_);
-  scene.add(new THREE.HemisphereLight(0x3a4658, 0x140d08, 0.25));
-
-  const floorMat = new THREE.MeshPhysicalMaterial({ color: 0x100e0c, roughness: 0.9, metalness: 0.0 });
-  applyWeathering(floorMat, {
-    wear: 0, wearColor: 0, wearRoughness: 0.8, wearMetalness: 0, primerColor: null,
-    grime: 0.5, grimeColor: 0x080604, streaks: 0, dust: 0, variation: 0.12, fade: 0,
-    roughVar: 0.15, scuffs: 0,
-  }, null);
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(4, 96), floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-  return { key };
-}
+// The booth set, its lights and environment: booth.ts.

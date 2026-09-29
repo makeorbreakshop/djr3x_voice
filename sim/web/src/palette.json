@@ -1,0 +1,91 @@
+{
+  "_doc": [
+    "Paint and weathering per material class - the one place the droid's colours live.",
+    "sim/model/build_r3x.py reads this file and BAKES it (with the weathering) into the GLB's",
+    "PBR textures; sim/web/scripts/pack-model.mjs reads it for the clearcoat factors. After",
+    "editing, rebuild the model: sim/model/build.sh. look.ts only reads it as the flat-colour",
+    "fallback for a model built with --no-bake. Colours are sRGB hex (as three.js Color).",
+    "Oga's Cantina R-3X paint from neutral-light references (the Hasbro Black Series figure,",
+    "painted to match; park photos are amber-tinted): weathered orange top/bottom rings and",
+    "base; charcoal middle ring, top cap, pedestal and head shell; orange visor with cream bars;",
+    "blue headphone cups; blue RX-24 letters on a dark plate; light-grey arms with orange wrist",
+    "cuffs. Chips show silver metal under the paint; dirt sits in the seams."
+  ],
+  "dust": "#8a7f70",
+  "classes": {
+    "paint_charcoal": {
+      "color": "#3c3f44", "roughness": 0.55, "metalness": 0.15, "clearcoat": 0.15, "clearcoatRoughness": 0.5,
+      "weather": {
+        "wear": 0.6, "wearColor": "#9a9c9e", "wearRoughness": 0.38, "wearMetalness": 0.85, "primerColor": "#55575a",
+        "grime": 0.8, "grimeColor": "#1f1810", "streaks": 0.25, "dust": 0.15, "variation": 0.15, "fade": 0.08,
+        "roughVar": 0.4, "scuffs": 0.45
+      }
+    },
+    "paint_lightgrey": {
+      "color": "#a8a8a2", "roughness": 0.55, "metalness": 0.05, "clearcoat": 0.15, "clearcoatRoughness": 0.5,
+      "weather": {
+        "wear": 0.5, "wearColor": "#c4c6c8", "wearRoughness": 0.38, "wearMetalness": 0.85, "primerColor": "#7a7a74",
+        "grime": 0.8, "grimeColor": "#1f1810", "streaks": 0.35, "dust": 0.2, "variation": 0.15, "fade": 0.15,
+        "roughVar": 0.4, "scuffs": 0.45
+      }
+    },
+    "visor_stripes": {
+      "color": "#d0621f", "roughness": 0.5, "metalness": 0.0, "clearcoat": 0.25, "clearcoatRoughness": 0.45,
+      "weather": {
+        "wear": 0.55, "wearColor": "#a9aaa6", "wearRoughness": 0.38, "wearMetalness": 0.85, "primerColor": "#6b675f",
+        "grime": 0.8, "grimeColor": "#1f1810", "streaks": 0.35, "dust": 0.15, "variation": 0.15, "fade": 0.05,
+        "roughVar": 0.4, "scuffs": 0.45
+      },
+      "stripes": { "color": "#e6dcc6", "periodM": 0.03, "duty": 0.28, "dir": [0.94, 0.34], "mirrorX": false }
+    },
+    "paint_orange": {
+      "color": "#c55a1e", "roughness": 0.5, "metalness": 0.0, "clearcoat": 0.3, "clearcoatRoughness": 0.45,
+      "weather": {
+        "wear": 0.65, "wearColor": "#a9aaa6", "wearRoughness": 0.38, "wearMetalness": 0.85, "primerColor": "#6b675f",
+        "grime": 0.9, "grimeColor": "#1f1810", "streaks": 0.5, "dust": 0.2, "variation": 0.18, "fade": 0.1,
+        "roughVar": 0.35, "scuffs": 0.45
+      }
+    },
+    "metal_grey": {
+      "_note": "Grey paint with a metallic flake: reads as metal but not chrome.",
+      "color": "#8e959d", "roughness": 0.46, "metalness": 0.22, "clearcoat": 0.15, "clearcoatRoughness": 0.5,
+      "weather": {
+        "wear": 0.45, "wearColor": "#c4c6c8", "wearRoughness": 0.3, "wearMetalness": 0.95, "primerColor": "#55575a",
+        "grime": 0.8, "grimeColor": "#1f1810", "streaks": 0.25, "dust": 0.2, "variation": 0.1, "fade": 0.1,
+        "roughVar": 0.45, "scuffs": 0.3
+      }
+    },
+    "metal_dark": {
+      "color": "#2e3034", "roughness": 0.55, "metalness": 0.55, "clearcoat": 0,
+      "weather": {
+        "wear": 0.4, "wearColor": "#8e9194", "wearRoughness": 0.32, "wearMetalness": 0.9, "primerColor": null,
+        "grime": 0.6, "grimeColor": "#15110c", "streaks": 0.15, "dust": 0.2, "variation": 0.1, "fade": 0.0,
+        "roughVar": 0.5, "scuffs": 0.25
+      }
+    },
+    "rubber": {
+      "color": "#121213", "roughness": 0.9, "metalness": 0, "clearcoat": 0,
+      "weather": {
+        "wear": 0.0, "wearColor": "#2a2a2a", "wearRoughness": 0.9, "wearMetalness": 0, "primerColor": null,
+        "grime": 0.3, "grimeColor": "#0a0806", "streaks": 0.0, "dust": 0.6, "variation": 0.12, "fade": 0.25,
+        "roughVar": 0.1, "scuffs": 0.0
+      }
+    },
+    "accent_blue": {
+      "color": "#2a67c8", "roughness": 0.42, "metalness": 0.1, "clearcoat": 0.35, "clearcoatRoughness": 0.4,
+      "weather": {
+        "wear": 0.35, "wearColor": "#a9aaa6", "wearRoughness": 0.35, "wearMetalness": 0.85, "primerColor": "#5d5c58",
+        "grime": 0.7, "grimeColor": "#1f1810", "streaks": 0.2, "dust": 0.2, "variation": 0.12, "fade": 0.2,
+        "roughVar": 0.35, "scuffs": 0.35
+      }
+    },
+    "eye_lens": {
+      "_note": "H_*Eye_4 diffusion bulbs: frosted, lit from behind by the WS2812 jewel (leds.ts). Unweathered.",
+      "color": "#3a4048", "roughness": 0.35, "metalness": 0, "clearcoat": 0.6, "clearcoatRoughness": 0.1
+    },
+    "light_pipe": {
+      "_note": "Mic-Mouth-Split light pipe: translucent print, lit by the mouth V behind it (leds.ts). Unweathered.",
+      "color": "#2a2622", "roughness": 0.55, "metalness": 0, "clearcoat": 0
+    }
+  }
+}

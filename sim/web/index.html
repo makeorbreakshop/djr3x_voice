@@ -107,6 +107,14 @@
           <button data-cam="arms">Arms</button>
           <button data-cam="chest">Chest</button>
         </div>
+        <label class="inline" title="High adds ambient occlusion. The render scale adapts to hold 60 fps either way.">
+          Render quality
+          <select id="quality" aria-label="Render quality" style="width:auto">
+            <option value="high">High (AO)</option>
+            <option value="low">Low (no AO)</option>
+          </select>
+          <output id="render-scale" class="hint" style="margin:0"></output>
+        </label>
       </section>
     </aside>
     <script type="module" src="/src/main.ts"></script>

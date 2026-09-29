@@ -31,10 +31,16 @@ const LED_GAIN = 6;
 /** Mouth V (left arm, top to tip) as fractions of the lit part's half-width / half-height. */
 const MOUTH_V: [number, number][] = [[-0.82, 0.8], [-0.58, 0.3], [-0.34, -0.22], [-0.1, -0.74]];
 
-/** Linear LED light after FastLED.setBrightness(128). */
+/**
+ * Linear LED light after FastLED.setBrightness(128). A WS2812 channel value is a PWM duty
+ * cycle, so it is already linear light - decoding it as sRGB would dim a half-lit LED to
+ * a fifth and push every mixed colour toward its dominant primary (the amber idle eyes
+ * came out deep red), leaving nothing bright enough for the tone mapper to whiten the
+ * core the way a camera sees a real LED.
+ */
 export function ledColor(rgb: RGB, out: THREE.Color): THREE.Color {
   const k = (OUTPUT_BRIGHTNESS + 1) / 256 / 255;
-  return out.setRGB(rgb[0] * k, rgb[1] * k, rgb[2] * k, THREE.SRGBColorSpace);
+  return out.setRGB(rgb[0] * k, rgb[1] * k, rgb[2] * k, THREE.LinearSRGBColorSpace);
 }
 
 // ------------------------------------------------------------------ diffuser shader
@@ -208,7 +214,7 @@ export class FaceLeds {
       }
       // sigma ~ bulb depth: the frosted bulb glows through its whole body, as a real
       // diffuser does, rather than only at the face nearest the jewel.
-      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.05, 0.1, LED_GAIN * 2.2);
+      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.05, 0.1, LED_GAIN * 3.5);
     };
     const [first, second] = LEFT_EYE_IS_DROIDS_LEFT ? (['L', 'R'] as const) : (['R', 'L'] as const);
     this.left = eye(first);
