@@ -128,3 +128,6 @@ cantina_os/.requirements_installed
 
 # Phase 0 bus-tap session logs (large, per run)
 logs/session-*.jsonl
+
+# Rust crate test data is committed
+!rust/crates/*/tests/data/
