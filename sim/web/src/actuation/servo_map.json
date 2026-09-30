@@ -1,5 +1,5 @@
 {
-  "_doc": "Actuation profiles. The printable kit is static; 'r3x_animation' is the mechanics of the motorised build in Drive MOB/Projects/DJ-R3X/R-3X Animation (parts list '07 - r3x hardware.txt', sample show '08 - r3x maestro sample script.txt'): 8 servos, channel numbers as that script uses them. That build used a Pololu Maestro; ours will be a custom controller, so the controller here is 'custom' - the sim's pipeline (calibration, soft limits, jerk-limited follower, pulse output) is the reference for its firmware (sim/docs/motion-control.md section 8). 'extended' keeps those 8 and adds arm/claw servos on the Maestro's spare channels. Ring gear ratios are measured from the ring-animation STLs (inner-gear sector pitch radius / servo gear). Anything marked calibration 'assumed' (centreUs, invert, neck and lift gearing) must be set on the bench: jog each servo to the model's rest pose and record the pulse. Motion limits are ~70% of loaded capability (sim/docs/motion-control.md). Joints without a channel are posable only.",
+  "_doc": "Actuation profiles. The printable kit is static; 'r3x_animation' is the mechanics of the motorised build in Drive MOB/Projects/DJ-R3X/R-3X Animation (parts list '07 - r3x hardware.txt', sample show '08 - r3x maestro sample script.txt'): 8 servos, channel numbers as that script uses them. That build used a Pololu Maestro; ours will be a custom controller, so the controller here is 'custom' - the sim's pipeline (calibration, soft limits, jerk-limited follower, pulse output) is the reference for its firmware (sim/docs/motion-control.md section 8). 'extended' keeps those 8 and adds arm/claw servos on the Maestro's spare channels. Ring gear ratios are measured from the ring-animation STLs (inner-gear sector pitch radius / servo gear). Anything marked calibration 'assumed' (centreUs, invert, neck and lift gearing) must be set on the bench: jog each servo to the rest pose (every joint 0: show/SPEC.md 'Frame and zeros', not the kit's display pose) and record the pulse. Motion limits are ~70% of loaded capability (sim/docs/motion-control.md). Joints without a channel are posable only.",
   "default": "r3x_animation",
   "profiles": {
     "r3x_animation": {
@@ -12,7 +12,7 @@
           "calibration": "assumed", "note": "Script centre 5961 qus = 1490 us. Neck-gear ratio not yet measured (1.5 assumed)." },
         { "ch": 1, "name": "headlift", "servo": "SERVO_60KG_270", "gear": 1.0, "joints": { "head_lift": 1 },
           "mmPerDeg": 0.21, "centerUs": 1500, "centerValue": 0, "margin": 1, "vMax": 40, "aMax": 300, "jMax": 4000,
-          "calibration": "assumed", "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = kit pose (0 mm), 800-2200 us = +/-20 mm." },
+          "calibration": "assumed", "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = rest (0 mm), 800-2200 us = +/-20 mm." },
         { "ch": 2, "name": "headtilt", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "head_tilt": 1 },
           "centerUs": 1124, "margin": 4, "vMax": 100, "aMax": 400, "jMax": 3000, "calibration": "assumed" },
         { "ch": 3, "name": "visor", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "visor": 1 },
@@ -20,15 +20,15 @@
           "note": "Push-rod linkage treated as 1:1. Script flaps 4956 <-> 5297 qus (~11 deg)." },
         { "ch": 4, "name": "elbow", "servo": "DS3218_DUAL", "gear": 1.0, "joints": { "hero_shoulder": 1 },
           "centerUs": 1840, "margin": 5, "vMax": 120, "aMax": 500, "jMax": 3000, "calibration": "assumed",
-          "note": "20 kg double-shaft servo in the hero-arm elbow disc. Script 'up' 7361 qus = model pose." },
+          "note": "20 kg double-shaft servo in the hero-arm elbow disc. Script 'up' 7361 qus = rest." },
         { "ch": 5, "name": "hand", "servo": "SERVO_7KG", "gear": 1.0, "joints": { "hero_wrist": 1 },
           "centerUs": 1504, "margin": 4, "vMax": 180, "aMax": 900, "jMax": 6000, "calibration": "assumed" },
         { "ch": 6, "name": "lowarm", "servo": "SERVO_35KG_270", "gear": 3.8, "joints": { "torso_lower": 1 },
           "centerUs": 1504, "margin": 3, "vMax": 40, "aMax": 120, "jMax": 800,
-          "note": "Lower ring: 22T-class servo gear into a ~98 deg internal sector (~3.8:1), carries the poker arm." },
+          "note": "Lower ring: 22T-class servo gear into a ~98 deg internal sector (~3.8:1), carries the poker arm. Script centre 6016 qus ('middle', between 'front' 3200 and 'back' 8832) = rest." },
         { "ch": 7, "name": "heroarm", "servo": "SERVO_35KG_270", "gear": 4.4, "joints": { "torso_top": 1 },
           "centerUs": 1511, "margin": 3, "vMax": 40, "aMax": 120, "jMax": 800,
-          "note": "Top ring: servo gear into a ~61 deg internal sector (~4.4:1), carries the hero arm." }
+          "note": "Top ring: servo gear into a ~61 deg internal sector (~4.4:1), carries the hero arm. Script centre 6043 qus ('center', between 'front' 3200 and 'back' 8832) = rest." }
       ]
     },
     "extended": {
