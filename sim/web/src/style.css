@@ -25,7 +25,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #panel { position: fixed; top: 12px; right: 12px; bottom: 12px; width: 380px; display: flex; flex-direction: column;
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 0;
   backdrop-filter: blur(8px); }
-#panel.wide { width: min(760px, 58vw); }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
 h1 span { color: var(--accent); font-weight: 500; }
@@ -40,7 +39,7 @@ section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px
 .pill.live.on { color: #57d38c; border-color: #1f5a3a; }
 .pill[hidden] { display: none; }
 
-#caption { position: fixed; left: 16px; bottom: 16px; right: var(--panel-space, 404px); max-width: 640px; pointer-events: none;
+#caption { position: fixed; left: var(--scene-space, 12px); bottom: 16px; right: var(--panel-space, 404px); max-width: 640px; pointer-events: none;
   font-size: 14px; line-height: 1.45; }
 #caption > div { background: rgba(10,11,15,.72); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 10px; margin-top: 6px; }
@@ -75,15 +74,9 @@ output { font: 12px ui-monospace, Menlo, monospace; min-width: 2.5em; text-align
 #serial-log li .tx { color: var(--accent); }
 #serial-log li .rx { color: var(--accent-2); }
 
-#joints { margin-top: 6px; }
-.joint { display: grid; grid-template-columns: 108px 1fr 40px; align-items: center; gap: 6px; margin: 2px 0; }
-.joint span { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-.joint input { width: 100%; }
-.joint output { font-size: 11px; }
-.joint.group { margin-top: 8px; color: var(--muted); font-size: 11px; display: block; }
 
 @media (max-width: 720px) {
-  #panel, #panel.wide { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 52vh; }
+  #panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 52vh; }
 }
 
 select, textarea { width: 100%; background: #0f1117; color: var(--text); border: 1px solid var(--line);
@@ -95,9 +88,6 @@ table.servos td { color: var(--muted); padding: 1px 4px 1px 0; white-space: nowr
 table.servos td.us { color: var(--accent); text-align: right; }
 table.servos td.meh { color: var(--warn); }
 table.servos td.bad { color: #ff6b6b; }
-.joint { grid-template-columns: 96px 1fr 34px 30px; }
-.joint i { font: normal 10px ui-monospace, Menlo, monospace; color: #5b6170; }
-.joint.posable span { color: #5b6170; }
 
 .subs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .subs label.sub { margin: 2px 0; font-size: 12px; }
@@ -139,8 +129,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0
 .tab-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -14px; padding: 12px 14px 20px; }
 .tab-body[hidden] { display: none; }
 .tab-body > section.first { border-top: 0; margin-top: 0; padding-top: 0; }
-.tab-body[data-body="talk"], .tab-body[data-body="logs"] { display: flex; flex-direction: column; }
-.tab-body[data-body="talk"][hidden], .tab-body[data-body="logs"][hidden] { display: none; }
+.tab-body[data-body="talk"] { display: flex; flex-direction: column; }
+.tab-body[data-body="talk"][hidden] { display: none; }
 
 .note { margin: 0 0 12px; padding: 9px 11px; border-radius: 8px; border: 1px solid #5a4418;
   background: rgba(255,179,71,.07); color: #e7c48a; font-size: 12px; line-height: 1.5; }
@@ -172,7 +162,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0
 .seg { margin-top: 4px; }
 .seg button.on { border-color: var(--accent); color: var(--accent); }
 
-.state-badge { position: fixed; top: 16px; left: 16px; padding: 5px 10px 5px 24px; border-radius: 99px;
+.state-badge { position: fixed; top: 16px; left: calc(var(--scene-space, 12px) + 4px); padding: 5px 10px 5px 24px; border-radius: 99px;
   border: 1px solid var(--line); background: rgba(10,11,15,.72); color: var(--muted);
   font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase;
   pointer-events: none; }
@@ -186,7 +176,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0
 .state-badge[data-state="speaking"]::before { background: #57d38c; }
 
 /* conversation */
-.tab-body > h2 { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.talk-live { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tab-body > h2, .talk-live > h2 { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 button.link { flex: 0 0 auto; margin-left: auto; background: none; border: 0; padding: 0; color: var(--muted);
   font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 button.link:hover { color: var(--text); }
@@ -262,20 +253,9 @@ h2 .pill.on { color: #57d38c; border-color: #1f5a3a; }
 .stage-modes button { flex: 1; }
 .warn-line { color: var(--warn); margin: 0 0 6px; }
 .warn-line[hidden] { display: none; }
-details.advanced { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
-details.advanced > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-details.advanced > section:first-of-type { border-top: 0; }
 
 /* The embedded demo's own controls: only while no runtime is connected. */
 body.live [data-offline] { display: none !important; }
-
-/* Scene control (scene.ts): backdrop + work light, over the 3D view, every mode. */
-.scene-ctl { position: fixed; top: 12px; left: 132px; display: flex; gap: 6px; align-items: center; z-index: 4; }
-.scene-ctl[hidden] { display: none; }
-.scene-ctl select, .scene-ctl button { width: auto; padding: 4px 8px; border-radius: 99px; font-size: 12px;
-  background: rgba(10,11,15,.72); border: 1px solid var(--line); color: var(--text); }
-.scene-ctl button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-@media (max-width: 720px) { .scene-ctl { left: auto; right: 12px; } }
 
 /* DJ */
 .dj-info { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; font-size: 12px; }
@@ -296,17 +276,105 @@ h3 { font-size: 11px; color: var(--muted); font-weight: 600; margin: 12px 0 6px;
 .centre-label.hot { color: #5cf0ff; background: rgba(5,7,10,.85); z-index: 1; }
 .centre-label.dim { opacity: .35; }
 .centre-label[hidden] { display: none; }
-.scene-ctl .home-btn, #drive-home { font-weight: 600; }
-.scene-ctl .home-btn { border-color: var(--accent); color: var(--accent); }
-.scene-note { font-size: 11px; color: var(--muted); background: rgba(10,11,15,.72); padding: 3px 8px; border-radius: 99px; }
-.scene-note[hidden], .scene-ctl [hidden] { display: none; }
 #home-state.on { color: #57d38c; }
-.joints-table { width: 100%; border-collapse: collapse; font: 11px/1.5 ui-monospace, Menlo, monospace; }
-.joints-table td { padding: 1px 4px; border-bottom: 1px solid var(--line); }
-.joints-table td.num { text-align: right; color: var(--text); }
+
+/* ================================================================== side panels
+   Scene (left): how this viewer sees R3X. R3X (right, #panel): what he does. */
+#scene-panel { position: fixed; top: 12px; left: 12px; bottom: 12px; width: 240px; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 0;
+  backdrop-filter: blur(8px); z-index: 6; }
+#scene-panel header { margin-bottom: 4px; }
+.side-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -14px; padding: 8px 14px 20px; }
+.side-body > section.first { border-top: 0; margin-top: 0; padding-top: 4px; }
+.side-body section[hidden] { display: none; }
+button.icon { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; }
+button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.rail { display: none; flex-direction: column; gap: 6px; margin-top: 8px; }
+.rail button { flex: 0 0 auto; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; color: var(--muted); }
+.rail button:hover { color: var(--text); }
+.rail button[hidden] { display: none; }
+body.scene-collapsed #scene-panel { width: 50px; padding: 8px; align-items: center; }
+body.scene-collapsed #scene-panel h1, body.scene-collapsed .side-body { display: none; }
+body.scene-collapsed #scene-panel header { margin: 0; }
+body.scene-collapsed #scene-collapse svg { transform: scaleX(-1); }
+body.scene-collapsed .rail { display: flex; }
+
+/* Toggles: pressed reads like a selected chip. */
+button[aria-pressed="true"], .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+.stack button { text-align: left; }
+label.field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+label.field select { margin: 0; }
+.kv { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+.kv output, .kv b { margin-left: auto; color: var(--text); font: 500 12px ui-monospace, Menlo, monospace; }
+.kv[hidden] { display: none; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Viewport overlays: the state chip, frame stats, captions (Scene -> Overlays). */
+.frame-stats { position: fixed; top: 46px; left: calc(var(--scene-space, 12px) + 4px); padding: 3px 8px; border-radius: 6px;
+  background: rgba(10,11,15,.72); border: 1px solid var(--line); color: var(--muted); pointer-events: none;
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.frame-stats[hidden] { display: none; }
+body.no-captions #caption { display: none; }
+.state-badge[data-state="bench"]::before { background: var(--warn); }
+.state-badge[data-state="studio"]::before { background: var(--accent-2); }
+.state-badge { text-transform: none; letter-spacing: .02em; }
+
+/* Offline, the runtime's own controls stand aside (the embedded demo's have data-offline). */
+body:not(.live) [data-live] { display: none !important; }
+
+/* Behaviour */
+details.override { margin-top: 4px; }
+details.override > summary, details.debug > summary, #show-system summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+details.override > summary { display: inline-block; font-size: 11px; }
+details.override[open] > summary { margin-bottom: 6px; }
+
+/* Shows */
+#shared-perf > section.first { border-top: 0; margin-top: 0; padding-top: 0; }
+#sh-search { width: 100%; margin-top: 6px; }
+.show-list li[hidden] { display: none; }
+
+/* Rig: Home, outputs by region, one joints table */
+.home-row { display: flex; align-items: center; gap: 12px; }
+.home-row .home-btn { flex: 0 0 auto; min-width: 120px; }
+.home-row .kv { margin: 0; }
+#home-state.on { color: #57d38c; }
+.out-group + .out-group { margin-top: 10px; }
+.og-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+.og-head small { color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
+.og-head button.link { margin-left: auto; font-size: 11px; }
+button.link:disabled { opacity: .4; }
+.table-wrap { overflow-x: auto; }
+.joints-table { width: 100%; border-collapse: collapse; font: 11px/1.5 ui-monospace, Menlo, monospace; table-layout: fixed; }
+.joints-table thead th { text-align: left; color: #5b6170; font-weight: 500; padding: 0 4px 2px; }
+.joints-table th:first-child { width: 92px; }
+.joints-table th.num, .joints-table td.num { text-align: right; width: 58px; }
+.joints-table th:last-child { width: 50px; }
+.joints-table td, .joints-table tbody th { padding: 1px 4px; border-bottom: 1px solid var(--line); font-weight: 400; text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.joints-table tr.grp th { padding-top: 8px; color: var(--muted); font: 600 10px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
+.joints-table td.num { color: var(--text); }
 .joints-table td.home { color: var(--muted); }
-.joints-table tr.off td.num { color: #ffc94d; }
-.joints-table tr:hover td { background: rgba(92,240,255,.07); }
-.joints-table button { width: auto; padding: 0 6px; font-size: 10px; }
-.scene-ctl { flex-wrap: wrap; right: calc(var(--panel-space, 0px) + 12px); }
-.scene-ctl > * { flex: 0 0 auto; }
+.joints-table tr.off td.num:not(.home) { color: #ffc94d; }
+.joints-table tr[data-joint]:hover > * { background: rgba(92,240,255,.07); }
+.joints-table td.jog input { width: 100%; margin: 0; }
+.joints-table button { width: 100%; padding: 0 4px; font-size: 10px; }
+
+/* System: logs in the panel read in two lines (time, level, source; then the message). */
+section.logs .log { height: min(46vh, 420px); flex: none; }
+section.logs .log li { grid-template-columns: 52px 34px 1fr; }
+section.logs .log li span { grid-column: 1 / -1; }
+details.debug { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+details.debug[open] > summary { margin-bottom: 8px; }
+details.debug small { opacity: .7; }
+
+@media (max-width: 1200px) {
+  #scene-panel { width: 216px; }
+  #panel { width: 344px; }
+}
+@media (max-width: 720px) {
+  #scene-panel { top: 8px; left: 8px; bottom: auto; max-height: 44vh; }
+  body.scene-collapsed #scene-panel { max-height: none; }
+}
+.seg button { min-width: 0; }
+.side .seg button { padding-inline: 2px; }

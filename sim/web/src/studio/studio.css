@@ -1,6 +1,6 @@
 /* Studio dock: bottom of the stage, the whole width left of the control panel (never under
    it). Dense, monospace numbers. */
-.studio { position: fixed; left: 12px; right: var(--panel-space, 404px); bottom: 12px; height: clamp(260px, 46vh, 540px);
+.studio { position: fixed; left: var(--scene-space, 12px); right: var(--panel-space, 404px); bottom: 12px; height: clamp(260px, 46vh, 540px);
   display: flex; flex-direction: column; background: rgba(11, 13, 18, .96); border: 1px solid var(--line);
   border-radius: 10px; overflow: hidden; z-index: 5; font-size: 12px; }
 .studio[hidden] { display: none; }

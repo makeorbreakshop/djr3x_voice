@@ -1,7 +1,10 @@
 /**
- * The control panel around the 3D droid: operating mode, push-to-talk, typed turns, the
- * conversation, the Drive panel (brain/autonomy/freeze, alive layers, emotes, outputs),
- * music / DJ, an advanced console, service health, and the live log + event stream.
+ * The R3X panel (right): what he does. The Show / Bench / Studio switch picks the tabs -
+ * Show: Talk (push-to-talk, typed turns, the conversation), Perform (emotes and shows, placed
+ * by main.ts; DJ; music), Behaviour (brain, autonomy, alive layers, gaze, engagement);
+ * Bench: Rig (Home, outputs by body region, joints, calibrate), Test (the same emotes and
+ * shows); every mode: System (services, logs + events, debug views). The Scene panel (left,
+ * scenepanel.ts) is how the viewer sees him and never changes his state.
  *
  * Every action is a typed command to the r3x gateway and waits for its ack; state comes from
  * the gateway's retained state, and the runtime's log lines come from the gateway too. The
@@ -15,6 +18,8 @@ import type { OperatingMode } from './generated/OperatingMode';
 import { accessToken, LiveLink, LogRecord } from './link';
 import { mountCalibrate } from './calibrate';
 import * as Ptt from './ptt';
+import { BodyRegions } from './regions';
+import type { RobotProfile } from './generated/RobotProfile';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -32,6 +37,10 @@ const reason = (a: Ack) => (a.status === 'rejected' ? a.reason : '');
 const TRACING_LEVEL: Record<string, string> = { DEBUG: 'debug', INFO: 'info', WARNING: 'warn', ERROR: 'error' };
 
 type Phase = 'offline' | 'idle' | 'engaging' | 'listening' | 'thinking' | 'speaking';
+const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+/** The first tab of each operating mode, until the operator picks another. */
+const DEFAULT_TAB: Record<OperatingMode, string> = { show: 'talk', bench: 'rig', studio: 'system' };
+const TABS_KEY = 'r3x.tabs';
 
 interface Turn {
   id: string;
@@ -52,7 +61,10 @@ export class ControlPanel {
   readonly gw: GatewayClient;
   private connected = false;
   private mode = 'IDLE';
-  private emotes: string[] = [];
+  /** Show / Bench / Studio: the runtime's, or the local pick while offline. */
+  private stageMode: OperatingMode = 'show';
+  private regions: BodyRegions | null = null;
+  private tabFor: Record<string, string> = { ...DEFAULT_TAB };
   private phase: Phase = 'offline';
   private ptt: Ptt.PttState = Ptt.initial();
   /** Where `music.position_s` was, by the page clock (for the DJ countdown). */
@@ -67,7 +79,7 @@ export class ControlPanel {
   private logPaused = false;
   private logKinds = new Set(['log', 'event']);
   private errCount = 0;
-  private activeTab = 'talk';
+  private activeTab = '';
   private cliHistory: string[] = [];
   private cliIndex = -1;
 
@@ -95,6 +107,7 @@ export class ControlPanel {
     mountCalibrate(this.gw, $('drive'), (m) => this.toast(m));
     this.bindLogs();
     this.renderEyes();
+    this.applyMode('show', true);
     this.setPhase('offline');
     this.pttInput({ kind: 'link', connected: false });
     if (!new URLSearchParams(location.search).has('offline')) this.gw.start();
@@ -115,7 +128,7 @@ export class ControlPanel {
     $('offline-note').hidden = on;
     for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !on;
     const pill = $('st-gw');
-    pill.textContent = on ? 'R3X' : 'NO R3X';
+    pill.textContent = on ? 'Connected' : 'Offline';
     pill.classList.toggle('on', on);
     this.pttInput({ kind: 'link', connected: on });
     if (!on) {
@@ -125,7 +138,7 @@ export class ControlPanel {
   }
 
   private onHello(h: Hello) {
-    this.emotes = h.profile?.emotes ?? [];
+    this.regions = h.profile ? new BodyRegions(h.profile as RobotProfile) : null;
     this.render(h.state);
   }
 
@@ -173,16 +186,15 @@ export class ControlPanel {
   /** Engagement (STARTUP/IDLE/AMBIENT/INTERACTIVE). */
   private setMode(m: Engagement) {
     this.mode = m.toUpperCase();
+    $('eng-now').textContent = title(m);
     document.querySelectorAll<HTMLButtonElement>('[data-engage]').forEach((b) =>
       b.classList.toggle('on', b.dataset.engage === m));
   }
 
   /** Operating mode (Show/Bench/Studio). */
   private setStage(s: RetainedState) {
-    document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
-      b.classList.toggle('on', b.dataset.stageMode === s.stage.mode));
+    if (s.stage.mode !== this.stageMode) this.applyMode(s.stage.mode);
     const brainOff = !s.stage.brain;
-    $('brain-off').hidden = !brainOff || !this.connected;
     for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
     if (this.ptt.enabled === brainOff) this.pttInput({ kind: 'enabled', enabled: !brainOff });
   }
@@ -190,13 +202,64 @@ export class ControlPanel {
   private setPhase(p: Phase) {
     if (!this.connected) p = 'offline';
     this.phase = p;
+    this.renderChip();
+  }
+
+  /** The viewport's one state chip: mode, and the conversation phase when it says something. */
+  private renderChip() {
+    const p = this.phase;
     const labels: Record<Phase, string> = {
-      offline: 'offline', idle: this.mode.toLowerCase(), engaging: 'engaging…', listening: 'listening',
-      thinking: 'thinking', speaking: 'speaking',
+      offline: 'Offline', idle: title(this.mode), engaging: 'Engaging…', listening: 'Listening',
+      thinking: 'Thinking', speaking: 'Speaking',
     };
     const badge = $('state-badge');
-    badge.dataset.state = p;
-    badge.textContent = labels[p];
+    const mode = title(this.stageMode);
+    if (!this.connected) {
+      badge.dataset.state = 'offline';
+      badge.textContent = this.stageMode === 'studio' ? 'Studio · Offline' : 'Offline';
+    } else if (this.stageMode === 'show') {
+      badge.dataset.state = p;
+      badge.textContent = `${mode} · ${labels[p]}`;
+    } else {
+      badge.dataset.state = p === 'idle' ? this.stageMode : p;
+      badge.textContent = p === 'idle' ? mode : `${mode} · ${labels[p]}`;
+    }
+  }
+
+  /** Offline there is no StageManager: the page's own mode pick (main.ts). */
+  setLocalMode(mode: OperatingMode) {
+    if (!this.connected) this.applyMode(mode);
+  }
+
+  /**
+   * Show / Bench / Studio: the switch, the tabs that mode has (each mode remembers its last
+   * tab), and where the one set of emote/show controls sits (Perform in Show, Test in Bench).
+   */
+  private applyMode(mode: OperatingMode, boot = false) {
+    this.stageMode = mode;
+    document.body.dataset.mode = mode;
+    document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) => {
+      const on = b.dataset.stageMode === mode;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
+      (b.hidden = !(b.dataset.modes ?? '').split(' ').includes(mode)));
+    const slot = $(mode === 'bench' ? 'test-slot' : 'perform-slot');
+    const shared = $('shared-perf');
+    if (shared.parentElement !== slot) slot.appendChild(shared);
+    if (boot) {
+      try {
+        Object.assign(this.tabFor, JSON.parse(localStorage.getItem(TABS_KEY) ?? '{}'));
+      } catch {
+        /* storage blocked */
+      }
+    }
+    const want = this.tabFor[mode];
+    const ok = (t: string) => !!document.querySelector<HTMLButtonElement>(`[data-tab="${t}"]:not([hidden])`);
+    this.showTab(ok(want) ? want : DEFAULT_TAB[mode]);
+    this.renderChip();
+    window.dispatchEvent(new CustomEvent('r3x:mode', { detail: mode }));
   }
 
   /** Feed the push-to-talk machine; send what it asks for. True when a key event was ours. */
@@ -264,35 +327,50 @@ export class ControlPanel {
   // ------------------------------------------------------------------ tabs
 
   private bindTabs() {
+    const tabs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tab]:not([hidden])'));
     document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => {
-      b.onclick = () => this.showTab(b.dataset.tab!);
+      const body = document.querySelector<HTMLElement>(`[data-body="${b.dataset.tab}"]`)!;
+      body.id ||= `body-${b.dataset.tab}`;
+      body.setAttribute('aria-labelledby', (b.id = `tab-${b.dataset.tab}`));
+      b.setAttribute('aria-controls', body.id);
+      b.onclick = () => this.pickTab(b.dataset.tab!);
+      // Arrow keys move between the visible tabs (one tab stop for the whole strip).
+      b.onkeydown = (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        const list = tabs();
+        const next = list[(list.indexOf(b) + (e.key === 'ArrowRight' ? 1 : list.length - 1)) % list.length];
+        e.preventDefault();
+        next.focus();
+        this.pickTab(next.dataset.tab!);
+      };
     });
-    let saved: string | null = null;
+  }
+
+  /** The operator picked a tab: remembered for the current mode. */
+  private pickTab(name: string) {
+    this.tabFor[this.stageMode] = name;
     try {
-      saved = localStorage.getItem('r3x.tab');
+      localStorage.setItem(TABS_KEY, JSON.stringify(this.tabFor));
     } catch {
       /* storage blocked */
     }
-    if (saved && document.querySelector(`[data-tab="${saved}"]`)) this.showTab(saved);
+    this.showTab(name);
   }
 
   private showTab(name: string) {
+    if (name === this.activeTab) return;
     this.activeTab = name;
-    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
-      b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => {
+      const on = b.dataset.tab === name;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+    });
     document.querySelectorAll<HTMLElement>('[data-body]').forEach((el) => (el.hidden = el.dataset.body !== name));
-    $('panel').classList.toggle('wide', name === 'logs');
-    if (name === 'logs') {
+    if (name === 'system') {
       this.errCount = 0;
       this.renderErrCount();
       this.scrollLog();
     }
-    try {
-      localStorage.setItem('r3x.tab', name);
-    } catch {
-      /* storage blocked */
-    }
-    window.dispatchEvent(new Event('resize')); // the 3D view re-centres in the space left
   }
 
   // ------------------------------------------------------------------ talk
@@ -532,20 +610,20 @@ export class ControlPanel {
   // ------------------------------------------------------------------ drive
 
   private bindDrive() {
-    $('drive').addEventListener('click', (e) => {
+    $('panel').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
       const s = this.gw.state?.stage;
       if (!b || !s) return;
       const d = b.dataset;
       if (d.toggle === 'brain') void this.cmd({ class: 'stage', type: 'set_brain', enabled: !s.brain });
       else if (d.toggle === 'autonomy') void this.cmd({ class: 'stage', type: 'set_autonomy', enabled: !s.autonomy });
-      else if (d.toggle === 'freeze') void this.cmd({ class: 'stage', type: 'freeze', on: !s.frozen });
       else if (d.layer) void this.cmd({ class: 'stage', type: 'set_layer', layer: d.layer, enabled: !s.layers[d.layer] });
       else if (d.output) void this.cmd({ class: 'stage', type: 'set_output', output: d.output, enabled: !s.outputs[d.output] });
-      else if (d.emote) void this.cmd({ class: 'perf', type: 'emote', slot: Number(d.emote) });
-      else if (d.outputs) {
-        const enabled = d.outputs === 'on';
-        for (const output of Object.keys(s.outputs)) {
+      else if (d.group) {
+        // All on, unless they already are: then all off.
+        const names = this.outputGroups(s).find(([r]) => r === d.group)?.[1] ?? [];
+        const enabled = !names.every((o) => s.outputs[o]);
+        for (const output of names) {
           if (s.outputs[output] !== enabled) void this.cmd({ class: 'stage', type: 'set_output', output, enabled });
         }
       }
@@ -553,22 +631,40 @@ export class ControlPanel {
   }
 
   private renderDrive(s: RetainedState) {
+    // The chips are re-rendered on every state update: keep keyboard focus on the same control.
+    const f = document.activeElement as HTMLElement | null;
+    const key = f?.closest('#drive-toggles, #drive-layers, #drive-outputs')
+      ? ['toggle', 'layer', 'output', 'group'].map((k) => (f.dataset[k] ? `[data-${k}="${CSS.escape(f.dataset[k]!)}"]` : '')).join('')
+      : '';
+    this.drawDrive(s);
+    if (key) document.querySelector<HTMLElement>(key)?.focus();
+  }
+
+  private drawDrive(s: RetainedState) {
     const st = s.stage;
     const chip = (attr: string, value: string, label: string, on: boolean, title = '') =>
       `<button class="chip${on ? ' on' : ''}" data-${attr}="${esc(value)}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
     $('drive-toggles').innerHTML = [
-      chip('toggle', 'brain', 'Brain (voice + LLM)', st.brain, 'Accept spoken and typed turns'),
-      chip('toggle', 'autonomy', 'Autonomy (idle + DJ)', st.autonomy, 'Idle policy and DJ autonomy'),
-      chip('toggle', 'freeze', st.frozen ? 'Frozen - release' : 'Freeze motion', st.frozen, 'Stop every run and refuse new ones'),
+      chip('toggle', 'brain', 'Brain', st.brain, 'Voice + LLM: accept spoken and typed turns'),
+      chip('toggle', 'autonomy', 'Autonomy', st.autonomy, 'Idle policy and DJ autonomy'),
     ].join('');
-    $('drive-layers').innerHTML = Object.keys(st.layers).map((l) => chip('layer', l, l.replace(/_/g, ' '), st.layers[l])).join('')
+    $('drive-layers').innerHTML = Object.keys(st.layers).map((l) => chip('layer', l, l.replace(/_/g, ' '), st.layers[l], 'Procedural motion')).join('')
       || '<span class="hint">No alive layers in the profile.</span>';
-    $('drive-emotes').innerHTML = this.emotes.map((cue, i) => `<button class="chip" data-emote="${i}" title="slot ${i + 1}">${esc(cue.replace(/_/g, ' '))}</button>`).join('')
-      || '<span class="hint">No emotes in the profile.</span>';
     const outs = Object.keys(st.outputs);
-    $('drive-outputs').innerHTML = outs.map((o) => chip('output', o, o, st.outputs[o])).join('');
-    $('drive-out-summary').textContent = `${outs.filter((o) => st.outputs[o]).length} of ${outs.length} on`;
-    for (const b of Array.from($('drive-emotes').querySelectorAll('button'))) (b as HTMLButtonElement).disabled = st.frozen;
+    $('drive-outputs').innerHTML = this.outputGroups(st).map(([region, names]) => {
+      const n = names.filter((o) => st.outputs[o]).length;
+      const all = n === names.length;
+      return `<div class="out-group"><div class="og-head"><span>${esc(region)}</span><small>${n} / ${names.length}</small>
+        <button class="link" data-group="${esc(region)}" aria-label="${all ? 'All off' : 'All on'}: ${esc(region)}">${all ? 'all off' : 'all on'}</button></div>
+        <div class="chips">${names.map((o) => chip('output', o, o, st.outputs[o])).join('')}</div></div>`;
+    }).join('');
+    $('drive-out-summary').textContent = outs.length ? `${outs.filter((o) => st.outputs[o]).length} of ${outs.length} on` : '';
+  }
+
+  /** The outputs by body region (regions.ts), in the profile's order. */
+  private outputGroups(st: { outputs: Record<string, boolean> }) {
+    const outs = Object.keys(st.outputs);
+    return this.regions ? this.regions.group(outs, (o) => this.regions!.ofOutput(o)) : [['Outputs', outs] as [string, string[]]];
   }
 
   private renderEyes() {
@@ -617,6 +713,7 @@ export class ControlPanel {
         if (this.logKinds.has(k)) this.logKinds.delete(k);
         else this.logKinds.add(k);
         b.classList.toggle('on', this.logKinds.has(k));
+        b.setAttribute('aria-pressed', String(this.logKinds.has(k)));
         this.applyLogFilter();
       };
     });
@@ -646,7 +743,7 @@ export class ControlPanel {
     li.innerHTML = `<time>${clockTime(r.t)}</time><b>${esc(r.level.slice(0, 4))}</b><i>${esc(short)}</i><span>${esc(r.msg)}</span>`;
     li.dataset.text = `${r.level} ${r.name} ${r.msg}`.toLowerCase();
     this.appendLogRow(li, replay);
-    if (!replay && (r.level === 'ERROR' || r.level === 'CRITICAL') && this.activeTab !== 'logs') {
+    if (!replay && (r.level === 'ERROR' || r.level === 'CRITICAL') && this.activeTab !== 'system') {
       this.errCount++;
       this.renderErrCount();
     }

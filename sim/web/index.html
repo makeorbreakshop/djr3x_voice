@@ -6,69 +6,117 @@
     <title>DJ R3X Control</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
-  <body>
+  <body data-mode="show">
     <div id="stage"></div>
     <div id="loading">Loading R3X&hellip;</div>
     <div id="caption" hidden><div id="cap-heard"></div><div id="cap-said"></div></div>
-    <div id="state-badge" class="state-badge" data-state="offline">offline</div>
-    <div id="scene-ctl" class="scene-ctl" hidden>
-      <select id="scene-bg" aria-label="Background" title="What R3X stands in front of">
-        <option value="booth">Booth</option>
-        <option value="grey">Studio grey</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-      <select id="quality" aria-label="Render quality" title="Render quality. Balanced (default): 1.25x scale, lighter AO, draws only as often as the picture changes. High: 1.5x, full AO, 60 fps while anything moves fast. Performance: 1x, no AO, lowest rates.">
-        <option value="performance">Performance</option>
-        <option value="balanced">Balanced</option>
-        <option value="high">High</option>
-      </select>
-      <button id="scene-work" aria-pressed="false" title="Work light: soft key, fill and rim, independent of the stage lights">Work light</button>
-      <button id="scene-centres" aria-pressed="false" title="Centres: each joint's range, its 0 (home) tick and where it is now">Centres</button>
-      <select id="gaze-src" aria-label="Gaze target" title="What R3X's head looks at in Show (Bench and Studio ignore it)" hidden>
-        <option value="viewport">Gaze: view</option>
-        <option value="vision">Gaze: face</option>
-        <option value="audio" disabled>Gaze: sound (later)</option>
-        <option value="off">Gaze: off</option>
-      </select>
-      <span id="gaze-owner" class="scene-note" hidden></span>
-      <button id="scene-home" class="home-btn" title="Home: stop every run, release the puppet, alive layers and autonomy off, ease every joint to its home pose" hidden>Home</button>
-    </div>
+    <div id="state-badge" class="state-badge" data-state="offline" role="status">Offline</div>
+    <div id="frame-stats" class="frame-stats" hidden></div>
     <div id="centre-labels" class="centre-labels" hidden></div>
 
-    <aside id="panel">
+    <!-- ================================================================ Scene (how you see him) -->
+    <aside id="scene-panel" class="side" aria-label="Scene">
       <header>
-        <h1>DJ R3X <span>control</span></h1>
+        <h1>Scene</h1>
+        <button id="scene-collapse" class="icon" aria-expanded="true" aria-controls="scene-body" title="Collapse to icons">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
+      </header>
+      <nav class="rail" aria-label="Scene sections">
+        <button data-scene-open="sc-view" aria-label="View" title="View">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="10" height="8" rx="1.5" /><path d="m11.5 7 3-2v7l-3-2" /></svg>
+        </button>
+        <button data-scene-open="sc-env" aria-label="Environment" title="Environment">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></svg>
+        </button>
+        <button data-scene-open="sc-overlays" aria-label="Overlays" title="Overlays">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 1.5 5.5 8 9l6.5-3.5z" /><path d="m1.5 8.5 6.5 3.5 6.5-3.5" /></svg>
+        </button>
+        <button data-scene-open="sc-perf" aria-label="Performance" title="Performance">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 12a6 6 0 1 1 12 0" /><path d="m8 12 3-4" /></svg>
+        </button>
+      </nav>
+      <div id="scene-body" class="side-body">
+        <section id="sc-view" class="first">
+          <h2>View</h2>
+          <div class="row seg" role="group" aria-label="Camera preset">
+            <button data-cam="full" aria-pressed="true">Full</button>
+            <button data-cam="face" aria-pressed="false">Face</button>
+            <button data-cam="arms" aria-pressed="false">Arms</button>
+            <button data-cam="chest" aria-pressed="false">Chest</button>
+          </div>
+          <div class="row"><button id="cam-reset" title="Back to the selected preset's framing">Reset camera</button></div>
+        </section>
+        <section id="sc-env">
+          <h2>Environment</h2>
+          <label class="field">Background
+            <select id="scene-bg">
+              <option value="booth">Booth</option>
+              <option value="grey">Studio grey</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <div class="row"><button id="scene-work" class="toggle" aria-pressed="false" title="Soft key, fill and rim, independent of the stage lights">Work light</button></div>
+        </section>
+        <section id="sc-overlays">
+          <h2>Overlays</h2>
+          <div class="stack">
+            <button id="scene-centres" class="toggle" aria-pressed="false" title="Each joint's pivot axis, range, home (0) tick and where it is now">Centres</button>
+            <button id="scene-captions" class="toggle" aria-pressed="true" title="What R3X heard and said, at the bottom of the view">Captions</button>
+            <button id="scene-stats" class="toggle" aria-pressed="false" title="Frames drawn per second, render scale and quality">Frame stats</button>
+          </div>
+        </section>
+        <section id="sc-perf">
+          <h2>Performance</h2>
+          <label class="field">Quality
+            <select id="quality" title="Balanced (default): 1.25x scale, lighter AO, draws only as often as the picture changes. High: 1.5x, full AO, 60 fps while anything moves fast. Performance: 1x, no AO, lowest rates.">
+              <option value="performance">Performance</option>
+              <option value="balanced">Balanced</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <p class="kv" title="Adapts to hold 60 fps while you interact, up to the quality's cap">Render scale <output id="render-scale"></output></p>
+        </section>
+      </div>
+    </aside>
+
+    <!-- ================================================================ R3X (what he does) -->
+    <aside id="panel" aria-label="R3X">
+      <header>
+        <h1>R3X</h1>
         <div class="status">
-          <span id="st-gw" class="pill live" title="r3x runtime gateway; start everything with ./r3x">NO R3X</span>
+          <span id="st-gw" class="pill live" title="r3x runtime gateway; start everything with ./r3x">Offline</span>
           <span id="st-live" class="pill live" title="CantinaOS SimBridge (./r3x --legacy only)" hidden>OFFLINE</span>
-          <span id="st-mode" class="pill">IDLE</span>
         </div>
       </header>
 
       <div class="row seg stage-modes" role="radiogroup" aria-label="Operating mode">
-        <button data-stage-mode="show" title="Brain, alive layers, idle policy and every output on">Show</button>
-        <button data-stage-mode="bench" title="Everything off; enable one output at a time">Bench</button>
-        <button data-stage-mode="studio" title="Virtual preview; enable outputs to send to the robot">Studio</button>
+        <button role="radio" aria-checked="true" data-stage-mode="show" title="Brain, alive layers, idle policy and every output on">Show</button>
+        <button role="radio" aria-checked="false" data-stage-mode="bench" title="Everything off; enable one output at a time">Bench</button>
+        <button role="radio" aria-checked="false" data-stage-mode="studio" title="Timeline; enable outputs to send to the robot">Studio</button>
       </div>
-      <p id="toast" class="hint warn-line" hidden></p>
+      <p id="toast" class="hint warn-line" role="status" hidden></p>
 
-      <nav class="tabs" role="tablist">
-        <button role="tab" data-tab="talk" aria-selected="true">Talk</button>
-        <button role="tab" data-tab="drive">Drive</button>
-        <button role="tab" data-tab="control">Control</button>
-        <button role="tab" data-tab="logs">Logs <span id="err-count" class="count" hidden></span></button>
-        <button role="tab" data-tab="sim">Sim</button>
+      <nav class="tabs" role="tablist" aria-label="R3X sections">
+        <button role="tab" data-tab="talk" data-modes="show">Talk</button>
+        <button role="tab" data-tab="perform" data-modes="show">Perform</button>
+        <button role="tab" data-tab="behaviour" data-modes="show">Behaviour</button>
+        <button role="tab" data-tab="rig" data-modes="bench">Rig</button>
+        <button role="tab" data-tab="test" data-modes="bench">Test</button>
+        <button role="tab" data-tab="system" data-modes="show bench studio">System <span id="err-count" class="count" hidden></span></button>
       </nav>
 
-      <!-- ================================================================ Talk -->
-      <div class="tab-body" data-body="talk">
-        <p id="offline-note" class="note">
-          The r3x gateway isn't connected, so this page is running its own demo.
-          Start everything with <code>./r3x</code> from the repo root.
-        </p>
-        <p id="brain-off" class="note" hidden>The brain is off in this mode. Turn it on in Drive, or switch to Show.</p>
+      <!-- ================================================================ Talk (Show) -->
+      <div class="tab-body" data-body="talk" role="tabpanel">
+        <p id="offline-note" class="note">Not connected to the r3x runtime, so this page runs its own demo. Start it with <code>./r3x</code>.</p>
+        <div class="row wrap" data-offline title="Or drop an audio file on the droid to have him say it">
+          <button id="btn-converse" class="primary" title="Listen, think, answer with a random R3X line">Demo conversation</button>
+          <button id="btn-line" title="Speak a random R3X clip">Say a line</button>
+          <button id="btn-mic" title="Your mic drives R3X's mouth (analysed only, not played)">Talk as R3X (mic)</button>
+        </div>
 
+        <div class="talk-live" data-live>
         <button id="ptt" class="ptt" data-state="idle" disabled>
           <span class="ptt-dot"></span>
           <span class="ptt-label">Click to talk</span>
@@ -77,53 +125,43 @@
         <p id="ptt-msg" class="hint" hidden></p>
 
         <form id="say-form" class="row say">
-          <input id="say-in" placeholder="Type to R3X&hellip;" autocomplete="off" disabled />
+          <input id="say-in" placeholder="Type to R3X&hellip;" aria-label="Type to R3X" autocomplete="off" disabled />
           <button id="say-send" type="submit" disabled>Send</button>
         </form>
 
-        <div class="row seg" id="mode-buttons">
-          <button data-engage="idle">Idle</button>
-          <button data-engage="ambient">Ambient</button>
-          <button data-engage="interactive">Interactive</button>
-        </div>
-
         <h2>Conversation <button id="conv-clear" class="link">clear</button></h2>
         <ol id="conv" class="conv"><li class="empty">Nothing yet. Click the button (or hold Space) and talk.</li></ol>
+        </div>
       </div>
 
-      <!-- ================================================================ Drive -->
-      <div class="tab-body" data-body="drive" id="drive" hidden>
-        <section class="first">
-          <h2>Home <small id="home-state">-</small></h2>
-          <div class="row"><button id="drive-home" class="primary home-btn" title="Stop every run, release the puppet, alive layers and autonomy off, then ease every joint to its home pose (Bench or Studio)">Home</button></div>
+      <!-- ================================================================ Perform (Show) -->
+      <div class="tab-body" data-body="perform" role="tabpanel" hidden>
+        <div id="perform-slot"></div>
+        <section data-live>
+          <h2>DJ <span id="dj-state" class="pill">off</span></h2>
+          <div class="row">
+            <button data-dj="start">Start</button>
+            <button data-dj="stop">Stop</button>
+          </div>
+          <dl id="dj-info" class="dj-info" hidden>
+            <dt>Now</dt><dd id="dj-now">-</dd>
+            <dt>Next</dt><dd id="dj-next">-</dd>
+            <dt>Line</dt><dd id="dj-line">-</dd>
+            <dt>Transition</dt><dd id="dj-when">-</dd>
+          </dl>
+          <div class="row wrap">
+            <button data-cli="dj test" data-cli-out="dj-msg" title="DJ mode on the current (or a random) track, then jump to ~8 s before its transition. With real keys this spends one short Claude line and one ElevenLabs line; later transitions crossfade without a line until DJ Stop. Needs Show mode.">DJ test (~40 s)</button>
+            <button data-cli="dj transition now" data-cli-out="dj-msg" title="Run the next transition immediately">Transition now</button>
+            <button data-cli="music seek -40" data-cli-out="dj-msg" title="Jump to 40 s before the end of the track">End &minus;40 s</button>
+          </div>
+          <p id="dj-msg" class="hint"></p>
         </section>
-        <section>
-          <h2>Autonomy</h2>
-          <div class="chips" id="drive-toggles"></div>
+        <section data-offline>
+          <h2>DJ <small>metronome</small></h2>
+          <div class="row"><button id="btn-dj" title="Dance to a metronome">DJ mode</button></div>
+          <label class="inline">BPM <input id="bpm" type="range" min="80" max="150" value="118" /><output id="bpm-out">118</output></label>
         </section>
-        <section>
-          <h2>Alive layers <small>procedural motion</small></h2>
-          <div class="chips" id="drive-layers"></div>
-        </section>
-        <section>
-          <h2>Emotes</h2>
-          <div class="chips" id="drive-emotes"></div>
-        </section>
-        <section>
-          <h2>Outputs <small id="drive-out-summary"></small></h2>
-          <p class="hint">Gate drivers, not layers. Bench starts with every output off.</p>
-          <div class="chips" id="drive-outputs"></div>
-          <div class="row"><button data-outputs="on">All on</button><button data-outputs="off">All off</button></div>
-        </section>
-        <section>
-          <h2>Joints <small>now / home, deg or mm</small></h2>
-          <table class="joints-table"><tbody id="joint-rows"></tbody></table>
-        </section>
-      </div>
-
-      <!-- ================================================================ Control -->
-      <div class="tab-body" data-body="control" hidden>
-        <section class="first">
+        <section data-live>
           <h2>Music</h2>
           <p class="now"><span id="now-state" class="dot"></span><span id="now-track">Nothing playing</span></p>
           <div class="row">
@@ -132,48 +170,108 @@
             <button data-music="next">Next</button>
           </div>
           <form id="music-form" class="row">
-            <input id="music-q" placeholder="Search the library, or describe a vibe&hellip;" autocomplete="off" />
+            <input id="music-q" placeholder="Search the library, or describe a vibe&hellip;" aria-label="Search music" autocomplete="off" />
             <button type="submit">Play</button>
           </form>
           <ul id="library" class="library"></ul>
           <p id="library-count" class="hint"></p>
         </section>
+      </div>
 
-        <section>
-          <h2>DJ mode <span id="dj-state" class="pill">off</span></h2>
-          <div class="row">
-            <button data-dj="start">Start</button>
-            <button data-dj="stop">Stop</button>
-            <button data-music="next">Next track</button>
-          </div>
-          <dl id="dj-info" class="dj-info" hidden>
-            <dt>Now</dt><dd id="dj-now">-</dd>
-            <dt>Next</dt><dd id="dj-next">-</dd>
-            <dt>Line</dt><dd id="dj-line">-</dd>
-            <dt>Transition</dt><dd id="dj-when">-</dd>
-          </dl>
-          <h3>Test a transition</h3>
-          <div class="row wrap">
-            <button data-cli="dj test" data-cli-out="dj-msg" title="DJ mode on the current (or a random) track, then jump to ~8 s before its transition">DJ test (~40 s)</button>
-            <button data-cli="dj transition now" data-cli-out="dj-msg" title="Run the next transition immediately">Transition now</button>
-            <button data-cli="music seek -40" data-cli-out="dj-msg" title="Jump to 40 s before the end of the track">Seek to end &minus;40 s</button>
-          </div>
-          <p id="dj-msg" class="hint"></p>
-          <p class="hint">With real keys a DJ test spends one short Claude line and one ElevenLabs line;
-            later transitions crossfade without a line until DJ Stop. Needs Show mode (DJ transitions are autonomy).</p>
+      <!-- ================================================================ Behaviour (Show) -->
+      <div class="tab-body" data-body="behaviour" role="tabpanel" hidden>
+        <section class="first">
+          <h2>Brain &amp; autonomy</h2>
+          <div class="chips" id="drive-toggles"></div>
+          <label class="inline" data-offline><input id="sh-idle" type="checkbox" checked /> <span id="sh-idle-label">Idle policy</span></label>
         </section>
-
-        <details class="advanced">
-        <summary>Advanced: eye override, console</summary>
         <section>
-          <h2>Eyes <small>LED pattern override</small></h2>
-          <div class="chips" id="eye-patterns"></div>
+          <h2>Alive layers</h2>
+          <div class="chips" id="drive-layers"></div>
         </section>
-
         <section>
-          <h2>Command line <small>same commands as the terminal</small></h2>
+          <h2>Gaze</h2>
+          <label class="field">Looks at
+            <select id="gaze-src">
+              <option value="viewport">This view's camera</option>
+              <option value="vision">Faces (vision)</option>
+              <option value="audio" disabled>Sound (later)</option>
+              <option value="off">Nothing (off)</option>
+            </select>
+          </label>
+          <p id="gaze-owner" class="kv" hidden></p>
+        </section>
+        <section>
+          <h2>Engagement</h2>
+          <p class="kv">Now <b id="eng-now">-</b></p>
+          <details class="override">
+            <summary>override</summary>
+            <div class="row seg" id="mode-buttons" data-live>
+              <button data-engage="idle">Idle</button>
+              <button data-engage="ambient">Ambient</button>
+              <button data-engage="interactive">Interactive</button>
+            </div>
+            <div class="row seg" data-offline>
+              <button data-mode="IDLE">Idle</button>
+              <button data-mode="AMBIENT">Ambient</button>
+              <button data-mode="INTERACTIVE">Interactive</button>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <!-- ================================================================ Rig (Bench) -->
+      <div class="tab-body" data-body="rig" id="drive" role="tabpanel" hidden>
+        <section class="first home-row">
+          <button id="drive-home" class="primary home-btn" title="Stop every run, release the puppet, alive layers and autonomy off, then ease every joint to its home pose">Home</button>
+          <span id="home-state" class="kv">-</span>
+        </section>
+        <section>
+          <h2>Outputs <small id="drive-out-summary"></small></h2>
+          <div id="drive-outputs" class="out-groups" title="Outputs gate drivers, not layers"></div>
+        </section>
+        <section>
+          <h2>Joints <button id="jog-release" class="link" disabled title="Release every jogged joint back to the performer">release jog</button></h2>
+          <div class="table-wrap">
+            <table class="joints-table">
+              <thead><tr><th scope="col">joint</th><th scope="col">jog</th><th scope="col" class="num">now</th><th scope="col" class="num">home</th><th scope="col"><span class="sr">home one</span></th></tr></thead>
+              <tbody id="joint-rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ================================================================ Test (Bench) -->
+      <div class="tab-body" data-body="test" role="tabpanel" hidden>
+        <div id="test-slot"></div>
+      </div>
+
+      <!-- ================================================================ System (every mode) -->
+      <div class="tab-body" data-body="system" role="tabpanel" hidden>
+        <section class="first" data-live>
+          <h2>Services <small id="svc-summary"></small></h2>
+          <ul id="services" class="services"></ul>
+        </section>
+        <section class="logs">
+          <h2>Logs</h2>
+          <div class="log-bar">
+            <div class="chips" id="log-kinds">
+              <button class="chip on" data-kind="log" aria-pressed="true">Logs</button>
+              <button class="chip on" data-kind="event" aria-pressed="true">Events</button>
+            </div>
+            <select id="log-level" aria-label="Lowest log level" title="Lowest level the runtime streams">
+              <option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option>
+            </select>
+            <input id="log-filter" placeholder="Filter&hellip;" aria-label="Filter logs" autocomplete="off" spellcheck="false" />
+            <button id="log-pause" title="Pause the view (records keep arriving)">Pause</button>
+            <button id="log-clear">Clear</button>
+          </div>
+          <ol id="log" class="log"></ol>
+        </section>
+        <details class="debug">
+          <summary>Console</summary>
           <form id="cli-form" class="row">
-            <input id="cli-in" placeholder="help, status, eye pattern thinking&hellip;" autocomplete="off" spellcheck="false" />
+            <input id="cli-in" placeholder="help, status, eye pattern thinking&hellip;" aria-label="Console command" autocomplete="off" spellcheck="false" />
             <button type="submit">Run</button>
           </form>
           <div class="row wrap">
@@ -183,141 +281,76 @@
             <button data-cli="eye status">Eye status</button>
           </div>
           <ol id="cli-out" class="cli-out"></ol>
-        </section>
         </details>
-
-        <section>
-          <h2>Services <small id="svc-summary"></small></h2>
-          <ul id="services" class="services"></ul>
-        </section>
-      </div>
-
-      <!-- ================================================================ Logs -->
-      <div class="tab-body" data-body="logs" hidden>
-        <div class="log-bar">
-          <div class="chips" id="log-kinds">
-            <button class="chip on" data-kind="log">Logs</button>
-            <button class="chip on" data-kind="event">Events</button>
-          </div>
-          <select id="log-level" title="Lowest level the runtime streams">
-            <option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option>
-          </select>
-          <input id="log-filter" placeholder="Filter&hellip;" autocomplete="off" spellcheck="false" />
-          <button id="log-pause" title="Pause the view (records keep arriving)">Pause</button>
-          <button id="log-clear">Clear</button>
-        </div>
-        <ol id="log" class="log"></ol>
-      </div>
-
-      <!-- ================================================================ Sim -->
-      <div class="tab-body" data-body="sim" hidden>
-        <section class="first" data-offline>
-          <h2>Show <small>offline demo</small></h2>
-          <div class="row">
-            <button id="btn-converse" class="primary" title="Listen, think, answer with a random R3X line">Demo conversation</button>
-            <button id="btn-line" title="Speak a random R3X clip">Say a line</button>
-          </div>
-          <div class="row">
-            <button id="btn-mic" title="Your mic drives R3X's mouth (analysed only, not played)">Talk as R3X (mic)</button>
-            <button id="btn-dj" title="Dance to a metronome">DJ mode</button>
-          </div>
-          <label class="inline">BPM <input id="bpm" type="range" min="80" max="150" value="118" /><output id="bpm-out">118</output></label>
-          <p class="hint">Drop any audio file on the droid to have him say it.</p>
-        </section>
-
-        <section id="show-system">
-          <h2>Show system <small>clips · cues · sequences (show/)</small></h2>
-          <div class="show-now">
-            <span>show</span><b id="sh-show">-</b>
-            <span>gesture</span><b id="sh-gesture">-</b>
-            <span>background</span><b id="sh-background">-</b>
-          </div>
-          <div class="row">
-            <button id="sh-stop" title="show.stop {all}: everything blends out">Stop</button>
-            <button id="sh-freeze" title="motion.freeze: stop shows and gestures, stop idle, hold the setpoints (off blends back over 0.5 s)">Freeze motion</button>
-          </div>
-          <label class="inline">Intensity <input id="sh-int" type="range" min="0" max="1.5" step="0.05" value="1" /><output id="sh-int-out">1.00</output></label>
-          <label class="inline">Speed <input id="sh-speed" type="range" min="0.5" max="2" step="0.05" value="1" /><output id="sh-speed-out">1.00</output></label>
-          <label class="inline"><input id="sh-idle" type="checkbox" checked /> <span id="sh-idle-label">Idle policy</span></label>
-          <label class="inline" data-offline title="Background layer: an authored loop under gestures and shows, per activity">Loop <small>idle</small><select id="sh-bg-idle" aria-label="Background loop while idle"></select><small>DJ</small><select id="sh-bg-dj" aria-label="Background loop in DJ mode"></select></label>
-          <details open><summary>Sequences <small id="sh-n-sequence"></small></summary><ul id="sh-list-sequence" class="show-list"></ul></details>
-          <details open><summary>Cues <small id="sh-n-cue"></small></summary><ul id="sh-list-cue" class="show-list"></ul></details>
-          <details><summary>Clips <small id="sh-n-clip"></small></summary><ul id="sh-list-clip" class="show-list"></ul></details>
-          <p id="sh-status" class="hint"></p>
-        </section>
-
-        <section>
-          <h2>Puppeteer <small>command space · gamepad</small></h2>
-          <p id="pp-pad" class="hint">No gamepad. Connect one (left stick rings/lean, right stick gaze, d-pad lift/visor, triggers arm, A B X Y slots 1-4, Back+ for 5-8, Start = freeze), or use the sliders.</p>
+        <details class="debug">
+          <summary>Eye override</summary>
+          <div class="chips" id="eye-patterns"></div>
+        </details>
+        <details class="debug">
+          <summary>Puppeteer</summary>
+          <p id="pp-pad" class="kv" title="Left stick rings/lean, right stick gaze, d-pad lift/visor, triggers arm, A B X Y emote slots 1-4, Back+ for 5-8, Start = freeze">No gamepad</p>
           <div id="pp-intents" class="pp-intents"></div>
           <div class="row"><button id="pp-center">Center</button></div>
           <div class="row" id="pp-modes" data-offline></div>
-          <div class="row wrap" id="pp-slots"></div>
           <div class="row" data-offline>
             <button id="take-rec" title="Log the command stream at 50 Hz with show layers and events">Record take</button>
             <button id="take-dl">Download take</button>
           </div>
           <p id="take-info" class="hint"></p>
-          <label class="inline"><input id="whine" type="checkbox" /> Servo whine (audio follows joint speed)</label>
-        </section>
-
-        <section data-offline>
-          <h2>Performer events <small>standalone only</small></h2>
-          <div class="row wrap">
-            <button data-mode="IDLE">Mode IDLE</button>
-            <button data-mode="AMBIENT">Mode AMBIENT</button>
-            <button data-mode="INTERACTIVE">Mode INTERACTIVE</button>
-          </div>
+          <label class="inline"><input id="whine" type="checkbox" /> Servo whine</label>
+        </details>
+        <details class="debug">
+          <summary>Face LEDs</summary>
+          <canvas id="ledview" width="300" height="96"></canvas>
+          <ol id="serial-log" title="Board commands the performer sends (standalone)"></ol>
+        </details>
+        <details class="debug">
+          <summary>Servos <small id="servo-summary"></small></summary>
+          <table class="servos">
+            <thead><tr><th>ch</th><th>name</th><th>servo</th><th>out</th></tr></thead>
+            <tbody id="servo-body"></tbody>
+          </table>
+        </details>
+        <details class="debug" data-offline>
+          <summary>Machine status</summary>
+          <div id="subsystems" class="subs" title="Each chest window is a subsystem: untick one to see it blink red; LLM or mic down is a fault"></div>
+        </details>
+        <details class="debug" data-offline>
+          <summary>Performer events</summary>
           <div class="row wrap">
             <button data-ev="listen">Listening started</button>
             <button data-ev="stop">Listening stopped</button>
             <button data-ev="speak">Speech started</button>
             <button data-ev="end">Speech ended</button>
           </div>
-        </section>
+        </details>
+      </div>
 
-        <section>
-          <h2>Face LEDs <small>performer frames</small></h2>
-          <canvas id="ledview" width="300" height="96"></canvas>
-          <p class="hint">Board commands the performer sends (standalone):</p>
-          <ol id="serial-log"></ol>
+      <!-- Emotes and shows: one set of controls, in Perform (Show) or Test (Bench). -->
+      <div id="shared-perf">
+        <section class="first">
+          <h2>Emotes</h2>
+          <div class="chips" id="emotes"></div>
         </section>
-
-        <section data-offline>
-          <h2>Machine status <small>chest lights</small></h2>
-          <p class="hint">Each chest window is a subsystem. Untick one to see it blink red; LLM or mic down is a fault.</p>
-          <div id="subsystems" class="subs"></div>
-        </section>
-
-        <section>
-          <h2>Servos <small>what the controller is sent</small></h2>
-          <p id="servo-summary" class="hint"></p>
-          <table class="servos">
-            <thead><tr><th>ch</th><th>name</th><th>servo</th><th>out</th></tr></thead>
-            <tbody id="servo-body"></tbody>
-          </table>
-        </section>
-
-        <section>
-          <h2>Joints <small>jog</small></h2>
-          <label class="inline" title="Sliders jog joints directly; untick to release them"><input id="manual" type="checkbox" /> Manual control</label>
-          <label class="inline"><input id="look" type="checkbox" checked /> Look at camera</label>
-          <label class="inline"><input id="axes" type="checkbox" /> Show pivots</label>
-          <div id="joints"></div>
-        </section>
-
-        <section>
-          <h2>Camera</h2>
-          <div class="row">
-            <button data-cam="full">Full</button>
-            <button data-cam="face">Face</button>
-            <button data-cam="arms">Arms</button>
-            <button data-cam="chest">Chest</button>
+        <section id="show-system">
+          <h2>Shows</h2>
+          <div class="show-now">
+            <span>show</span><b id="sh-show">-</b>
+            <span>gesture</span><b id="sh-gesture">-</b>
+            <span>background</span><b id="sh-background">-</b>
           </div>
-          <label class="inline" title="Quality is the viewport's control (top left). The scale adapts to hold 60 fps while you interact.">
-            Render scale
-            <output id="render-scale" class="hint" style="margin:0"></output>
-          </label>
+          <div class="row">
+            <button id="sh-stop" title="Everything blends out">Stop</button>
+            <button id="sh-freeze" title="Stop shows and gestures, stop idle, hold the setpoints; new runs are refused (off blends back over 0.5 s)">Freeze motion</button>
+          </div>
+          <label class="inline">Intensity <input id="sh-int" type="range" min="0" max="1.5" step="0.05" value="1" /><output id="sh-int-out">1.00</output></label>
+          <label class="inline">Speed <input id="sh-speed" type="range" min="0.5" max="2" step="0.05" value="1" /><output id="sh-speed-out">1.00</output></label>
+          <label class="inline" data-offline title="Background layer: an authored loop under gestures and shows, per activity">Loop <small>idle</small><select id="sh-bg-idle" aria-label="Background loop while idle"></select><small>DJ</small><select id="sh-bg-dj" aria-label="Background loop in DJ mode"></select></label>
+          <input id="sh-search" type="search" placeholder="Find a sequence, cue or clip&hellip;" aria-label="Find a show" autocomplete="off" spellcheck="false" />
+          <details><summary>Sequences <small id="sh-n-sequence"></small></summary><ul id="sh-list-sequence" class="show-list"></ul></details>
+          <details><summary>Cues <small id="sh-n-cue"></small></summary><ul id="sh-list-cue" class="show-list"></ul></details>
+          <details><summary>Clips <small id="sh-n-clip"></small></summary><ul id="sh-list-clip" class="show-list"></ul></details>
+          <p id="sh-status" class="hint" role="status"></p>
         </section>
       </div>
     </aside>

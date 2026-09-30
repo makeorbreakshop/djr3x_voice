@@ -29,7 +29,9 @@ import { Ghosts } from './ghost';
 import { ServoWhine } from './servowhine';
 import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
-import { Centres, atHome, formatValue, shortName } from './centres';
+import { Centres, atHome, formatValue } from './centres';
+import { mountScenePanel } from './scenepanel';
+import { BodyRegions } from './regions';
 import type { RobotProfile } from './generated/RobotProfile';
 import type { GazeSource } from './generated/GazeSource';
 import {
@@ -66,7 +68,6 @@ const sceneLook = set.show && !STILL
   ? new SceneLook(scene, renderer, (on) => set.show!(on), (booth) => limitControls(controls, booth))
   : null;
 {
-  const ctl = document.getElementById('scene-ctl')!;
   const bg = document.getElementById('scene-bg') as HTMLSelectElement;
   const work = document.getElementById('scene-work') as HTMLButtonElement;
   const sync = () => {
@@ -74,7 +75,8 @@ const sceneLook = set.show && !STILL
     bg.value = sceneLook.choice.backdrop;
     work.setAttribute('aria-pressed', String(sceneLook.choice.workLight));
   };
-  ctl.hidden = !sceneLook;
+  document.getElementById('sc-env')!.hidden = !sceneLook;
+  (document.querySelector('[data-scene-open="sc-env"]') as HTMLElement).hidden = !sceneLook;
   bg.onchange = () => { sceneLook?.pick({ backdrop: bg.value as Backdrop }); sync(); bg.blur(); };
   work.onclick = () => { sceneLook?.pick({ workLight: !sceneLook.choice.workLight }); sync(); work.blur(); };
   sceneLook?.onUpdate(sync);
@@ -91,10 +93,13 @@ try {
   /* storage blocked */
 }
 let centresOn = centresPick ?? false;
+/** Each joint's pivot arrow (showPivots), built on first use. */
+const pivots: THREE.Object3D[] = [];
 function setCentres(on: boolean) {
   centresOn = on;
   document.getElementById('scene-centres')!.setAttribute('aria-pressed', String(on));
   centres?.setVisible(on);
+  showPivots(on);
 }
 function centresFollowMode(mode: string) {
   if (centresPick === null) setCentres(mode !== 'show');
@@ -118,19 +123,25 @@ controls.addEventListener('change', () => post.pacer.interact());
 
 /** Height of the Studio dock over the stage bottom (0 = closed); the droid centres above it. */
 let viewInset = 0;
-/** Centre the droid in the space left of the control panel (full width on phones). */
+/** Centre the droid in the space between the Scene and R3X panels (full width on phones). */
 function fitView() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const panelEl = document.getElementById('panel');
-  const panel = w > 720 && !STILL && panelEl ? panelEl.offsetWidth + 24 : 0;
+  const side = (id: string) => {
+    const el = document.getElementById(id);
+    return w > 720 && !STILL && el ? el.offsetWidth + 24 : 0;
+  };
+  const panel = side('panel');
+  const scenePanel = side('scene-panel');
   document.documentElement.style.setProperty('--panel-space', `${panel}px`);
+  document.documentElement.style.setProperty('--scene-space', `${scenePanel || 12}px`);
   camera.aspect = w / h;
-  camera.setViewOffset(w, h, panel / 2, viewInset / 2, w, h);
+  camera.setViewOffset(w, h, (panel - scenePanel) / 2, viewInset / 2, w, h);
   camera.updateProjectionMatrix();
   post.setSize(w, h);
 }
 addEventListener('resize', fitView);
+mountScenePanel(post, fitView);
 fitView();
 
 
@@ -202,6 +213,7 @@ let djOn = false;
 let bpm = 118;
 let frozen = false;
 let manual = false;
+/** Standalone gaze: the head follows this view's camera (the Gaze select, offline). */
 let lookAtCamera = true;
 let autonomy = true;
 
@@ -488,8 +500,6 @@ function onGatewayState(s: RetainedState) {
   frozen = s.stage.frozen;
   $('sh-freeze').classList.toggle('on', frozen);
   $('btn-dj').classList.toggle('on', s.dj.active);
-  $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
-  stMode.textContent = s.engagement.engagement.toUpperCase();
   studio.setActive(s.stage.mode === 'studio');
   centresFollowMode(s.stage.mode);
   ghosts?.apply(s.stage.outputs);
@@ -518,7 +528,7 @@ function setConnected(on: boolean) {
     $('btn-dj').classList.toggle('on', djOn);
     frozen = false;
     $('sh-freeze').classList.remove('on');
-    stMode.textContent = mode;
+    $('eng-now').textContent = titleCase(mode);
   }
   showUiDirty = true;
 }
@@ -581,7 +591,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
   setLocalStage(b.dataset.stageMode ?? 'show');
 }));
 function setLocalStage(mode: string) {
-  document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
+  panel.setLocalMode(mode as 'show' | 'bench' | 'studio');
   studio.setActive(mode === 'studio');
   centresFollowMode(mode);
   renderHome();
@@ -622,8 +632,8 @@ async function load() {
   ghosts.apply(gwState?.stage.outputs ?? null);
   centres = new Centres(rig, FULL_PROFILE.joints, $('centre-labels'));
   centres.setVisible(centresOn);
-  buildJointUi(rig);
-  buildJointTable();
+  showPivots(centresOn);
+  buildJointTable(rig);
   document.getElementById('loading')!.remove();
 }
 
@@ -660,7 +670,7 @@ let prevJoints: Record<string, number> | null = null;
 let showUiDirty = true;
 let showUiTick = 0;
 let updateShowUi = () => {};
-const stMode = $('st-mode');
+const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 
 /** Disabled light outputs (connected), dimmed: the real driver would stay dark. */
 function dim(px: RGB[], output: string): RGB[] {
@@ -775,20 +785,19 @@ document.querySelectorAll<HTMLButtonElement>('[data-ev]').forEach((b) => {
   };
 });
 
-$<HTMLInputElement>('manual').onchange = (e) => {
-  manual = (e.target as HTMLInputElement).checked;
-  if (manual) return;
+/** Jogging holds the joints; release hands them back to the performer. */
+function setManual(on: boolean) {
+  manual = on;
+  $<HTMLButtonElement>('jog-release').disabled = !on;
+}
+$('jog-release').onclick = () => {
+  setManual(false);
   if (connected) void send({ class: 'perf', type: 'release', channels: [...jointInputs.keys()] });
   else perf({ cmd: 'jog_release' });
 };
-$<HTMLInputElement>('look').onchange = (e) => {
-  lookAtCamera = (e.target as HTMLInputElement).checked;
-  if (!lookAtCamera) perf({ cmd: 'look', pan_tilt: null });
-};
 
-const pivots: THREE.Object3D[] = [];
-$<HTMLInputElement>('axes').onchange = (e) => {
-  const on = (e.target as HTMLInputElement).checked;
+/** Each joint's pivot axis, drawn with the Centres overlay. */
+function showPivots(on: boolean) {
   if (on && rig && !pivots.length) {
     for (const j of rig.joints.values()) {
       const arrow = new THREE.ArrowHelper(j.axis, new THREE.Vector3(), 0.06, 0xffcc33, 0.015, 0.01);
@@ -800,18 +809,23 @@ $<HTMLInputElement>('axes').onchange = (e) => {
     }
   }
   pivots.forEach((p) => (p.visible = on));
-};
+}
 
 // Presets come from the set (booth.ts): in the booth they frame the droid through the arch.
 // The chest preset looks at the logic panels on the droid's right-front quarter.
 const CAMS = set.cams;
+let camPreset = 'full';
+function goCam(name: string) {
+  camPreset = name;
+  const [p, tgt] = CAMS[name];
+  camera.position.copy(p);
+  controls.target.copy(tgt);
+  document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.cam === name)));
+}
 document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) => {
-  b.onclick = () => {
-    const [p, tgt] = CAMS[b.dataset.cam!];
-    camera.position.copy(p);
-    controls.target.copy(tgt);
-  };
+  b.onclick = () => goCam(b.dataset.cam!);
 });
+$('cam-reset').onclick = () => goCam(camPreset);
 
 // Drop an audio file to make R3X say it.
 addEventListener('dragover', (e) => { e.preventDefault(); stage.classList.add('dragging'); });
@@ -843,56 +857,14 @@ SUBSYSTEMS.forEach(([label, service], i) => {
   $('subsystems').appendChild(row);
 });
 
-// ------------------------------------------------------------------ joint sliders (jog)
-const jointInputs = new Map<string, { input: HTMLInputElement; out: HTMLOutputElement }>();
-function buildJointUi(r: Rig) {
-  const container = $('joints');
-  const groups: [string, RegExp][] = [
-    ['Head', /^head|^visor/], ['Torso rings', /^torso/], ['Hero arm', /^hero/],
-    ['Throttle arm', /^throttle/], ['Poker arm', /^poker/],
-  ];
-  for (const [label, re] of groups) {
-    const g = document.createElement('div');
-    g.className = 'joint group';
-    g.textContent = label;
-    container.appendChild(g);
-    for (const j of r.joints.values()) {
-      if (!re.test(j.spec.name)) continue;
-      const row = document.createElement('label');
-      row.className = 'joint';
-      row.title = j.spec.note || j.spec.name;
-      const name = document.createElement('span');
-      name.textContent = j.spec.name.replace(/^(head|torso|hero|throttle|poker)_/, '');
-      const input = document.createElement('input');
-      input.type = 'range';
-      input.min = String(j.spec.min);
-      input.max = String(j.spec.max);
-      input.step = '0.5';
-      input.value = '0';
-      const out = document.createElement('output');
-      out.textContent = '0';
-      input.oninput = () => {
-        const v = Number(input.value);
-        if (!manual) {
-          manual = true;
-          $<HTMLInputElement>('manual').checked = true;
-        }
-        // A joint name in a perf puppet command jogs that joint directly (runtime).
-        if (connected) void send({ class: 'perf', type: 'puppet', channels: { [j.spec.name]: v } });
-        else perf({ cmd: 'jog', joint: j.spec.name, value: v });
-      };
-      row.append(name, input, out);
-      container.appendChild(row);
-      jointInputs.set(j.spec.name, { input, out });
-    }
-  }
-}
+// ------------------------------------------------------------------ joint jog (Rig -> Joints)
+const jointInputs = new Map<string, { input: HTMLInputElement; out: HTMLOutputElement | null }>();
 
 function updateJointReadout() {
   if (!view) return;
   for (const [name, ui] of jointInputs) {
     const v = view.joints[name] ?? 0;
-    ui.out.textContent = v.toFixed(0);
+    if (ui.out) ui.out.textContent = v.toFixed(0);
     if (!manual && document.activeElement !== ui.input) ui.input.value = String(v);
   }
 }
@@ -1036,13 +1008,28 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
     for (const q of loops) el.add(new Option(q.id, q.id));
     el.onchange = () => perf({ cmd: 'background', activity, id: el.value || null });
   }
+  // The profile's emote slots (the gamepad's A B X Y, Back+ for 5-8).
   SLOTS.forEach((id, i) => {
     const b = document.createElement('button');
-    b.textContent = `${i + 1} ${id}`;
-    b.title = items.find((it) => it.id === id)?.description ?? id;
+    b.className = 'chip';
+    b.textContent = id.replace(/_/g, ' ');
+    b.title = `${items.find((it) => it.id === id)?.description ?? id} (slot ${i + 1})`;
     b.onclick = () => emote(i);
-    $('pp-slots').appendChild(b);
+    $('emotes').appendChild(b);
   });
+  $<HTMLInputElement>('sh-search').oninput = (e) => {
+    const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
+    for (const kind of ['sequence', 'cue', 'clip']) {
+      const ul = $('sh-list-' + kind);
+      let n = 0;
+      for (const li of Array.from(ul.children) as HTMLElement[]) {
+        li.hidden = !!q && !(li.dataset.id ?? '').toLowerCase().includes(q);
+        if (!li.hidden) n++;
+      }
+      $('sh-n-' + kind).textContent = q ? `(${n} of ${ul.children.length})` : `(${ul.children.length})`;
+      (ul.parentElement as HTMLDetailsElement).open = !!q && n > 0;
+    }
+  };
 }
 
 {
@@ -1058,7 +1045,19 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
     perf({ cmd: 'autonomy', on });
   };
 
-  // Puppeteer: one slider per continuous intent, the modes, the emote slots.
+  // Intensity per operating mode: Bench tests start low; each mode keeps its last value.
+  const intensityFor: Record<string, number> = { show: 1, bench: 0.35, studio: 1 };
+  let intensityMode = 'show';
+  addEventListener('r3x:mode', (e) => {
+    const m = String((e as CustomEvent).detail);
+    const el = $<HTMLInputElement>('sh-int');
+    intensityFor[intensityMode] = Number(el.value);
+    intensityMode = m;
+    el.value = String(intensityFor[m] ?? 1);
+    out('sh-int-out', el.value);
+  });
+
+  // Puppeteer: one slider per continuous intent and the modes (emotes are their own section).
   const box = $('pp-intents');
   const sliders = new Map<string, HTMLInputElement>();
   for (const k of INTENTS) {
@@ -1129,10 +1128,10 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
     }
     document.querySelectorAll<HTMLLIElement>('.show-list li').forEach((li) => li.classList.toggle('running', ids.has(li.dataset.id!)));
     // Frozen motion refuses every play: say so instead of offering buttons that bounce.
-    document.querySelectorAll<HTMLButtonElement>('.show-list button, #pp-slots button').forEach((b) => (b.disabled = frozen));
+    document.querySelectorAll<HTMLButtonElement>('.show-list button, #emotes button').forEach((b) => (b.disabled = frozen));
     const take = performer?.takeInfo();
     $('take-info').textContent = !take ? '' : take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
-    if (!connected) stMode.textContent = mode;
+    if (!connected) $('eng-now').textContent = titleCase(mode);
   };
 }
 
@@ -1147,20 +1146,11 @@ function home(joints: string[] = []) {
   if (studioLocal) performer?.command({ cmd: 'home', joints }); // perf() stands down while connected
 }
 $('drive-home').onclick = () => home();
-$('scene-home').onclick = (e) => {
-  home();
-  (e.currentTarget as HTMLElement).blur();
-};
 
+/** Home is a Bench/Studio action (it lives in Bench's Rig tab; the runtime refuses it in Show). */
 function renderHome() {
   const mode = gwState?.stage.mode ?? null;
-  const allowed = !connected || mode === 'bench' || mode === 'studio';
-  for (const id of ['drive-home', 'scene-home']) {
-    const b = $<HTMLButtonElement>(id);
-    b.disabled = !allowed;
-    b.title = allowed ? b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '') : `${b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '')} (Show: switch to Bench or Studio)`;
-  }
-  $('scene-home').hidden = !allowed || !(connected ? mode !== 'show' : true);
+  $<HTMLButtonElement>('drive-home').disabled = connected && mode === 'show';
 }
 
 function renderHomeState() {
@@ -1178,22 +1168,44 @@ function renderHomeState() {
   el.classList.toggle('on', on);
 }
 
-/** Drive -> Joints: current and home value per joint, a per-joint Home, hover = gizmo highlight. */
+/**
+ * Rig -> Joints: one row per joint, grouped by body region - a jog slider, the current and
+ * home value, a per-joint Home; hover a row (or an output) to highlight it on the droid.
+ */
 const jointRows = new Map<string, HTMLElement>();
-function buildJointTable() {
+const REGIONS = new BodyRegions(FULL_PROFILE);
+function buildJointTable(r: Rig) {
   const body = $('joint-rows');
-  body.innerHTML = FULL_PROFILE.joints.map((j) => `<tr data-joint="${j.name}" title="${j.name}">
-    <td>${shortName(j.name)}</td><td class="num">-</td>
-    <td class="home">${formatValue(HOME[j.name], j.unit)}</td>
-    <td><button data-home-joint="${j.name}" title="Ease ${j.name} to its home value (held until released)">home</button></td></tr>`).join('');
-  for (const tr of Array.from(body.querySelectorAll<HTMLElement>('tr'))) jointRows.set(tr.dataset.joint!, tr);
+  const names = FULL_PROFILE.joints.map((j) => j.name).filter((n) => r.joints.has(n));
+  body.innerHTML = REGIONS.group(names, (n) => REGIONS.ofDrivenJoint(n)).map(([region, list]) =>
+    `<tr class="grp"><th colspan="5" scope="colgroup">${region}</th></tr>` + list.map((n) => {
+      const j = FULL_PROFILE.joints.find((x) => x.name === n)!;
+      return `<tr data-joint="${n}" title="${n}${r.joints.get(n)!.spec.note ? ` - ${r.joints.get(n)!.spec.note}` : ''}">
+        <th scope="row">${n.replace(/^(head|torso)_/, '').replace(/_/g, ' ')}</th>
+        <td class="jog"><input type="range" min="${r.joints.get(n)!.spec.min}" max="${r.joints.get(n)!.spec.max}" step="0.5" value="${HOME[n]}" aria-label="Jog ${n}" /></td>
+        <td class="num">-</td><td class="num home">${formatValue(HOME[n], j.unit)}</td>
+        <td><button data-home-joint="${n}" aria-label="Home ${n}" title="Ease ${n} to its home value (held until released)">home</button></td></tr>`;
+    }).join('')).join('');
+  for (const tr of Array.from(body.querySelectorAll<HTMLElement>('tr[data-joint]'))) {
+    const name = tr.dataset.joint!;
+    jointRows.set(name, tr);
+    const input = tr.querySelector('input')!;
+    input.oninput = () => {
+      const v = Number(input.value);
+      if (!manual) setManual(true);
+      // A joint name in a perf puppet command jogs that joint directly (runtime).
+      if (connected) void send({ class: 'perf', type: 'puppet', channels: { [name]: v } });
+      else perf({ cmd: 'jog', joint: name, value: v });
+    };
+    jointInputs.set(name, { input, out: null });
+  }
   body.onclick = (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-home-joint]');
     if (b) home([b.dataset.homeJoint!]);
   };
   body.onmouseover = (e) => centres?.highlight([(e.target as HTMLElement).closest<HTMLElement>('tr')?.dataset.joint ?? ''].filter(Boolean));
   body.onmouseleave = () => centres?.highlight(null);
-  // The Drive outputs are actuators: hover one to see the joints it drives.
+  // The Rig outputs are actuators: hover one to see the joints it drives.
   $('drive-outputs').onmouseover = (e) => {
     const out = (e.target as HTMLElement).closest<HTMLElement>('[data-output]')?.dataset.output;
     const a = FULL_PROFILE.actuators.find((x) => x.name === out);
@@ -1208,7 +1220,7 @@ function updateJointTable() {
   for (const [j, tr] of jointRows) {
     const v = view.joints[j] ?? 0;
     const unit = FULL_PROFILE.joints.find((x) => x.name === j)!.unit;
-    tr.children[1].textContent = formatValue(v, unit);
+    tr.children[2].textContent = formatValue(v, unit);
     // What the (simulated) servo reached, which settles inside its deadband: amber past 1.
     tr.classList.toggle('off', Math.abs(v - HOME[j]) > 1);
   }
@@ -1240,16 +1252,23 @@ function updateJointTable() {
 // ------------------------------------------------------------------ gaze target (Show)
 const gazeSel = $<HTMLSelectElement>('gaze-src');
 let claimed = false;
+const gazeOffline = ['vision'];
 function renderGaze(s: RetainedState | null) {
-  // A runtime without gaze support (older build) leaves the selector hidden.
-  const g = s?.stage.gaze;
-  gazeSel.hidden = !g;
+  // Standalone: the embedded performer follows this view's camera, or nothing.
+  for (const o of Array.from(gazeSel.options)) if (gazeOffline.includes(o.value)) o.disabled = !s;
+  if (!s) {
+    gazeSel.value = lookAtCamera ? 'viewport' : 'off';
+    $('gaze-owner').hidden = true;
+    return;
+  }
+  // A runtime without gaze support (older build): the standalone choice stands.
+  const g = s.stage.gaze;
   $('gaze-owner').hidden = !g || g !== 'viewport';
-  if (!s || !g) return;
+  if (!g) return;
   if (document.activeElement !== gazeSel) gazeSel.value = g;
   const owner = s.stage.gaze_owner ?? null;
-  $('gaze-owner').textContent = owner === PANEL_ID ? 'this panel' : owner ? `owned by ${owner}` : 'no owner';
-  gazeSel.title = `What R3X's head looks at in Show (Bench and Studio ignore it). This panel: ${PANEL_ID}`;
+  $('gaze-owner').textContent = owner === PANEL_ID ? 'Following this view' : owner ? `Following ${owner}'s view` : 'No view owns it yet';
+  gazeSel.title = `What R3X's head looks at in Show (Bench and Studio ignore it). This view: ${PANEL_ID}`;
   // Nobody owns the viewport: the first panel to see that claims it.
   if (g === 'viewport' && !owner && !claimed) {
     claimed = true;
@@ -1258,6 +1277,12 @@ function renderGaze(s: RetainedState | null) {
 }
 gazeSel.onchange = () => {
   const source = gazeSel.value as GazeSource;
+  if (!connected) {
+    lookAtCamera = source === 'viewport';
+    if (!lookAtCamera) perf({ cmd: 'look', pan_tilt: null });
+    gazeSel.blur();
+    return;
+  }
   void send({ class: 'stage', type: 'set_gaze', source, ...(source === 'viewport' ? { owner: PANEL_ID } : {}) });
   gazeSel.blur();
 };

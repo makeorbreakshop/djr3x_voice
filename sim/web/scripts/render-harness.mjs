@@ -96,8 +96,8 @@ const setup = (state, pose = {}) => `(async () => {
   const pose = Object.assign({ hero_shoulder: 20 }, ${JSON.stringify(pose)});
   p.command({ cmd: 'autonomy', on: false });
   p.command({ cmd: 'look', pan_tilt: null });
-  document.getElementById('look').checked = false;
-  document.getElementById('look').dispatchEvent(new Event('change'));
+  document.getElementById('gaze-src').value = 'off';
+  document.getElementById('gaze-src').dispatchEvent(new Event('change'));
   for (const j of r.rig.joints.keys()) p.command({ cmd: 'jog', joint: j, value: pose[j] ?? 0 });
   if (${JSON.stringify(state)} === 'speaking') {
     p.command({ cmd: 'mode', mode: 'INTERACTIVE' });

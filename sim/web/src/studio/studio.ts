@@ -748,7 +748,7 @@ export class Studio {
     this.rec = { t0: this.t, wall: performance.now(), samples: new Map(), next: 0 };
     this.play(this.t);
     this.host.performer()!.previewStop(); // record over the live pose, not the old curve
-    this.say('Recording: move the sliders (here or in Drive). R or Space stops.');
+    this.say('Recording: move the sliders. R or Space stops.');
     this.syncBar();
   }
 
@@ -962,8 +962,8 @@ export class Studio {
     if (!this.active) return;
     const tgt = e.target instanceof HTMLElement ? e.target : null;
     if (tgt?.closest('input:not([type=range]), textarea, select') || tgt?.isContentEditable) return;
-    // Keys aimed at the control panel (a focused mode button, a tab) are the panel's.
-    if (tgt?.closest('#panel')) return;
+    // Keys aimed at a side panel (a focused mode button, a tab) are that panel's.
+    if (tgt?.closest('#panel, #scene-panel')) return;
     const mod = e.metaKey || e.ctrlKey;
     const tr = this.selTrack();
     const k = e.key;

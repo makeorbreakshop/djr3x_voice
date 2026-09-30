@@ -112,7 +112,7 @@ export type PttLook = 'offline' | 'idle' | 'starting' | 'listening' | 'sending' 
 export function view(s: PttState): { look: PttLook; label: string; hint: string } {
   const hint = 'click to talk, click again to send · or hold Space';
   if (!s.connected) return { look: 'offline', label: 'R3X offline', hint: 'start everything with ./r3x' };
-  if (!s.enabled) return { look: 'offline', label: 'Talking is off in this mode', hint: 'turn the brain on in Drive, or switch to Show' };
+  if (!s.enabled) return { look: 'offline', label: 'Talking is off in this mode', hint: 'turn the brain on in Behaviour, or switch to Show' };
   if (s.pending === 'start') return { look: 'starting', label: 'Starting the mic…', hint: s.mode === 'hold' ? 'keep holding Space' : '' };
   if (s.pending === 'stop') return { look: 'sending', label: 'Sending…', hint: '' };
   if (ours(s) || s.phase === 'listening') {
