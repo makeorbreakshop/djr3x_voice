@@ -29,6 +29,10 @@ PARTS = {
     "parts.anderson.base_center": "base-center",
     "parts.anderson.pan_ring_gear": "headlift-base-mount",
     "parts.anderson.base_ring": "headlift-base-mount (1)",
+    # the visor drive still used with Hunter's head (the workbench's visor_horn / visor_push_rod / visor_tab)
+    "parts.anderson.visor_horn": "visor-servo-horn",
+    "parts.anderson.visor_push_rod": "visor-push-rod",
+    "parts.anderson.visor_rod_tab": "visor-rod-tab",
 }
 # parts his STEP folder does not have: sourced from the STLs in their animation folders.
 # module -> {variant name ("" = defaults): what it is}

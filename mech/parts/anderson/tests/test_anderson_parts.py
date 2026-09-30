@@ -141,3 +141,25 @@ def test_inserts_preset(name):
                 assert math.isclose(2 * f["r"], ins["d"], abs_tol=1e-6) and f["depth"] >= ins["length"] + 1 - 1e-6
     with pytest.raises(ValueError):
         mod.make({f"{next(iter(designed))}_hole": "rivet"})
+
+
+def test_visor_drive_interface():
+    """The feature names and spacings the workbench's visor drive mates by (its interface)."""
+    horn = _mod("parts.anderson.visor_horn").make()
+    rod = _mod("parts.anderson.visor_push_rod").make()
+    tab = _mod("parts.anderson.visor_rod_tab").make()
+    f = horn.features
+    assert f["spline"]["teeth"] == 25 and f["spline"]["d"] == [0.0, 0.0, 1.0]
+    assert f["servo_face"]["p"][2] == 0.0 and f["servo_face"]["n"] == [0.0, 0.0, -1.0]
+    assert math.isclose(math.dist(f["spline"]["p"], f["tip"]["p"]), 25.0, abs_tol=1e-9)
+    assert math.isclose(math.dist(rod.features["pin_a"]["p"], rod.features["pin_b"]["p"]), 58.0, abs_tol=1e-9)
+    assert math.isclose(2 * rod.features["pin_a"]["r"], 3.5) and rod.features["pin_a"]["depth"] == 5.0
+    t = tab.features
+    assert t["socket"]["p"] == [0.0, 0.0, -1.5] and math.isclose(2 * t["socket"]["r"], 8.5)
+    assert math.isclose(math.dist(t["socket"]["p"], t["tip"]["p"]), 19.5, abs_tol=1e-9)
+    assert math.isclose(t["tip"]["p"][2], 18.0) and math.isclose(2 * t["tip"]["r"], 3.5)
+    assert t["cross"]["d"] == [1.0, 0.0, 0.0]
+    # nut traps / inserts are real alternatives for every group
+    for mod, g in (("visor_push_rod", "pin"), ("visor_rod_tab", "cross"), ("visor_rod_tab", "tip")):
+        p = _mod(f"parts.anderson.{mod}").make({f"{g}_hole": "nut_trap"})
+        assert p.is_valid and len(p.solids()) == 1
