@@ -7,10 +7,16 @@
 import init, { WasmPerformer } from './wasm/r3x_performer';
 import type { PadFrame } from './generated/PadFrame';
 import profileJson from '../../../profiles/r3x/robot.json?raw';
+import generatedJson from '../../../profiles/r3x/robot.generated.json?raw';
 import { SHOW_FILES } from './show/loader';
 import type { RGB } from './leds';
 
-export const PROFILE_JSON: string = profileJson;
+/**
+ * `?profile=generated` runs the profile generated from the mech model (mech/rigsync,
+ * robot.generated.diff.md) instead of robot.json: its limits, speeds and joint tree.
+ */
+export const PROFILE_JSON: string =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).get('profile') === 'generated' ? generatedJson : profileJson;
 
 export type RunLayer = 'background' | 'gesture' | 'show';
 export type Activity = 'idle' | 'engaged' | 'listening' | 'thinking' | 'speaking' | 'dj';

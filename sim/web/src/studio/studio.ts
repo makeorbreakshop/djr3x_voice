@@ -17,6 +17,7 @@
  */
 import './studio.css';
 import { lintShow } from '../wasm/r3x_performer';
+import { torqueMarks } from '../mechrig/lint';
 import { PROFILE_JSON, type Performer, type PerfFrames } from '../performer';
 import { SHOW_FILES } from '../show/loader';
 import type { Ack } from '../generated/Ack';
@@ -555,6 +556,7 @@ export class Studio {
       const files = { ...SHOW_FILES, [`show/clips/${this.doc.id}.json`]: JSON.stringify(this.doc) };
       const r = JSON.parse(lintShow(PROFILE_JSON, JSON.stringify(files))) as { errors: string[] };
       this.marks = lintMarks(r.errors, this.doc.id);
+      this.marks.push(...torqueMarks(this.doc)); // servo load vs the 70 % rule (mechrig/lint.ts)
     } catch (e) {
       this.marks = [{ message: String(e) }];
     }

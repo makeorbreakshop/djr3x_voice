@@ -36,6 +36,7 @@ import { Workbench } from './workbench/workbench';
 import { injectBuildDom, mountBuildPanel } from './workbench/buildpanel';
 import { mountPanels } from './layout';
 import { PadOverlay } from './padoverlay';
+import { MechRig } from './mechrig';
 import type { PadFrame } from './generated/PadFrame';
 import { BodyRegions } from './regions';
 import type { RobotProfile } from './generated/RobotProfile';
@@ -471,7 +472,15 @@ function onPerfOut(o: PerfOut) {
 const aimAt = (p: THREE.Vector3) => rig?.aimAt(p) ?? null;
 
 let hadPad = false;
+let padParked = false;
 function pollGamepad() {
+  // Build's pad jog (mechrig/padjog.ts) has the pad: park the puppeteer at neutral once.
+  if (mechRig.padOwns) {
+    if (!padParked) perf({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
+    padParked = true;
+    return;
+  }
+  padParked = false;
   const pad = [...(navigator.getGamepads?.() ?? [])].find((g) => g && g.mapping === 'standard');
   if (pad) {
     perf({ cmd: 'pad', axes: [...pad.axes], buttons: pad.buttons.map((b) => [b.pressed, b.value] as [boolean, number]) });
@@ -681,6 +690,8 @@ const workbench = new Workbench({
 });
 mountBuildPanel(workbench);
 renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too
+// One rig from the mech model (src/mechrig/): Scene > Model, servo load meters, Build pad jog.
+const mechRig = new MechRig({ scene, workbench, droid: () => droid, interact: () => post.pacer.interact() });
 addEventListener('r3x:mode', (e) => {
   const m = String((e as CustomEvent).detail);
   workbench.setActive(m === 'build');
@@ -809,6 +820,7 @@ function frame() {
   }
   if (showUiDirty || ++showUiTick % 15 === 0) updateShowUi();
 
+  mechRig.frame(view?.joints, t);
   workbench.tick();
   controls.update();
   if (!workbench.active && (!sceneLook || sceneLook.showingBooth)) set.constrain(camera, controls.target);
