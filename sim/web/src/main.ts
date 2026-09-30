@@ -664,7 +664,7 @@ async function load() {
   rig = new Rig(gltf.scene, doc, restFromUrl());
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
-  chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
+  chestLights = new ChestLights(rig, 'torso_middle', doc.chest_lights ?? []);
   buildPackageLights();
   ghosts = new Ghosts(rig, PROFILE);
   ghosts.apply(gwState?.stage.outputs ?? null);

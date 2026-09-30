@@ -77,7 +77,7 @@ async function load() {
   rig = new Rig(gltf.scene, doc);
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
-  chest = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
+  chest = new ChestLights(rig, 'torso_middle', doc.chest_lights ?? []);
   $('loading').remove();
 }
 load().catch((e) => {

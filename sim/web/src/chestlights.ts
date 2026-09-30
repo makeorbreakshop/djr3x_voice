@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import type { RGB } from './leds';
+import type { Rig } from './rig';
 
 export interface ChestLightSpec {
   kind: 'dot' | 'window';
@@ -17,23 +18,47 @@ export interface ChestLightSpec {
   panel: string;
 }
 
-/** Lights behind the panel openings, posed in the middle ring's frame. */
+/**
+ * Emissive colour of one small body LED: board brightness 128/255, then `gain`, hue kept but
+ * the brightest channel capped at `cap`. Channel values are PWM duty, i.e. linear light (see
+ * leds.ts ledColor). Bloom starts at 1.0 (post.ts), so the cap keeps a lit LED a coloured dot
+ * or square with at most a small halo - uncapped, white and bright colours at gain 3-4 reach 2.0 in
+ * every channel and bloom (at a quarter resolution) into white blobs larger than the panel.
+ */
+export function bodyLedColor(out: THREE.Color, p: RGB, gain: number, cap = BODY_LED_CAP): THREE.Color {
+  out.setRGB((p[0] / 255) * 0.5 * gain, (p[1] / 255) * 0.5 * gain, (p[2] / 255) * 0.5 * gain, THREE.LinearSRGBColorSpace);
+  const m = Math.max(out.r, out.g, out.b);
+  if (m > cap) out.multiplyScalar(cap / m);
+  // Bloom keys on luminance: a white or pale LED at the channel cap would still flare, so
+  // its luminance stops just under the threshold (a saturated colour never gets near it).
+  const y = 0.2126 * out.r + 0.7152 * out.g + 0.0722 * out.b;
+  return cap !== Infinity && y > BODY_LED_LUMA ? out.multiplyScalar(BODY_LED_LUMA / y) : out;
+}
+
+/** Luminance ceiling of a body LED (post.ts blooms from 1.0). */
+export const BODY_LED_LUMA = 0.95;
+
+/** Brightest channel of a body LED (just over the bloom threshold: a glint, not a flare). */
+export const BODY_LED_CAP = 1.3;
+
+/** Lights behind the panel openings, riding the middle ring (`link`). */
 export class ChestLights {
   private readonly mats: THREE.MeshBasicMaterial[] = [];
   private readonly meshes: THREE.Mesh[] = [];
-  private readonly c = new THREE.Color();
 
-  constructor(parent: THREE.Object3D, specs: ChestLightSpec[], private readonly gain = 3.5) {
-    parent.updateWorldMatrix(true, false);
-    const inv = new THREE.Matrix4().copy(parent.matrixWorld).invert();
+  /** `specs` are in the model's kit frame (rig.json); see Rig.kitToLocal. */
+  constructor(rig: Rig, link: string, specs: ChestLightSpec[], private readonly gain = 3.5) {
+    const parent = rig.get(link).node;
     const z = new THREE.Vector3(0, 0, 1);
     for (const s of specs) {
       const geo = s.kind === 'dot'
-        ? new THREE.CircleGeometry(0.0016, 12)
-        : new THREE.PlaneGeometry(s.w * 0.95, s.h * 0.95);
+        ? new THREE.CircleGeometry(0.0014, 12)
+        : new THREE.PlaneGeometry(s.w * 0.9, s.h * 0.9);
       const mat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
       const m = new THREE.Mesh(geo, mat);
-      m.position.set(...s.pos).applyMatrix4(inv);
+      m.name = `chest_led_${s.kind}`;
+      m.position.copy(rig.kitToLocal(parent, s.pos));
+      // Kit-frame directions are the link's own (joints carry no rotation at the kit pose).
       m.quaternion.setFromUnitVectors(z, new THREE.Vector3(...s.normal).normalize());
       parent.add(m);
       this.mats.push(mat);
@@ -48,10 +73,8 @@ export class ChestLights {
 
   update(pixels: RGB[]) {
     pixels.forEach((p, i) => {
-      // Addressable LEDs at the same global brightness as the face (128/255). Channel
-      // values are PWM duty, i.e. linear light (see leds.ts ledColor).
-      this.c.setRGB((p[0] / 255) * 0.5, (p[1] / 255) * 0.5, (p[2] / 255) * 0.5, THREE.LinearSRGBColorSpace);
-      this.mats[i]?.color.copy(this.c).multiplyScalar(this.gain);
+      const mat = this.mats[i];
+      if (mat) bodyLedColor(mat.color, p, this.gain);
     });
   }
 }

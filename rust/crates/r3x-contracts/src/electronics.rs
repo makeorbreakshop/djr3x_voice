@@ -1,6 +1,6 @@
 //! Electronics packages: `profiles/electronics/<id>.json`, selected by a Robot Profile's
 //! `electronics` field. A package is the droid's boards (model, size, mount, connectors,
-//! power), its LED layout per light group (pixel count, positions in the body frame, chain
+//! power), its LED layout per light group (pixel count, positions on their link, chain
 //! order), which profile light groups and actuators it drives with which driver/firmware,
 //! a power budget, a wiring list and a BOM.
 //!
@@ -8,8 +8,10 @@
 //! [`crate::profile::RobotProfile::resolve_electronics`]), so the performer, the drivers and
 //! the sim all see the package's real LED counts and positions.
 //!
-//! Units: positions in metres in the body frame at the zero pose (Y up, front = +Z, +X the
-//! droid's left), the same space as [`LightPixel`]; board sizes in mm; currents in mA.
+//! Units: positions in metres in the model's kit frame (the GLB's own coordinates, Y up, every
+//! joint at the kit pose), the same space as [`LightPixel`]; each rides its `link`, so the
+//! sim parents it there and it turns with the link and its rest offset. Board sizes in mm;
+//! currents in mA.
 
 use std::collections::HashSet;
 
@@ -52,14 +54,14 @@ pub enum LedEmulator {
     None,
 }
 
-/// A board's place in the body: which bracket holds it and its pose in the body frame.
+/// A board's place in the body: which bracket holds it and its pose (model kit frame, on `link`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct BoardMount {
     /// The frame bracket / printed part it is fastened to.
     pub bracket: String,
     /// Rig link it rides on (`torso_middle`, `head_tilt`, ...; `torso_lower` = the base).
     pub link: String,
-    /// Board centre, metres, body frame at zero pose.
+    /// Board centre, metres, model kit frame (see the module docs).
     pub t: [f64; 3],
     /// Orientation, unit quaternion `[x, y, z, w]`; board +Z = its component side.
     #[serde(default = "identity_q")]

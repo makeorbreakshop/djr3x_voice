@@ -2,19 +2,24 @@
 
     python3 mech/electronics/gen_packages.py
 
-The packages are data; this script only computes the LED layouts (positions in the body
-frame) from the geometry we already have, so they stay consistent:
+The packages are data; this script only computes the LED layouts (positions in the model's
+kit frame, see Units) from the geometry we already have, so they stay consistent:
 
 - the chest logic panels' LED holes and windows: the r3x_native package's own chest layout
   (measured from the kit's MS_P_1_Full panels by sim/model/build_r3x.py), kept in
   profiles/electronics/r3x_native.json and read back from there;
+- the grnwave body boards: mech/electronics/logic_panels.json (LED holes and window slots
+  measured from the kit's logic panel STLs by logic_panels.py);
 - the eye bulbs and the mouth: rig.json `anchors` (sim/model/build_r3x.py), copied below.
 
 Everything about the grnwave boards that the product page, the manual and the sample sketch
 (github.com/grnwaveworkshop/DJ-RexBody, DJLEDNanoV2.ino) do not state is marked
 `inferred` with a note. Brandon: confirm those once the boards are in hand.
 
-Units: metres, body frame at the zero pose, Y up, front = +Z, +X = the droid's left.
+Units: metres in the model's kit frame - the GLB's own coordinates (rig.json's frame), Y up,
+every joint at the kit pose. Each point belongs to its group's `link`: the sim parents it
+there (Rig.kitToLocal), so it turns with the link and its canonical rest offset
+(sim/web/src/show/rig_limits.json). Not the canonical body frame: that differs per ring.
 """
 
 from __future__ import annotations
@@ -239,34 +244,33 @@ def native(chest_layout):
 GRN_EXPOSED = [[1, 4, 5], [0, 1, 2], [3, 4, 5]]
 
 
-def grnwave_body(chest_layout):
+# mech/electronics/logic_panels.py: the panels' LED holes and 2 x 3 window slots, measured
+# from the kit STLs (model kit frame). Its open slots per panel come out as exactly
+# GRN_EXPOSED - the sketch's animated groups are the ones behind the windows.
+LOGIC_PANELS = json.loads((Path(__file__).resolve().parent / "logic_panels.json").read_text())["panels"]
+PIPE_DEPTH = 0.001   # small LED under its light pipe: the pipe tip, just inside the hole
+BLOCK_DEPTH = 0.003  # 5050s behind the window face
+HIDDEN_DEPTH = 0.006  # behind the MS_LPI mount that covers the slot
+BLOCK_PITCH = 0.006  # 2 x 2 5050s per group
+
+
+def grnwave_body():
     out = []
-    for b, p in enumerate(panels(chest_layout)):
-        for d in p["dots"]:  # 8 small LEDs, light pipes into the panel's LED holes
-            out.append(px("small", d["pos"], d["normal"], 0.003, 0.003))
-        exposed = GRN_EXPOSED[b]
-        wins = p["windows"]
-        hidden_k = 0
-        for g in range(6):
-            if g in exposed:
-                w = wins[exposed.index(g)]
-                c = w["pos"]
-                n = w["normal"]
-                # tangent across the panel (horizontal, perpendicular to the normal)
-                tx, tz = n[2], -n[0]
-                for i in range(4):
-                    ox = (0.25 if i % 2 else -0.25) * w["w"]
-                    oy = (0.25 if i >= 2 else -0.25) * w["h"]
-                    pos = (c[0] + tx * ox - n[0] * 0.004, c[1] + oy, c[2] + tz * ox - n[2] * 0.004)
-                    out.append(px("block", pos, n, 0.005, 0.005))
-            else:
-                # not behind an opening on this panel: inside the ring, stacked behind the dots
-                d0 = p["dots"][2 + hidden_k * 2]
-                n = d0["normal"]
-                for i in range(4):
-                    pos = (d0["pos"][0] - n[0] * 0.01, d0["pos"][1] + (i - 1.5) * 0.004, d0["pos"][2] - n[2] * 0.01)
-                    out.append(px("block_hidden", pos, n, 0.005, 0.005))
-                hidden_k += 1
+    for b, p in enumerate(LOGIC_PANELS):
+        n, across = p["normal"], p["across"]
+        for h in p["holes"]:  # 8 small LEDs, light pipes into the panel's LED holes, bottom->top
+            c = h["centre"]
+            out.append(px("small", [c[i] - n[i] * PIPE_DEPTH for i in range(3)], n, 0.003, 0.003))
+        slots = sorted(p["slots"], key=lambda s: s["group"])
+        assert [s["group"] for s in slots if s["open"]] == GRN_EXPOSED[b], (b, slots)
+        for s in slots:
+            depth = BLOCK_DEPTH if s["open"] else HIDDEN_DEPTH
+            for i in range(4):  # 2 x 2: bottom row first
+                du = (i % 2 - 0.5) * BLOCK_PITCH
+                dv = (i // 2 - 0.5) * BLOCK_PITCH
+                pos = [s["centre"][k] + across[k] * du - n[k] * depth for k in range(3)]
+                pos[1] += dv
+                out.append(px("block" if s["open"] else "block_hidden", pos, n, 0.005, 0.005))
     return out
 
 
@@ -274,10 +278,10 @@ def grnwave(chest_layout):
     eyes = [px("eye", (EYE_L[0], EYE_L[1], EYE_L[2] - EYE_SIZE[2] / 2), w=0.008, h=0.008),
             px("eye", (EYE_R[0], EYE_R[1], EYE_R[2] - EYE_SIZE[2] / 2), w=0.008, h=0.008)]
     body_boards = []
-    for b, p in enumerate(panels(chest_layout)):
-        dots = [d["pos"] for d in p["dots"]]
-        c = [sum(v[i] for v in dots) / 8 for i in range(3)]
-        n = p["dots"][0]["normal"]
+    for b, p in enumerate(LOGIC_PANELS):
+        pts = [h["centre"] for h in p["holes"]] + [s["centre"] for s in p["slots"]]
+        c = [sum(v[i] for v in pts) / len(pts) for i in range(3)]
+        n = p["normal"]
         c = (c[0] - n[0] * 0.012, c[1], c[2] - n[2] * 0.012)
         yaw = math.atan2(n[0], n[2])
         name = "ABC"[b]
@@ -286,11 +290,11 @@ def grnwave(chest_layout):
             "role": f"logic panel {b + 1} (chain {b * 32}-{b * 32 + 31}): 8 small LEDs + 6 x 4 5050",
             "url": "https://grnwave.com/product/dj-rex-body-led-set/",
             "dims_mm": [60.0, 40.0, 3.0],
-            "mount": {"bracket": f"MS_P_1_Full logic panel {b + 1}, from behind (light pipes through the LED holes)",
+            "mount": {"bracket": f"MS_P_1_Full logic panel {b + 1} on its MS_LPI mount, from behind (light pipes through the LED holes)",
                       "link": "torso_middle", "t": r(c),
                       "q": r([0.0, math.sin(yaw / 2), 0.0, math.cos(yaw / 2)], 5),
                       "inferred": True,
-                      "inferred_note": "Panel order A/B/C = our chest panels 1-3 (droid's right side, rear to front) and the board pose behind each panel are inferred; the manual only says 'mount the three boards in the body'."},
+                      "inferred_note": "Board A/B/C = panels 1-3 (droid's right side, rear to front): the sketch's exposed groups match each panel's open window slots only in this order (mech/electronics/logic_panels.py). The board's depth behind the panel is inferred."},
             "connectors": [{"id": "in", "kind": "dupont_3p_2.54", "pins": ["DATA", "5V", "GND"]},
                            {"id": "out", "kind": "dupont_3p_2.54", "pins": ["DATA", "5V", "GND"]}],
             "volts": 5.0, "current": {"idle_ma": 10, "typical_ma": 180, "max_ma": 32 * MA_WS2812},
@@ -352,12 +356,12 @@ def grnwave(chest_layout):
             },
         ],
         "lights": [
-            {"name": "body", "pixels": 96, "layout": grnwave_body(chest_layout),
+            {"name": "body", "pixels": 96, "layout": grnwave_body(),
              "driver": serial("grnwave", "GRNWAVE_SERIAL_PORT"), "board": "body_a", "link": "torso_middle",
              "data_line": "nano.D4", "chain_start": 0, "led": "WS2812B 5050 (small LEDs under VLP-600-R pipes)",
              "ma_per_led": MA_WS2812, "serves": ["chest", "speech_amplitude", "tempo", "chest_status"],
              "inferred": True,
-             "inferred_note": "Per board: 0-7 small LEDs bottom->top in the panel's LED holes, 8-31 six groups of 4. The 3 groups the sample animates sit behind the panel's 3 windows (in our window order); the other 3 are hidden. Positions follow our chest panels; confirm on the boards."},
+             "inferred_note": "Per board: 0-7 small LEDs bottom->top in the panel's LED holes, 8-31 six groups of 4 in a 2 x 3 grid (group g: row g // 2 from the bottom, column g % 2 from the side away from the holes). Hole and slot centres are measured from the kit STLs (mech/electronics/logic_panels.json); with that grid the sample's animated groups are exactly each panel's 3 open windows. The grid order on the board is inferred; confirm on the boards."},
             {"name": "eyes", "pixels": 2, "layout": eyes,
              "driver": serial("grnwave", "GRNWAVE_SERIAL_PORT"), "board": "eyes", "link": "head_tilt",
              "data_line": "nano.D4", "chain_start": 96, "led": "8 mm PL9823 / WS2812D-F8", "ma_per_led": MA_PL9823,

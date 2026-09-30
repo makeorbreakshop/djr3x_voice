@@ -19,6 +19,7 @@ import type { ElectronicsPackage } from './generated/ElectronicsPackage';
 import type { PackageLight } from './generated/PackageLight';
 import type { Rig } from './rig';
 import type { RGB } from './leds';
+import { BODY_LED_CAP, bodyLedColor } from './chestlights';
 
 const FILES = import.meta.glob<ElectronicsPackage>('../../../profiles/electronics/*.json', { eager: true, import: 'default' });
 
@@ -71,26 +72,23 @@ export function ownsLights(pkg: ElectronicsPackage | null | undefined): boolean 
 
 /** The node a package `link` rides on: a rig joint's node, else the model root. */
 function linkNode(rig: Rig, link: string): THREE.Object3D {
-  return rig.joints.get(link)?.node ?? rig.root;
+  return rig.joints.get(link)?.node ?? rig.root.getObjectByName('r3x_root') ?? rig.root;
 }
 
-/** Body-frame (model) point -> `parent`'s local frame, at the current pose (build at rest). */
-function toLocal(rig: Rig, parent: THREE.Object3D, p: [number, number, number]): THREE.Vector3 {
-  const modelRoot = rig.root.getObjectByName('r3x_root') ?? rig.root;
-  modelRoot.updateWorldMatrix(true, false);
-  parent.updateWorldMatrix(true, false);
-  return parent.worldToLocal(modelRoot.localToWorld(new THREE.Vector3(...p)));
-}
+/** LED kinds drawn as squares (5050 blocks, diffuser windows); the rest are round. */
+const SQUARE = new Set(['block', 'block_hidden', 'window']);
 
 /**
- * The package's LEDs at their layout positions, one emissive disc each (size = the LED's
- * `w`), riding their group's link. What they show comes from the performer's package
- * emulator, as frames (`frames.package`, or the gateway's `lights`).
+ * The package's LEDs at their layout positions (model kit frame, see Rig.kitToLocal), one
+ * emissive disc or square each (size = the LED's `w` x `h`), parented to their group's link
+ * so they turn with it. What they show comes from the performer's package emulator, as
+ * frames (`frames.package`, or the gateway's `lights`). Body LEDs are capped just over the
+ * bloom threshold (chestlights.ts bodyLedColor); the head's are for the face renderer's
+ * bulbs (faceSlots), so they keep the plain gain.
  */
 export class PackageLeds {
-  private readonly groups = new Map<string, THREE.MeshBasicMaterial[]>();
+  private readonly groups = new Map<string, { mats: THREE.MeshBasicMaterial[]; capped: boolean }>();
   private readonly meshes: THREE.Mesh[] = [];
-  private readonly c = new THREE.Color();
 
   constructor(rig: Rig, lights: PackageLight[], private readonly gain = 4) {
     const z = new THREE.Vector3(0, 0, 1);
@@ -98,11 +96,13 @@ export class PackageLeds {
       const parent = linkNode(rig, g.link);
       const mats: THREE.MeshBasicMaterial[] = [];
       for (const px of g.layout) {
-        const r = Math.max(0.0012, Math.min(px.w, px.h) / 2);
         const mat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false, side: THREE.DoubleSide });
-        const m = new THREE.Mesh(new THREE.CircleGeometry(r, 16), mat);
+        const geo = SQUARE.has(px.kind)
+          ? new THREE.PlaneGeometry(px.w * 0.9, px.h * 0.9)
+          : new THREE.CircleGeometry(Math.max(0.0012, Math.min(px.w, px.h) / 2), 16);
+        const m = new THREE.Mesh(geo, mat);
         m.name = `pkg_led_${g.name}`;
-        m.position.copy(toLocal(rig, parent, px.pos));
+        m.position.copy(rig.kitToLocal(parent, px.pos));
         m.quaternion.setFromUnitVectors(z, new THREE.Vector3(...px.normal).normalize());
         m.visible = px.kind !== 'block_hidden';
         m.renderOrder = 2;
@@ -110,7 +110,7 @@ export class PackageLeds {
         mats.push(mat);
         this.meshes.push(m);
       }
-      this.groups.set(g.name, mats);
+      this.groups.set(g.name, { mats, capped: !g.link.startsWith('head') && g.link !== 'visor' });
     }
   }
 
@@ -119,14 +119,9 @@ export class PackageLeds {
   }
 
   update(lights: Record<string, RGB[]>) {
-    for (const [name, mats] of this.groups) {
+    for (const [name, { mats, capped }] of this.groups) {
       const px = lights[name] ?? [];
-      mats.forEach((mat, i) => {
-        const p = px[i] ?? [0, 0, 0];
-        // Brightness 128 on the board, then a gain so bloom picks them up (like chestlights.ts).
-        this.c.setRGB((p[0] / 255) * 0.5, (p[1] / 255) * 0.5, (p[2] / 255) * 0.5, THREE.LinearSRGBColorSpace);
-        mat.color.copy(this.c).multiplyScalar(this.gain);
-      });
+      mats.forEach((mat, i) => bodyLedColor(mat.color, px[i] ?? [0, 0, 0], this.gain, capped ? BODY_LED_CAP : Infinity));
     }
   }
 }
@@ -159,7 +154,7 @@ export class BoardsView {
       const m = new THREE.Mesh(new THREE.BoxGeometry(l, w, h), mat);
       m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color: SUPPORT_COLOR[b.support], depthTest: false })));
       m.name = `board_${b.id}`;
-      m.position.copy(toLocal(rig, parent, b.mount.t));
+      m.position.copy(rig.kitToLocal(parent, b.mount.t));
       m.quaternion.set(...b.mount.q);
       m.renderOrder = 3;
       m.userData.board = b.id;

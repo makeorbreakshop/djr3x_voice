@@ -117,7 +117,7 @@
       "type": "object"
     },
     "BoardMount": {
-      "description": "A board's place in the body: which bracket holds it and its pose in the body frame.",
+      "description": "A board's place in the body: which bracket holds it and its pose (model kit frame, on `link`).",
       "properties": {
         "bracket": {
           "description": "The frame bracket / printed part it is fastened to.",
@@ -152,7 +152,7 @@
           "type": "array"
         },
         "t": {
-          "description": "Board centre, metres, body frame at zero pose.",
+          "description": "Board centre, metres, model kit frame (see the module docs).",
           "items": {
             "format": "double",
             "type": "number"
