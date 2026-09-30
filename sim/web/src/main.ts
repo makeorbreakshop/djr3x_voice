@@ -20,7 +20,7 @@ import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
 import { ChestLights } from './chestlights';
 import { SpeechAudio, TtsAmplitudeAgc } from './audio';
 import { accessToken, LiveLink } from './link';
-import { ControlPanel } from './panel';
+import { ControlPanel, type PageMode } from './panel';
 import type { Event as R3xEvent, Frames, RetainedState } from './gateway';
 import type { Command } from './generated/Command';
 import { limitControls, setupStage } from './booth'; // before any material compiles (patches a chunk)
@@ -31,6 +31,8 @@ import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
 import { Centres, atHome, formatValue } from './centres';
 import { mountScenePanel } from './scenepanel';
+import { Workbench } from './workbench/workbench';
+import { injectBuildDom, mountBuildPanel } from './workbench/buildpanel';
 import { mountPanels } from './layout';
 import { PadOverlay } from './padoverlay';
 import type { PadFrame } from './generated/PadFrame';
@@ -172,6 +174,7 @@ for (const id of ['panel', 'scene-panel']) {
   el.addEventListener('transitionend', done);
   el.addEventListener('transitioncancel', done);
 }
+injectBuildDom(); // Build's markup, before the panels wire their rails and tabs
 const panels = mountPanels(fitView);
 mountScenePanel(post, () => panels.set('scene', false));
 fitView();
@@ -560,7 +563,7 @@ function onGatewayState(s: RetainedState) {
   frozen = s.stage.frozen;
   $('sh-freeze').classList.toggle('on', frozen);
   $('btn-dj').classList.toggle('on', s.dj.active);
-  studio.setActive(s.stage.mode === 'studio');
+  studio.setActive(s.stage.mode === 'studio' && !workbench.active);
   centresFollowMode(s.stage.mode);
   ghosts?.apply(s.stage.outputs);
   renderGaze(s);
@@ -651,12 +654,31 @@ document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
   setLocalStage(b.dataset.stageMode ?? 'show');
 }));
 function setLocalStage(mode: string) {
-  panel.setLocalMode(mode as 'show' | 'bench' | 'studio');
+  panel.setLocalMode(mode as PageMode);
   studio.setActive(mode === 'studio');
   centresFollowMode(mode);
   renderHome();
 }
 if (studio.wantsOpen()) setLocalStage('studio');
+
+// ------------------------------------------------------------------ Build (src/workbench/)
+// The mechanics workbench: a mech/out/ assembly drawn where the droid's head is, the droid
+// hidden. Sim only - it never sends a command. The panel's Build switch is local (panel.ts).
+let droid: THREE.Object3D | null = null;
+const workbench = new Workbench({
+  scene, camera, controls, renderer,
+  interact: () => post.pacer.interact(),
+  setDroidVisible(on) {
+    if (droid) droid.visible = on;
+  },
+});
+mountBuildPanel(workbench);
+addEventListener('r3x:mode', (e) => {
+  const m = String((e as CustomEvent).detail);
+  workbench.setActive(m === 'build');
+  if (m === 'build') studio.setActive(false);
+  else if (connected) studio.setActive(gwState?.stage.mode === 'studio');
+});
 
 // ?offline keeps a tab on the embedded performer even while the runtime is running.
 if (legacy && !params.has('offline')) link.start();
@@ -683,6 +705,8 @@ async function load() {
   });
   prepareDroidMaterials(gltf.scene, renderer);
   scene.add(gltf.scene);
+  droid = gltf.scene;
+  droid.visible = !workbench.active;
 
   rig = new Rig(gltf.scene, doc, restFromUrl());
   leds = new FaceLeds(rig);
@@ -707,7 +731,7 @@ load().catch((e) => {
 // __r3x.show.play('dj_intro', {intensity: 1.3}), __r3x.performer.command({cmd: 'eyes', pattern: 'happy'})
 Object.assign(window, { __r3x: {
   get rig() { return rig; }, get performer() { return performer; }, get frames() { return view; },
-  get connected() { return connected; }, gw: panel.gw, camera, controls, post,
+  get connected() { return connected; }, gw: panel.gw, camera, controls, post, build: workbench,
   show: {
     play: (id: string, p: { intensity?: number; speed?: number } = {}) => playShow(id, p.intensity ?? 1, p.speed ?? 1),
     stop: () => stopShows(),
@@ -776,10 +800,11 @@ function frame() {
   }
   if (showUiDirty || ++showUiTick % 15 === 0) updateShowUi();
 
+  workbench.tick();
   controls.update();
-  if (!sceneLook || sceneLook.showingBooth) set.constrain(camera, controls.target);
+  if (!workbench.active && (!sceneLook || sceneLook.showingBooth)) set.constrain(camera, controls.target);
   post.render();
-  if (view) centres?.render(renderer, camera, view.joints);
+  if (view && !workbench.active) centres?.render(renderer, camera, view.joints);
   if (++homeTick % 12 === 0) updateJointTable();
   if (logDirty) drawLog();
 }

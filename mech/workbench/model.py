@@ -1,0 +1,258 @@
+"""In-memory assembly model; serialises to the manifest in SCHEMA.md (r3x.mech.manifest v1).
+
+An assembly module builds one `Assembly` (with nested children). Geometry rides along as
+trimesh meshes in the assembly frame at the zero pose; the builder (build.py) turns those
+into per-part files and the JSON.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+import numpy as np
+
+SCHEMA = "r3x.mech.manifest"
+VERSION = 1
+CLASSES = ("shell", "mech", "servo", "fastener", "bearing", "hardware")
+
+
+def vec(v) -> list[float]:
+    return [round(float(x), 4) for x in v]
+
+
+@dataclass
+class Transform:
+    t: tuple = (0.0, 0.0, 0.0)
+    q: tuple = (0.0, 0.0, 0.0, 1.0)  # x, y, z, w
+
+    @staticmethod
+    def from_matrix(m: np.ndarray) -> "Transform":
+        from trimesh.transformations import quaternion_from_matrix
+
+        w, x, y, z = quaternion_from_matrix(m)
+        return Transform(tuple(m[:3, 3]), (x, y, z, w))
+
+    def matrix(self) -> np.ndarray:
+        from trimesh.transformations import quaternion_matrix
+
+        x, y, z, w = self.q
+        m = quaternion_matrix([w, x, y, z])
+        m[:3, 3] = self.t
+        return m
+
+    def json(self):
+        out: dict[str, Any] = {"t": vec(self.t)}
+        if not np.allclose(self.q, (0, 0, 0, 1)):
+            out["q"] = vec(self.q)
+        return out
+
+
+@dataclass
+class Link:
+    id: str
+    name: str
+    joint: Optional[str] = None
+
+
+@dataclass
+class Part:
+    id: str
+    name: str
+    cls: str
+    link: str
+    mesh: Any  # trimesh.Trimesh, assembly frame, zero pose (full detail)
+    source: dict
+    material: str = ""
+    printed: bool = False
+    explode: tuple = (0.0, 1.0, 0.0)
+    explode_mm: float = 40.0
+    mass_g: Optional[float] = None
+    mass_note: str = ""
+    linkage: Optional[str] = None  # horn/rod parts are posed by a linkage, not rigidly
+    role: Optional[str] = None  # "horn" | "rod" | "rod_end_a" | "rod_end_b"
+    inferred: bool = False
+    inferred_note: str = ""
+    note: str = ""
+    decimate_to: Optional[int] = None  # display triangle budget (None = builder default)
+
+    def __post_init__(self):
+        assert self.cls in CLASSES, self.cls
+
+
+@dataclass
+class Joint:
+    id: str
+    name: str
+    type: str
+    parent_link: str
+    child_link: str
+    pivot: tuple
+    axis: tuple
+    limits: tuple
+    unit: str = "deg"
+    profile_joint: Optional[str] = None
+    profile_limits: Optional[tuple] = None
+    drive: dict = field(default_factory=dict)
+    zero: dict = field(default_factory=dict)
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
+class Linkage:
+    """A push rod from a servo horn (on `horn_link`) to a ball on `ground_link`."""
+
+    id: str
+    servo: str
+    horn_link: str
+    centre: tuple
+    axis: tuple
+    radius: float
+    zero_dir: tuple
+    ball_offset: float
+    ground_link: str
+    ground_point: tuple
+    rod_length: float
+    servo_range: tuple = (-150.0, 150.0)
+    parts: list = field(default_factory=list)
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
+class Fastener:
+    id: str
+    spec: dict
+    key: str
+    joins: list
+    link: str
+    step: str
+    matrix: Optional[np.ndarray] = None  # +Z = insertion direction, head at origin; None = unplaced
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
+class Step:
+    id: str
+    title: str
+    parts: list = field(default_factory=list)
+    fasteners: list = field(default_factory=list)
+    unplaced: list = field(default_factory=list)
+    tools: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
+    context: list = field(default_factory=list)
+    joint: Optional[str] = None
+    pose: dict = field(default_factory=dict)
+    guide_page: Optional[int] = None
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
+class BomLine:
+    key: str
+    item: str
+    qty: float
+    category: str
+    spec: dict = field(default_factory=dict)
+    source: str = ""
+    parts: list = field(default_factory=list)
+    fasteners: list = field(default_factory=list)
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
+class Check:
+    id: str
+    kind: str
+    status: str
+    title: str
+    summary: str
+    joint: Optional[str] = None
+    value: Optional[float] = None
+    pose: dict = field(default_factory=dict)
+    parts: list = field(default_factory=list)
+    assumptions: list = field(default_factory=list)
+
+
+@dataclass
+class Assembly:
+    id: str
+    name: str
+    description: str = ""
+    frame_note: str = ""
+    mount: Optional[dict] = None
+    guide: Optional[dict] = None
+    links: list = field(default_factory=list)
+    parts: list = field(default_factory=list)
+    joints: list = field(default_factory=list)
+    linkages: list = field(default_factory=list)
+    fasteners: list = field(default_factory=list)
+    steps: list = field(default_factory=list)
+    bom: list = field(default_factory=list)
+    checks: list = field(default_factory=list)
+    children: list = field(default_factory=list)  # Assembly | dict (ChildRef)
+    notes: list = field(default_factory=list)
+
+    # ------------------------------------------------------------------ lookups
+    def part(self, pid: str) -> Part:
+        return next(p for p in self.parts if p.id == pid)
+
+    def joint(self, jid: str) -> Joint:
+        return next(j for j in self.joints if j.id == jid)
+
+    def link_chain(self, link: str) -> list[str]:
+        """Joints from the ground down to `link` (outermost first)."""
+        by = {l.id: l for l in self.links}
+        out = []
+        while by[link].joint:
+            j = self.joint(by[link].joint)
+            out.append(j.id)
+            link = j.parent_link
+        return out[::-1]
+
+    def validate(self):
+        ids = [p.id for p in self.parts] + [f.id for f in self.fasteners]
+        dup = {i for i in ids if ids.count(i) > 1}
+        assert not dup, f"duplicate ids {dup}"
+        links = {l.id for l in self.links}
+        for p in self.parts:
+            assert p.link in links, f"{p.id}: unknown link {p.link}"
+        for j in self.joints:
+            assert j.parent_link in links and j.child_link in links, j.id
+        step_ids = {s.id for s in self.steps}
+        for f in self.fasteners:
+            assert f.step in step_ids, f"{f.id}: unknown step {f.step}"
+        pids = {p.id for p in self.parts}
+        fids = {f.id for f in self.fasteners}
+        for s in self.steps:
+            for p in s.parts + s.context:
+                assert p in pids, f"{s.id}: unknown part {p}"
+            for f in s.fasteners:
+                assert f in fids, f"{s.id}: unknown fastener {f}"
+        for c in self.children:
+            if isinstance(c, Assembly):
+                c.validate()
+
+
+def rollup(asm: Assembly, loaded: dict | None = None) -> list[BomLine]:
+    """Own BOM plus every inline child's, merged by key (quantities summed)."""
+    merged: dict[str, BomLine] = {}
+    lines = list(asm.bom)
+    for c in asm.children:
+        if isinstance(c, Assembly):
+            lines += rollup(c)
+        elif loaded and c.get("id") in loaded:
+            lines += [BomLine(**{k: v for k, v in b.items() if k in BomLine.__dataclass_fields__})
+                      for b in loaded[c["id"]]]
+    for b in lines:
+        if b.key in merged:
+            m = merged[b.key]
+            m.qty += b.qty
+            m.inferred = m.inferred or b.inferred
+        else:
+            merged[b.key] = BomLine(**{**b.__dict__, "parts": list(b.parts), "fasteners": list(b.fasteners)})
+    return sorted(merged.values(), key=lambda b: (b.category, b.key))

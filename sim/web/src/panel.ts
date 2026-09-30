@@ -1,5 +1,6 @@
 /**
- * The R3X panel (right): what he does. The Show / Bench / Studio switch picks the tabs -
+ * The R3X panel (right): what he does. The Build / Show / Bench / Studio switch picks the tabs -
+ * Build (sim only, src/workbench/): Parts, Joints, Steps, Checks, BOM - the mechanics, never the robot;
  * Show: Talk (push-to-talk, typed turns, the conversation), Perform (emotes and shows, placed
  * by main.ts; DJ; music), Behaviour (brain, autonomy, alive layers, gaze, engagement);
  * Bench: Rig (Home, outputs by body region, joints, calibrate), Test (the same emotes and
@@ -38,8 +39,10 @@ const TRACING_LEVEL: Record<string, string> = { DEBUG: 'debug', INFO: 'info', WA
 
 type Phase = 'offline' | 'idle' | 'engaging' | 'listening' | 'thinking' | 'speaking';
 const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-/** The first tab of each operating mode, until the operator picks another. */
-const DEFAULT_TAB: Record<OperatingMode, string> = { show: 'talk', bench: 'rig', studio: 'system' };
+/** The runtime's operating modes plus Build, which is this page's own (sim only, no runtime). */
+export type PageMode = OperatingMode | 'build';
+/** The first tab of each mode, until the operator picks another. */
+const DEFAULT_TAB: Record<PageMode, string> = { build: 'parts', show: 'talk', bench: 'rig', studio: 'system' };
 const TABS_KEY = 'r3x.tabs';
 
 interface Turn {
@@ -61,8 +64,8 @@ export class ControlPanel {
   readonly gw: GatewayClient;
   private connected = false;
   private mode = 'IDLE';
-  /** Show / Bench / Studio: the runtime's, or the local pick while offline. */
-  private stageMode: OperatingMode = 'show';
+  /** Build / Show / Bench / Studio: the runtime's, the local pick while offline, or Build. */
+  private stageMode: PageMode = 'show';
   private regions: BodyRegions | null = null;
   private tabFor: Record<string, string> = { ...DEFAULT_TAB };
   private phase: Phase = 'offline';
@@ -195,9 +198,9 @@ export class ControlPanel {
       b.classList.toggle('on', b.dataset.engage === m));
   }
 
-  /** Operating mode (Show/Bench/Studio). */
+  /** Operating mode (Show/Bench/Studio). Build is local: the runtime's mode waits behind it. */
   private setStage(s: RetainedState) {
-    if (s.stage.mode !== this.stageMode) this.applyMode(s.stage.mode);
+    if (this.stageMode !== 'build' && s.stage.mode !== this.stageMode) this.applyMode(s.stage.mode);
     const brainOff = !s.stage.brain;
     for (const id of ['ptt', 'rail-ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
     if (this.ptt.enabled === brainOff) this.pttInput({ kind: 'enabled', enabled: !brainOff });
@@ -218,7 +221,10 @@ export class ControlPanel {
     };
     const badge = $('state-badge');
     const mode = title(this.stageMode);
-    if (!this.connected) {
+    if (this.stageMode === 'build') {
+      badge.dataset.state = 'build';
+      badge.textContent = 'Build · sim only';
+    } else if (!this.connected) {
       badge.dataset.state = 'offline';
       badge.textContent = this.stageMode === 'studio' ? 'Studio · Offline' : 'Offline';
     } else if (this.stageMode === 'show') {
@@ -230,16 +236,16 @@ export class ControlPanel {
     }
   }
 
-  /** Offline there is no StageManager: the page's own mode pick (main.ts). */
-  setLocalMode(mode: OperatingMode) {
-    if (!this.connected) this.applyMode(mode);
+  /** Offline there is no StageManager: the page's own mode pick (main.ts). Build is always local. */
+  setLocalMode(mode: PageMode) {
+    if (mode === 'build' || !this.connected) this.applyMode(mode);
   }
 
   /**
    * Show / Bench / Studio: the switch, the tabs that mode has (each mode remembers its last
    * tab), and where the one set of emote/show controls sits (Perform in Show, Test in Bench).
    */
-  private applyMode(mode: OperatingMode, boot = false) {
+  private applyMode(mode: PageMode, boot = false) {
     this.stageMode = mode;
     document.body.dataset.mode = mode;
     document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) => {
@@ -564,7 +570,12 @@ export class ControlPanel {
       else if (d.stageMode) {
         // Focus left on a mode button must not re-send it on a later Space/Enter.
         b.blur();
-        if (this.gw.state?.stage.mode !== d.stageMode) void this.cmd({ class: 'stage', type: 'set_mode', mode: d.stageMode as OperatingMode });
+        // Build never reaches the runtime; leaving it for the mode the runtime is already in is local too.
+        if (d.stageMode === 'build') this.applyMode('build');
+        else {
+          if (this.stageMode === 'build') this.applyMode(d.stageMode as OperatingMode);
+          if (this.gw.state?.stage.mode !== d.stageMode) void this.cmd({ class: 'stage', type: 'set_mode', mode: d.stageMode as OperatingMode });
+        }
       }
       else if (d.music === 'play') void this.cmd({ class: 'intent', type: 'music', action: 'play' });
       else if (d.music === 'stop') void this.cmd({ class: 'intent', type: 'music', action: 'stop' });
