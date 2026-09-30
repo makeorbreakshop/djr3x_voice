@@ -23,6 +23,9 @@
         </button>
       </header>
       <nav class="rail" aria-label="Scene sections">
+        <button data-scene-open="sc-pad" aria-label="Controller" title="Controller ( G )">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5h7a3 3 0 0 1 3 3v2.2a2 2 0 0 1-3.6 1.2L10 9.5H6l-.9 1.4a2 2 0 0 1-3.6-1.2V7.5a3 3 0 0 1 3-3z" /><path d="M4.5 6.5v2M3.5 7.5h2" /><circle cx="10.5" cy="7" r=".4" /><circle cx="12" cy="8.2" r=".4" /></svg>
+        </button>
         <button data-scene-open="sc-view" aria-label="View" title="View">
           <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="10" height="8" rx="1.5" /><path d="m11.5 7 3-2v7l-3-2" /></svg>
         </button>
@@ -37,7 +40,11 @@
         </button>
       </nav>
       <div id="scene-body" class="side-body">
-        <section id="sc-view" class="first">
+        <section id="sc-pad" class="first">
+          <h2>Controller <small>G</small></h2>
+          <div id="pad-dock"></div>
+        </section>
+        <section id="sc-view">
           <h2>View</h2>
           <div class="row seg" role="group" aria-label="Camera preset">
             <button data-cam="full" aria-pressed="true">Full</button>
@@ -303,7 +310,7 @@
           <summary>Puppeteer</summary>
           <p id="pp-pad" class="kv" title="Left stick rings/lean, right stick gaze, d-pad lift/visor, triggers arm, A B X Y emote slots 1-4, Back+ for 5-8, Start = freeze">No gamepad</p>
           <div id="pp-intents" class="pp-intents"></div>
-          <div class="row"><button id="pp-center">Center</button><button id="pp-overlay" title="Show or hide the controller overlay (G)">Controller overlay (G)</button></div>
+          <div class="row"><button id="pp-center">Center</button><button id="pp-overlay" title="Open the controller view in the Scene panel (G)">Controller view (G)</button></div>
           <div class="row" id="pp-modes" data-offline></div>
           <div class="row" data-offline>
             <button id="take-rec" title="Log the command stream at 50 Hz with show layers and events">Record take</button>
