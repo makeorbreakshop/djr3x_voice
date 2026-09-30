@@ -34,16 +34,10 @@ DEFAULTS = dict(
 )
 
 
-def make(params: dict | None = None, **kw):
-    from build123d import Cylinder, Plane, Pos, Rot, extrude
-
-    P = dict(DEFAULTS)
-    P.update(params or {})
-    P.update(kw)
-    unknown = set(P) - set(DEFAULTS)
-    if unknown:
-        raise TypeError(f"unknown base_servo_top parameters: {sorted(unknown)}")
-    fit = P["fit"]
+def outline(P: dict, slot: bool = True, right=None):
+    """The plate's outline (a Face on XY). base_center extends the same outline into its tower:
+    `slot=False` leaves the top slot out, `right` (profile items from the bottom-left corner's
+    neighbour up to, not including, the top round's top point) replaces the right-hand side."""
     (x0, x1), (y0, y1) = P["x"], P["y"]
     cx, cy = P["chamfer"]
     r = P["corner_r"]
@@ -65,9 +59,25 @@ def make(params: dict | None = None, **kw):
     c_left = corner_centre((cx, y1), d, (x0, cy), (-1.0, 0.0))
     tr = P["top_right_round"]
     ry = tr[1] + math.sqrt(r ** 2 - (x1 - tr[0]) ** 2)
-    face = profile([(x0, y0), (x1, y0), (x1, ry), ("arc", tr), (tr[0], y1), (sx1, y1), (sx1, sy), (sx0, sy), (sx0, y1),
+    right = right if right is not None else [(x1, y0), (x1, ry), ("arc", tr)]
+    top_slot = [(sx1, y1), (sx1, sy), (sx0, sy), (sx0, y1)] if slot else []
+    return profile([(x0, y0), *right, (tr[0], y1), *top_slot,
                     (c_top[0], y1), ("arc", c_top), (c_top[0] + r * n[0], c_top[1] + r * n[1]),
                     (c_left[0] + r * n[0], c_left[1] + r * n[1]), ("arc", c_left), (x0, c_left[1])])
+
+
+def make(params: dict | None = None, **kw):
+    from build123d import Cylinder, Plane, Pos, Rot, extrude
+
+    P = dict(DEFAULTS)
+    P.update(params or {})
+    P.update(kw)
+    unknown = set(P) - set(DEFAULTS)
+    if unknown:
+        raise TypeError(f"unknown base_servo_top parameters: {sorted(unknown)}")
+    fit = P["fit"]
+    (x0, x1), (y0, y1) = P["x"], P["y"]
+    face = outline(P)
     z0, t = P["z0"], P["thickness"]
     body = extrude(Plane.XY.offset(z0) * face, amount=t)
     dh = hole_d(P["bolt"], "clearance", fit, P["hole_sizes"])

@@ -255,8 +255,8 @@ def brep_holes(path: Path) -> list[dict]:
         vs = np.array([tuple(v) for v in f.vertices()])
         t = (vs - p) @ d
         r = cyl.Radius()
-        # a partial cylinder (a slot end, a fillet) is not a round hole: keep only closed ones
-        if f.area < 0.95 * 2 * np.pi * r * (t.max() - t.min()):
+        # a partial cylinder (a slot end, a fillet) is not a round hole; a bore broken by a keyway is
+        if f.area < 0.6 * 2 * np.pi * r * (t.max() - t.min()):
             continue
         hit = next((h for h in out if abs(h["r"] - r) < 1e-3 and abs(abs(h["d"] @ d) - 1) < 1e-6
                     and np.linalg.norm((p - h["p"]) - h["d"] * ((p - h["p"]) @ h["d"])) < 1e-3), None)

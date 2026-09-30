@@ -26,5 +26,8 @@ PARTS = {
     "parts.anderson.lift_gear": "lift-gear",
     "parts.anderson.lift_rack": "head-lift-straight-gear",
     "parts.anderson.slide_platform": "slide-platform",
+    "parts.anderson.base_center": "base-center",
+    "parts.anderson.pan_ring_gear": "headlift-base-mount",
+    "parts.anderson.base_ring": "headlift-base-mount (1)",
 }
 # not modelled: mgn12-rail-with-2020 is a stand-in for purchased parts (a 2020 extrusion + MGN12 rail)
