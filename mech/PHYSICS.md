@@ -88,3 +88,21 @@ Not scheduled yet; this is how it should be built when it is.
   orientation), derated for printed plastic; calibrated by weighing parts and a phone
   accelerometer tap test.
 - Brandon never edits CAD: intent -> parameters/designs -> rebuild -> checks + physics -> 3D view.
+
+### Update (same day): our own Rust physics core, MuJoCo/CalculiX as test oracles
+
+Supersedes "MuJoCo in-process" above. Our problem is narrow (one articulated robot: rigid-link
+tree, a few closed loops, servos, gravity, friction), so we own the engine in Rust, alongside
+`r3x-performer-core`, native + WASM:
+
+- `r3x-dynamics`: recursive Newton-Euler inverse dynamics (per-clip joint torques and pin/bearing
+  reaction loads - the most valuable piece), Featherstone articulated-body forward dynamics,
+  loop-closure constraints (rods, rack, visor linkage), a servo actuator model (position control,
+  torque/speed limits, deadband, gear ratio), joint friction/damping; built directly from the
+  workbench assembly (no export).
+- Collision/distance via `parry` (could also replace FCL in the assembly suite).
+- Structural FEA in Rust: voxel/hex linear static + modal (via `faer`), per part, loads from the
+  dynamics; stiffness fed back as compliant joints so the sim wobbles.
+- MuJoCo and CalculiX stay only in tests, as reference oracles: the same clip/part must match
+  within tolerance (torques/loads; deflection and first-mode frequency within a few %).
+- Out of scope unless needed: contact-rich simulation (grasping, arm-vs-decks).
