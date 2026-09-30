@@ -415,7 +415,7 @@ export function mountBuildPanel(wb: Workbench) {
               <button class="ic solo" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${solo}" aria-label="${solo ? 'Show everything' : `Show only ${esc(p.name)}`}" title="${solo ? 'Show everything' : 'Solo'}">${SOLO}</button>
             </span></li>`;
         }).join('');
-    }).join('') || '<li class="empty">No parts match.</li>';
+    }).join('') || `<li class="empty">${filter === 'all' ? (wb.top && flatten(wb.top.asm).length > 1 ? 'No parts at this level: pick a sub-assembly above.' : 'No parts.') : 'No parts match.'}</li>`;
     $('bp-show-all').hidden = !wb.isolated && !wb.hidden.size;
     renderDetail();
   }

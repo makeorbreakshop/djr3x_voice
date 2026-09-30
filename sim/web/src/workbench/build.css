@@ -171,6 +171,6 @@ table.bom tr.grp th { text-align: left; padding: 12px 4px 3px; color: var(--text
 table.bom tr.grp th span { color: #5b6170; font: 400 11px ui-monospace, Menlo, monospace; margin-left: 4px; }
 table.bom tr.grp:first-child th { padding-top: 0; }
 #bp-variants { display: grid; gap: 4px; margin-bottom: 8px; }
-.bp-var { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.bp-var { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .bp-var select { margin: 0; padding: 3px 6px; min-width: 0; }
 #bp-variants[hidden] { display: none; }
