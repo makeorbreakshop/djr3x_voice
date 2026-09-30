@@ -20,4 +20,10 @@ PARTS = {
     "neck_coupler": "parts.head.neck_coupler",
     "neck_joint_member": "parts.head.neck_joint_member",
     "custom_joint_piece": "parts.head.custom_joint_piece",
+    # the shells (Hunter's cut of the R-3X kit head)
+    "head_top": "parts.head.head_top",
+    "head_bottom": "parts.head.head_bottom",
+    "side_left": "parts.head.side_left",
+    "side_right": "parts.head.side_right",
 }
+SHELLS = ("parts.head.head_top", "parts.head.head_bottom", "parts.head.side_left", "parts.head.side_right")

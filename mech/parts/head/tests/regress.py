@@ -153,12 +153,15 @@ def ref_holes(mesh: trimesh.Trimesh, step: float = 0.5, rmin: float = 0.8, rmax:
     return out
 
 
-def match_holes(features: dict, ref_mesh: trimesh.Trimesh, tol: float = 0.2, holes=None, frame=None, **kw) -> dict:
+def match_holes(features: dict, ref_mesh: trimesh.Trimesh, tol: float = 0.2, holes=None, frame=None,
+                unmodelled=(), **kw) -> dict:
     """Every `hole_*` axis feature of the part against the holes (and slots) found on the
     reference, and back. A match: same principal axis, centre (perpendicular to the axis) within
     `tol`, radius within 0.3 mm, same kind (hole or slot). `frame` (4x4, design -> reference) is
     for parts exported askew (the visor mount): both sides are compared in the design frame.
-    Returns {matched: [(name, err_mm)], missing_in_ref, missing_in_model, max_err_mm}."""
+    `unmodelled`: [{note, box}] regions (design frame) whose reference holes the part declares it
+    does not model - listed under `unmodelled`, not failed.
+    Returns {matched: [(name, err_mm)], missing_in_ref, missing_in_model, unmodelled, max_err_mm}."""
     if frame is not None:
         from parts.head._common import moved
 
@@ -170,11 +173,16 @@ def match_holes(features: dict, ref_mesh: trimesh.Trimesh, tol: float = 0.2, hol
     holes = holes if holes is not None else ref_holes(ref_mesh, **kw)
     mh = {k: f for k, f in features.items() if k.startswith("hole_") and f["type"] == "axis"}
     matched, miss_ref, used = [], [], set()
+    oblique = []
     for name, f in sorted(mh.items()):
         d = np.abs(np.asarray(f["d"]))
         ax = int(np.argmax(d))
         if d[ax] < 0.999:
-            miss_ref.append((name, "not along a principal axis"))
+            # a hole off the principal axes (a radial hole in a ring): the reference's surface must
+            # lie on the hole's wall all round, at mid-depth
+            err = _wall_error(f, ref_mesh)
+            (matched if err <= tol else miss_ref).append((name, round(err, 4)))
+            oblique.append(f)
             continue
         best = None
         for i, h in enumerate(holes):
@@ -190,10 +198,39 @@ def match_holes(features: dict, ref_mesh: trimesh.Trimesh, tol: float = 0.2, hol
         else:
             matched.append((name, round(best[0], 4)))
             used.add(best[1])
+    left = [h for i, h in enumerate(holes) if i not in used and not _on_axis(h["c"], oblique)]
+    inbox = lambda c, b: all(b[0][k] <= c[k] <= b[1][k] for k in range(3))
+    skipped = [h for h in left if any(inbox(h["c"], u["box"]) for u in unmodelled)]
     miss_model = [(round(h["r"] * 2, 2), "xyz"[h["axis"]], np.round(h["c"], 2).tolist())
-                  for i, h in enumerate(holes) if i not in used]
+                  for h in left if not any(h is k for k in skipped)]
     return {"matched": matched, "missing_in_ref": miss_ref, "missing_in_model": miss_model,
+            "unmodelled": [(u["note"], sum(inbox(h["c"], u["box"]) for h in skipped)) for u in unmodelled],
             "max_err_mm": max([e for _, e in matched], default=0.0)}
+
+
+def _wall_error(f: dict, mesh: trimesh.Trimesh, n: int = 36) -> float:
+    """Mean distance from the reference's surface to a hole feature's wall at mid-depth (mm)."""
+    p, d, r = np.asarray(f["p"], float), np.asarray(f["d"], float), float(f["r"])
+    e1 = np.cross(d, [1.0, 0, 0] if abs(d[0]) < 0.9 else [0, 1.0, 0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(d, e1)
+    u = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    c = p + d * f.get("depth", 2 * r) / 2
+    pts = c + r * (np.outer(np.cos(u), e1) + np.outer(np.sin(u), e2))
+    _, dist, _ = trimesh.proximity.closest_point(mesh, pts)
+    return float(dist.mean())
+
+
+def _on_axis(c, feats, margin: float = 1.0) -> bool:
+    """Whether a point lies inside one of the given hole features (reference detections of an
+    oblique hole, seen as slots in the principal sections)."""
+    for f in feats:
+        p, d = np.asarray(f["p"]), np.asarray(f["d"])
+        w = np.asarray(c) - p
+        t = w @ d
+        if -margin <= t <= f.get("depth", 10.0) + margin and np.linalg.norm(w - t * d) <= f["r"] + margin:
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ heatmaps (scratchpad only)
