@@ -11,6 +11,7 @@ void fx_fault(const Ctx &c) {
       mainLeds[smallIdx(b, k)] = k == pos ? scaled(ALERT_RED, 0.6) : CRGB::Black;
     for (uint8_t k = 0; k < WINDOWS_PER_BOARD; k++) setWindow(b, k, scaled(ALERT_RED, pulse));
   }
+  presentWindows(c, NULL);
   fx_hidden_off(c);
   CRGB e = scaled(ALERT_RED, pulse);
   setEyes(e, e);

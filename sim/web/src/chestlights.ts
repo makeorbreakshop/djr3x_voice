@@ -66,9 +66,19 @@ export class ChestLights {
     }
   }
 
+  private shown = true;
+  private covered = new Set<number>();
+
   /** Hidden while an electronics package brings its own body LEDs (electronics.ts). */
   setVisible(on: boolean) {
-    for (const m of this.meshes) m.visible = on;
+    this.shown = on;
+    this.meshes.forEach((m, i) => (m.visible = on && !this.covered.has(i)));
+  }
+
+  /** Pixels drawn by a diffuser pane instead (electronics.ts Diffusers). */
+  setCovered(indices: Iterable<number>) {
+    this.covered = new Set(indices);
+    this.setVisible(this.shown);
   }
 
   update(pixels: RGB[]) {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { PACKAGES, faceSlots, ownsLights, profileJsonWith } from '../src/electronics';
+import {
+  PACKAGES, diffuserFalloff, diffuserSources, faceSlots, ownsLights, profileJsonWith, windowColor,
+} from '../src/electronics';
 import { PROFILE_JSON } from '../src/performer';
 import type { RGB } from '../src/leds';
 
@@ -39,6 +41,39 @@ interface Wasm {
   initSync(o: { module: Uint8Array }): unknown;
   WasmPerformer: new (profile: string, show: string, seed: number) => { command(c: string): void; tick(t: number): string; free(): void };
 }
+
+describe('diffused logic-panel windows', () => {
+  it('both LED packages cover their 9 windows with opal; the light pipes stay points', () => {
+    const native = diffuserSources(PACKAGES.r3x_native);
+    const grn = diffuserSources(PACKAGES.grnwave_full_led);
+    expect(native.map((s) => [s.group, s.windows.length])).toEqual([['chest', 9]]);
+    expect(grn.map((s) => [s.group, s.windows.length])).toEqual([['body', 9]]);
+    expect(grn[0].windows.every((w) => w.leds.length === 4 && w.diffuser.kind === 'opal')).toBe(true);
+    // A package with no LED boards keeps the native chest preview, diffusers included.
+    expect(diffuserSources(PACKAGES.community_morton)).toEqual(native);
+    for (const src of [...native, ...grn]) {
+      const g = [...PACKAGES.r3x_native.lights, ...PACKAGES.grnwave_full_led.lights].find((l) => l.name === src.group)!;
+      for (const w of src.windows) for (const i of w.leds) expect(['dot', 'small']).not.toContain(g.layout[i].kind);
+    }
+  });
+
+  it('a window shows the linear mean of its LEDs times the transmission', () => {
+    const w = { leds: [0, 1, 2, 3], diffuser: { kind: 'opal' as const, transmission: 0.5 } };
+    const px: RGB[] = [[255, 0, 0], [255, 0, 0], [0, 0, 255], [0, 0, 0]];
+    expect(windowColor(px, w)).toEqual([63.75, 0, 31.875]);
+  });
+
+  it('falls off toward the edges and corners, evenly in the middle', () => {
+    for (const kind of ['opal', 'frosted'] as const) {
+      const mid = diffuserFalloff(0, 0, kind);
+      expect(mid).toBe(1);
+      expect(diffuserFalloff(0.95, 0, kind)).toBeLessThan(mid);
+      expect(diffuserFalloff(0.95, 0.95, kind)).toBeLessThan(diffuserFalloff(0.95, 0, kind));
+      expect(diffuserFalloff(0.95, 0.95, kind)).toBeGreaterThan(0.3);
+    }
+    expect(diffuserFalloff(0.3, 0, 'opal')).toBe(1); // opal: flat across the middle
+  });
+});
 
 describe.skipIf(!built)('grnwave in the wasm performer', () => {
   it('frames carry the package groups when grnwave is selected, none for native', async () => {

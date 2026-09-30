@@ -454,7 +454,10 @@ impl Performer {
                         return Err(format!("grnwave emulator: light group {g} must have {count} pixels, not {:?}", n(g)));
                     }
                 }
-                Some(GrnwaveFirmware::new(derive(cfg.seed, 6)))
+                // Diffusers over the windows (the package's `lights.body.windows`): windows
+                // are authored as units; bare, the per-pixel `blocks` effects run.
+                let diffused = profile.package.as_ref().and_then(|p| p.light("body")).is_some_and(|l| l.diffused());
+                Some(GrnwaveFirmware::new(derive(cfg.seed, 6)).with_diffusers(diffused))
             }
             _ => None,
         };

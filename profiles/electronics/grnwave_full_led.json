@@ -1799,6 +1799,314 @@
           "h": 0.005
         }
       ],
+      "windows": [
+        {
+          "id": "p1_w0",
+          "panel": "logic_panel_1",
+          "leds": [
+            12,
+            13,
+            14,
+            15
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.15872,
+            0.43844,
+            0.01706
+          ],
+          "normal": [
+            -0.9959,
+            0.0,
+            0.0903
+          ],
+          "u": [
+            0.0903,
+            0.0,
+            0.9959
+          ],
+          "size_m": [
+            0.0136,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w1",
+          "panel": "logic_panel_1",
+          "leds": [
+            24,
+            25,
+            26,
+            27
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16471,
+            0.46816,
+            0.03302
+          ],
+          "normal": [
+            -0.9959,
+            0.0,
+            0.0903
+          ],
+          "u": [
+            0.0903,
+            0.0,
+            0.9959
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w2",
+          "panel": "logic_panel_1",
+          "leds": [
+            28,
+            29,
+            30,
+            31
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16707,
+            0.46812,
+            0.01819
+          ],
+          "normal": [
+            -0.9959,
+            0.0,
+            0.0903
+          ],
+          "u": [
+            0.0903,
+            0.0,
+            0.9959
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w0",
+          "panel": "logic_panel_2",
+          "leds": [
+            40,
+            41,
+            42,
+            43
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11765,
+            0.43844,
+            0.10812
+          ],
+          "normal": [
+            -0.7998,
+            0.0,
+            0.6003
+          ],
+          "u": [
+            0.6003,
+            0.0,
+            0.7998
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w1",
+          "panel": "logic_panel_2",
+          "leds": [
+            44,
+            45,
+            46,
+            47
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.12608,
+            0.43844,
+            0.09557
+          ],
+          "normal": [
+            -0.7998,
+            0.0,
+            0.6003
+          ],
+          "u": [
+            0.6003,
+            0.0,
+            0.7998
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w2",
+          "panel": "logic_panel_2",
+          "leds": [
+            48,
+            49,
+            50,
+            51
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11881,
+            0.45293,
+            0.10902
+          ],
+          "normal": [
+            -0.7998,
+            0.0,
+            0.6003
+          ],
+          "u": [
+            0.6003,
+            0.0,
+            0.7998
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w0",
+          "panel": "logic_panel_3",
+          "leds": [
+            84,
+            85,
+            86,
+            87
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.06118,
+            0.45356,
+            0.15293
+          ],
+          "normal": [
+            -0.3767,
+            0.0,
+            0.9263
+          ],
+          "u": [
+            0.9263,
+            0.0,
+            0.3767
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w1",
+          "panel": "logic_panel_3",
+          "leds": [
+            88,
+            89,
+            90,
+            91
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.04804,
+            0.46814,
+            0.16077
+          ],
+          "normal": [
+            -0.3767,
+            0.0,
+            0.9263
+          ],
+          "u": [
+            0.9263,
+            0.0,
+            0.3767
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w2",
+          "panel": "logic_panel_3",
+          "leds": [
+            92,
+            93,
+            94,
+            95
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.06174,
+            0.46805,
+            0.15441
+          ],
+          "normal": [
+            -0.3767,
+            0.0,
+            0.9263
+          ],
+          "u": [
+            0.9263,
+            0.0,
+            0.3767
+          ],
+          "size_m": [
+            0.014,
+            0.012
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        }
+      ],
       "driver": {
         "type": "serial_led",
         "board": "grnwave",
@@ -2133,10 +2441,17 @@
       "item": "1000 uF 10 V capacitor",
       "qty": 1,
       "category": "hardware"
+    },
+    {
+      "item": "3 mm opal acrylic window diffuser (cut to the window)",
+      "qty": 9,
+      "category": "optics",
+      "note": "one per logic-panel window, ~55 % transmission"
     }
   ],
   "notes": [
     "Sample code: github.com/grnwaveworkshop/DJ-RexBody (no licence; kept for reference under mech/vendor/grnwave/, not copied). Our firmware/grnwave_nano is written from its facts: FastLED on D4, 3 x 32 body then 2 eyes.",
+    "Each logic-panel window has an opal diffuser over its 4 x 5050 (lights.body.windows), so a window is one colour and firmware/grnwave_nano authors windows as units (DIFFUSED in config.h). The light-pipe LEDs stay individual points.",
     "RS-485 Nano breakouts (grnwave) suit bigger systems; this package uses USB serial like our other boards.",
     "The servos stay on the R3X servo controller: pair this package with r3x_native's servo_ctl, or add it here."
   ]

@@ -125,6 +125,65 @@ pub struct Board {
     pub inferred_note: String,
 }
 
+/// What covers a window: an `opal` or `frosted` diffuser mixes the LEDs behind it into one
+/// evenly lit colour; `none` shows them as separate pixels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffuserKind {
+    /// Opal (milky) acrylic: the LEDs vanish into one flat colour.
+    #[default]
+    Opal,
+    /// Frosted / sanded clear: one colour, a little hot in the middle.
+    Frosted,
+    /// No cover: each LED is seen.
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct Diffuser {
+    pub kind: DiffuserKind,
+    /// Fraction of the light that gets through, 0..1 (opal 3 mm ~0.5, frosted ~0.8).
+    pub transmission: f64,
+}
+
+impl Diffuser {
+    /// Does the cover mix its LEDs into one colour?
+    pub fn mixes(&self) -> bool {
+        self.kind != DiffuserKind::None
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowShape {
+    #[default]
+    Rect,
+    Round,
+}
+
+/// A window of a panel: an opening that one or more of the group's LEDs light from behind,
+/// under a [`Diffuser`]. With a mixing diffuser the window is one colour, so the firmware
+/// and the performer author it as a unit; pixels not in any window are individual points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct LightWindow {
+    /// Unique in the package (`p1_w0` = panel 1, its window 0 in firmware order).
+    pub id: String,
+    /// The panel it is cut in (`logic_panel_1`).
+    pub panel: String,
+    /// Indices into this light group's pixels (not the chain), in chain order.
+    pub leds: Vec<u16>,
+    pub shape: WindowShape,
+    /// Centre of the diffuser face, metres, model kit frame (like [`LightPixel::pos`]).
+    pub centre: [f64; 3],
+    /// Outward face normal (kit frame, unit).
+    pub normal: [f64; 3],
+    /// The face's width direction (kit frame, unit, perpendicular to `normal`).
+    pub u: [f64; 3],
+    /// Width (along `u`) x height of the opening, metres.
+    pub size_m: [f64; 2],
+    pub diffuser: Diffuser,
+}
+
 /// One light group of the package: becomes a profile [`LightGroup`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PackageLight {
@@ -148,6 +207,9 @@ pub struct PackageLight {
     /// The semantic outputs it shows (`eyes`, `mouth`, `chest_status`, `tempo`, ...).
     #[serde(default)]
     pub serves: Vec<String>,
+    /// Panel windows over some of these LEDs (the rest are individual points).
+    #[serde(default)]
+    pub windows: Vec<LightWindow>,
     #[serde(default)]
     pub inferred: bool,
     #[serde(default)]
@@ -155,6 +217,11 @@ pub struct PackageLight {
 }
 
 impl PackageLight {
+    /// Is any window under a mixing diffuser (effects then author windows as units)?
+    pub fn diffused(&self) -> bool {
+        self.windows.iter().any(|w| w.diffuser.mixes())
+    }
+
     pub fn to_light_group(&self) -> LightGroup {
         LightGroup {
             name: self.name.clone(),
@@ -309,6 +376,7 @@ impl ElectronicsPackage {
             }
         }
         let mut names = HashSet::new();
+        let mut window_ids = HashSet::new();
         let mut spans: Vec<(&str, u16, u16, &str)> = Vec::new();
         for l in &self.lights {
             let n = &l.name;
@@ -328,6 +396,36 @@ impl ElectronicsPackage {
                 errs.push(format!("{id}: light {n}: inferred without an inferred_note"));
             }
             spans.push((l.data_line.as_str(), l.chain_start, l.chain_start + l.pixels, n.as_str()));
+            let mut seen = HashSet::new();
+            for w in &l.windows {
+                let wid = &w.id;
+                if !window_ids.insert(wid.as_str()) {
+                    errs.push(format!("{id}: duplicate window {wid}"));
+                }
+                if w.leds.is_empty() {
+                    errs.push(format!("{id}: window {wid}: no LEDs"));
+                }
+                for &i in &w.leds {
+                    if i >= l.pixels {
+                        errs.push(format!("{id}: window {wid}: LED {i} outside light {n} ({} px)", l.pixels));
+                    }
+                    if !seen.insert(i) {
+                        errs.push(format!("{id}: window {wid}: LED {i} is already in another window"));
+                    }
+                }
+                let t = w.diffuser.transmission;
+                if !(t > 0.0 && t <= 1.0) {
+                    errs.push(format!("{id}: window {wid}: diffuser transmission must be in (0, 1]"));
+                }
+                if !w.size_m.iter().all(|v| v.is_finite() && *v > 0.0) {
+                    errs.push(format!("{id}: window {wid}: size_m must be > 0"));
+                }
+                let len = |v: &[f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+                let dot: f64 = w.normal.iter().zip(&w.u).map(|(a, b)| a * b).sum();
+                if (len(&w.normal) - 1.0).abs() > 1e-2 || (len(&w.u) - 1.0).abs() > 1e-2 || dot.abs() > 1e-2 {
+                    errs.push(format!("{id}: window {wid}: normal and u must be unit and perpendicular"));
+                }
+            }
         }
         // Groups sharing a data line must not overlap in the chain.
         for (i, a) in spans.iter().enumerate() {
@@ -430,6 +528,44 @@ mod tests {
         assert_eq!(p.emulator, LedEmulator::Grnwave);
         // 25 light pipes for 24 small LEDs: the BOM carries the pipes.
         assert!(p.bom.iter().any(|b| b.item.contains("VLP-600-R") && b.qty == 25));
+    }
+
+    #[test]
+    fn logic_panel_windows_are_diffused_and_the_light_pipes_are_not() {
+        let expect = [("r3x_native", "chest", 1), ("grnwave_full_led", "body", 4)];
+        for (id, group, per) in expect {
+            let p = ElectronicsPackage::builtin(id).unwrap().unwrap();
+            let l = p.light(group).unwrap();
+            assert_eq!(l.windows.len(), 9, "{id}: 3 panels x 3 windows");
+            assert!(l.diffused());
+            for w in &l.windows {
+                assert_eq!(w.diffuser.kind, DiffuserKind::Opal, "{id} {}", w.id);
+                assert_eq!(w.leds.len(), per, "{id} {}", w.id);
+            }
+            // The LED holes (light pipes) are in no window: individual points.
+            let covered: HashSet<u16> = l.windows.iter().flat_map(|w| w.leds.iter().copied()).collect();
+            for (i, px) in l.layout.iter().enumerate() {
+                if matches!(px.kind.as_str(), "dot" | "small") {
+                    assert!(!covered.contains(&(i as u16)), "{id}: pixel {i} ({}) is a light pipe", px.kind);
+                }
+            }
+        }
+        // grnwave: window k of board b = group EXPOSED[b][k] (firmware/grnwave_nano config.h).
+        let p = ElectronicsPackage::builtin("grnwave_full_led").unwrap().unwrap();
+        let firsts: Vec<u16> = p.light("body").unwrap().windows.iter().map(|w| w.leds[0]).collect();
+        assert_eq!(firsts, [12, 24, 28, 40, 44, 48, 84, 88, 92]);
+    }
+
+    #[test]
+    fn window_validation() {
+        let mut p = ElectronicsPackage::builtin("grnwave_full_led").unwrap().unwrap();
+        let w = &mut p.lights[0].windows;
+        w[0].leds.push(200); // outside the group
+        w[1].leds = w[2].leds.clone(); // LEDs in two windows
+        w[3].diffuser.transmission = 0.0;
+        w[4].id = w[5].id.clone();
+        let crate::ProfileError::Invalid(errs) = p.validate().unwrap_err() else { panic!() };
+        assert!(errs.len() >= 4, "{errs:#?}");
     }
 
     #[test]

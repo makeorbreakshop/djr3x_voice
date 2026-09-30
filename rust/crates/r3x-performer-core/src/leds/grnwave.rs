@@ -13,6 +13,12 @@
 //! parameters); randomness differs (Arduino `random` vs [`Rng`]), timing and levels do not.
 //! Pixel values are before `FastLED.setBrightness` ([`BRIGHTNESS`]), like the face emulator's.
 //!
+//! Windows are units: with an opal diffuser over each (the package's `lights.body.windows`,
+//! `DIFFUSED` in the sketch's config.h) a window is one colour, so window effects write one
+//! colour per window ([`GrnwaveFirmware::win`], board-major = the health bits) and
+//! [`present_windows`] puts it on the window's 4 LEDs. Bare windows ([`GrnwaveFirmware::diffused`]
+//! false) keep the per-pixel path: the look's `blocks` effect varies the LEDs inside a window.
+//!
 //! Words (115200 baud, newline-terminated; lines up to 15 chars):
 //! `SI SE SL ST SS` state -> `+`; `SF` flash -> `+`; `Mnnn` amplitude; `Bnnn` tempo;
 //! `Xn` system state -> `+`; `Hxxx` health mask; `R` reset (silent, so the face driver's
@@ -102,22 +108,34 @@ struct Flicker {
     next: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct Blink {
+    color: usize,
+    on: bool,
+    next: f64,
+}
+
+pub type Effect = fn(&mut GrnwaveFirmware, &Ctx);
+
 /// The per-state look: one effect per zone (the sketch's `LOOKS` table in `effects.cpp`).
 #[derive(Clone, Copy)]
 pub struct Look {
     pub mode: u8,
-    pub dots: fn(&mut GrnwaveFirmware, &Ctx),
-    pub windows: fn(&mut GrnwaveFirmware, &Ctx),
-    pub eyes: fn(&mut GrnwaveFirmware, &Ctx),
-    pub mouth: fn(&mut GrnwaveFirmware, &Ctx),
+    pub dots: Effect,
+    /// Windows as units: writes [`GrnwaveFirmware::win`].
+    pub windows: Effect,
+    /// Per pixel inside each window, bare windows only; `None` = the window's colour flat.
+    pub blocks: Option<Effect>,
+    pub eyes: Effect,
+    pub mouth: Effect,
 }
 
 pub const LOOKS: [Look; 5] = [
-    Look { mode: b'I', dots: fx_twinkle, windows: fx_win_breathe, eyes: fx_eyes_flicker, mouth: fx_mouth_glow },
-    Look { mode: b'E', dots: fx_twinkle, windows: fx_win_breathe, eyes: fx_eyes_solid, mouth: fx_mouth_glow },
-    Look { mode: b'L', dots: fx_fill, windows: fx_win_breathe, eyes: fx_eyes_pulse, mouth: fx_mouth_glow },
-    Look { mode: b'T', dots: fx_scan, windows: fx_win_think, eyes: fx_eyes_alternate, mouth: fx_mouth_pulse },
-    Look { mode: b'S', dots: fx_vu, windows: fx_win_level, eyes: fx_eyes_speak, mouth: fx_mouth_vu },
+    Look { mode: b'I', dots: fx_twinkle, windows: fx_win_blink, blocks: None, eyes: fx_eyes_flicker, mouth: fx_mouth_glow },
+    Look { mode: b'E', dots: fx_twinkle, windows: fx_win_blink, blocks: None, eyes: fx_eyes_solid, mouth: fx_mouth_glow },
+    Look { mode: b'L', dots: fx_fill, windows: fx_win_breathe, blocks: None, eyes: fx_eyes_pulse, mouth: fx_mouth_glow },
+    Look { mode: b'T', dots: fx_scan, windows: fx_win_think, blocks: Some(fx_blk_spin), eyes: fx_eyes_alternate, mouth: fx_mouth_pulse },
+    Look { mode: b'S', dots: fx_vu, windows: fx_win_level, blocks: None, eyes: fx_eyes_speak, mouth: fx_mouth_vu },
 ];
 
 #[derive(Clone, Debug)]
@@ -126,6 +144,11 @@ pub struct GrnwaveFirmware {
     pub main: Vec<Rgb>,
     /// D5 line.
     pub mouth: [Rgb; MOUTH_LEDS],
+    /// One colour per window, board-major (A0 A1 A2 B0 ... = the health bits).
+    pub win: [Rgb; WINDOWS],
+    /// Diffusers over the windows (the sketch's `DIFFUSED`, default on): windows are shown
+    /// flat. Off, the look's `blocks` effect adds per-pixel detail.
+    pub diffused: bool,
     /// One of I E L T S.
     pub mode: u8,
     pub amplitude: u8,
@@ -138,6 +161,7 @@ pub struct GrnwaveFirmware {
     flash_until: f64,
     boot_start: f64,
     twinkle: [[Twinkle; SMALL_PER_BOARD]; BODY_BOARDS],
+    blink: [Blink; WINDOWS],
     flicker: [Flicker; EYE_LEDS],
     rx: String,
     tx: Vec<String>,
@@ -149,6 +173,8 @@ impl GrnwaveFirmware {
         GrnwaveFirmware {
             main: vec![OFF; MAIN_LEDS],
             mouth: [OFF; MOUTH_LEDS],
+            win: [OFF; WINDOWS],
+            diffused: true,
             mode: b'I',
             amplitude: 0,
             bpm: 0,
@@ -158,11 +184,18 @@ impl GrnwaveFirmware {
             flash_until: 0.0,
             boot_start: 0.0,
             twinkle: [[Twinkle::default(); SMALL_PER_BOARD]; BODY_BOARDS],
+            blink: [Blink::default(); WINDOWS],
             flicker: [Flicker { level: 0.8, target: 0.8, next: 0.0 }; EYE_LEDS],
             rx: String::new(),
             tx: vec![READY.to_string()],
             rng,
         }
+    }
+
+    /// Bare windows (no diffuser): the per-pixel `blocks` effects run.
+    pub fn with_diffusers(mut self, on: bool) -> Self {
+        self.diffused = on;
+        self
     }
 
     pub fn body(&self) -> &[Rgb] {
@@ -278,8 +311,9 @@ impl GrnwaveFirmware {
             (look.dots)(self, &ctx);
             (look.windows)(self, &ctx);
         }
-        fx_hidden_off(self, &ctx);
         fx_health(self, &ctx);
+        present_windows(self, &ctx, if self.bpm > 0 { None } else { look.blocks });
+        fx_hidden_off(self, &ctx);
         if ms < self.flash_until {
             fx_flash(self, &ctx);
         } else {
@@ -292,9 +326,22 @@ impl GrnwaveFirmware {
 pub const FLASH_MS: f64 = 350.0;
 pub const BOOT_TIMEOUT_MS: f64 = 60000.0;
 
+/// A window is a unit: its colour, shown on all its LEDs by [`present_windows`].
 fn set_window(fw: &mut GrnwaveFirmware, b: usize, k: usize, c: Rgb) {
-    let i = GrnwaveFirmware::window(b, k);
-    fw.main[i..i + LEDS_PER_GROUP].fill(c);
+    fw.win[b * 3 + k] = c;
+}
+
+/// Each window's colour on its 4 LEDs; bare windows then run `blocks` (per pixel).
+pub fn present_windows(fw: &mut GrnwaveFirmware, c: &Ctx, blocks: Option<Effect>) {
+    for b in 0..BODY_BOARDS {
+        for k in 0..3 {
+            let i = GrnwaveFirmware::window(b, k);
+            fw.main[i..i + LEDS_PER_GROUP].fill(fw.win[b * 3 + k]);
+        }
+    }
+    if let (false, Some(f)) = (fw.diffused, blocks) {
+        f(fw, c);
+    }
 }
 
 fn window_base(b: usize, k: usize) -> Rgb {
@@ -391,6 +438,24 @@ pub fn fx_beat_chase(fw: &mut GrnwaveFirmware, c: &Ctx) {
 
 // ------------------------------------------------------------------ windows (5050 blocks)
 
+/// fx_win_blink: the droid's blinking blocks. Each window holds a block colour (on 75 %, at
+/// 0.8) or goes dark for 300 + rand(1400) ms (engaged 150 + rand(600)), then jumps to
+/// another colour - never the one it had.
+pub fn fx_win_blink(fw: &mut GrnwaveFirmware, c: &Ctx) {
+    let engaged = fw.mode == b'E';
+    for i in 0..WINDOWS {
+        let s = &mut fw.blink[i];
+        if c.ms >= s.next {
+            s.on = fw.rng.next_f64() < 0.75;
+            s.color = (s.color + 1 + (fw.rng.next_f64() * 3.0) as usize) % BLOCK_COLORS.len();
+            s.next = c.ms
+                + if engaged { 150.0 + fw.rng.next_f64() * 600.0 } else { 300.0 + fw.rng.next_f64() * 1400.0 };
+        }
+        let s = fw.blink[i];
+        fw.win[i] = if s.on { scale(BLOCK_COLORS[s.color], 0.8) } else { OFF };
+    }
+}
+
 /// fx_win_breathe: each window breathes slowly in its own colour, 0.2-0.7.
 pub fn fx_win_breathe(fw: &mut GrnwaveFirmware, c: &Ctx) {
     let t = c.ms / 1000.0;
@@ -403,34 +468,70 @@ pub fn fx_win_breathe(fw: &mut GrnwaveFirmware, c: &Ctx) {
     }
 }
 
-/// fx_win_think: windows shimmer fast, 0-0.6.
+/// fx_win_think: a cyan "working" block steps through the 9 windows, board by board, 6 a
+/// second, with a 0.35 trail; the rest hold their colour at 0.12.
 pub fn fx_win_think(fw: &mut GrnwaveFirmware, c: &Ctx) {
-    let t = c.ms / 1000.0;
+    let pos = (libm::floor(c.ms / 1000.0 * 6.0) as u64 % WINDOWS as u64) as usize;
     for b in 0..BODY_BOARDS {
         for k in 0..3 {
-            let i = (b * 3 + k) as f64;
-            set_window(fw, b, k, scale(window_base(b, k), 0.3 + 0.3 * libm::sin(t * 8.0 + i)));
+            let i = b * 3 + k;
+            let col = if i == pos {
+                THINK_CYAN
+            } else if i == (pos + WINDOWS - 1) % WINDOWS {
+                scale(THINK_CYAN, 0.35)
+            } else {
+                scale(window_base(b, k), 0.12)
+            };
+            set_window(fw, b, k, col);
         }
     }
 }
 
-/// fx_win_level: windows follow the speech level, 0.35-1.
+/// Speech level at which a panel's window k lights (fx_win_level).
+pub const LEVEL_THRESH: [f64; 3] = [0.2, 0.45, 0.7];
+
+/// fx_win_level: each panel's 3 windows are a VU meter: window k turns the speaking orange
+/// (the mouth's) at 0.5 + 0.5 x the level once the level passes [`LEVEL_THRESH`]`[k]`, else its own colour at 0.15.
 pub fn fx_win_level(fw: &mut GrnwaveFirmware, c: &Ctx) {
     for b in 0..BODY_BOARDS {
-        for k in 0..3 {
-            set_window(fw, b, k, scale(window_base(b, k), 0.35 + 0.65 * c.level));
+        for (k, &th) in LEVEL_THRESH.iter().enumerate() {
+            let col = if c.level >= th { scale(MOUTH_SPEAK, 0.5 + 0.5 * c.level) } else { scale(window_base(b, k), 0.15) };
+            set_window(fw, b, k, col);
         }
     }
 }
 
-/// fx_win_beat: windows flash on the beat and decay (e^-6 per beat), alternate ones accented.
+/// Colour index of window `i` on beat `n`: changes every beat (step 1-3, never 0 mod 4).
+pub fn beat_color(i: usize, n: u64) -> usize {
+    ((i as u64 + n * (1 + i as u64 % 3)) % BLOCK_COLORS.len() as u64) as usize
+}
+
+/// fx_win_beat: on every beat each window changes colour ([`beat_color`]) and flashes,
+/// decaying e^-6 per beat; alternate windows accented (1.0 / 0.4) on alternate beats.
 pub fn fx_win_beat(fw: &mut GrnwaveFirmware, c: &Ctx) {
     let phase = frac(c.beat);
+    let n = libm::floor(c.beat) as u64;
     for b in 0..BODY_BOARDS {
         for k in 0..3 {
-            let accent = if ((k + b) % 2) as f64 == libm::floor(c.beat) % 2.0 { 1.0 } else { 0.4 };
+            let accent = if ((k + b) % 2) as u64 == n % 2 { 1.0 } else { 0.4 };
             let level = 0.35 + 0.65 * libm::exp(-phase * 6.0) * accent;
-            set_window(fw, b, k, scale(window_base(b, k), level));
+            set_window(fw, b, k, scale(BLOCK_COLORS[beat_color(b * 3 + k, n)], level));
+        }
+    }
+}
+
+/// fx_blk_spin (bare windows only): inside each window one 5050 at the window's colour,
+/// the rest at 0.3, the bright one circling the 2 x 2 at 8 steps a second.
+pub fn fx_blk_spin(fw: &mut GrnwaveFirmware, c: &Ctx) {
+    const ROUND: [usize; 4] = [0, 1, 3, 2];
+    let lit = ROUND[(libm::floor(c.ms / 1000.0 * 8.0) as u64 % 4) as usize];
+    for b in 0..BODY_BOARDS {
+        for k in 0..3 {
+            let i = GrnwaveFirmware::window(b, k);
+            let col = fw.win[b * 3 + k];
+            for j in (0..LEDS_PER_GROUP).filter(|&j| j != lit) {
+                fw.main[i + j] = scale(col, 0.3);
+            }
         }
     }
 }
@@ -576,6 +677,7 @@ pub fn fx_boot(fw: &mut GrnwaveFirmware, c: &Ctx) {
             set_window(fw, b, k, if f >= 1.0 { scale(window_base(b, k), 0.6) } else { OFF });
         }
     }
+    present_windows(fw, c, None);
     fx_hidden_off(fw, c);
     let px = scale(LISTEN_BLUE, 0.3);
     set_eyes(fw, px, px);
@@ -597,6 +699,7 @@ pub fn fx_sleep(fw: &mut GrnwaveFirmware, c: &Ctx) {
     if libm::floor(t) % 3.0 == 0.0 {
         fw.main[GrnwaveFirmware::small(0, 0)] = scale(VU_GREEN, 0.4);
     }
+    present_windows(fw, c, None);
     fx_hidden_off(fw, c);
     let px = scale(GOLD, 0.08);
     set_eyes(fw, px, px);
@@ -616,6 +719,7 @@ pub fn fx_fault(fw: &mut GrnwaveFirmware, c: &Ctx) {
             set_window(fw, b, k, scale(ALERT_RED, pulse));
         }
     }
+    present_windows(fw, c, None);
     fx_hidden_off(fw, c);
     let px = scale(ALERT_RED, pulse);
     set_eyes(fw, px, px);

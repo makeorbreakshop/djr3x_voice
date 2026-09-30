@@ -35,6 +35,14 @@ static const uint8_t EXPOSED[BODY_BOARDS][WINDOWS_PER_BOARD] = {
   {3, 4, 5},
 };
 
+// Diffusers: an opal cover over each window (profiles/electronics/grnwave_full_led.json,
+// lights.body.windows) mixes its 4 x 5050 into one colour, so effects author windows as
+// units (win[] in state.h). 0 = bare windows: LOOKS' `blocks` column then adds per-pixel
+// detail inside each window.
+#ifndef DIFFUSED
+#define DIFFUSED 1
+#endif
+
 #define BRIGHTNESS 128        // FastLED.setBrightness (the face board uses 128 too)
 #define POWER_LIMIT_MA 3000   // FastLED power cap at 5 V: size the supply above this
 #define FRAME_MS 20           // 50 Hz

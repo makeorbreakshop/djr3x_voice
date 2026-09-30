@@ -11,6 +11,7 @@ void fx_boot(const Ctx &c) {
     for (uint8_t k = 0; k < WINDOWS_PER_BOARD; k++)
       setWindow(b, k, f >= 1 ? scaled(windowBase(b, k), 0.6) : CRGB::Black);
   }
+  presentWindows(c, NULL);
   fx_hidden_off(c);
   CRGB e = scaled(LISTEN_BLUE, 0.3);
   setEyes(e, e);

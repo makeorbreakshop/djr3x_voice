@@ -30,6 +30,7 @@ CRGB chain[MAIN_LEDS + MOUTH_LEDS];
 #endif
 CRGB mainLeds[MAIN_LEDS];
 CRGB mouthLeds[MOUTH_LEDS];
+CRGB win[WINDOWS];
 
 char mode = 'I';
 uint8_t amplitude = 0;
@@ -116,8 +117,9 @@ static void render(uint32_t ms) {
     look->dots(c);
     look->windows(c);
   }
-  fx_hidden_off(c);
   fx_health(c);
+  presentWindows(c, bpm ? NULL : look->blocks);
+  fx_hidden_off(c);
   if (ms < flashUntil) fx_flash(c); else look->eyes(c);
   look->mouth(c);
 }

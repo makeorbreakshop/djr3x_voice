@@ -19,7 +19,8 @@ import { Rig, RigDoc, restFromUrl } from './rig';
 import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
 import { ChestLights } from './chestlights';
 import {
-  BoardsView, PACKAGES, PackageLeds, faceSlots, mountElectronics, ownsLights, profileJsonWith, selectedPackageId,
+  BoardsView, Diffusers, PACKAGES, PackageLeds, diffuserSources, diffusersFromUrl, faceSlots, mountElectronics, ownsLights,
+  profileJsonWith, selectedPackageId,
 } from './electronics';
 import type { ElectronicsPackage } from './generated/ElectronicsPackage';
 import { SpeechAudio, TtsAmplitudeAgc } from './audio';
@@ -238,6 +239,8 @@ let leds: FaceLeds | null = null;
 let chestLights: ChestLights | null = null;
 let pkgLeds: PackageLeds | null = null;
 let boards: BoardsView | null = null;
+let diffusers: Diffusers | null = null;
+let diffusersOn = diffusersFromUrl();
 let builtFor: string | null = null;
 let ghosts: Ghosts | null = null;
 let centres: Centres | null = null;
@@ -734,11 +737,14 @@ function frame() {
       // The package's LEDs at their real positions; the eye bulbs / mouth pipe glow from them.
       const dimmed = Object.fromEntries(Object.entries(view.package).map(([k, v]) => [k, dim(v, k)]));
       pkgLeds.update(dimmed);
+      diffusers?.update(dimmed);
       const face = faceSlots(dimmed);
       leds.update(face.eyes, face.mouth);
     } else {
       leds.update(dim(view.eyes, 'eyes'), dim(view.mouth, 'mouth'));
-      chestLights.update(dim(view.chest, 'chest'));
+      const chest = dim(view.chest, 'chest');
+      chestLights.update(chest);
+      diffusers?.update({ chest });
     }
     let speed = 0;
     if (prevJoints && dt > 0) for (const [j, v] of values) speed += Math.abs(v - (prevJoints[j] ?? v)) / dt;
@@ -953,17 +959,40 @@ const BLACK: RGB = [0, 0, 0];
  */
 function buildPackageLights() {
   const pkg = activePackage();
+  const mountTab = () =>
+    mountElectronics($('electronics-slot'), pkg, {
+      boards: () => boards,
+      connected,
+      diffusers: {
+        on: diffusersOn,
+        count: diffusers?.sources.reduce((n, s) => n + s.windows.length, 0) ?? 0,
+        set: (on) => {
+          diffusersOn = on;
+          applyDiffusers();
+        },
+      },
+    });
   if (!rig || !chestLights || builtFor === pkg.id) {
-    mountElectronics($('electronics-slot'), pkg, { boards: () => boards, connected });
+    mountTab();
     return;
   }
   builtFor = pkg.id;
   pkgLeds?.dispose();
   boards?.dispose();
+  diffusers?.dispose();
   pkgLeds = ownsLights(pkg) ? new PackageLeds(rig, pkg.lights) : null;
   chestLights.setVisible(!ownsLights(pkg));
   boards = new BoardsView(rig, pkg);
-  mountElectronics($('electronics-slot'), pkg, { boards: () => boards, connected });
+  diffusers = new Diffusers(rig, diffuserSources(pkg));
+  applyDiffusers();
+  mountTab();
+}
+
+/** Diffuser panes on (the raw pixels under them hidden) or off (the raw pixels). */
+function applyDiffusers() {
+  diffusers?.setEnabled(diffusersOn);
+  chestLights?.setCovered(diffusers?.covered('chest') ?? []);
+  for (const s of diffusers?.sources ?? []) pkgLeds?.setCovered(s.group, diffusers!.covered(s.group));
 }
 
 /** The LED readout for a package with its own boards: eyes, mouth V, then one row per body board. */

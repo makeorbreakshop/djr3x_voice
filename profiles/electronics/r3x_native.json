@@ -1249,6 +1249,287 @@
         "speech_amplitude",
         "tempo",
         "chest_status"
+      ],
+      "windows": [
+        {
+          "id": "p1_w0",
+          "panel": "logic_panel_1",
+          "leds": [
+            8
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.15711,
+            0.43834,
+            0.01722
+          ],
+          "normal": [
+            -0.9941,
+            0.0,
+            0.1089
+          ],
+          "u": [
+            0.1089,
+            0.0,
+            0.9941
+          ],
+          "size_m": [
+            0.0136,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w1",
+          "panel": "logic_panel_1",
+          "leds": [
+            9
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16548,
+            0.46823,
+            0.0182
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "u": [
+            0.1093,
+            0.0,
+            0.994
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w2",
+          "panel": "logic_panel_1",
+          "leds": [
+            10
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16351,
+            0.46817,
+            0.03279
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "u": [
+            0.1966,
+            0.0,
+            0.9805
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w0",
+          "panel": "logic_panel_2",
+          "leds": [
+            19
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.12627,
+            0.43839,
+            0.0958
+          ],
+          "normal": [
+            -0.7967,
+            0.0,
+            0.6044
+          ],
+          "u": [
+            0.6044,
+            0.0,
+            0.7967
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w1",
+          "panel": "logic_panel_2",
+          "leds": [
+            20
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11702,
+            0.43836,
+            0.1073
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "u": [
+            0.6758,
+            0.0,
+            0.737
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w2",
+          "panel": "logic_panel_2",
+          "leds": [
+            21
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11997,
+            0.4529,
+            0.10997
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "u": [
+            0.6757,
+            0.0,
+            0.7372
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w0",
+          "panel": "logic_panel_3",
+          "leds": [
+            30
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.0604,
+            0.45362,
+            0.1507
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "u": [
+            0.9282,
+            0.0,
+            0.372
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w1",
+          "panel": "logic_panel_3",
+          "leds": [
+            31
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.06157,
+            0.46823,
+            0.15432
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "u": [
+            0.9288,
+            0.0,
+            0.3706
+          ],
+          "size_m": [
+            0.014,
+            0.012
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w2",
+          "panel": "logic_panel_3",
+          "leds": [
+            32
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.04761,
+            0.46823,
+            0.15994
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "u": [
+            0.9584,
+            0.0,
+            0.2853
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        }
       ]
     }
   ],
@@ -1417,9 +1698,16 @@
       "item": "1000 uF 10 V capacitor",
       "qty": 2,
       "category": "hardware"
+    },
+    {
+      "item": "3 mm opal acrylic window diffuser (cut to the window)",
+      "qty": 9,
+      "category": "optics",
+      "note": "one per logic-panel window, ~55 % transmission"
     }
   ],
   "notes": [
-    "Two Nanos: set ARDUINO_SERIAL_PORT and CHEST_SERIAL_PORT whenever both are plugged in."
+    "Two Nanos: set ARDUINO_SERIAL_PORT and CHEST_SERIAL_PORT whenever both are plugged in.",
+    "Each logic-panel window has an opal diffuser (lights.chest.windows): one LED per window, one colour. The 8 LED holes per panel stay individual points."
   ]
 }

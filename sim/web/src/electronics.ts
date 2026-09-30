@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import type { ElectronicsPackage } from './generated/ElectronicsPackage';
 import type { PackageLight } from './generated/PackageLight';
+import type { LightWindow } from './generated/LightWindow';
 import type { Rig } from './rig';
 import type { RGB } from './leds';
 import { BODY_LED_CAP, bodyLedColor } from './chestlights';
@@ -89,6 +90,7 @@ const SQUARE = new Set(['block', 'block_hidden', 'window']);
 export class PackageLeds {
   private readonly groups = new Map<string, { mats: THREE.MeshBasicMaterial[]; capped: boolean }>();
   private readonly meshes: THREE.Mesh[] = [];
+  private readonly byGroup = new Map<string, THREE.Mesh[]>();
 
   constructor(rig: Rig, lights: PackageLight[], private readonly gain = 4) {
     const z = new THREE.Vector3(0, 0, 1);
@@ -105,13 +107,21 @@ export class PackageLeds {
         m.position.copy(rig.kitToLocal(parent, px.pos));
         m.quaternion.setFromUnitVectors(z, new THREE.Vector3(...px.normal).normalize());
         m.visible = px.kind !== 'block_hidden';
+        if (!m.visible) m.name = 'pkg_led_hidden';
         m.renderOrder = 2;
         parent.add(m);
         mats.push(mat);
         this.meshes.push(m);
       }
+      this.byGroup.set(g.name, this.meshes.slice(-g.layout.length));
       this.groups.set(g.name, { mats, capped: !g.link.startsWith('head') && g.link !== 'visor' });
     }
+  }
+
+  /** Hide a group's pixels that a diffuser pane draws instead (none: show them all). */
+  setCovered(group: string, indices: Iterable<number>) {
+    const covered = new Set(indices);
+    this.byGroup.get(group)?.forEach((m, i) => (m.visible = !covered.has(i) && m.name !== 'pkg_led_hidden'));
   }
 
   dispose() {
@@ -123,6 +133,141 @@ export class PackageLeds {
       const px = lights[name] ?? [];
       mats.forEach((mat, i) => bodyLedColor(mat.color, px[i] ?? [0, 0, 0], this.gain, capped ? BODY_LED_CAP : Infinity));
     }
+  }
+}
+
+// ------------------------------------------------------------------ diffusers
+
+/** `?diffusers=0` starts with the panes off (raw pixels); the Electronics tab toggles it. */
+export function diffusersFromUrl(): boolean {
+  return new URLSearchParams(location.search).get('diffusers') !== '0';
+}
+
+/**
+ * Brightness across a diffuser face, 0..1 (x, y in -1..1): even in the middle, falling
+ * toward the edges and corners - light spreading sideways in the acrylic and the recess
+ * walls shading it - so a pane reads as a lit diffuser, not a flat sticker. Frosted keeps
+ * more of a hot centre than opal.
+ */
+export function diffuserFalloff(x: number, y: number, kind: 'opal' | 'frosted'): number {
+  const sq = Math.max(Math.abs(x), Math.abs(y));
+  const round = Math.hypot(x, y) / Math.SQRT2;
+  const r = 0.6 * sq + 0.4 * round;
+  const s = (e0: number, e1: number, v: number) => {
+    const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  };
+  return kind === 'opal' ? 1 - 0.6 * s(0.35, 1.05, r) : 1 - 0.3 * s(0, 0.7, r) - 0.35 * s(0.6, 1.05, r);
+}
+
+const falloffTex = new Map<string, THREE.DataTexture>();
+function falloffTexture(kind: 'opal' | 'frosted'): THREE.DataTexture {
+  let t = falloffTex.get(kind);
+  if (t) return t;
+  const n = 64;
+  const data = new Uint8Array(n * n * 4);
+  for (let j = 0; j < n; j++)
+    for (let i = 0; i < n; i++) {
+      const v = Math.round(255 * diffuserFalloff(((i + 0.5) / n) * 2 - 1, ((j + 0.5) / n) * 2 - 1, kind));
+      data.set([v, v, v, 255], (j * n + i) * 4);
+    }
+  t = new THREE.DataTexture(data, n, n); // linear data: it scales the emitted light
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
+  falloffTex.set(kind, t);
+  return t;
+}
+
+/**
+ * One colour a diffused window shows: the mean of its LEDs in linear light (channel values
+ * are PWM duty, i.e. linear), times the cover's transmission. Same 0-255 scale as a pixel.
+ */
+export function windowColor(px: RGB[], w: Pick<LightWindow, 'leds' | 'diffuser'>): RGB {
+  const sum: RGB = [0, 0, 0];
+  for (const i of w.leds) {
+    const p = px[i] ?? [0, 0, 0];
+    sum[0] += p[0];
+    sum[1] += p[1];
+    sum[2] += p[2];
+  }
+  const k = w.diffuser.transmission / Math.max(1, w.leds.length);
+  return [sum[0] * k, sum[1] * k, sum[2] * k];
+}
+
+/** A light group's diffused windows: which group feeds them, where they ride, how bright. */
+export interface DiffuserSource {
+  group: string;
+  link: string;
+  windows: LightWindow[];
+  /** The raw pixels' renderer gain (ChestLights 3.5, PackageLeds 4). */
+  gain: number;
+}
+
+/** The diffused windows the page shows for `pkg`: its own groups', else the native chest's
+ * (a package with no LED boards keeps the native chest preview). */
+export function diffuserSources(pkg: ElectronicsPackage): DiffuserSource[] {
+  const own = ownsLights(pkg);
+  const groups = own ? pkg.lights : (pkg.lights.some((g) => g.name === 'chest') ? pkg : PACKAGES.r3x_native)?.lights ?? [];
+  return groups
+    .filter((g) => (own || g.name === 'chest') && (g.windows ?? []).some((w) => w.diffuser.kind !== 'none'))
+    .map((g) => ({ group: g.name, link: g.link, windows: (g.windows ?? []).filter((w) => w.diffuser.kind !== 'none'), gain: own ? 4 : 3.5 }));
+}
+
+/**
+ * Diffused logic-panel windows: a flat emissive pane filling each window opening (kit
+ * panel geometry, `LightWindow`), lit by the mean of the LEDs behind it (windowColor) with
+ * an edge falloff. Capped like the raw body LEDs (bodyLedColor), so bloom stays tame. The
+ * raw pixels under a pane are hidden while the panes are on (see `covered`).
+ */
+export class Diffusers {
+  private readonly panes: { group: string; w: LightWindow; mat: THREE.MeshBasicMaterial; gain: number; mesh: THREE.Mesh }[] = [];
+  private on = true;
+
+  constructor(rig: Rig, readonly sources: DiffuserSource[]) {
+    for (const src of sources) {
+      const parent = linkNode(rig, src.link);
+      for (const w of src.windows) {
+        const kind = w.diffuser.kind === 'frosted' ? 'frosted' : 'opal';
+        const mat = new THREE.MeshBasicMaterial({ color: 0x000000, map: falloffTexture(kind), toneMapped: false });
+        const geo = w.shape === 'round'
+          ? new THREE.CircleGeometry(Math.min(...w.size_m) / 2, 24)
+          : new THREE.PlaneGeometry(w.size_m[0], w.size_m[1]);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.name = `diffuser_${w.id}`;
+        mesh.position.copy(rig.kitToLocal(parent, w.centre));
+        // Kit-frame directions are the link's own: x = the face's width, z = out of the face.
+        const n = new THREE.Vector3(...w.normal).normalize();
+        const u = new THREE.Vector3(...w.u).normalize();
+        mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(u, n.clone().cross(u), n));
+        mesh.renderOrder = 2;
+        parent.add(mesh);
+        this.panes.push({ group: src.group, w, mat, gain: src.gain, mesh });
+      }
+    }
+  }
+
+  /** Pixel indices, per group, that the panes draw (hide the raw ones while on). */
+  covered(group: string): number[] {
+    return this.on ? this.panes.filter((p) => p.group === group).flatMap((p) => p.w.leds) : [];
+  }
+
+  get enabled() {
+    return this.on;
+  }
+
+  setEnabled(on: boolean) {
+    this.on = on;
+    for (const p of this.panes) p.mesh.visible = on;
+  }
+
+  update(lights: Record<string, RGB[]>) {
+    if (!this.on) return;
+    for (const p of this.panes) bodyLedColor(p.mat.color, windowColor(lights[p.group] ?? [], p.w), p.gain, BODY_LED_CAP);
+  }
+
+  dispose() {
+    for (const p of this.panes) p.mesh.removeFromParent();
   }
 }
 
@@ -181,6 +326,15 @@ const link = (text: string, url?: string) => (url ? `<a href="${esc(url)}" targe
 const inferred = (on: boolean | undefined, note: string | undefined) => (on ? ` <abbr class="inferred" title="${esc(note)}">inferred</abbr>` : '');
 const amps = (ma: number) => (ma >= 1000 ? `${(ma / 1000).toFixed(2)} A` : `${Math.round(ma)} mA`);
 
+/** "9 x 4 px, opal 55 %" for a group's windows. */
+function windowsNote(g: PackageLight): string {
+  const ws = g.windows ?? [];
+  if (!ws.length) return '';
+  const per = [...new Set(ws.map((w) => w.leds.length))].join('/');
+  const kinds = [...new Set(ws.map((w) => `${w.diffuser.kind} ${Math.round(w.diffuser.transmission * 100)} %`))].join(', ');
+  return `${ws.length} x ${per} px, ${esc(kinds)}`;
+}
+
 /** Boards, lights, power budget, wiring and BOM of one package. */
 export function packageHtml(pkg: ElectronicsPackage): string {
   const boards = pkg.boards.map((b) => `<tr>
@@ -197,6 +351,7 @@ export function packageHtml(pkg: ElectronicsPackage): string {
       <td><code>${esc(g.data_line)}</code> @${g.chain_start}</td>
       <td>${esc(g.led)}</td>
       <td>${esc(g.serves.join(', '))}</td>
+      <td>${windowsNote(g)}</td>
     </tr>`).join('');
   const rails = pkg.power.map((r) => `<tr>
       <td>${esc(r.name)}</td><td class="num">${r.volts} V</td>
@@ -220,7 +375,7 @@ export function packageHtml(pkg: ElectronicsPackage): string {
     <h3>Boards <small>${pkg.boards.length}</small></h3>
     ${table(['board', 'role', 'mm', 'mount', 'power', 'support'], boards)}
     <h3>Lights <small>${pkg.lights.reduce((n, g) => n + g.pixels, 0)} px</small></h3>
-    ${table(['group', 'px', 'chain', 'LED', 'shows'], lights)}
+    ${table(['group', 'px', 'chain', 'LED', 'shows', 'windows'], lights)}
     ${drives ? `<h3>Actuators</h3><ul class="elec-list">${drives}</ul>` : ''}
     <h3>Power budget</h3>
     ${table(['rail', 'V', 'typical', 'max', 'supply'], rails)}
@@ -239,7 +394,12 @@ export function packageHtml(pkg: ElectronicsPackage): string {
 export function mountElectronics(
   el: HTMLElement,
   active: ElectronicsPackage,
-  opts: { boards?: () => BoardsView | null; connected?: boolean } = {},
+  opts: {
+    boards?: () => BoardsView | null;
+    connected?: boolean;
+    /** The diffuser panes and a setter for them (on = panes, off = the raw pixels). */
+    diffusers?: { on: boolean; count: number; set: (on: boolean) => void };
+  } = {},
 ) {
   const options = Object.values(PACKAGES)
     .map((p) => `<option value="${esc(p.id)}"${p.id === active.id ? ' selected' : ''}>${esc(p.label)}</option>`)
@@ -252,7 +412,10 @@ export function mountElectronics(
     </div>
     ${opts.connected ? '<p class="hint">Connected: the runtime\'s profile decides (<code>R3X_ELECTRONICS</code>); a choice here applies to the offline demo.</p>' : ''}
     <label class="check"><input type="checkbox" id="elec-boards"> Show boards in the model</label>
+    ${opts.diffusers?.count ? `<label class="check"><input type="checkbox" id="elec-diffusers"${opts.diffusers.on ? ' checked' : ''}> Diffusers on <small>(${opts.diffusers.count} windows; off shows the raw pixels)</small></label>` : ''}
     <div id="elec-detail">${packageHtml(active)}</div>`;
   el.querySelector<HTMLSelectElement>('#elec-select')!.onchange = (e) => selectPackage((e.target as HTMLSelectElement).value);
   el.querySelector<HTMLInputElement>('#elec-boards')!.onchange = (e) => opts.boards?.()?.setVisible((e.target as HTMLInputElement).checked);
+  const diff = el.querySelector<HTMLInputElement>('#elec-diffusers');
+  if (diff) diff.onchange = () => opts.diffusers?.set(diff.checked);
 }

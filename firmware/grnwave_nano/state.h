@@ -14,6 +14,9 @@ struct Ctx {
 // ---- the LEDs
 extern CRGB mainLeds[MAIN_LEDS];   // body 0-95, eyes 96-97
 extern CRGB mouthLeds[MOUTH_LEDS];
+// One colour per window, board-major (A0 A1 A2 B0 ... = the health bits). Window effects
+// write here; presentWindows() (effects.cpp) puts it on the window's LEDs.
+extern CRGB win[WINDOWS];
 
 // ---- what the host told us (named_v1 words)
 extern char mode;            // I E L T S
@@ -44,10 +47,8 @@ inline float rnd() { return random(10000) / 10000.0f; }   // 0..1
 inline uint8_t smallIdx(uint8_t b, uint8_t k) { return b * BOARD_LEDS + k; }
 inline uint8_t groupIdx(uint8_t b, uint8_t g) { return b * BOARD_LEDS + SMALL_PER_BOARD + g * LEDS_PER_GROUP; }
 inline uint8_t windowIdx(uint8_t b, uint8_t k) { return groupIdx(b, EXPOSED[b][k]); }
-inline void setWindow(uint8_t b, uint8_t k, CRGB c) {
-  uint8_t i = windowIdx(b, k);
-  for (uint8_t j = 0; j < LEDS_PER_GROUP; j++) mainLeds[i + j] = c;
-}
+// A window is a unit: set its colour (shown on all its LEDs by presentWindows).
+inline void setWindow(uint8_t b, uint8_t k, CRGB c) { win[b * WINDOWS_PER_BOARD + k] = c; }
 inline CRGB windowBase(uint8_t b, uint8_t k) { return BLOCK_COLORS[(k + b) % 4]; }
 inline void setEyes(CRGB l, CRGB r) { mainLeds[BODY_LEDS] = l; mainLeds[BODY_LEDS + 1] = r; }
 // Mouth V: distance of LED i from the tip (0 at the tip).

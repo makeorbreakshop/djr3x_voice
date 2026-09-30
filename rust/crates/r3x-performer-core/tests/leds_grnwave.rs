@@ -8,7 +8,7 @@ use common::{repo, show_catalog};
 use r3x_contracts::RobotProfile;
 use r3x_performer_core::leds::firmware::Rgb;
 use r3x_performer_core::leds::grnwave::{
-    from_chest_stream, mouth_rank, GrnwaveFirmware as Fw, BODY_BOARDS, BODY_LEDS, EXPOSED, GROUPS_PER_BOARD,
+    beat_color, from_chest_stream, mouth_rank, GrnwaveFirmware as Fw, LEVEL_THRESH, WINDOWS, BODY_BOARDS, BODY_LEDS, EXPOSED, GROUPS_PER_BOARD,
     IDENTITY, LEDS_PER_GROUP, MAIN_LEDS, MOUTH_LEDS, READY, SMALL_PER_BOARD,
 };
 use r3x_performer_core::performer::{Command, PerformerConfig};
@@ -120,7 +120,7 @@ fn speaking_the_bars_are_a_vu_meter_and_the_mouth_opens_from_the_tip() {
 #[test]
 fn thinking_one_cyan_dot_scans_and_the_eyes_alternate() {
     let mut fw = board("ST\n");
-    let cyan = |fw: &Fw| fw.body().iter().filter(|c| **c == [0, 255, 255]).count();
+    let cyan = |fw: &Fw| (0..BODY_BOARDS).flat_map(|b| smalls(fw, b)).filter(|c| *c == [0, 255, 255]).count();
     assert_eq!(cyan(&fw), 1);
     let before = fw.eyes().to_vec();
     fw.update(1250.0);
@@ -167,6 +167,84 @@ fn sf_flashes_the_eyes_green_then_drops_into_engaged() {
     assert_eq!((fw.mode, fw.eyes()[0]), (b'E', [100, 180, 255]));
 }
 
+// ------------------------------------------------------------------ windows as units
+
+fn windows(fw: &Fw) -> Vec<Rgb> {
+    (0..BODY_BOARDS).flat_map(|b| (0..3).map(move |k| (b, k))).map(|(b, k)| window(fw, b, k)).collect()
+}
+
+#[test]
+fn the_package_windows_are_the_emulator_windows() {
+    let p = r3x_contracts::ElectronicsPackage::builtin("grnwave_full_led").unwrap().unwrap();
+    let body = p.light("body").unwrap();
+    assert!(body.diffused());
+    let emu: Vec<Vec<u16>> = (0..BODY_BOARDS)
+        .flat_map(|b| (0..3).map(move |k| (Fw::window(b, k)..Fw::window(b, k) + LEDS_PER_GROUP).map(|i| i as u16).collect()))
+        .collect();
+    let pkg: Vec<Vec<u16>> = body.windows.iter().map(|w| w.leds.clone()).collect();
+    assert_eq!(pkg, emu, "window i of the package = health bit i of the board");
+}
+
+#[test]
+fn thinking_a_cyan_block_steps_through_the_windows() {
+    let mut fw = board("ST\n");
+    let at = |fw: &Fw| windows(fw).iter().position(|c| *c == [0, 255, 255]);
+    let first = at(&fw).expect("one window is the cursor");
+    assert_eq!(windows(&fw).iter().filter(|c| **c == [0, 255, 255]).count(), 1);
+    fw.update(1000.0 + 1000.0 / 6.0);
+    assert_eq!(at(&fw), Some((first + 1) % WINDOWS), "one window on, 6 a second");
+    assert_eq!(windows(&fw)[first], fw.win[first]);
+    assert!(windows(&fw)[first][2] > 0 && windows(&fw)[first][2] < 255, "a fading trail");
+}
+
+#[test]
+fn speaking_each_panels_windows_are_a_vu_meter() {
+    let speak = |c: &Rgb| c[0] > 120 && c[1] < c[0] / 2 + 10 && c[2] < c[1];
+    for (amp, lit) in [("M000", 0), ("M040", 1), ("M100", 2), ("M255", 3)] {
+        let fw = board(&format!("SS\n{amp}\n"));
+        let level = fw.win.iter().filter(|c| speak(c)).count();
+        assert_eq!(level, lit * BODY_BOARDS, "{amp}: level {:.2} vs {LEVEL_THRESH:?}", (f64::from(fw.amplitude) / 255.0).sqrt());
+    }
+}
+
+#[test]
+fn on_the_beat_every_window_changes_colour() {
+    for i in 0..WINDOWS {
+        for n in 0..8 {
+            assert_ne!(beat_color(i, n), beat_color(i, n + 1), "window {i} beat {n}");
+        }
+    }
+    let mut fw = board("SI\nB120\n"); // t = 1 s: beat 2
+    let before = windows(&fw);
+    fw.update(1500.0); // beat 3
+    let after = windows(&fw);
+    assert!((0..WINDOWS).all(|i| before[i] != after[i]), "{before:?} -> {after:?}");
+}
+
+#[test]
+fn idle_windows_blink_between_block_colours() {
+    let mut fw = Fw::new(Rng::new(7));
+    fw.write("X0\nSI\n");
+    let mut seen = std::collections::HashSet::new();
+    for t in 0..200 {
+        fw.update(1000.0 + f64::from(t) * 100.0);
+        seen.insert(fw.win[0]);
+    }
+    assert!(seen.len() >= 3, "window A0 blinks through colours: {seen:?}");
+}
+
+#[test]
+fn bare_windows_keep_the_per_pixel_path() {
+    let mut fw = Fw::new(Rng::Const(0.5)).with_diffusers(false);
+    fw.write("X0\nST\n");
+    fw.update(1000.0);
+    let i = Fw::window(0, 0);
+    let px = &fw.main[i..i + LEDS_PER_GROUP];
+    assert_eq!(px.iter().filter(|c| **c == fw.win[0]).count(), 1, "one bright 5050 circles: {px:?}");
+    // Diffused (the default), the same state is flat.
+    assert!(board("ST\n").diffused);
+}
+
 // ------------------------------------------------------------------ the performer
 
 fn grnwave_profile() -> RobotProfile {
@@ -196,6 +274,7 @@ fn the_performer_drives_the_grnwave_emulator_from_the_face_and_chest_streams() {
     });
     step(&mut p, 3.5); // the chest host's 3 s boot sweep (X1) ends with X0
     assert_eq!(p.grnwave.as_ref().unwrap().sys_state, 0);
+    assert!(p.grnwave.as_ref().unwrap().diffused, "the package's windows have diffusers");
     p.command(Command::ListeningStarted);
     p.command(Command::ListeningStopped);
     let f = step(&mut p, 4.0);

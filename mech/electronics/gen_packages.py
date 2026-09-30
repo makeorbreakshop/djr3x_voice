@@ -191,7 +191,8 @@ def native(chest_layout):
             {"name": "chest", "pixels": 33, "layout": chest_layout,
              "driver": serial("chest", "CHEST_SERIAL_PORT"), "board": "chest_strip", "link": "torso_middle",
              "data_line": "chest_nano.D6", "chain_start": 0, "led": "WS2812B 5050", "ma_per_led": MA_WS2812,
-             "serves": ["chest", "speech_amplitude", "tempo", "chest_status"]},
+             "serves": ["chest", "speech_amplitude", "tempo", "chest_status"],
+             "windows": native_windows(chest_layout)},
         ],
         "actuators": [
             {"actuators": ["*"], "board": "servo_ctl", "driver": "r3x_servo", "support": "driven",
@@ -229,9 +230,12 @@ def native(chest_layout):
             {"item": "6 V 10 A supply", "qty": 1, "category": "power"},
             {"item": "330 R resistor", "qty": 3, "category": "hardware"},
             {"item": "1000 uF 10 V capacitor", "qty": 2, "category": "hardware"},
+            {"item": "3 mm opal acrylic window diffuser (cut to the window)", "qty": 9, "category": "optics",
+             "note": "one per logic-panel window, ~55 % transmission"},
         ],
         "notes": [
             "Two Nanos: set ARDUINO_SERIAL_PORT and CHEST_SERIAL_PORT whenever both are plugged in.",
+            "Each logic-panel window has an opal diffuser (lights.chest.windows): one LED per window, one colour. The 8 LED holes per panel stay individual points.",
         ],
     }
 
@@ -274,9 +278,74 @@ def grnwave_body():
     return out
 
 
+# Diffusers: an opal cover over each logic-panel window (Brandon, 2026-09-30: "a diffused
+# cover on top, so each is one colour"). The LED holes keep their own light pipes - separate
+# 2.5 mm holes, one pipe each, nothing shared - so those stay individual points.
+DIFFUSER = {"kind": "opal", "transmission": 0.55}  # 3 mm opal acrylic
+PANE_OFFSET = 0.001  # diffuser face, in front of the LEDs it covers
+
+
+def _sub(a, b):
+    return [a[i] - b[i] for i in range(3)]
+
+
+def _unit(v):
+    n = math.sqrt(sum(x * x for x in v))
+    return [x / n for x in v]
+
+
+def _nearest_slot(pos):
+    """(panel number, slot) of the kit window slot nearest `pos` (logic_panels.json)."""
+    best = None
+    for p in LOGIC_PANELS:
+        for s in p["slots"]:
+            d = sum(x * x for x in _sub(s["centre"], pos))
+            if best is None or d < best[0]:
+                best = (d, p["panel"], s)
+    return best[1], best[2]
+
+
+def window(wid, panel, leds, layout, slot):
+    """A diffused window over `leds` (indices into `layout`): the opening's size and width
+    direction from the kit slot, its face just in front of the LEDs' plane."""
+    pts = [layout[i]["pos"] for i in leds]
+    c = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
+    n = _unit([sum(layout[i]["normal"][k] for i in leds) for k in range(3)])
+    # u: horizontal and across the face (kit frame is Y up): up x n.
+    u = _unit([n[2], 0.0, -n[0]])
+    return {
+        "id": wid, "panel": f"logic_panel_{panel}", "leds": leds, "shape": "rect",
+        "centre": r([c[k] + n[k] * PANE_OFFSET for k in range(3)]), "normal": r(n, 4), "u": r(u, 4),
+        "size_m": r(slot["size_m"], 4), "diffuser": dict(DIFFUSER),
+    }
+
+
+def native_windows(chest):
+    """rex_chest_v1 strip: per panel 8 dots, then its 3 windows, one LED each."""
+    out = []
+    for p in range(3):
+        for k in range(3):
+            i = p * 11 + 8 + k
+            panel, slot = _nearest_slot(chest[i]["pos"])
+            out.append(window(f"p{panel}_w{k}", panel, [i], chest, slot))
+    return out
+
+
+def grnwave_windows(body):
+    """Per board b (= panel b + 1), window k is group GRN_EXPOSED[b][k]: its 4 x 5050."""
+    out = []
+    for b, p in enumerate(LOGIC_PANELS):
+        slots = {s["group"]: s for s in p["slots"]}
+        for k, g in enumerate(GRN_EXPOSED[b]):
+            first = b * 32 + 8 + g * 4
+            out.append(window(f"p{p['panel']}_w{k}", p["panel"], list(range(first, first + 4)), body, slots[g]))
+    return out
+
+
 def grnwave(chest_layout):
     eyes = [px("eye", (EYE_L[0], EYE_L[1], EYE_L[2] - EYE_SIZE[2] / 2), w=0.008, h=0.008),
             px("eye", (EYE_R[0], EYE_R[1], EYE_R[2] - EYE_SIZE[2] / 2), w=0.008, h=0.008)]
+    body = grnwave_body()
     body_boards = []
     for b, p in enumerate(LOGIC_PANELS):
         pts = [h["centre"] for h in p["holes"]] + [s["centre"] for s in p["slots"]]
@@ -356,7 +425,7 @@ def grnwave(chest_layout):
             },
         ],
         "lights": [
-            {"name": "body", "pixels": 96, "layout": grnwave_body(),
+            {"name": "body", "pixels": 96, "layout": body, "windows": grnwave_windows(body),
              "driver": serial("grnwave", "GRNWAVE_SERIAL_PORT"), "board": "body_a", "link": "torso_middle",
              "data_line": "nano.D4", "chain_start": 0, "led": "WS2812B 5050 (small LEDs under VLP-600-R pipes)",
              "ma_per_led": MA_WS2812, "serves": ["chest", "speech_amplitude", "tempo", "chest_status"],
@@ -400,9 +469,12 @@ def grnwave(chest_layout):
             {"item": "5 V 4 A supply", "qty": 1, "category": "power"},
             {"item": "330 R resistor", "qty": 2, "category": "hardware"},
             {"item": "1000 uF 10 V capacitor", "qty": 1, "category": "hardware"},
+            {"item": "3 mm opal acrylic window diffuser (cut to the window)", "qty": 9, "category": "optics",
+             "note": "one per logic-panel window, ~55 % transmission"},
         ],
         "notes": [
             "Sample code: github.com/grnwaveworkshop/DJ-RexBody (no licence; kept for reference under mech/vendor/grnwave/, not copied). Our firmware/grnwave_nano is written from its facts: FastLED on D4, 3 x 32 body then 2 eyes.",
+            "Each logic-panel window has an opal diffuser over its 4 x 5050 (lights.body.windows), so a window is one colour and firmware/grnwave_nano authors windows as units (DIFFUSED in config.h). The light-pipe LEDs stay individual points.",
             "RS-485 Nano breakouts (grnwave) suit bigger systems; this package uses USB serial like our other boards.",
             "The servos stay on the R3X servo controller: pair this package with r3x_native's servo_ctl, or add it here.",
         ],

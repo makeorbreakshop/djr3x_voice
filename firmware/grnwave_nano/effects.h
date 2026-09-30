@@ -12,7 +12,8 @@ typedef void (*Effect)(const Ctx &c);
 struct Look {
   char mode;       // I E L T S
   Effect dots;     // the 8 small LEDs per body board
-  Effect windows;  // the 3 exposed 5050 groups per board
+  Effect windows;  // the 3 windows per board, as units: writes win[] (setWindow)
+  Effect blocks;   // per pixel inside each window, only without diffusers (DIFFUSED 0); NULL = flat
   Effect eyes;
   Effect mouth;
 };
@@ -25,11 +26,15 @@ void fx_fill(const Ctx &c);
 void fx_scan(const Ctx &c);
 void fx_vu(const Ctx &c);
 void fx_beat_chase(const Ctx &c);   // replaces the dots while music plays (Bnnn > 0)
-// windows
+// windows (units: one colour each)
+void fx_win_blink(const Ctx &c);    // the droid's blinking blocks
 void fx_win_breathe(const Ctx &c);
 void fx_win_think(const Ctx &c);
 void fx_win_level(const Ctx &c);
 void fx_win_beat(const Ctx &c);     // replaces the windows while music plays
+// window -> pixels
+void presentWindows(const Ctx &c, Effect blocks);  // win[] onto the LEDs (+ blocks if bare)
+void fx_blk_spin(const Ctx &c);     // bare windows: a bright corner circles the 2 x 2
 void fx_hidden_off(const Ctx &c);   // groups not behind a window: dark
 void fx_health(const Ctx &c);       // overlay: a down subsystem's window blinks red
 // eyes

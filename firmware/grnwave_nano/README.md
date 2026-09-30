@@ -26,7 +26,7 @@ arduino-cli upload  --fqbn arduino:avr:nano -p /dev/cu.usbserial-XXXX firmware/g
 ```
 
 Clone Nanos with the old bootloader need `--fqbn arduino:avr:nano:cpu=atmega328old`. On the
-Nano it uses 56 % of flash and 51 % of RAM.
+Nano it uses 60 % of flash and 57 % of RAM (both `DIFFUSED` settings).
 
 ## Wiring
 
@@ -64,7 +64,16 @@ face stream and `B`, `X` and `H` from the chest stream. It sends at the profile'
 ## Customising
 
 - **`effects.cpp` > `LOOKS`** is the registry: one row per state, with one effect each for
-  the body dots, windows, eyes and mouth. To change a look, swap in a different function.
+  the body dots, windows, bare-window blocks, eyes and mouth. To change a look, swap in a
+  different function.
+- **Windows are units.** Each window has an opal diffuser (the package's
+  `lights.body.windows`; `DIFFUSED 1` in `config.h`), so it shows one colour. Window effects
+  write one colour per window (`setWindow` / `win[]`, board-major = the health bits) and
+  `presentWindows` puts it on the window's 4 x 5050. Idle/engaged blink the droid's blocks
+  (`fx_win_blink`), thinking steps a cyan block through the windows (`fx_win_think`),
+  speaking makes each panel's 3 windows a VU meter (`fx_win_level`), and music changes
+  every window's colour on the beat (`fx_win_beat`). With `DIFFUSED 0` (no covers) the
+  `blocks` column adds per-pixel detail inside a window (`fx_blk_spin` while thinking).
 - **`fx_*.cpp`** has one effect per file. The parameters are named constants at the top of
   each file. To add an effect, copy one, rename it, declare it in `effects.h` and put it in
   `LOOKS`. Effects get a `Ctx` (`ms`, the speech `level` 0..1, `bpm`, `beat`) and write
