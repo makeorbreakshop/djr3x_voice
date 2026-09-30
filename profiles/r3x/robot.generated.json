@@ -488,7 +488,7 @@
         "min": -13.2,
         "max": 28.2
       },
-      "v_max": 419.2,
+      "v_max": 335.1,
       "a_max": 900,
       "j_max": 8000,
       "extended": false
@@ -596,7 +596,7 @@
         "center_value": 0,
         "trim_us": 0,
         "invert": true,
-        "gear": 0.72,
+        "gear": 0.9007,
         "pulse_min_us": 500,
         "pulse_max_us": 2500,
         "range_deg": 270,
@@ -1469,10 +1469,10 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-09-30T19:48:29+00:00",
+    "generated_at": "2026-09-30T21:00:48+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-09-30T18:29:43+00:00",
+      "generated_at": "2026-09-30T21:00:42+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
@@ -1998,7 +1998,11 @@
             -0.9331
           ]
         },
-        "first_contact": null,
+        "first_contact": {
+          "min": null,
+          "max": 31.5,
+          "source": "hunter_head check interference_head_tilt: range -20..+25 deg; first contact +31.5 hex_shaft x mount_plate (6.5 past the limit); -33 hex_shaft x mount_plate (13 past the limit)"
+        },
         "inferred": false,
         "driven": true
       },
@@ -2042,7 +2046,11 @@
             1.5358
           ]
         },
-        "first_contact": null,
+        "first_contact": {
+          "min": null,
+          "max": 18.0,
+          "source": "hunter_head check interference_head_roll: range -12..+12 deg; first contact +18 neck_joint_member x head_bottom (6 past the limit); -18 neck_joint_member x head_bottom (6 past the limit); 4 explained ne"
+        },
         "inferred": true,
         "driven": true
       },
@@ -2072,18 +2080,22 @@
           ],
           "servo_model": "SERVO_35KG_270",
           "servo_model_source": "part visor_servo name",
-          "servo_deg_per_unit": 0.72,
+          "servo_deg_per_unit": 0.9007,
           "mm_per_servo_deg": null,
           "eta": 0.9,
           "linkages": [
             "rod_visor"
           ],
-          "how": "push_rod at rest: visor_servo +0.720 servo deg per joint deg",
+          "how": "push_rod at rest: visor_servo +0.901 servo deg per joint deg",
           "jacobian_at_rest": [
-            0.72
+            0.9007
           ]
         },
-        "first_contact": null,
+        "first_contact": {
+          "min": null,
+          "max": 33.0,
+          "source": "hunter_head check interference_visor: range -15..+30 deg; first contact +33 h_v_1 x h_m_1 (3 past the limit); clear to -40; 15 explained near-miss pairs left out"
+        },
         "inferred": true,
         "driven": true
       }
@@ -2207,7 +2219,7 @@
           "visor"
         ],
         "linkage": "hunter_head/rod_visor",
-        "servo_deg_per_unit": 0.72,
+        "servo_deg_per_unit": 0.9007,
         "mm_per_servo_deg": null,
         "eta": 0.9,
         "stall_nm": 2.8603,
@@ -2271,22 +2283,22 @@
         "id": "r3x_neck_drive/turntable",
         "name": "Pan turntable + lift tower",
         "joint": "head_pan",
-        "kg": 1.0407,
+        "kg": 1.0807,
         "com": [
-          -16.88,
-          54.06,
-          -20.48
+          -16.25,
+          75.6,
+          -19.68
         ],
         "inertia": [
-          0.04947,
-          0.00455,
-          0.04844,
-          -0.001288,
-          -0.0004781,
-          0.001155
+          0.06255,
+          0.004597,
+          0.06152,
+          -0.001666,
+          -0.0004922,
+          0.0006688
         ],
-        "parts": 11,
-        "catalogue_parts": 5
+        "parts": 12,
+        "catalogue_parts": 6
       },
       {
         "id": "r3x_neck_drive/slide",
@@ -2355,21 +2367,21 @@
         "id": "hunter_head/head",
         "name": "Head (mount plate, servos, shell)",
         "joint": "head_roll",
-        "kg": 1.0567,
+        "kg": 1.3891,
         "com": [
-          2.37,
-          775.04,
-          -9.36
+          1.99,
+          783.13,
+          1.89
         ],
         "inertia": [
-          0.004708,
-          0.01002,
-          0.008386,
-          -3.923e-05,
-          -0.0001739,
-          -0.0001167
+          0.009446,
+          0.01475,
+          0.01229,
+          -0.0001129,
+          -2.918e-05,
+          0.001091
         ],
-        "parts": 33,
+        "parts": 47,
         "catalogue_parts": 29
       },
       {
@@ -2378,17 +2390,17 @@
         "joint": "visor",
         "kg": 0.158,
         "com": [
-          0.97,
-          802.15,
-          22.42
+          1.12,
+          802.21,
+          22.61
         ],
         "inertia": [
-          0.0005799,
-          0.001763,
-          0.001918,
-          3.818e-06,
-          1.132e-05,
-          -0.0002292
+          0.0005782,
+          0.001752,
+          0.001908,
+          3.278e-06,
+          9.375e-06,
+          -0.0002279
         ],
         "parts": 10,
         "catalogue_parts": 5
@@ -2778,9 +2790,9 @@
         "horn": {
           "link": "hunter_head/head",
           "centre": [
-            53.2,
-            791.6637,
-            60.4046
+            52.5,
+            841.09,
+            -1.2697
           ],
           "axis": [
             1.0,
@@ -2790,17 +2802,17 @@
           "radius": 25.0,
           "zero_dir": [
             0.0,
-            -0.866,
-            -0.5
+            -0.5,
+            0.866
           ],
           "ball_offset": 0.0
         },
         "ground": {
           "link": "hunter_head/visor",
           "point": [
-            53.2,
-            755.0015,
-            -8.1191
+            52.5,
+            770.59,
+            20.3809
           ]
         },
         "rod_length": 58.0,
@@ -2818,9 +2830,9 @@
           "visor_push_rod"
         ],
         "inferred": true,
-        "inferred_note": "Anderson's horn/rod/tab; the servo's place on Hunter's head is chosen by design_drive (lever rest -120 deg, rod 15 deg, servo orientation 0)."
+        "inferred_note": "Anderson's horn/rod/tab; the servo's place on Hunter's head is chosen by design_drive (lever rest 0 deg, horn -30 deg off it, rod 90 deg, servo orientation 1)."
       }
     },
-    "total_kg": 12.966
+    "total_kg": 13.339
   }
 }

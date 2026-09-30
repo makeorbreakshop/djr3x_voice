@@ -90,14 +90,25 @@ def pair_distance(geo: Geo, a: str, ma: np.ndarray, b: str, mb: np.ndarray, far:
     return float(min(d.min(), far))
 
 
-def interference(asm: Assembly, geo: Geo) -> list[Check]:
+def interference(asm: Assembly, geo: Geo, explained: list | None = None) -> list[Check]:
+    """First contact per joint. Pairs an EXPLAINED entry of test "clearance" covers (the suite's
+    own explanations: a known near-miss with its fix) are left out and named in the summary."""
+    from fnmatch import fnmatch
+
+    def known(a, b):
+        return next((e for e in explained or [] if e.get("test") in ("clearance", "*") and
+                     all(any(fnmatch(x, pat) for pat in e["parts"]) for x in (a, b))), None)
+
     out = []
     rigid = [p for p in asm.parts if not p.linkage]
     ms0 = link_matrices(asm, {})
     for j in asm.joints:
-        pairs, mated = [], []
+        pairs, mated, skipped = [], [], []
         for a, b in itertools.combinations(rigid, 2):
             if j.id not in path_joints(asm, a.link, b.link):
+                continue
+            if known(a.id, b.id):
+                skipped.append(f"{a.id}/{b.id}")
                 continue
             if pair_distance(geo, a.id, ms0[a.link], b.id, ms0[b.link]) < CONTACT_MM:
                 mated.append(f"{a.id}/{b.id}")
@@ -145,7 +156,8 @@ def interference(asm: Assembly, geo: Geo) -> list[Check]:
         worst = min(hits, key=lambda h: abs(h[0]) - abs(hi if h[0] > 0 else lo), default=None)
         out.append(Check(
             f"interference_{j.id}", "interference", status, f"{j.id}: first contact",
-            f"range {lo:+g}..{hi:+g} {j.unit}; first contact " + "; ".join(notes),
+            f"range {lo:+g}..{hi:+g} {j.unit}; first contact " + "; ".join(notes)
+            + (f"; {len(skipped)} explained near-miss pairs left out" if skipped else ""),
             joint=j.id, value=worst[0] if worst else None,
             pose={j.id: worst[0]} if worst else {j.id: hi},
             parts=sorted(set(parts)),
@@ -317,6 +329,9 @@ def torque(asm: Assembly, servo: dict, profile_amax: dict, extra_loads: dict) ->
         skipped = 0
         for pose in grid(asm, jids, 5.0):
             jac = servo_jacobian(asm, pose, jids)
+            ids = [lk.id for lk in asm.linkages]
+            if jac is not None:  # only this pair's rows (other linkages, e.g. a visor rod, ride along)
+                jac = jac[[ids.index(lk) for lk in links], :]
             # where the rods lose leverage the torque is unbounded: the authority check owns that
             if jac is None or np.min(np.linalg.svd(jac, compute_uv=False)) < 0.25:
                 skipped += 1
@@ -325,9 +340,8 @@ def torque(asm: Assembly, servo: dict, profile_amax: dict, extra_loads: dict) ->
             for use_dyn in (False, True):
                 tq = np.array([g + (math.copysign(d, g) if use_dyn else 0) for g, d in ld])
                 ts = np.linalg.solve(jac.T, tq)
-                ids = [lk.id for lk in asm.linkages]
-                for lk in links:
-                    v = abs(float(ts[ids.index(lk)]))
+                for k, lk in enumerate(links):
+                    v = abs(float(ts[k]))
                     s, d, p = worst[lk]
                     if not use_dyn and v > s:
                         worst[lk] = (v, d, pose)
@@ -387,13 +401,13 @@ def mass_summary(asm: Assembly) -> Check:
 
 
 def run_all(asm: Assembly, servo: dict | None = None, profile_amax: dict | None = None,
-            extra_loads: dict | None = None) -> list[Check]:
+            extra_loads: dict | None = None, explained: list | None = None) -> list[Check]:
     geo = Geo(asm)
     checks = []
     if asm.linkages:
         checks.append(reach(asm))
         checks += authority(asm)
-    checks += interference(asm, geo)
+    checks += interference(asm, geo, explained)
     if any(p.cls == "shell" for p in asm.parts):
         checks.append(shell_clearance(asm, geo))
     if servo:

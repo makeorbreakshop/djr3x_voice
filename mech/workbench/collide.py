@@ -71,7 +71,7 @@ class Scene:
         for k in self.ids:
             lo, hi = meshes[k].bounds
             corners.append(np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]))
-        self.corners = np.stack(corners)  # (N, 8, 3)
+        self.corners = np.stack(corners) if corners else np.zeros((0, 8, 3))  # (N, 8, 3)
         self._fcl = {}
 
     def obj(self, k):

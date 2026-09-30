@@ -9,7 +9,7 @@
 
 import './build.css';
 import type { AsmNode, Workbench } from './workbench';
-import { flatten, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MStep } from './manifest';
+import { flatten, variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MStep } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -351,7 +351,10 @@ export function mountBuildPanel(wb: Workbench) {
     status.classList.toggle('err', !!wb.error);
     $('bp-reload').title = m ? `Reload · built ${new Date(m.generated_at).toLocaleString()}` : 'Reload';
     // Sub-assemblies: one picker, indented, only when there are any.
-    const all = wb.top ? flatten(wb.top.asm) : [];
+    // Sub-assemblies of unpicked variants (the droid's other head) are out of the model.
+    const shown = new Set<MAssembly>();
+    wb.forEachNode((n) => { if (wb.nodeShown(n)) shown.add(n.asm); });
+    const all = wb.top ? flatten(wb.top.asm).filter((x) => shown.has(x.node)) : [];
     focusSel.hidden = all.length < 2;
     if (all.length > 1) {
       const sig = all.map((x) => x.node.id).join();
@@ -383,27 +386,41 @@ export function mountBuildPanel(wb: Workbench) {
       return;
     }
     const a = node.asm;
-    const groups = new Map<string, string[]>();
-    for (const v of a.variants ?? []) groups.set(v.group, [...(groups.get(v.group) ?? []), v.id]);
-    $('bp-variants').innerHTML = [...groups].map(([g, ids]) =>
-      variantSelect(g, ids.map((id) => ({ id, name: a.variants!.find((v) => v.id === id)!.name })), wb.variants[g])).join('');
+    // Every variant group in the shown model (part options and child options such as the
+    // droid's head mech), whatever is focused: switching one changes the whole model.
+    const groups = new Map<string, { id: string; name: string }[]>();
+    wb.forEachNode((n) => {
+      if (!wb.nodeShown(n)) return;
+      for (const v of variantOptions(n.asm)) {
+        const g = groups.get(v.group) ?? [];
+        if (!g.some((x) => x.id === v.id)) g.push({ id: v.id, name: v.name });
+        groups.set(v.group, g);
+      }
+    });
+    $('bp-variants').innerHTML = [...groups].map(([g, opts]) => variantSelect(g, opts, wb.variants[g])).join('');
     $('bp-variants').hidden = !groups.size;
 
+    // The focused assembly's parts and every shown sub-assembly's (the droid's root owns none).
+    const subs: MAssembly[] = [];
+    wb.forEachNode((n) => { if (wb.nodeShown(n)) subs.push(n.asm); }, node);
+    const allParts = subs.flatMap((x) => x.parts);
     // Filter chips with counts (a filter with nothing in it stands aside).
     $('bp-filters').innerHTML = FILTERS.map(([f, label, test]) => {
-      const n = a.parts.filter(test).length;
+      const n = allParts.filter(test).length;
       if (!n && f !== 'all' && filter !== f) return '';
       return `<button class="chip" data-bp="filter" data-f="${f}" aria-pressed="${filter === f}">${label} <span>${n}</span></button>`;
     }).join('');
     const test = FILTERS.find(([f]) => f === filter)![2];
 
-    const byLink = a.links.map((l) => ({ l, parts: a.parts.filter((p) => p.link === l.id && test(p)) })).filter((g) => g.parts.length);
-    body.innerHTML = byLink.map(({ l, parts }) => {
-      const g = groupName(a, l);
-      const ids = a.parts.filter((p) => p.link === l.id).map((p) => p.id);
+    const byLink = subs.flatMap((sa) => sa.links.map((l) => ({ sa, l, parts: sa.parts.filter((p) => p.link === l.id && test(p)) })))
+      .filter((g) => g.parts.length);
+    body.innerHTML = byLink.map(({ sa, l, parts }) => {
+      const g0 = groupName(sa, l);
+      const g = sa === a ? g0 : { ...g0, name: `${bare(sa.name)} › ${g0.name}` };
+      const ids = sa.parts.filter((p) => p.link === l.id).map((p) => p.id);
       const iso = !!wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
       const tip = `${l.name}${g.j ? ` · ${g.j.name}` : ''}. Click to show only this link`;
-      return `<li class="grp"><button class="grp-btn" data-bp="isolate-link" data-link="${esc(l.id)}" data-asm="${esc(a.id)}" aria-pressed="${iso}" title="${esc(tip)}">${esc(g.name)} <span>· ${esc(g.how)}</span></button><span class="grp-n">${parts.length}</span></li>` +
+      return `<li class="grp"><button class="grp-btn" data-bp="isolate-link" data-link="${esc(l.id)}" data-asm="${esc(sa.id)}" aria-pressed="${iso}" title="${esc(tip)}">${esc(g.name)} <span>· ${esc(g.how)}</span></button><span class="grp-n">${parts.length}</span></li>` +
         parts.map((p) => {
           const hidden = wb.hidden.has(p.id);
           const solo = wb.isolated?.size === 1 && wb.isolated.has(p.id);

@@ -101,6 +101,38 @@ def tube_generator(length, r=13.0):
     return g
 
 
+def coil_generator(r=21.0, wire_r=3.2, h=55.0, turns=5.5, n=240, sides=10):
+    """A coil spring along +Y from y = 0 (the sim's neck spring, sim/web/src/rig.ts buildNeckSpring)."""
+    def g():
+        t = np.linspace(0, 1, n + 1)
+        a = t * turns * 2 * np.pi
+        c = np.stack([np.cos(a) * r, t * h, np.sin(a) * r], 1)
+        tan = np.gradient(c, axis=0)
+        tan /= np.linalg.norm(tan, axis=1)[:, None]
+        nrm = np.stack([np.cos(a), np.zeros_like(a), np.sin(a)], 1)
+        bin_ = np.cross(tan, nrm)
+        k = np.linspace(0, 2 * np.pi, sides, endpoint=False)
+        ring = c[:, None, :] + wire_r * (np.cos(k)[None, :, None] * nrm[:, None, :] + np.sin(k)[None, :, None] * bin_[:, None, :])
+        v = ring.reshape(-1, 3)
+        f = []
+        for i in range(n):
+            for j in range(sides):
+                p0, p1 = i * sides + j, i * sides + (j + 1) % sides
+                q0, q1 = p0 + sides, p1 + sides
+                f += [[p0, q0, p1], [p1, q0, q1]]
+        caps = [v[:sides].mean(0), v[-sides:].mean(0)]
+        v = np.vstack([v, caps])
+        c0, c1 = len(v) - 2, len(v) - 1
+        for j in range(sides):
+            f.append([c0, (j + 1) % sides, j])
+            f.append([c1, n * sides + j, n * sides + (j + 1) % sides])
+        return trimesh.Trimesh(v, np.array(f), process=True)
+    return g
+
+
+SPRING_Y, SPRING_H = 608.5, 55.0  # the sim's spring: on the top cap (TR_N), 55 mm at head lift 0
+
+
 # ---------------------------------------------------------------------------------------
 def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
     """Head pan + head lift stage in the base, the neck tube and the upper neck guide."""
@@ -189,6 +221,17 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
                      mass_g=L * catalog.PURCHASED["neck_tube"]["g_per_mm"], placement="fitted",
                      evidence="length = neck-main socket (head) - slide bottom (base stage)",
                      inferred=True, inferred_note="tube material/wall not in the parts list; stage height assumed"))
+
+    # the cosmetic neck spring (the real droid and the Hasbro figure have one; the kit does not
+    # model it): the sim's Visual look draws it procedurally, so this is its twin, stretched by
+    # the head lift like the sim's (manifest part `stretch`)
+    a.parts.append(P("neck_spring", "Neck coil spring (cosmetic, the sim's)", "shell", "turntable",
+                     trans(0, SPRING_Y, 0), None, generator=coil_generator(h=SPRING_H), kind="generated",
+                     origin="ours", material="steel (painted, cosmetic)", printed=False, mass_g=40.0,
+                     placement="fitted", evidence="sim/web/src/rig.ts buildNeckSpring: r 21, wire 3.2, 5.5 turns, "
+                     "55 mm on the top cap at y 608.5",
+                     stretch={"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, SPRING_Y, 0],
+                              "rest_mm": SPRING_H}))
 
     # upper neck guide (neck support), mirroring the base lift design: 6 in lazy susan; its outer race
     # (neck-support-ring-outer) on the top ring floor, inner race (turns with the neck) carries a

@@ -17,7 +17,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  defaultVariants, firstStep, hiddenByVariants, joinUrl, loadManifest,
+  defaultVariants, firstStep, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type Manifest, type MLinkage, type MPart, type PartClass,
 } from './manifest';
 
@@ -42,6 +42,8 @@ interface PartObj {
   mesh: THREE.Mesh;
   mat: THREE.MeshStandardMaterial;
   base: THREE.Vector3;
+  /** Where the mesh sits at the current stretch (parts with `stretch`), else `base`. */
+  sBase?: THREE.Vector3;
 }
 
 interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null }
@@ -114,6 +116,12 @@ export class Workbench {
 
   parts = new Map<string, PartObj>();
   fast = new Map<string, FastObj>();
+  /** Every part/fastener object, including repeats of an id across variant options (the maps
+   * above index the ones in shown assemblies first). */
+  private allParts: PartObj[] = [];
+  private allFast: FastObj[] = [];
+  /** Nodes out of the model: under an unpicked child variant (e.g. the droid's other head). */
+  private variantHidden = new Set<AsmNode>();
   private readonly listeners = new Set<() => void>();
   private readonly plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
   private readonly lights = new THREE.Group();
@@ -289,12 +297,12 @@ export class Workbench {
       }
       return g;
     };
-    const parts = new Map<string, PartObj>();
-    const fast = new Map<string, FastObj>();
+    const parts: PartObj[] = [];
+    const fast: FastObj[] = [];
     const top = await this.buildNode(m.root, null, geometry, parts, fast);
     if (seq !== this.loadSeq) return;
-    this.parts = parts;
-    this.fast = fast;
+    this.allParts = parts;
+    this.allFast = fast;
     this.top = top;
     this.root.add(this.top.group);
     // No highlight knee here (look.ts tameHighlights): it squeezes every lit value above 0.7
@@ -306,6 +314,7 @@ export class Workbench {
     this.focus = this.top;
     this.variants = {};
     this.forEachNode((n) => Object.assign(this.variants, defaultVariants(n.asm)));
+    this.applyVariantNodes();
     this.pose();
     this.refresh();
     if (this.active) this.frame();
@@ -315,6 +324,9 @@ export class Workbench {
     this.root.clear();
     this.parts.clear();
     this.fast.clear();
+    this.allParts = [];
+    this.allFast = [];
+    this.variantHidden.clear();
     this.top = this.focus = null;
     this.selected = null;
     this.hidden.clear();
@@ -325,7 +337,7 @@ export class Workbench {
   }
 
   private async buildNode(asm: MAssembly, parent: AsmNode | null, geometry: (u: string) => Promise<THREE.BufferGeometry>,
-    parts: Map<string, PartObj>, fast: Map<string, FastObj>): Promise<AsmNode> {
+    parts: PartObj[], fast: FastObj[]): Promise<AsmNode> {
     const group = new THREE.Group();
     group.name = `asm:${asm.id}`;
     const node: AsmNode = { asm, group, links: new Map(), pose: {}, parent, children: [], rodZero: new Map(), rods: new Map() };
@@ -362,7 +374,7 @@ export class Workbench {
       } else {
         (node.links.get(p.link) ?? group).add(mesh);
       }
-      parts.set(p.id, { part: p, node, holder, mesh, mat, base: b });
+      parts.push({ part: p, node, holder, mesh, mat, base: b });
     }));
     const fastMat = this.material('fastener');
     await Promise.all((asm.fasteners ?? []).filter((f) => f.placed && f.mesh && f.transform).map(async (f) => {
@@ -385,7 +397,7 @@ export class Workbench {
       } else {
         (node.links.get(f.link) ?? group).add(obj);
       }
-      fast.set(f.id, { f, node, obj, base: m, mat, holder });
+      fast.push({ f, node, obj, base: m, mat, holder });
     }));
     // Zero-pose rod balls: where the rod meshes were exported.
     const zero = linkMatrices(asm.links, asm.joints, {});
@@ -409,6 +421,28 @@ export class Workbench {
   private material(cls: PartClass) {
     const look = CLASS_LOOK[cls];
     return new THREE.MeshStandardMaterial({ ...look, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  }
+
+  /** Child variants: hide the unpicked options' subtrees and index the shown parts by id first. */
+  private applyVariantNodes() {
+    this.variantHidden.clear();
+    if (!this.top) return;
+    const hidden = hiddenAssemblies(this.top.asm, this.variants);
+    this.forEachNode((n) => {
+      if (hidden.has(n.asm)) this.variantHidden.add(n);
+    });
+    this.forEachNode((n) => (n.group.visible = !hidden.has(n.asm)));
+    this.parts = new Map();
+    this.fast = new Map();
+    for (const shown of [true, false]) {
+      for (const po of this.allParts) if (this.variantHidden.has(po.node) !== shown && !this.parts.has(po.part.id)) this.parts.set(po.part.id, po);
+      for (const fo of this.allFast) if (this.variantHidden.has(fo.node) !== shown && !this.fast.has(fo.f.id)) this.fast.set(fo.f.id, fo);
+    }
+  }
+
+  /** Whether a node is in the model under the current variant picks. */
+  nodeShown(n: AsmNode) {
+    return !this.variantHidden.has(n);
   }
 
   forEachNode(fn: (n: AsmNode) => void, from = this.top) {
@@ -451,6 +485,15 @@ export class Workbench {
       for (const [id, g] of n.links) g.matrix.copy(ms.get(id)!);
       for (const lk of n.asm.linkages ?? []) this.poseLinkage(n, lk, ms);
     });
+    for (const po of this.allParts) {
+      const st = po.part.stretch;
+      if (!st) continue;
+      const s = Math.max(0.3, (st.rest_mm + (po.node.pose[st.joint] ?? 0)) / st.rest_mm);
+      po.mesh.scale.set(1, s, 1);
+      po.sBase = po.base.clone();
+      po.sBase.y = st.anchor[1] + (po.base.y - st.anchor[1]) * s;
+      po.mesh.position.copy(po.sBase).addScaledVector(new THREE.Vector3(...(po.part.explode ?? [0, 0, 0])), (po.part.explode_mm ?? 0) * this.explode);
+    }
     this.root.updateMatrixWorld(true);
   }
 
@@ -459,13 +502,13 @@ export class Workbench {
     n.rods.set(lk.id, s ? { servoDeg: s.servoDeg } : null);
     if (!s) return; // out of reach: the rod keeps its last pose, the panel says so
     const zero = n.rodZero.get(lk.id);
-    for (const fo of this.fast.values()) {
+    for (const fo of this.allFast) {
       if (fo.node !== n || fo.f.linkage !== lk.id || !fo.holder) continue;
       fo.holder.matrix.copy(fo.f.role === 'horn' ? hornMatrix(lk, ms.get(lk.horn.link)!, s.servoDeg)
         : zero ? rodMatrix(zero.a, zero.b, s.a, s.b) : new THREE.Matrix4());
     }
     for (const pid of lk.parts) {
-      const po = this.parts.get(pid);
+      const po = this.allParts.find((x) => x.node === n && x.part.id === pid);
       if (!po) continue;
       const role = po.part.role ?? '';
       const m = role === 'horn' ? hornMatrix(lk, ms.get(lk.horn.link)!, s.servoDeg)
@@ -515,6 +558,9 @@ export class Workbench {
 
   setVariant(group: string, id: string) {
     this.variants[group] = id;
+    this.applyVariantNodes();
+    if (this.focus && this.variantHidden.has(this.focus)) this.focus = this.top;
+    this.pose();
     this.refresh();
     this.emit();
   }
@@ -631,7 +677,7 @@ export class Workbench {
 
     for (const [id, po] of this.parts) {
       const p = po.part;
-      let visible = !hideV.has(id) && !this.hidden.has(id) && (!this.isolated || this.isolated.has(id));
+      let visible = !hideV.has(id) && !this.hidden.has(id) && (!this.isolated || this.isolated.has(id)) && !this.variantHidden.has(po.node);
       if (p.class === 'shell' && this.shell === 'hidden') visible = false;
       const f = first.get(id);
       if (cur && f !== undefined && f > this.step && !ctx.has(id)) visible = false;
@@ -691,7 +737,7 @@ export class Workbench {
       const p = po.part;
       const dir = tmp.set(...(p.explode ?? [0, 0, 0]));
       const k = this.explode + (inStep.has(p.id) ? insert * 1.2 : 0);
-      po.mesh.position.copy(po.base).addScaledVector(dir, (p.explode_mm ?? 0) * k);
+      po.mesh.position.copy(po.sBase ?? po.base).addScaledVector(dir, (p.explode_mm ?? 0) * k);
     }
     for (const fo of this.fast.values()) {
       const owner = this.parts.get(fo.f.joins[0]);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod } from '../src/workbench/kinematics';
-import { defaultVariants, flatten, hiddenByVariants, joinUrl, resolveTree, firstStep, type MAssembly, type MJoint, type MLink, type MLinkage, type Manifest } from '../src/workbench/manifest';
+import { defaultVariants, flatten, hiddenAssemblies, hiddenByVariants, joinUrl, resolveTree, firstStep, type MAssembly, type MJoint, type MLink, type MLinkage, type Manifest } from '../src/workbench/manifest';
 
 const links: MLink[] = [
   { id: 'base', name: 'Base', joint: null },
@@ -88,6 +88,21 @@ describe('build manifest', () => {
     const pick = defaultVariants(a);
     expect(pick).toEqual({ eyes: 'eyes_b' });
     expect([...hiddenByVariants(a, pick)]).toEqual(['ea']);
+  });
+
+  it('child variants: the default option shows, the other subtree is out (ids may repeat)', () => {
+    const hunter = asm('hunter_head', { mount: { parent_link: 'slide', variant: { group: 'head_mech', id: 'hunter', default: true } } });
+    const kitHead = asm('head_r3x', {
+      mount: { parent_link: 'slide', variant: { group: 'head_mech', id: 'r3x_anderson', default: false } },
+      children: [asm('mouth_split')],
+    });
+    const nd = asm('neck', { children: [kitHead, hunter] });
+    const root = asm('droid', { children: [nd] });
+    const pick = defaultVariants(nd);
+    expect(pick).toEqual({ head_mech: 'hunter' });
+    expect([...hiddenAssemblies(root, pick)].map((a) => a.id)).toEqual(['head_r3x', 'mouth_split']);
+    expect([...hiddenAssemblies(root, { head_mech: 'r3x_anderson' })].map((a) => a.id)).toEqual(['hunter_head']);
+    expect([...hiddenByVariants(nd, pick)]).toEqual([]);
   });
 
   it('first step per part, and URL joining', () => {

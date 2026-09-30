@@ -38,6 +38,8 @@ export interface MPart {
   note?: string;
   cad?: CadStatus;
   catalog?: string;
+  /** Scaled along +Y about `anchor` by (rest_mm + joint value) / rest_mm (the neck spring with head_lift). */
+  stretch?: { joint: string; axis?: Vec3; anchor: Vec3; rest_mm: number };
 }
 
 export interface MJoint {
@@ -166,7 +168,11 @@ export interface MAssembly {
   name: string;
   description?: string;
   frame_note?: string;
-  mount?: { parent_link?: string; transform?: MTransform; mount_node?: string; inferred?: boolean; note?: string };
+  mount?: {
+    parent_link?: string; transform?: MTransform; mount_node?: string; inferred?: boolean; note?: string;
+    /** This child is one option of a variant group of its parent (only the selected option shows). */
+    variant?: { group: string; id: string; default?: boolean };
+  };
   guide?: { title?: string; pages?: number[] };
   links: MLink[];
   parts: MPart[];
@@ -267,21 +273,45 @@ export function flatten(root: MAssembly): { node: MAssembly; path: MAssembly[] }
   return out;
 }
 
+/** Every variant option on `a`: its own part variants plus children mounted as options
+ * (`mount.variant`, e.g. the droid's head_mech: Hunter's gimbal or Anderson's tilt). */
+export function variantOptions(a: MAssembly): { group: string; id: string; name: string; default: boolean; child?: MAssembly }[] {
+  const out: { group: string; id: string; name: string; default: boolean; child?: MAssembly }[] = [];
+  for (const v of a.variants ?? []) out.push({ group: v.group, id: v.id, name: v.name, default: !!v.default });
+  for (const c of (a.children ?? []) as MAssembly[]) {
+    const v = c.mount?.variant;
+    if (v) out.push({ group: v.group, id: v.id, name: c.name ?? v.id, default: !!v.default, child: c });
+  }
+  return out;
+}
+
 /** Variant groups -> the selected option id (defaults applied). */
 export function defaultVariants(a: MAssembly): Record<string, string> {
   const pick: Record<string, string> = {};
-  for (const v of a.variants ?? []) {
+  for (const v of variantOptions(a)) {
     if (!(v.group in pick) || v.default) pick[v.group] = v.id;
   }
   return pick;
 }
 
-/** Parts hidden by the current variant picks. */
+/** Parts hidden by the current variant picks (part options on this assembly). Child options are
+ * whole assemblies: see hiddenAssemblies (by node, since part ids may repeat across options). */
 export function hiddenByVariants(a: MAssembly, pick: Record<string, string>): Set<string> {
   const hide = new Set<string>();
   for (const v of a.variants ?? []) if (pick[v.group] !== v.id) for (const p of v.parts ?? []) hide.add(p);
   for (const v of a.variants ?? []) if (pick[v.group] === v.id) for (const p of v.parts ?? []) hide.delete(p);
   return hide;
+}
+
+/** Assemblies under an unpicked child option (they and their subtrees are out of the model). */
+export function hiddenAssemblies(root: MAssembly, pick: Record<string, string>): Set<MAssembly> {
+  const out = new Set<MAssembly>();
+  for (const { node } of flatten(root)) {
+    for (const o of variantOptions(node)) {
+      if (o.child && pick[o.group] !== o.id) for (const { node: n } of flatten(o.child)) out.add(n);
+    }
+  }
+  return out;
 }
 
 /** The step in which each part first appears (parts in no step: -1). */

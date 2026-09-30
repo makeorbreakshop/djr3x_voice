@@ -78,6 +78,7 @@ class Part:
     features: dict = field(default_factory=dict)  # name -> feature (mates.py), assembly frame, zero pose
     cad: str = "mesh"  # mesh (a reference mesh) | vendor (vendor CAD) | parametric (ours) | placeholder
     catalog: Optional[str] = None  # parts catalog id ("gobilda:2913-0004-0241")
+    stretch: Optional[dict] = None  # {"joint", "axis", "anchor", "rest_mm"}: scaled by a prismatic joint (SCHEMA.md)
 
     def __post_init__(self):
         assert self.cls in CLASSES, self.cls

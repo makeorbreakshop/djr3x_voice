@@ -101,7 +101,11 @@ A rigid body. Every part rides on exactly one link.
   "bbox": [[minx,miny,minz],[maxx,maxy,maxz]],   // assembly frame, zero pose
   "triangles": {"display": 4000, "source": 51000},
   "inferred": false, "inferred_note": "",
-  "note": ""
+  "note": "",
+  // optional: a part that stretches with a prismatic joint of this assembly (the neck spring with
+  // head_lift): scaled along `axis` (the assembly's +Y only, in v1) about `anchor` (assembly frame)
+  // by (rest_mm + joint value) / rest_mm. Readers without it draw the part rigid at rest.
+  "stretch": {"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, 608.5, 0], "rest_mm": 55}
 }
 ```
 

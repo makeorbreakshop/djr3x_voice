@@ -41,6 +41,7 @@ class Part:
     cad: str = "mesh"             # mesh (a reference mesh) | vendor | parametric (ours) | placeholder
     catalog: str | None = None    # mech/parts/catalog.json id
     real: dict | None = None      # {"kind", "spec"}: the real part (mech/parts) fitted onto `file` (a stand-in)
+    stretch: dict | None = None   # {"joint", "axis", "anchor", "rest_mm"}: scaled along axis by a prismatic joint
     explode: tuple = (0, 1, 0)
 
 

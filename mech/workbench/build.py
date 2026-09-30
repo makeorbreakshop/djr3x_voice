@@ -118,7 +118,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
             "triangles": {"display": int(len(disp.faces)), "source": int(len(m.faces))},
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
-            "cad": p.cad, "catalog": p.catalog, "features": p.features,
+            "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch,
         }))
     fast = []
     written = set()
@@ -222,6 +222,8 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
 def suite_for(mod, asm, full: bool = False):
     from .suite import Suite
 
+    if not asm.parts:  # a root that only holds sub-assemblies (the droid): the suite tests one tree level
+        return []
     return Suite(asm, tol=getattr(mod, "TOLERANCES", None), explained=getattr(mod, "EXPLAINED", None), full=full).run()
 
 

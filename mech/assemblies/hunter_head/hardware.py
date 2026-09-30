@@ -99,7 +99,9 @@ class Hw:
                  "top": plane(h["p"], -d), "thread": axis(h["p"], d, _nom(spec["thread"]) / 2)}
         if depth is not None:
             feats["thread"]["depth"] = round(float(depth), 2)
-        f = Fastener(fid, dict(spec, note="6 x 6 mm (BOM)"), "insert-M4x6", [pid], self.p[pid].link, step, m,
+        key = f"insert-{spec['thread']}x{spec['length_mm']:g}"
+        f = Fastener(fid, dict(spec, note="6 x 6 mm (BOM)") if key == "insert-M4x6" else dict(spec), key, [pid],
+                     self.p[pid].link, step, m,
                      mesh=r.mesh, cad=r.status, features=feats)
         self.fast.append(f)
         self.mate("press", (fid, "outer"), (pid, f"hole_{hole_name}"), note="heat-set into the printed hole")
@@ -107,7 +109,7 @@ class Hw:
         return f
 
     def screw(self, fid, head_at, d, clamps, into, step, link, kind="shcs", thread="M4", catalog=None,
-              inferred=False, note="", linkage=None, role=None, joins=None):
+              inferred=False, note="", linkage=None, role=None, joins=None, length=None):
         """A screw whose head bears at `head_at`, shank along `d` through `clamps` [(part, hole name)]
         into `into` = (part id, feature name, 'insert'|'plastic'|'metal'|'nut', available depth).
         Its length is chosen from the grip and the minimum engagement."""
@@ -119,7 +121,7 @@ class Hw:
             avail = max(avail or 0.0, tf["depth"])  # the blind hole under the insert
         grip = float((np.asarray(tf["p"]) - head_at) @ d)
         need = {"insert": 1.5, "plastic": 2.0, "metal": 1.0, "nut": 1.05}[kind_into] * _nom(thread)
-        L = screw_len(grip, need, avail)
+        L = length or screw_len(grip, need, avail)
         if L is None:
             fits = [x for x in STD_LEN if avail is None or x <= grip + avail + 1e-6]
             L = max(fits) if fits else STD_LEN[0]
@@ -351,8 +353,18 @@ def add_hardware(asm, fit, visor):
         hw.hole("mount_plate", f"fl{i + 1}", top, -UP, r)
         ins = min((f for f in hw.fast if f.id.startswith("ins_bottom")),
                   key=lambda f: np.linalg.norm(np.asarray(f.features["top"]["p"])[[0, 2]] - c[[0, 2]]))
-        hw.screw(f"scr_plate_bottom_{i + 1}", top, -UP, [("mount_plate", f"fl{i + 1}")],
-                 (ins.id, "thread", "insert", 6.0), "s10", "head", joins=["mount_plate", "head_bottom", ins.id])
+        clamps = [("mount_plate", f"fl{i + 1}")]
+        head = top
+        # a visor bracket's foot on this hole: the same screw clamps it too
+        for bid in ("visor_bracket_l", "visor_bracket_r"):
+            if bid not in P:
+                continue
+            for k, f in P[bid].features.items():
+                if k.startswith("hole_screw") and np.linalg.norm(np.asarray(f["p"])[[0, 2]] - np.asarray(top)[[0, 2]]) < 1.0:
+                    clamps = [(bid, k[5:])] + clamps
+                    head = np.array([top[0], f["p"][1], top[2]])
+        hw.screw(f"scr_plate_bottom_{i + 1}", head, -UP, clamps,
+                 (ins.id, "thread", "insert", 6.0), "s09", "head", joins=[c[0] for c in clamps] + ["head_bottom", ins.id])
 
     # --- s07 servos into the plate: flange holes over the inserts -------------------------------
     for i, f in enumerate([f for f in hw.fast if f.id.startswith("ins_servo")]):
@@ -363,8 +375,10 @@ def add_hardware(asm, fit, visor):
         if fl_top is None:
             fl_top = p + UP * 2.5
         hw.hole(f"servo_{side}", f"fl{i + 1}", fl_top, -UP, 2.2)
+        # button heads (a socket head's rim hits the servo case beside the flange) and M4 x 8: a 10
+        # reaches the insert's drill point in the plate (parametric-plate owner, 2026-09-30)
         hw.screw(f"scr_servo_{i + 1}", fl_top, -UP, [(f"servo_{side}", f"fl{i + 1}")], (f.id, "thread", "insert", 6.0),
-                 "s07", "head", joins=[f"servo_{side}", "mount_plate", f.id])
+                 "s07", "head", kind="bhcs", length=8, joins=[f"servo_{side}", "mount_plate", f.id])
 
     # --- s05 pillow blocks: down through the plate's 4 mm bridge into the tapped posts ----------
     for i, (c, r) in enumerate(sorted(pillow, key=lambda h: (h[0][0], h[0][2]))):
@@ -464,9 +478,9 @@ def add_hardware(asm, fit, visor):
         ball_c = arm_face + n_dir * (SPACER_T + BALL_HALF)
         stud_head = ball_c + n_dir * BALL_HALF
         far = arm_face - n_dir * ARM_T  # the arm's other face
-        hw.washer(f"wsh_ball_a_{s}", arm_face + n_dir * SPACER_T, -n_dir, arm_p.id, "ball", "s09", "head",
+        hw.washer(f"wsh_ball_a_{s}", arm_face + n_dir * SPACER_T, -n_dir, arm_p.id, "ball", "s10", "head",
                   linkage=lk.id, role="horn", spec=SPACER)
-        nut_id = hw.nut(f"nut_ball_a_{s}", far, -n_dir, arm_p.id, "s09", "head", linkage=lk.id, role="horn")
+        nut_id = hw.nut(f"nut_ball_a_{s}", far, -n_dir, arm_p.id, "s10", "head", linkage=lk.id, role="horn")
         # ball-link parts: posed with the rod (the housing turns about its ball)
         link_a, link_b, rod = _rod_parts(lk, s)
         for p in (link_a, link_b, rod):
@@ -474,7 +488,7 @@ def add_hardware(asm, fit, visor):
             P[p.id] = p
         hw.hole(link_a.id, "ball", stud_head, -n_dir, 2.05)
         hw.screw(f"stud_a_{s}", stud_head, -n_dir, [(link_a.id, "ball"), (arm_p.id, "ball")],
-                 (nut_id, "thread", "nut", 8.0), "s09", "head", linkage=lk.id, role="horn",
+                 (nut_id, "thread", "nut", 8.0), "s10", "head", linkage=lk.id, role="horn",
                  joins=[link_a.id, arm_p.id])
         hw.fast[-1].features["ball_seat"] = ball(ball_c, 4.75)
         hw.mate("ball_link", (link_a.id, "ball_c"), (f"stud_a_{s}", "ball_seat"))
@@ -485,10 +499,10 @@ def add_hardware(asm, fit, visor):
         b = np.asarray(lk.ground_point)
         face = np.array([b[0], hub_face, b[2]])
         hw.hole("hub_top", f"ball_{s}", face, -UP, 1.8)
-        hw.washer(f"wsh_ball_b_{s}", face + UP * SPACER_T, -UP, "hub_top", f"ball_{s}", "s09", "neck", spec=SPACER)
+        hw.washer(f"wsh_ball_b_{s}", face + UP * SPACER_T, -UP, "hub_top", f"ball_{s}", "s10", "neck", spec=SPACER)
         hw.hole(link_b.id, "ball", b + UP * BALL_HALF, -UP, 2.05)
         hw.screw(f"stud_b_{s}", b + UP * BALL_HALF, -UP, [(link_b.id, "ball")], ("hub_top", f"hole_ball_{s}", "metal", 10.0),
-                 "s09", "neck", joins=[link_b.id, "hub_top"], note="Into the threaded sonic hub. Loctite.")
+                 "s10", "neck", joins=[link_b.id, "hub_top"], note="Into the threaded sonic hub. Loctite.")
         hw.fast[-1].features["ball_seat"] = ball(b, 4.75)
         hw.mate("ball_link", (link_b.id, "ball_c"), (f"stud_b_{s}", "ball_seat"))
         link_b.features["ball_face"] = plane(b - UP * BALL_HALF, -UP)
@@ -516,12 +530,9 @@ def add_hardware(asm, fit, visor):
 
     contact_mates(hw, P, [("head_bottom", "side_left"), ("head_bottom", "side_right"), ("side_left", "head_top"),
                           ("side_right", "head_top")], "glue", "shell seam: alignment pins + glue (step s12)")
-    contact_mates(hw, P, [("visor_servo_mount", "side_right")], "glue",
-                  "the mount's feet on the right ear: where they screw is not in the sources")
-    # --- visor ------------------------------------------------------------------------------------
-    _visor(hw, P, visor)
-    P["visor_arm_l"].features.setdefault("hub", axis(visor["pivot"], [1, 0, 0], 4.75))
-
+    # the visor drive is designed after the hardware exists (it must clear it); assembly.py adds
+    # its parts and calls visor.visor_mates on this Hw
+    asm._hw = hw
     asm.fasteners = hw.fast
     asm.mates = hw.mates
     return notes
@@ -626,59 +637,6 @@ def clamp_screws(hw, P, leaves):
         hw.mates[-3].solved = False
         hw.mates[-2].solved = False
         hw.mates[-1].solved = False
-
-
-def _visor(hw, P, visor):
-    """Visor: a 25T disc horn on the servo's spline, the right arm bolted to it (4 x M3 on the
-    DXF's 10 mm square), the left arm on a pivot screw into the left ear."""
-    if not visor:
-        return
-    sp = np.asarray(visor["spline"], float)
-    out = unit(visor["out"])  # the servo output direction (-X, out of the right ear)
-    horn_face = sp + out * 3.0
-    hr = spec_part("disc_horn", {"od_mm": 20.0, "t_mm": 3.0, "square_mm": 10.0})
-    horn = hr.mesh.copy()
-    horn.apply_transform(frame_on_axis(sp, out))
-    hp = Part("visor_horn", "Visor servo horn, 25T aluminium disc 20 mm", "hardware", "visor", horn,
-              {"kind": "generated", "placement": "mates"}, "aluminium", False, tuple(out), 20, 4.0, "estimate",
-              cad="parametric", inferred=True,
-              inferred_note="The DXF's 9.5 mm hub hole + 4 x M3 on a 10 mm square fits a standard 25T disc horn.",
-              features={"spline": spline(sp, out, TEETH), "face": plane(horn_face, out)})
-    hw.asm.parts.append(hp)
-    P[hp.id] = hp
-    hw.mate("spline", ("visor_horn", "spline"), ("visor_servo", "spline"), teeth=TEETH)
-    P["visor_arm_r"].features.update({"face_in": plane(horn_face, -out), "hub": axis(horn_face, out, 4.75)})
-    hw.mate("seated", ("visor_arm_r", "face_in"), ("visor_horn", "face"))
-    t = visor["t"]
-    for k, (dy, dz) in enumerate([(-5, -5), (-5, 5), (5, 5), (5, -5)]):
-        off = np.array([0.0, dy, dz])
-        hw.hole("visor_arm_r", f"h{k}", horn_face + out * t + off, -out, 1.7)
-        hw.hole("visor_horn", f"h{k}", horn_face + off, -out, 1.25)
-        hw.screw(f"scr_visor_horn_{k + 1}", horn_face + out * t + off, -out, [("visor_arm_r", f"h{k}")],
-                 ("visor_horn", f"hole_h{k}", "metal", 3.0), "s12", "visor", thread="M3", inferred=True,
-                 joins=["visor_arm_r", "visor_horn"], note="M3 into the horn's tapped holes.")
-    # the servo into its mount: 4 inserts in the mount's bosses, 4 screws down through the flange
-    ms = np.asarray(visor["m_servo"])
-    dn = ms[:3, :3] @ np.array([0.0, -1.0, 0.0])  # away from the output
-    for k, (x, z) in enumerate(visor["flange"]["holes"]):
-        face = (ms @ np.array([x, visor["flange"]["bottom_y"], z, 1.0]))[:3]
-        top = (ms @ np.array([x, -13.39, z, 1.0]))[:3]
-        hw.hole("visor_servo_mount", f"boss{k}", face, dn, 3.0)
-        ins = hw.insert(f"ins_vmount_{k + 1}", "visor_servo_mount", f"boss{k}", "s11")
-        hw.hole("visor_servo", f"fl{k}", top, dn, 2.2)
-        hw.screw(f"scr_vservo_{k + 1}", top, dn, [("visor_servo", f"fl{k}")], (ins.id, "thread", "insert", 6.0), "s11",
-                 "head", inferred=True, joins=["visor_servo", "visor_servo_mount", ins.id],
-                 note="Visor servo into the mount's inserts (the mount's bosses are 6 mm insert holes).")
-    # left arm: pivot screw through the arm into the left ear (a hole the sources do not show)
-    pv = np.asarray(visor["pivot"], float)
-    ax_x = visor["arm_x"]
-    outer = np.array([ax_x + t / 2, pv[1], pv[2]])
-    ear = np.array([ax_x - t / 2 - WASHER_T, pv[1], pv[2]])
-    hw.hole("visor_arm_l", "pivot", outer, [-1, 0, 0], 2.3)
-    hw.hole("side_left", "visor_pivot", ear, [-1, 0, 0], 1.7)
-    hw.screw("pin_visor_l", outer, [-1, 0, 0], [("visor_arm_l", "pivot")], ("side_left", "hole_visor_pivot", "plastic", 12.0),
-             "s12", "visor", inferred=True, joins=["visor_arm_l", "side_left"],
-             note="The left arm has no servo: a shoulder/pivot screw into the left ear (hole inferred).")
 
 
 def neck_member_pin(hw, P):

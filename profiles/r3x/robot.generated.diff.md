@@ -1,6 +1,6 @@
 # Robot profile: mech model vs `robot.json`
 
-Generated 2026-09-30T19:48:29+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-09-30T18:29:43+00:00; assemblies r3x_droid, base, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: head_r3x, randall_frame).
+Generated 2026-09-30T21:00:48+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-09-30T21:00:42+00:00; assemblies r3x_droid, base, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: head_r3x, randall_frame).
 
 `robot.generated.json` is NOT live. To try it: runtime `R3X_PROFILE=profiles/r3x/robot.generated.json`, sim `?profile=generated`. To adopt it: `mech/.venv/bin/python -m rigsync --apply` (backs up robot.json).
 
@@ -50,8 +50,8 @@ Generated 2026-09-30T19:48:29+00:00 by `mech/.venv/bin/python -m rigsync` from `
 | ⚠ | head_roll | actuator headroll.gear | 2.4 | 1.5367 | push-rod PAIR: tilt and roll both move servo_l and servo_r; the profile still models one channel per joint, so this is the rest-pose magnitude only (see mech.drives) |
 |  | visor | soft | -12 .. 27 | -13.2 .. 28.2 |  |
 |  | visor | animation | -12 .. 27 | -13.2 .. 28.2 |  |
-|  | visor | v_max | 150 | 419.2 |  |
-| ⚠ | visor | actuator visor.gear | 1 | 0.72 | servo pulse per joint degree changes (hardware only; the sim is unaffected) |
+|  | visor | v_max | 150 | 335.1 |  |
+| ⚠ | visor | actuator visor.gear | 1 | 0.9007 | servo pulse per joint degree changes (hardware only; the sim is unaffected) |
 
 Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttle_claw_a, throttle_claw_b, hero_claw_l, hero_claw_r, hero_claw_t.
 
@@ -71,24 +71,24 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 | hero_wrist | hero_shoulder | hero_shoulder | 271.29, 685.42, 291.11 | 0.498, 0.664, 0.558 | direct - direct | SERVO_7KG | clear |
 | head_lift | torso_top | head_pan | 0, 0, 0 | 0, 1, 0 | gear - rack: 0.475 mm per servo deg | SERVO_60KG_270 | clear |
 | head_pan | head_lift | - | 0, 0, 0 | 0, 1, 0 | gear - gear 4:1 | SERVO_35KG_270 | clear |
-| head_tilt | head_pan | head_lift | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | clear |
-| head_roll | head_tilt | head_tilt | 0, 738.3, 0 | 0, 0, 1 | push_rod_pair - push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg | GOBILDA_2000_25_2 | clear |
-| visor | head_roll | head_roll | 0, 770.59, 0.881 | 1, 0, 0 | push_rod - push_rod at rest: visor_servo +0.720 servo deg per joint deg | SERVO_35KG_270 | clear |
+| head_tilt | head_pan | head_lift | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | max +31.5 |
+| head_roll | head_tilt | head_tilt | 0, 738.3, 0 | 0, 0, 1 | push_rod_pair - push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg | GOBILDA_2000_25_2 | max +18 |
+| visor | head_roll | head_roll | 0, 770.59, 0.881 | 1, 0, 0 | push_rod - push_rod at rest: visor_servo +0.901 servo deg per joint deg | SERVO_35KG_270 | max +33 |
 
 ## Mass properties (per link, from the CAD)
 
-Total 12.966 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
+Total 13.339 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
 
 | link | moved by | kg | COM mm | Ixx Iyy Izz kg m² |
 |---|---|---|---|---|
 | base/base | ground | 3.935 | -0, 101, -1 | 1.18e-01 1.84e-01 1.17e-01 |
 | r3x_neck_drive/neck_stage | ground | 0.616 | -2, -49, 14 | 5.20e-03 9.61e-03 4.66e-03 |
-| r3x_neck_drive/turntable | head_pan | 1.041 | -17, 54, -20 | 4.95e-02 4.55e-03 4.84e-02 |
+| r3x_neck_drive/turntable | head_pan | 1.081 | -16, 76, -20 | 6.25e-02 4.60e-03 6.15e-02 |
 | r3x_neck_drive/slide | head_lift | 0.411 | -2, 280, -10 | 2.74e-02 1.57e-04 2.74e-02 |
 | hunter_head/neck | head_lift | 0.064 | 0, 729, -0 | 8.95e-05 1.23e-05 9.27e-05 |
 | hunter_head/cross | head_tilt | 0.003 | 0, 738, 0 | 8.75e-07 1.03e-06 1.93e-07 |
-| hunter_head/head | head_roll | 1.057 | 2, 775, -9 | 4.71e-03 1.00e-02 8.39e-03 |
-| hunter_head/visor | visor | 0.158 | 1, 802, 22 | 5.80e-04 1.76e-03 1.92e-03 |
+| hunter_head/head | head_roll | 1.389 | 2, 783, 2 | 9.45e-03 1.47e-02 1.23e-02 |
+| hunter_head/visor | visor | 0.158 | 1, 802, 23 | 5.78e-04 1.75e-03 1.91e-03 |
 | morton_frame/frame | ground | 1.234 | 0, 120, 0 | 2.14e-02 1.61e-02 2.14e-02 |
 | lower_ring/lower_ring_mount | ground | 0.255 | -1, 366, -36 | 1.38e-03 2.10e-03 9.40e-04 |
 | lower_ring/lower_ring | torso_lower | 0.896 | 29, 356, -6 | 7.16e-03 1.69e-02 1.06e-02 |
@@ -114,7 +114,7 @@ Total 12.966 kg. Printed parts: volume x density x fill; purchased parts: catalo
 | pan_servo | SERVO_35KG_270 | head_pan | 4.0:1 | 2.8603 | 431.1 |
 | servo_l | GOBILDA_2000_25_2 | head_roll, head_tilt | linkage (live Jacobian) | 2.4713 | 300.0 |
 | servo_r | GOBILDA_2000_25_2 | head_roll, head_tilt | linkage (live Jacobian) | 2.4713 | 300.0 |
-| visor_servo | SERVO_35KG_270 | visor | 0.72:1 | 2.8603 | 431.1 |
+| visor_servo | SERVO_35KG_270 | visor | 0.9007:1 | 2.8603 | 431.1 |
 
 ## Clips that change
 
