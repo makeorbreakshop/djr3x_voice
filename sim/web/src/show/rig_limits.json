@@ -23,6 +23,7 @@
     "head_lift": { "min": -20, "max": 20, "type": "prismatic" },
     "head_pan": { "min": -70, "max": 70, "type": "revolute" },
     "head_tilt": { "min": -20, "max": 25, "type": "revolute" },
+    "head_roll": { "min": -12, "max": 12, "type": "revolute" },
     "visor": { "min": -15, "max": 30, "type": "revolute" }
   }
 }

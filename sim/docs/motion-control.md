@@ -38,6 +38,7 @@ screenshots in the R-3X Animation folder.
 | 5 | `hand` | hero wrist roll | 7 kg | direct ("new wrist" parts) |
 | 6 | `lowarm` | lower ring (poker arm) | 35 kg | internal gear sector, ~98°, **~3.8:1** (measured) |
 | 7 | `heroarm` | top ring (hero arm) | 35 kg | internal gear sector, ~61°, **~4.4:1** (measured) |
+| 17 | `headroll` | head roll | goBILDA 2000-0025-0002 (25 kg) | Hunter's head mech (`mech/assemblies/hunter_head`): push-rod gimbal, **~2.4:1** (inferred) |
 
 - Ring ratios come from the gear STLs: inner-sector pitch radius ≈118 mm against ~31 mm and
   ~27 mm servo gears. They cap the rings at about ±35° and ±30°, so the rig's joint limits
@@ -45,6 +46,16 @@ screenshots in the R-3X Animation folder.
 - The middle ring, the throttle arm and the poker arm are **not** motorised in this build.
   The sim treats them as posable. The `extended` profile shows what nine more servos would
   add.
+- **Head roll** comes from Hunter Smoke's head mech, Brandon's chosen head: a two-servo
+  push-rod gimbal whose cross nests the roll (pillow-block bearings, axis +Z) inside the
+  tilt (U-joint bearings, axis +X), both through the gimbal centre ~738 mm up. Chain:
+  lift → pan → tilt → roll → visor. Range ±12° to first contact (inferred in the mech
+  build), soft ±10°. `+head_roll` is right-handed about +Z: the crown leans to the droid's
+  right. Channel 17 is the controller's spare PIO output, so the base build is 9 servos.
+  **Gap:** on the real mech both servos carry tilt *and* roll (horns turn together for tilt,
+  opposite for roll; from the manifest's linkage geometry ~1.6 servo° per tilt° and ~2.4 per
+  roll° each). The pipeline maps one joint per servo, so the profile models an independent
+  roll channel; driving Hunter's mech needs a two-joint mix on channels 2 and 17.
 - Supply is 12 V into buck converters; 6 V at the servos is assumed.
 - **Still assumed and needing the bench:** each channel's centre pulse (the rest pose, every joint 0: `show/SPEC.md` "Frame and zeros"),
   the direction, the neck gear ratio (1.5 assumed), and the lift pinion (0.21 mm/° ⇒ ±20 mm

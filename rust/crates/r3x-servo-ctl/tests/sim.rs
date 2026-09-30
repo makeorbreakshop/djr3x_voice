@@ -23,8 +23,11 @@ fn profile() -> RobotProfile {
     RobotProfile::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.json")).unwrap()
 }
 
+/// Every profile channel but 17 (head_roll), which the tests keep as the unconfigured one.
 fn configs() -> BTreeMap<String, ChannelConfig> {
-    channel_configs(&profile(), DriverKind::R3xServo)
+    let mut c = channel_configs(&profile(), DriverKind::R3xServo);
+    assert_eq!(c.remove("head_roll").map(|r| r.ch), Some(17));
+    c
 }
 
 /// A host talking to a controller over a fake wire, on a fake clock.

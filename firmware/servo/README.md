@@ -28,7 +28,7 @@ Host tests (no board): `cd rust && cargo test -p r3x-motion -p r3x-servo-ctl -p 
 |---|---|---|---|
 | 0-15 | GPIO n | hardware PWM slice n/2, A (even) / B (odd) | neck, headlift, headtilt, visor, elbow, hand, lowarm, heroarm, hero_claw, throttle_*, poker_* |
 | 16 | GPIO16 | PIO0 SM0 | middle_ring |
-| 17 | GPIO17 | PIO0 SM1 | (spare) |
+| 17 | GPIO17 | PIO0 SM1 | headroll (Hunter head mech, base build) |
 | - | GPIO20 / GPIO21 | I2C0 SDA / SCL | INA219 @ 0x40 on the servo rail |
 | - | GPIO22 | output, active high | servo rail enable (MOSFET / relay gate) |
 | - | GPIO25 | output | onboard LED: on = following, off = holding |
@@ -60,7 +60,7 @@ Host tests (no board): `cd rust && cargo test -p r3x-motion -p r3x-servo-ctl -p 
    GPIO0: nothing until the first heartbeat, then a 1490 us pulse at 50.0 Hz; GPIO4 starts
    200 ms after GPIO0. Check PIO channels 16/17 read the commanded width within +-1 us.
 3. Measure the control loop: toggle a spare GPIO around `tick` (soft-float f64 on the M0+;
-   expect well under 5 ms for 17 channels). If tight, enable embassy-rp's
+   expect well under 5 ms for 18 channels). If tight, enable embassy-rp's
    `intrinsics` / `rom-v2-intrinsics` ROM float routines and re-check parity.
 4. INA219: confirm the shunt value on the board, then read `rail_ma` in telemetry against a
    bench meter at idle and with one servo stalled by hand. Set `StallConfig` trip/clear from

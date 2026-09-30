@@ -27,9 +27,11 @@ Kind = Literal["clip", "cue", "sequence"]
 DO_KINDS = ("clip", "eyes", "chest", "lights", "sfx", "speak", "duck", "unduck", "wait")
 Do = Literal["clip", "eyes", "chest", "lights", "sfx", "speak", "duck", "unduck", "wait"]
 
-#: The eight joints the 8-servo ``r3x_animation`` profile drives.
+#: The nine joints the base build drives: the 8-servo ``r3x_animation`` mechanics plus the
+#: head roll of Hunter's head mech.
 BASE_JOINTS = frozenset(
-    {"head_pan", "head_tilt", "head_lift", "visor", "hero_shoulder", "hero_wrist", "torso_lower", "torso_top"}
+    {"head_pan", "head_tilt", "head_roll", "head_lift", "visor", "hero_shoulder", "hero_wrist", "torso_lower",
+     "torso_top"}
 )
 EXTENDED_JOINT_PREFIXES = ("hero_claw_", "throttle_", "poker_")
 EXTENDED_JOINTS = frozenset({"torso_middle"})

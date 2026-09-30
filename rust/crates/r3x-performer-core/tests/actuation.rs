@@ -32,6 +32,7 @@ fn joints() -> Vec<JointSpec> {
         j("head_pan", -70.0, 70.0, Revolute),
         j("head_lift", -20.0, 20.0, Prismatic),
         j("head_tilt", -20.0, 25.0, Revolute),
+        j("head_roll", -12.0, 12.0, Revolute),
         j("visor", -15.0, 30.0, Revolute),
         j("hero_shoulder", -35.0, 45.0, Revolute),
         j("hero_wrist", -90.0, 90.0, Revolute),
@@ -137,6 +138,7 @@ fn pipeline_keeps_the_channel_numbers_from_the_show_script() {
         ("hand", 5),
         ("lowarm", 6),
         ("heroarm", 7),
+        ("headroll", 17),
     ]
     .into_iter()
     .collect();

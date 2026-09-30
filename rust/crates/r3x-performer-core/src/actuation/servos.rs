@@ -126,6 +126,18 @@ pub fn servo(name: &str) -> Option<ServoModel> {
             1.0,
             0.035,
         ),
+        // Hunter's head mech (tilt + roll push-rod pair): 25.2 kg.cm stall at 6 V, 500-2500 us
+        // over ~300 deg (goBILDA 2000-0025-0002 catalogue); the 4.8 V point is scaled.
+        "GOBILDA_2000_25_2" => m(
+            "goBILDA 2000 (25-2 torque)",
+            300.0,
+            2500.0,
+            [(4.8, 0.25), (6.0, 0.2)],
+            [(4.8, 20.2), (6.0, 25.2)],
+            3.0,
+            0.6,
+            0.045,
+        ),
         // Claimed 0.1 s/60; ServoEasing measured ~450 deg/s.
         "SG90" => m(
             "SG90",

@@ -384,6 +384,14 @@ mod tests {
     }
 
     #[test]
+    fn head_roll_rides_the_spare_pio_channel() {
+        let cfg = R3xServoConfig::from_profile(&profile());
+        let roll = &cfg.channels["head_roll"];
+        assert_eq!((roll.ch, roll.gear, roll.soft_min, roll.soft_max), (17, 2.4, -10.0, 10.0));
+        assert_eq!(cfg.actuators["headroll"], 17);
+    }
+
+    #[test]
     fn silent_controller_fails_open_after_retries() {
         let (d, o) = start(false);
         assert_eq!(o.open_count("/dev/servo"), 3);

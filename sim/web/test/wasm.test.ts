@@ -48,6 +48,20 @@ describe.skipIf(!built)('wasm performer', () => {
     p.free();
   });
 
+  it('rolls the head from the puppeteer and from the head_cant clip', async () => {
+    const w = await load();
+    const peak = (cmd: object) => {
+      const p = new w.WasmPerformer(JSON.stringify(PROFILE), showFiles(), 7);
+      p.command(JSON.stringify(cmd));
+      let roll = 0;
+      for (let i = 0; i < 90; i++) roll = Math.max(roll, (JSON.parse(p.tick(i / 60)) as { joints: Record<string, number> }).joints.head_roll);
+      p.free();
+      return roll;
+    };
+    expect(peak({ cmd: 'puppet', intent: 'roll', value: 1 })).toBeGreaterThan(4);
+    expect(peak({ cmd: 'perform', id: 'head_cant' })).toBeGreaterThan(4);
+  });
+
   it('drives the controls the standalone sim uses', async () => {
     const w = await load();
     const p = new w.WasmPerformer(JSON.stringify(PROFILE), showFiles(), 7);

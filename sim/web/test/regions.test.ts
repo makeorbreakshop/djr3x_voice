@@ -10,7 +10,7 @@ describe('body regions (derived from the profile hierarchy)', () => {
     const outputs = [...profile.actuators.filter((a: { extended: boolean }) => !a.extended).map((a: { name: string }) => a.name),
       ...profile.lights.map((l: { name: string }) => l.name), 'middle_ring'];
     const g = Object.fromEntries(regions.group(outputs, (n) => regions.ofOutput(n)));
-    expect(g.Head).toEqual(['neck', 'headlift', 'headtilt', 'visor', 'eyes', 'mouth']);
+    expect(g.Head).toEqual(['neck', 'headlift', 'headtilt', 'headroll', 'visor', 'eyes', 'mouth']);
     expect(g.Arms).toEqual(['elbow', 'hand', 'heroarm']);
     expect(g.Torso).toEqual(['lowarm', 'middle_ring']);
     expect(g['Lights & stage']).toEqual(['chest', 'stage']);

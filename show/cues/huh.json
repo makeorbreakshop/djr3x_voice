@@ -1,0 +1,13 @@
+{
+  "id": "huh",
+  "kind": "cue",
+  "title": "Huh?",
+  "description": "Puzzled 'huh?': head cants aside with listening eyes and a chest blip",
+  "tags": ["huh", "what", "confused", "say again"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "head_cant"},
+    {"at": 0, "do": "eyes", "pattern": "listening", "duration": 1.8},
+    {"at": 0.1, "do": "chest", "command": "SL", "hold": 1.5}
+  ]
+}

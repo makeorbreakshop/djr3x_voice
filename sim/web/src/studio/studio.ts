@@ -42,7 +42,7 @@ const PROFILE = JSON.parse(PROFILE_JSON) as {
   joints: { name: string; unit: string; soft: { min: number; max: number }; animation: { min: number; max: number }; v_max: number; extended: boolean }[];
   actuators: { joints: Record<string, number> }[];
 };
-const BODY_ORDER = ['head_pan', 'head_tilt', 'head_lift', 'visor', 'hero_shoulder', 'hero_wrist', 'torso_top', 'torso_lower'];
+const BODY_ORDER = ['head_pan', 'head_tilt', 'head_roll', 'head_lift', 'visor', 'hero_shoulder', 'hero_wrist', 'torso_top', 'torso_lower'];
 /** Channels a clip can drive: each actuator's primary joint, body order first. */
 const JOINTS: JointInfo[] = PROFILE.actuators
   .map((a) => Object.keys(a.joints)[0])

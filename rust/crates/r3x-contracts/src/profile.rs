@@ -416,8 +416,8 @@ mod tests {
     fn r3x_profile_loads_and_validates() {
         let p = RobotProfile::load(r3x_path()).unwrap();
         assert_eq!(p.name, "r3x");
-        assert_eq!(p.joints.len(), 21);
-        assert_eq!(p.actuators.len(), 17);
+        assert_eq!(p.joints.len(), 22);
+        assert_eq!(p.actuators.len(), 18);
         let chest = p.lights.iter().find(|g| g.name == "chest").unwrap();
         assert_eq!((chest.pixels, chest.layout.len()), (33, 33));
         assert_eq!(p.emotes.len(), 8);

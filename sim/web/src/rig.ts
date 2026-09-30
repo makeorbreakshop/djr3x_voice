@@ -78,6 +78,35 @@ export class Joint {
   }
 }
 
+/**
+ * Head roll (Hunter's gimbal: roll about +Z, nested inside the tilt at the same pivot, the
+ * gimbal centre). The kit model has no roll node, so when the GLB lacks `j_head_roll` one is
+ * inserted between `j_head_tilt` and all of its children, at the tilt's pivot: rolling it
+ * turns everything above the tilt (shell, visor, eyes, LEDs). A model that has the node is
+ * used as is, and both end up with the same tree and the same spec.
+ */
+export function ensureHeadRoll(root: THREE.Object3D, doc: RigDoc): void {
+  const tiltAt = doc.joints.findIndex((j) => j.name === 'head_tilt');
+  const tilt = root.getObjectByName('j_head_tilt');
+  if (tiltAt < 0 || !tilt) return;
+  if (!root.getObjectByName('j_head_roll')) {
+    const roll = new THREE.Group();
+    roll.name = 'j_head_roll';
+    roll.userData.synthetic = true;
+    for (const c of [...tilt.children]) roll.add(c); // keeps each child's local transform
+    tilt.add(roll);
+  }
+  if (!doc.joints.some((j) => j.name === 'head_roll')) {
+    const lim = (restDoc.joints as Record<string, { min: number; max: number }>).head_roll;
+    doc.joints.splice(tiltAt + 1, 0, {
+      name: 'head_roll', parent: 'head_tilt', pivot: [...doc.joints[tiltAt].pivot], axis: [0, 0, 1],
+      min: lim.min, max: lim.max, type: 'revolute',
+      note: "Hunter's head mech: roll about +Z at the gimbal centre; + leans the crown to the droid's right",
+    });
+    for (const j of doc.joints) if (j.parent === 'head_tilt' && j.name !== 'head_roll') j.parent = 'head_roll';
+  }
+}
+
 export class Rig {
   readonly joints = new Map<string, Joint>();
   readonly anchors = new Map<string, THREE.Object3D>();
@@ -89,6 +118,7 @@ export class Rig {
 
   constructor(readonly root: THREE.Object3D, readonly doc: RigDoc, readonly restPose: RestPose = CANONICAL_REST) {
     (root.getObjectByName('r3x_root') ?? root).rotation.y = THREE.MathUtils.degToRad(restPose.bodyYaw);
+    ensureHeadRoll(root, doc);
     for (const spec of doc.joints) {
       const node = root.getObjectByName(`j_${spec.name}`);
       if (!node) throw new Error(`GLB is missing joint node j_${spec.name}`);

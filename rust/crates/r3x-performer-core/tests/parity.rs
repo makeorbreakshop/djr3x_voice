@@ -403,7 +403,13 @@ fn parity_actuation_pipeline() {
             fr["frame"].as_u64().unwrap(),
             "frame no at t={t}"
         );
-        let want_targets: Vec<i64> = serde_json::from_value(fr["targets"].clone()).unwrap();
+        let mut want_targets: Vec<i64> = serde_json::from_value(fr["targets"].clone()).unwrap();
+        // Intended difference (2026-09-30): the base profile gained head_roll on channel 17
+        // (Hunter's head mech), idle in the TS trace. Held at 0 here, so it sits at centre.
+        if let Some(ch17) = want_targets.get_mut(17) {
+            assert_eq!(*ch17, 0);
+            *ch17 = 1500;
+        }
         assert_eq!(a.last_frame.targets, want_targets, "pulses at t={t}");
         let v = a.joint_values();
         let got: Vec<f64> = names.iter().map(|j| v[j]).collect();

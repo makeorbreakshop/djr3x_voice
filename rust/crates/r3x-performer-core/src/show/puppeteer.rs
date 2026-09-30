@@ -4,17 +4,18 @@
 //! signals at the end instead.
 //!
 //! Continuous intents in [-1, 1]: gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor,
-//! arm_raise, energy. Discrete: 8 cue slots and a mode (idle / engaged / dj).
+//! arm_raise, energy, roll. Discrete: 8 cue slots and a mode (idle / engaged / dj).
 //!
 //! Gamepad (standard mapping): left stick = body_yaw / lean, right stick = gaze, d-pad =
 //! lift / visor, RT - LT = arm_raise, LB/RB = energy down/up, A B X Y = cue slots 1-4
 //! (hold Back for 5-8), R3 = cycle mode, Start = motion.freeze toggle. The host polls the
-//! pad and hands its state to [`Puppeteer::update`].
+//! pad and hands its state to [`Puppeteer::update`]. `roll` has no pad binding yet (every
+//! DS3 control is taken by `r3x-pad`'s operator layer); UI sliders and takes drive it.
 
 use super::body::{get, Pose};
 use serde::{Deserialize, Serialize};
 
-pub const CONTINUOUS: [&str; 8] = [
+pub const CONTINUOUS: [&str; 9] = [
     "gaze_yaw",
     "gaze_pitch",
     "lift",
@@ -23,6 +24,7 @@ pub const CONTINUOUS: [&str; 8] = [
     "visor",
     "arm_raise",
     "energy",
+    "roll",
 ];
 pub const MODES: [PuppetMode; 3] = [PuppetMode::Idle, PuppetMode::Engaged, PuppetMode::Dj];
 pub const SLOT_COUNT: usize = 8;
@@ -37,7 +39,7 @@ pub enum PuppetMode {
 }
 
 /// One value per [`CONTINUOUS`] intent, in that order.
-pub type Command = [f64; 8];
+pub type Command = [f64; 9];
 
 pub fn intent_index(name: &str) -> Option<usize> {
     CONTINUOUS.iter().position(|k| *k == name)
@@ -72,6 +74,8 @@ const VISOR_OPEN: f64 = 11.0;
 const VISOR_CLOSE: f64 = 14.0;
 const ARM_UP: f64 = 34.0;
 const ARM_DOWN: f64 = 20.0;
+/// Head roll at full stick, deg (inside the soft range, +/-10).
+const ROLL: f64 = 9.0;
 
 /// A standard-mapping gamepad snapshot.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -112,8 +116,8 @@ pub struct Puppeteer {
 impl Default for Puppeteer {
     fn default() -> Self {
         Puppeteer {
-            cmd: [0.0; 8],
-            target: [0.0; 8],
+            cmd: [0.0; 9],
+            target: [0.0; 9],
             mode: PuppetMode::Idle,
             fired: Vec::new(),
             gamepad: false,
@@ -128,6 +132,7 @@ impl Default for Puppeteer {
 }
 
 const ENERGY: usize = 7;
+const ROLL_I: usize = 8;
 /// Default release fade (min-jerk), plan section 3c.
 pub const RELEASE_S: f64 = 0.4;
 
@@ -143,8 +148,10 @@ impl Puppeteer {
     /// (min-jerk), so the body settles back onto the layers below without a jump.
     pub fn release(&mut self) {
         self.release = Some((self.cmd, 0.0));
-        for i in 0..ENERGY {
-            self.target[i] = 0.0;
+        for (i, t) in self.target.iter_mut().enumerate() {
+            if i != ENERGY {
+                *t = 0.0;
+            }
         }
     }
 
@@ -171,14 +178,16 @@ impl Puppeteer {
             self.read_pad(pad, dt);
         }
         let k = 1.0 - libm::exp(-dt / 0.08); // ~80 ms smoothing: sticks are noisy, servos are not
-        for i in 0..8 {
-            self.cmd[i] += (self.target[i] - self.cmd[i]) * k;
+        for (c, t) in self.cmd.iter_mut().zip(self.target) {
+            *c += (t - *c) * k;
         }
         if let Some((from, since)) = &mut self.release {
             *since += dt;
             let w = 1.0 - super::curve::minjerk((*since / RELEASE_S).min(1.0));
-            for (c, f) in self.cmd.iter_mut().zip(from.iter()).take(ENERGY) {
-                *c = f * w;
+            for (i, (c, f)) in self.cmd.iter_mut().zip(from.iter()).enumerate() {
+                if i != ENERGY {
+                    *c = f * w;
+                }
             }
             if w <= 0.0 {
                 self.release = None;
@@ -214,6 +223,7 @@ impl Puppeteer {
             self.dpad_visor,
             clamp1(val(7) - val(6)),
             self.target[ENERGY],
+            self.target[ROLL_I],
         ];
         if edge(4) {
             self.target[ENERGY] = clamp1(self.target[ENERGY] - 0.25);
@@ -242,7 +252,7 @@ impl Puppeteer {
         if !self.enabled {
             return;
         }
-        let [gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor, arm_raise, _] = self.cmd;
+        let [gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor, arm_raise, _, roll] = self.cmd;
         fn add(pose: &mut Pose, j: &str, v: f64) {
             if v != 0.0 {
                 pose.insert(j.into(), get(pose, j) + v);
@@ -290,10 +300,38 @@ impl Puppeteer {
             },
         );
         add(pose, "hero_wrist", arm * 20.0);
+        // +roll: right-handed about +Z, the crown toward the droid's right (-X).
+        add(pose, "head_roll", expo(roll) * ROLL);
     }
 
     /// Energy as a gain: 0.4x at -1, 1x at 0, 1.6x at +1.
     pub fn energy_gain(&self) -> f64 {
         1.0 + 0.6 * self.cmd[ENERGY]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roll_is_an_additive_head_roll_that_a_pad_leaves_alone_and_release_fades() {
+        let mut p = Puppeteer::default();
+        p.set("roll", 1.0);
+        p.set("energy", 0.5);
+        let pad = PadState { axes: vec![0.0; 4], buttons: vec![(false, 0.0); 17] };
+        for _ in 0..100 {
+            p.update(0.01, Some(&pad));
+        }
+        assert!(p.cmd[ROLL_I] > 0.99, "{}", p.cmd[ROLL_I]);
+        let mut pose = Pose::new();
+        p.apply(&mut pose);
+        assert!((get(&pose, "head_roll") - ROLL * expo(p.cmd[ROLL_I])).abs() < 1e-12);
+        p.release();
+        for _ in 0..100 {
+            p.update(0.01, None);
+        }
+        assert_eq!(p.cmd[ROLL_I], 0.0);
+        assert!((p.cmd[ENERGY] - 0.5).abs() < 1e-3);
     }
 }

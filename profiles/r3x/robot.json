@@ -450,10 +450,32 @@
       "extended": false
     },
     {
-      "name": "visor",
+      "name": "head_roll",
       "kind": "revolute",
       "unit": "deg",
       "parent": "head_tilt",
+      "hard": {
+        "min": -12,
+        "max": 12
+      },
+      "soft": {
+        "min": -10,
+        "max": 10
+      },
+      "animation": {
+        "min": -10,
+        "max": 10
+      },
+      "v_max": 100,
+      "a_max": 400,
+      "j_max": 3000,
+      "extended": false
+    },
+    {
+      "name": "visor",
+      "kind": "revolute",
+      "unit": "deg",
+      "parent": "head_roll",
       "hard": {
         "min": -15,
         "max": 30
@@ -538,6 +560,28 @@
         "status": "assumed"
       },
       "extended": false
+    },
+    {
+      "name": "headroll",
+      "joints": {
+        "head_roll": 1
+      },
+      "driver": "r3x_servo",
+      "channel": 17,
+      "servo": "GOBILDA_2000_25_2",
+      "calibration": {
+        "center_us": 1500,
+        "center_value": 0,
+        "trim_us": 0,
+        "invert": false,
+        "gear": 2.4,
+        "pulse_min_us": 500,
+        "pulse_max_us": 2500,
+        "range_deg": 300,
+        "status": "assumed"
+      },
+      "extended": false,
+      "note": "Hunter's head mech (mech/assemblies/hunter_head): roll about +Z at the gimbal centre, +/-12 deg to first contact. The mech is a push-rod pair: servo_l/servo_r each carry tilt AND roll (~1.6 servo deg per tilt deg, ~2.4 per roll deg, opposite signs). Modelled as an independent roll channel until the pipeline can mix two joints into one servo."
     },
     {
       "name": "visor",

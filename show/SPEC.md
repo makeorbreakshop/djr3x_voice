@@ -57,13 +57,13 @@ The file name must equal the `id`. Ids are `snake_case`, unique across all three
 ```
 
 - **Units:** degrees for revolute joints; millimetres for `head_lift` (prismatic).
-- **Joint names are the rig's:** `head_pan`, `head_tilt`, `head_lift`, `visor`, `hero_shoulder`, `hero_wrist`, `torso_lower`, `torso_top`. These eight are driven by the 8-servo `r3x_animation` profile.
+- **Joint names are the rig's:** `head_pan`, `head_tilt`, `head_roll`, `head_lift`, `visor`, `hero_shoulder`, `hero_wrist`, `torso_lower`, `torso_top`. These nine are driven by the base (`r3x_animation`) profile: the 8-servo R-3X Animation mechanics plus the head roll of Hunter's head mech (±12° hard, ±10° soft).
   - The extended joints are `torso_middle`, `hero_claw_*`, `throttle_*` and `poker_*`. They are allowed, but the clip must say `"requires": "extended"`.
-  - The linter flags extended joints used without `requires`, because the 8-servo build cannot perform them.
+  - The linter flags extended joints used without `requires`, because the base build cannot perform them.
 - **Keys:** the first key must be at t=0. Additive tracks must start and end at 0. Override tracks blend in and out over `blend` seconds.
   - The default `blend` depends on the joint class, as Disney's BD-X/Olaf engine does: light "show function" parts blend faster than the body.
     - `visor`: 0.1 s
-    - `head_pan`, `head_tilt`, `head_lift`: 0.2 s
+    - `head_pan`, `head_tilt`, `head_roll`, `head_lift`: 0.2 s
     - `hero_*`, `torso_*`, and the extended arm joints: 0.35 s
   - Department actions (eyes, chest, lights) switch within 0.1 s.
   - A track may set its own `blend`.
@@ -84,7 +84,9 @@ the performer and the servos:
   the middle ring has its three logic panels at the front and the throttle arm out to the
   right; the top ring has the RX-24 plate at the front and the hero arm up at the front-left.
 - **Signs:** `+head_pan` and `+torso_*` turn toward the droid's left (+X). `+head_tilt` and
-  `+visor` tip down.
+  `+visor` tip down. `+head_roll` is right-handed about +Z (forward) through the gimbal
+  centre: the crown leans to the droid's right (−X), right ear down. The roll nests inside the
+  tilt at the same pivot, so it turns everything above the tilt (shell, visor, eyes).
 - The rings stack. A ring's value turns everything above it, so `head_pan` 0 faces forward
   only while the rings are at 0. Gaze targets are solved from the current pose (`Rig.aimAt`),
   and `gaze off` faces the base's front.

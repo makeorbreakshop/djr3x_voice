@@ -18,7 +18,7 @@ export type SystemMode = 'IDLE' | 'AMBIENT' | 'INTERACTIVE';
 export type PuppetMode = 'idle' | 'engaged' | 'dj';
 
 /** Puppeteer command space (`show::puppeteer::CONTINUOUS`, in order). */
-export const INTENTS = ['gaze_yaw', 'gaze_pitch', 'lift', 'body_yaw', 'lean', 'visor', 'arm_raise', 'energy'] as const;
+export const INTENTS = ['gaze_yaw', 'gaze_pitch', 'lift', 'body_yaw', 'lean', 'visor', 'arm_raise', 'energy', 'roll'] as const;
 export const PUPPET_MODES: PuppetMode[] = ['idle', 'engaged', 'dj'];
 
 export type PerfCmd =

@@ -97,6 +97,8 @@ const PLACE: Record<string, Place> = {
   // Outside the headphones (+/-0.18 m), so nothing is drawn over the face.
   head_tilt: { offset: [-0.23, 0, 0], r: 0.045 },
   visor: { offset: [0.23, 0, 0], r: 0.045 },
+  // Above the dome, facing forward: reads as a level over the head.
+  head_roll: { offset: [0, 0.2, 0], r: 0.045 },
 };
 /** Small parts whose label shows only on hover (the arcs and needles always show). */
 const QUIET = /claw/;

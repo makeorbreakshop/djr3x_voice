@@ -1,0 +1,16 @@
+{
+  "id": "head_cant",
+  "kind": "clip",
+  "title": "Head cant",
+  "description": "Curious 'huh?': head cants to one side, brow lifts, holds, then rights itself",
+  "tags": ["huh", "curious", "what", "cant"],
+  "tier": "free",
+  "duration": 1.8,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.35, 8], [1.3, 8], [1.8, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, 3], [1.3, 3], [1.8, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.4, -3], [1.3, -3], [1.8, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, -6], [1.3, -6], [1.8, 0]]}
+  }
+}

@@ -1,9 +1,9 @@
 {
-  "_doc": "Actuation profiles. The printable kit is static; 'r3x_animation' is the mechanics of the motorised build in Drive MOB/Projects/DJ-R3X/R-3X Animation (parts list '07 - r3x hardware.txt', sample show '08 - r3x maestro sample script.txt'): 8 servos, channel numbers as that script uses them. That build used a Pololu Maestro; ours will be a custom controller, so the controller here is 'custom' - the sim's pipeline (calibration, soft limits, jerk-limited follower, pulse output) is the reference for its firmware (sim/docs/motion-control.md section 8). 'extended' keeps those 8 and adds arm/claw servos on the Maestro's spare channels. Ring gear ratios are measured from the ring-animation STLs (inner-gear sector pitch radius / servo gear). Anything marked calibration 'assumed' (centreUs, invert, neck and lift gearing) must be set on the bench: jog each servo to the rest pose (every joint 0: show/SPEC.md 'Frame and zeros', not the kit's display pose) and record the pulse. Motion limits are ~70% of loaded capability (sim/docs/motion-control.md). Joints without a channel are posable only.",
+  "_doc": "Actuation profiles. The printable kit is static; 'r3x_animation' is the mechanics of the motorised build in Drive MOB/Projects/DJ-R3X/R-3X Animation (parts list '07 - r3x hardware.txt', sample show '08 - r3x maestro sample script.txt'): 8 servos, channel numbers as that script uses them, plus head_roll on channel 17 from Hunter's head mech. That build used a Pololu Maestro; ours will be a custom controller, so the controller here is 'custom' - the sim's pipeline (calibration, soft limits, jerk-limited follower, pulse output) is the reference for its firmware (sim/docs/motion-control.md section 8). 'extended' keeps those 9 and adds arm/claw servos on the Maestro's spare channels. Ring gear ratios are measured from the ring-animation STLs (inner-gear sector pitch radius / servo gear). Anything marked calibration 'assumed' (centreUs, invert, neck and lift gearing) must be set on the bench: jog each servo to the rest pose (every joint 0: show/SPEC.md 'Frame and zeros', not the kit's display pose) and record the pulse. Motion limits are ~70% of loaded capability (sim/docs/motion-control.md). Joints without a channel are posable only.",
   "default": "r3x_animation",
   "profiles": {
     "r3x_animation": {
-      "label": "R-3X Animation mechanics (8 servos, custom controller)",
+      "label": "R-3X Animation mechanics + Hunter head roll (9 servos, custom controller)",
       "controller": { "type": "custom", "channels": 18, "frameHz": 50, "resolutionUs": 1 },
       "supplyVolts": 6.0,
       "channels": [
@@ -15,6 +15,9 @@
           "calibration": "assumed", "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = rest (0 mm), 800-2200 us = +/-20 mm." },
         { "ch": 2, "name": "headtilt", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "head_tilt": 1 },
           "centerUs": 1124, "margin": 4, "vMax": 100, "aMax": 400, "jMax": 3000, "calibration": "assumed" },
+        { "ch": 17, "name": "headroll", "servo": "GOBILDA_2000_25_2", "gear": 2.4, "joints": { "head_roll": 1 },
+          "centerUs": 1500, "margin": 2, "vMax": 100, "aMax": 400, "jMax": 3000, "calibration": "assumed",
+          "note": "Hunter's head mech (mech/assemblies/hunter_head): a push-rod pair, each servo carrying tilt and roll (~2.4 servo deg per roll deg). Independent roll channel until the pipeline mixes; channel 17 is the controller's spare PIO output." },
         { "ch": 3, "name": "visor", "servo": "SERVO_35KG_270", "gear": 1.0, "joints": { "visor": 1 },
           "centerUs": 1239, "invert": true, "margin": 3, "vMax": 150, "aMax": 900, "jMax": 8000, "calibration": "assumed",
           "note": "Push-rod linkage treated as 1:1. Script flaps 4956 <-> 5297 qus (~11 deg)." },
@@ -32,7 +35,7 @@
       ]
     },
     "extended": {
-      "label": "Extended (17 servos: + arms, claws, middle ring; custom controller)",
+      "label": "Extended (18 servos: + arms, claws, middle ring; custom controller)",
       "controller": { "type": "custom", "channels": 18, "frameHz": 50, "resolutionUs": 1 },
       "supplyVolts": 6.0,
       "inherit": "r3x_animation",

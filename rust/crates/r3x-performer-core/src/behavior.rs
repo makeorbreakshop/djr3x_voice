@@ -11,6 +11,13 @@
 //!              and a small wobble driven by the same amplitude as the mouth LEDs
 //! ```
 //!
+//! Head roll (Hunter's gimbal; +roll is right-handed about +Z: the crown leans toward the
+//! droid's right) rides the same layers and draws nothing from the RNG, so every other joint
+//! is unchanged by it: listening holds a slow 4-8 deg cant, crown toward the listener
+//! (saccades layer), thinking sometimes cants toward its look-away - centre-weighted off the draw that picked the
+//! look-away (saccades), speech accents roll +/-2-4 deg, alternating sides (speech_bob),
+//! and idle drifts <= 2 deg (gaze_wander).
+//!
 //! Every alive layer is individually switchable ([`AliveLayers`]); with all on, the output
 //! is the TS reference's. The host resolves the look target to (pan, tilt) degrees in the
 //! head_pan parent frame (the TS `aimAt`, which needs the 3D rig).
@@ -116,6 +123,12 @@ pub struct Procedural {
     anchor: Gaze,
     glance_back: bool,
     wobble_phase: f64,
+    /// Smoothed head roll of the activity layer (listening / thinking cant), deg.
+    roll: f64,
+    /// The cant the current thinking look-away holds, deg.
+    think_roll: f64,
+    /// Side of the next speech-accent roll (+1 / -1): accents alternate.
+    accent_side: f64,
     /// While set and a look target exists: the gaze tracks the target plus this (pan, tilt)
     /// offset every frame, so a moving listener is followed between saccades.
     follow: Option<(f64, f64)>,
@@ -142,6 +155,9 @@ impl Default for Procedural {
             anchor: Gaze::default(),
             glance_back: false,
             wobble_phase: 0.0,
+            roll: 0.0,
+            think_roll: 0.0,
+            accent_side: 1.0,
             follow: None,
         }
     }
@@ -161,6 +177,7 @@ impl Procedural {
         self.next_saccade = t;
         self.glance_back = false;
         self.follow = None;
+        self.think_roll = 0.0;
     }
 
     /// 0..1: how frozen the listening hold is right now.
@@ -231,6 +248,7 @@ impl Procedural {
         {
             self.accent_at = t;
             self.accent_gain = rng.range(0.7, 1.2);
+            self.accent_side = -self.accent_side;
         }
         let (accent_at, accent_gain) = (self.accent_at, self.accent_gain);
         let bob_on = if lay.speech_bob { 1.0 } else { 0.0 };
@@ -280,6 +298,10 @@ impl Procedural {
                     let mag = rng.range(15.0, 30.0);
                     let side = if rng.next_f64() < 0.5 { -1.0 } else { 1.0 };
                     self.look(t, mag * side, -14.0);
+                    // Occasional cant toward the look-away: |s|^3 of the uniform behind `mag`
+                    // (mean ~1.75 deg, now and then up to 7), so no extra draw.
+                    let s = (mag - 22.5) / 7.5;
+                    self.think_roll = -side * 7.0 * (s * s * s).abs();
                     self.follow = None;
                     self.next_saccade = t + 1.1 * jitter(rng);
                 }
@@ -426,6 +448,25 @@ impl Procedural {
         };
         self.still += (listening - self.still) * (1.0 - exp(-dt / 0.35));
         let alive = (1.0 - 0.85 * self.still) * energy;
+
+        // ---------------------------------------------------------------- head roll
+        let (cant, tau) = match self.activity {
+            // Curious cant, crown toward the listener (+pan = the droid's left = -roll): 4 deg
+            // straight ahead, 8 at 30 deg off-axis.
+            Activity::Listening if saccades => {
+                let side = if self.gaze.pan > 0.0 { -1.0 } else { 1.0 };
+                (side * (4.0 + 4.0 * (self.gaze.pan.abs() / 30.0).min(1.0)), 0.7)
+            }
+            Activity::Thinking if saccades => (self.think_roll, 0.4),
+            _ => (0.0, 0.5),
+        };
+        self.roll += (cant - self.roll) * (1.0 - exp(-dt / tau));
+        let mut roll = self.roll + accent(0.4) * 3.0 * self.accent_side;
+        if lay.gaze_wander && matches!(self.activity, Activity::Idle | Activity::Engaged) {
+            let drift = 0.85 * sin(2.0 * PI * 0.07 * t + 0.9) + 0.4 * sin(2.0 * PI * 0.043 * t + 2.1);
+            roll += drift * alive.min(1.6);
+        }
+        set(&mut pose, "head_roll", roll);
         if lay.breathing {
             let breath = sin(2.0 * PI * 0.25 * t);
             let v = get(&pose, "head_lift") + breath * 1.5 * alive;
@@ -445,5 +486,60 @@ impl Procedural {
         }
 
         joints.iter().map(|j| (j.clone(), get(&pose, j))).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const J: [&str; 2] = ["head_roll", "head_pan"];
+
+    /// Run `act` for `secs` at 60 Hz; returns every head_roll sample.
+    fn run(p: &mut Procedural, act: Activity, secs: f64, ctx: PerformContext) -> Vec<f64> {
+        let joints: Vec<String> = J.iter().map(|s| s.to_string()).collect();
+        let mut rng = Rng::new(3);
+        let t0 = p.since.max(0.0) + 0.01;
+        p.set_activity(act, t0);
+        (1..=(secs * 60.0) as usize)
+            .map(|i| p.update(t0 + i as f64 / 60.0, 1.0 / 60.0, &ctx, &mut rng, &joints)["head_roll"])
+            .collect()
+    }
+
+    fn ctx(look: Option<(f64, f64)>, energy: f64) -> PerformContext {
+        PerformContext { amplitude: 0.0, look, bpm: 120.0, energy }
+    }
+
+    #[test]
+    fn listening_holds_a_cant_toward_the_listener() {
+        let mut p = Procedural::default();
+        let r = run(&mut p, Activity::Listening, 4.0, ctx(Some((-30.0, 0.0)), 1.0));
+        let end = *r.last().unwrap();
+        assert!((7.5..=8.0).contains(&end), "{end}"); // listener on the right: crown right, 8 deg
+        let mut p = Procedural::default();
+        let r = run(&mut p, Activity::Listening, 4.0, ctx(None, 1.0));
+        assert!((r.last().unwrap() - 4.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn idle_drift_stays_within_2_deg_and_the_layers_switch_it_off() {
+        let mut p = Procedural::default();
+        let r = run(&mut p, Activity::Idle, 60.0, ctx(None, 1.6));
+        let max = r.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(max > 0.5 && max <= 2.0, "{max}");
+
+        let mut p = Procedural { layers: AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false }, ..Default::default() };
+        for act in [Activity::Idle, Activity::Listening, Activity::Thinking] {
+            assert!(run(&mut p, act, 5.0, ctx(Some((20.0, 0.0)), 1.0)).iter().all(|v| *v == 0.0));
+        }
+    }
+
+    #[test]
+    fn thinking_cants_are_centre_weighted_and_bounded() {
+        let mut p = Procedural::default();
+        let r = run(&mut p, Activity::Thinking, 120.0, ctx(None, 1.0));
+        let max = r.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        let mean = r.iter().map(|v| v.abs()).sum::<f64>() / r.len() as f64;
+        assert!(max <= 7.0 && max > 3.0 && mean < 2.5, "max {max} mean {mean}");
     }
 }

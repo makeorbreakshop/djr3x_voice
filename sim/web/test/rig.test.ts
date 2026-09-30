@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { CANONICAL_REST, KIT_POSE, Rig, type RigDoc } from '../src/rig';
 import limits from '../src/show/rig_limits.json';
 
-/** A bare kit-shaped node tree: r3x_root > torso_lower > torso_middle > torso_top > head_lift > head_pan > head_tilt. */
-function kitRig(rest = CANONICAL_REST) {
+/** A bare kit-shaped node tree: r3x_root > torso_lower > torso_middle > torso_top > head_lift > head_pan > head_tilt (> visor, a shell mesh). */
+function kitRig(rest = CANONICAL_REST, withRoll = false) {
   const root = new THREE.Group();
   const r3x = new THREE.Group();
   r3x.name = 'r3x_root';
@@ -18,12 +18,26 @@ function kitRig(rest = CANONICAL_REST) {
     parent.add(n);
     parent = n;
   }
+  const tilt = parent;
+  const visor = new THREE.Group();
+  visor.name = 'j_visor';
+  visor.position.set(0, 0.03, 0);
+  const shell = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1));
+  shell.name = 'head_tilt__shell';
+  shell.position.set(0, 0.08, 0);
+  if (withRoll) {
+    // A rebuilt model that carries its own roll node.
+    const roll = new THREE.Group();
+    roll.name = 'j_head_roll';
+    tilt.add(roll);
+    roll.add(visor, shell);
+  } else tilt.add(visor, shell);
   const doc: RigDoc = {
-    joints: chain.map((name, i) => ({
+    joints: chain.map((name, i): RigDoc['joints'][number] => ({
       name, parent: i ? chain[i - 1] : null, pivot: [0, 0, 0], min: -90, max: 90,
       axis: name === 'head_tilt' ? [1, 0, 0] : [0, 1, 0],
       ...(name === 'head_lift' ? { type: 'prismatic' as const } : {}),
-    })),
+    })).concat({ name: 'visor', parent: 'head_tilt', pivot: [0, 0.77, 0], axis: [1, 0, 0], min: -15, max: 30 }),
     anchors: {},
     triangles: 0,
   };
@@ -73,4 +87,28 @@ describe('canonical rest (rig_limits.json)', () => {
     rig.apply(new Map([['torso_top', 0]]));
     expect(rig.aimAt(new THREE.Vector3(0, 3.74, 3))![1]).toBeCloseTo(-45, 9);
   });
+});
+
+describe('head roll (Hunter head mech)', () => {
+  /** World x of a node's local +Y: where the crown leans (droid's left is +X). */
+  const lean = (o: THREE.Object3D) => new THREE.Vector3(0, 1, 0).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion())).x;
+
+  for (const withRoll of [false, true]) {
+    it(`nests inside the tilt at its pivot and carries the whole head (${withRoll ? 'model has the node' : 'synthetic'})`, () => {
+      const rig = kitRig(CANONICAL_REST, withRoll);
+      const roll = rig.get('head_roll');
+      expect(roll.node.parent?.name).toBe('j_head_tilt');
+      expect(roll.node.position.length()).toBe(0);
+      expect(roll.spec).toMatchObject({ parent: 'head_tilt', axis: [0, 0, 1], min: limits.joints.head_roll.min, max: limits.joints.head_roll.max });
+      expect(rig.get('visor').spec.parent).toBe('head_roll');
+      expect(rig.get('head_tilt').node.children).toEqual([roll.node]);
+      const shell = rig.root.getObjectByName('head_tilt__shell')!;
+      expect(shell.parent).toBe(roll.node);
+      // +roll is right-handed about +Z: the crown leans to the droid's right (-X).
+      rig.apply(new Map([['head_roll', 10]]));
+      rig.root.updateMatrixWorld(true);
+      expect(lean(shell)).toBeCloseTo(-Math.sin(THREE.MathUtils.degToRad(10)), 9);
+      expect(lean(rig.get('visor').node)).toBeCloseTo(lean(shell), 9);
+    });
+  }
 });

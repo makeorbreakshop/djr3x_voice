@@ -79,10 +79,12 @@ impl Source {
     }
 }
 
-/// The eight joints the 8-servo `r3x_animation` build drives.
-pub const BASE_JOINTS: [&str; 8] = [
+/// The nine joints the base build drives: the 8-servo `r3x_animation` mechanics plus the
+/// head roll of Hunter's head mech.
+pub const BASE_JOINTS: [&str; 9] = [
     "head_pan",
     "head_tilt",
+    "head_roll",
     "head_lift",
     "visor",
     "hero_shoulder",
