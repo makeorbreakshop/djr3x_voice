@@ -1,0 +1,327 @@
+"""DJ R3X printable kit ("DJ R3X - v2", Patrick Gray / David Ferreira) as the droid's backbone.
+
+Every Large Cut STL is exported assembled (Y-up, mm) in a display pose; the sim's model build
+measured the yaw that takes each rigid subtree to the canonical rest (r3xmech.frames.KIT_YAW_DEG).
+This module places every kit part, groups them into the guide's sub-assemblies, declares the
+links and joints, and (when the guide transcription exists in `_guide/`) attaches the guide's
+steps and hardware BOM. The R-3X Animation mechanisms are attached by
+`assemblies/r3x_animation/assembly.py`.
+
+The kit files are licensed group-only (CC BY-NC): they are read from mech/vendor/ (gitignored)
+and nothing derived from their geometry is committed.
+
+    from assemblies.kit.assembly import build
+    root = build()          # r3xmech.model.Asm tree (canonical frame, rest pose)
+"""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import numpy as np
+
+from r3xmech import frames
+from r3xmech.model import MECH, Asm, Joint, Link, Part
+
+KIT = MECH / "vendor/kit/unz/DJ R3X - v2/STLs/Large Cut"
+GUIDE = Path(__file__).resolve().parent / "_guide"
+
+# Superseded or duplicated files (the kit ships some panels/brackets twice).
+SKIP = [
+    r"\(Old\)",                                          # superseded LS_M_Full
+    r"Midsection - Middle/STLs/MS_P_[12]\.stl$",         # duplicates of Logic Panels/MS_P_*_Full
+    r"Midsection - Middle/STLs/MS_LPI_",                 # duplicates of LED Board Mounts/MS_LPI_*
+    r"Midsection - Middle/STLs/MS_DB - x7",              # = Logic Panels/MS_DB_1x8
+    r"Midsection - Middle/STLs/MS_DB_M - x4",            # = Logic Panels/MS_DB_M_1x4
+    r"Midsection - Middle/STLs/MS_L - x4",               # = Logic Panels/MS_L_1x4
+]
+# Exported once, printed four times at 90 deg about the vertical axis (as build_r3x.py does).
+REPLICATE_X4 = ["B_M_D - x4", "B_SM - x4", "B_S_C - x4", "B_S_O - x4", "B_S_PO - x4", "LS_V_1 - x4"]
+
+# (sub-assembly, stem regex). First match wins.
+GROUPS = [
+    ("base", r"^B_"), ("base", r"^P_"),
+    ("lower_ring", r"^(LS_|PA_)"),
+    ("middle_ring", r"^(MS_|LED_B_|TA_)"),
+    ("top_ring", r"^(TR|RR_|RX-24|HA_)"),
+    ("head", r"^H_"),
+]
+
+# Kit part -> link (deepest match wins, as build_r3x.assign_joint does).
+LINK_RULES = [
+    ("base", r"^(B_|P_)"),
+    ("lower_ring", r"^(LS_|PA_M_)"),
+    ("lower_ring_mount", r"^LS_IC_"),   # static core: inner race of the lower AND middle lazy susans (guide p20, p33)
+    ("poker_upper", r"^(PA_B_|PA_W_|PA_F_)"),
+    ("poker_hand", r"^(PA_W_|PA_F_)"),
+    ("middle_ring", r"^(MS_|LED_B_|TA_S_1$)"),
+    ("throttle_upper", r"^(TA_S_[2-5]$|TA_B_|TA_FA|TA_W)"),
+    ("throttle_fore", r"^(TA_FA|TA_W)"),
+    ("throttle_hand", r"^(TA_FA_1$|TA_W)"),
+    ("top_ring", r"^(TR[-_]|RR_|RX-24$|HA_EB_|HA_[LR]E_1$|HA_PJ_)"),
+    ("hero_arm", r"^(HA_SB_|HA_SP_|HA_PL_|HA_P_1$|HA_PS_|HA_W_|HA_[LRT]F_)"),
+    ("hero_hand", r"^(HA_W_1$|HA_[LRT]F_)"),
+    ("head", r"^H_"),
+    ("visor", r"^H_V_"),
+]
+LINK_SUBTREE_YAW = {  # which rest yaw applies to a link's kit geometry
+    "base": "static", "lower_ring_mount": "torso_lower", "lower_ring": "torso_lower", "poker_upper": "torso_lower", "poker_hand": "torso_lower",
+    "middle_ring": "torso_middle", "throttle_upper": "torso_middle", "throttle_fore": "torso_middle",
+    "throttle_hand": "torso_middle", "top_ring": "torso_top", "hero_arm": "torso_top", "hero_hand": "torso_top",
+    "head": "head", "visor": "head",
+}
+
+MATERIAL_RULES = [(r"_DNP$|\(DNP\)|^TR_RR_Full$", "rubber")]
+
+
+def pid(stem: str, k: int | None = None) -> str:
+    s = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
+    return s if k is None else f"{s}_{k}"
+
+
+def _first(rules, name):
+    for tag, pat in rules:
+        if re.search(pat, name):
+            return tag
+    return None
+
+
+def _deepest(rules, name):
+    hit = None
+    for tag, pat in rules:
+        if re.search(pat, name):
+            hit = tag
+    return hit
+
+
+def kit_files():
+    out = []
+    for p in sorted(KIT.rglob("*.stl")):
+        s = p.as_posix()
+        if any(re.search(pat, s) for pat in SKIP):
+            continue
+        out.append(p)
+    return out
+
+
+def kit_T(link: str) -> np.ndarray:
+    return frames.roty(frames.KIT_YAW_DEG[LINK_SUBTREE_YAW[link]])
+
+
+def kit_parts() -> list[Part]:
+    parts = []
+    for f in kit_files():
+        stem = f.stem
+        clean = stem.replace(" (New)", "").replace(" (DNP)", "_DNP").replace(" - x4", "")
+        link = _deepest(LINK_RULES, clean)
+        if link is None:
+            raise ValueError(f"kit part {stem} matches no link rule")
+        mat = "rubber" if _first(MATERIAL_RULES, stem) else "PLA"
+        copies = 4 if any(stem.startswith(r) for r in REPLICATE_X4) else 1
+        m = re.search(r"x(\d+)$", stem.replace(" ", ""))
+        for k in range(copies):
+            T = kit_T(link) @ frames.roty(90.0 * k)
+            parts.append(Part(
+                id=pid(clean, k + 1 if copies > 1 else None), name=stem + (f" #{k + 1}" if copies > 1 else ""),
+                cls="shell", link=link, T=T, file=f, origin="kit", placement="kit",
+                material=mat, printed=(mat == "PLA"),
+                note=("print qty in the file name: " + m.group(0)) if (m and copies == 1) else "",
+            ))
+    return parts
+
+
+# ---- joints measured on the kit (canonical frame) -------------------------------------
+def _kit_pt(p, link):
+    return tuple(np.round(frames.apply(kit_T(link), p), 2))
+
+
+def _kit_dir(d, link):
+    return tuple(np.round(frames.apply_dir(kit_T(link), d), 5))
+
+
+def kit_arm_joints() -> dict[str, Joint]:
+    """Arm joints of the poseable kit. Pivots/axes are kit-geometry measurements (hinge discs,
+    hub bores) - the poker/throttle ones from build_r3x.py JOINTS, the hero ones re-measured
+    here (r3xmech.kitmeasure) and equal to build_r3x's to 0.1 mm."""
+    J = {}
+
+    def rj(id_, name, parent, child, link, pivot, axis, lim, prof, drive_kind="none", **kw):
+        J[id_] = Joint(id=id_, name=name, type="revolute", parent_link=parent, child_link=child,
+                       pivot=_kit_pt(pivot, link), axis=_kit_dir(axis, link), limits=lim,
+                       profile_joint=prof, drive={"kind": drive_kind}, **kw)
+
+    rj("poker_shoulder", "Poker arm shoulder", "lower_ring", "poker_upper", "lower_ring",
+       (-4.2, 372.0, 200.6), (1, 0, 0), (-45, 35), "poker_shoulder",
+       evidence=["kit hub PA_M_1/PA_M_3 (build_r3x.py)"], confidence="medium")
+    rj("poker_wrist", "Poker arm wrist", "poker_upper", "poker_hand", "lower_ring",
+       (-8.0, 465.7, 328.0), (1, 0, 0), (-40, 40), "poker_wrist", evidence=["build_r3x.py"], confidence="medium")
+    rj("throttle_shoulder", "Throttle arm shoulder", "middle_ring", "throttle_upper", "middle_ring",
+       (-6.3, 448.6, -211.2), (0, 0, 1), (-50, 50), "throttle_shoulder",
+       evidence=["kit shaft TA_S_1 axis (build_r3x.py)"], confidence="medium")
+    rj("throttle_elbow", "Throttle arm elbow", "throttle_upper", "throttle_fore", "middle_ring",
+       (-8.05, 242.1, -211.2), (0, 0, 1), (-60, 45), "throttle_elbow", evidence=["hubs TA_FA_I_3/I_4"], confidence="medium")
+    rj("throttle_wrist", "Throttle arm wrist", "throttle_fore", "throttle_hand", "middle_ring",
+       (-187.3, 321.6, -205.8), (0, 0, 1), (-60, 60), "throttle_wrist", evidence=["hubs TA_FA_I_1/I_2"], confidence="medium")
+    return J
+
+
+def _guide():
+    f = GUIDE / "guide_steps.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
+def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
+    """Guide steps and hardware -> schema steps / unplaced fasteners / BOM, per sub-assembly.
+    Fasteners are not located in 3D yet: every one is listed as `unplaced` under its step."""
+    g = _guide()
+    if g is None:
+        for a in asms.values():
+            a.notes.append("Guide steps not attached: run the guide transcription into assemblies/kit/_guide/.")
+        return
+    section_to_asm = {"base": "base", "lower_ring_poker_arm": "lower_ring", "middle_ring_throttle_arm": "middle_ring",
+                      "top_ring_hero_arm": "top_ring", "head": "head"}
+    desc = {}
+    for sec in g.get("sections", []):
+        for h in sec.get("hardware", []):
+            desc[h.get("mcmaster")] = h.get("desc", "")
+    for sec in g.get("sections", []):
+        a = asms.get(section_to_asm.get(sec["id"], ""), None)
+        if a is None:
+            a = asms["base"]
+            a.notes.append(f"guide section {sec['id']} not mapped to a sub-assembly")
+        a.guide = {"title": g.get("source", "DJ R3X v2 Guide.pdf"), "pages": sec.get("pages")}
+        for st in sec.get("steps", []):
+            n = len(a.steps) + 1
+            parts = []
+            for stem in st.get("parts", []):
+                parts += parts_by_stem.get(stem, [])
+            a.steps.append({
+                "id": f"{a.id}_s{n:02d}", "n": n, "title": (st.get("notes") or "")[:80] or f"Step {st.get('n')}",
+                "parts": parts, "fasteners": [],
+                "unplaced": [{"key": f"mcmaster-{fz.get('mcmaster')}",
+                              "spec": {"mcmaster": fz.get("mcmaster"), "desc": desc.get(fz.get("mcmaster"), "")},
+                              "count": fz.get("qty"), "note": fz.get("where", "")}
+                             for fz in st.get("fasteners", [])],
+                "notes": [x for x in [st.get("notes")] + [f"consumables: {', '.join(st['consumables'])}"
+                                                          if st.get("consumables") else None] if x],
+                "guide_page": st.get("page"), "subassembly": st.get("subassembly"),
+                "inferred": False, "inferred_note": "",
+            })
+        for h in sec.get("hardware", []):
+            a.bom.append({"key": f"mcmaster-{h.get('mcmaster')}", "item": h.get("desc", ""), "qty": h.get("qty"),
+                          "category": "fastener", "spec": {"mcmaster": h.get("mcmaster")},
+                          "source": f"https://www.mcmaster.com/{h.get('mcmaster')}", "inferred": False,
+                          "inferred_note": ""})
+
+
+def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
+    parts = kit_parts()
+    J = kit_arm_joints()
+
+    root = Asm(id="r3x_droid", name="DJ R3X (kit shell + R-3X Animation mechanisms)",
+               description="Printable kit as the backbone; mechanisms attached per ring/base.",
+               links=[Link("ground", "Ground (floor / base plate)", None)])
+    base = Asm(id="base", name="Base + pedestal", mount_link="ground",
+               links=[Link("base", "Base skirt, top and pedestal (static)", None)])
+    lower = Asm(id="lower_ring", name="Lower ring + poker arm", mount_link="base",
+                links=[Link("lower_ring_mount", "Lower-ring lazy susan (static race)", None),
+                       Link("lower_ring", "Lower ring", "torso_lower"),
+                       Link("poker_upper", "Poker arm", "poker_shoulder"),
+                       Link("poker_hand", "Poker hand", "poker_wrist")])
+    # The middle ring's lazy susan has its inner race on LS_IC_1, the static core that also carries
+    # the lower ring's inner race (guide p20, p33): the middle ring does not ride the lower ring.
+    middle = Asm(id="middle_ring", name="Middle ring + throttle arm", mount_link="lower_ring_mount",
+                 links=[Link("middle_ring_mount", "Middle-ring lazy susan (lower race)", None),
+                        Link("middle_ring", "Middle ring (logic panels)", "torso_middle"),
+                        Link("throttle_upper", "Throttle arm upper", "throttle_shoulder"),
+                        Link("throttle_fore", "Throttle forearm", "throttle_elbow"),
+                        Link("throttle_hand", "Throttle hand", "throttle_wrist")])
+    top = Asm(id="top_ring", name="Top ring + hero arm", mount_link="middle_ring",
+              links=[Link("top_ring_mount", "Top-ring lazy susan (lower race)", None),
+                     Link("top_ring", "Top ring (RX-24)", "torso_top"),
+                     Link("hero_arm", "Hero arm", "hero_shoulder"),
+                     Link("hero_hand", "Hero hand", "hero_wrist")])
+    head = Asm(id="head", name="Head (shell, headband, ears, visor)", mount_link="head_mount",
+               links=[Link("head", "Head", "head_tilt"), Link("visor", "Visor (brow + side arms)", "visor")])
+
+    # vertical ring axes: all rings turn about body +Y through the origin (kit ring centres at x=z=0)
+    def ring():  # fresh evidence list per joint (drives append to it)
+        return dict(type="revolute", pivot=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0),
+                    evidence=["kit ring solids are centred on x=z=0 (LS_M_Full, MS_Main_Full, TR_NR_Full bbox centres)"],
+                    confidence="high")
+    lower.joints = [Joint("torso_lower", "Lower ring", parent_link="lower_ring_mount", child_link="lower_ring",
+                          limits=(-35, 35), profile_joint="torso_lower", **ring()), J["poker_shoulder"], J["poker_wrist"]]
+    middle.joints = [Joint("torso_middle", "Middle ring", parent_link="middle_ring_mount", child_link="middle_ring",
+                           limits=(0, 0), profile_joint="torso_middle",
+                           drive={"kind": "none", "note": "not motorised in the R-3X Animation build"}, **ring()),
+                     J["throttle_shoulder"], J["throttle_elbow"], J["throttle_wrist"]]
+    top.joints = [Joint("torso_top", "Top ring", parent_link="top_ring_mount", child_link="top_ring",
+                        limits=(-30, 30), profile_joint="torso_top", **ring())]
+
+    asms = {"base": base, "lower_ring": lower, "middle_ring": middle, "top_ring": top, "head": head}
+    link_to_asm = {"base": base, "lower_ring_mount": lower, "lower_ring": lower, "poker_upper": lower, "poker_hand": lower,
+                   "middle_ring": middle, "throttle_upper": middle, "throttle_fore": middle, "throttle_hand": middle,
+                   "top_ring": top, "hero_arm": top, "hero_hand": top, "head": head, "visor": head}
+    by_stem: dict[str, list[str]] = {}
+    for p in parts:
+        link_to_asm[p.link].parts.append(p)
+        stem = Path(p.file).stem
+        for key in {stem, stem.replace(" (New)", "").replace(" (DNP)", "").replace(" - x4", "")}:
+            by_stem.setdefault(key, []).append(p.id)
+    attach_guide(asms, by_stem)
+
+    root.children = [base, lower]
+    lower.children = [middle]
+    middle.children = [top]
+    base.notes.append("The head is not carried by the rings in the R-3X build: the neck tube runs from the "
+                      "pan/lift stage in the base, through all three rings, to the head (see r3x_neck_drive).")
+    if with_r3x:
+        from assemblies.r3x_animation.assembly import attach
+        attach(root, base, lower, middle, top, head)
+    if community:
+        from assemblies.community.assembly import morton_frame, mouth_split_parts, randall_frame
+        base.children += [morton_frame(), randall_frame()]
+        for p in base.parts:
+            if p.id == "p_m_3":
+                p.note = "superseded by Henley B_M_3_mod in the Morton frame variant"
+        mouth = Asm(id="mouth_split", name="Trevor Zaharichuk Mic-Mouth-Split (alternate mouth)", mount_link="head",
+                    variant={"group": "mouth", "id": "mic_mouth_split", "default": False},
+                    links=[Link("mouth", "Mouth insert", None)])
+        mouth.parts = mouth_split_parts(link="mouth")
+        head.children.append(mouth)
+    else:
+        # kit-only: the head sits on a static neck on the top ring
+        head.mount_link = "top_ring"
+        head.links.insert(0, Link("head_mount", "Static neck", None))
+        ear = (0.0, 770.6, 0.0)
+        head.joints = [Joint("head_tilt", "Head tilt (poseable)", "revolute", "head_mount", "head", (0.0, 740.0, 0.0),
+                             (1.0, 0.0, 0.0), (-20, 25), profile_joint="head_tilt", drive={"kind": "none"}),
+                       Joint("visor", "Visor (poseable)", "revolute", "head", "visor", ear, (1.0, 0.0, 0.0), (-15, 30),
+                             profile_joint="visor", drive={"kind": "none"})]
+        top.children.append(head)
+    return root
+
+
+def build():
+    """Workbench entry point (`python -m workbench build kit`): the whole droid as a
+    workbench.model.Assembly with meshes at the rest pose."""
+    from r3xmech.wb import to_workbench
+    return to_workbench(build_model())
+
+
+def kit_head_parts(origin_y: float = 738.3):
+    """Kit head parts in a head frame whose origin is (0, origin_y, 0) in the body frame (e.g.
+    Hunter's gimbal centre), for a head module that carries the kit's details on its own links:
+    [(id, stl_path, 4x4 file->head frame, link 'head' | 'visor', note)]."""
+    out = []
+    for p in kit_parts():
+        if p.link in ("head", "visor"):
+            T = frames.trans(0, -origin_y, 0) @ p.T
+            out.append((p.id, p.file, T, p.link, p.note))
+    return out
+
+
+if __name__ == "__main__":
+    r = build_model()
+    print(sum(1 for _ in r.all_parts()), "parts;", len(r.all_joints()), "joints")

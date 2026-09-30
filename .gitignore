@@ -132,3 +132,10 @@ logs/session-*.jsonl
 
 # Rust crate test data is committed
 !rust/crates/*/tests/data/
+
+# mech/ - vendored third-party CAD (licensed, never commit), venv, local renders
+mech/vendor/
+mech/.venv/
+mech/out/
+# transcriptions of the kit's group-only guide (licensed); regenerate locally
+mech/assemblies/kit/_guide/

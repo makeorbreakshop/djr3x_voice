@@ -22,6 +22,11 @@
       "command": "npx",
       "args": ["@modelcontextprotocol/server-puppeteer"],
       "description": "Browser automation for testing DJ R3X dashboard"
+    },
+    "build123d": {
+      "command": "mech/.venv/bin/build123d-mcp",
+      "args": ["--allow-imports", "numpy,scipy,trimesh,manifold3d,shapely"],
+      "description": "build123d CAD sandbox (render_view, measure, find_holes, cross_sections). Needs the mech venv: see mech/README.md"
     }
   }
 }
