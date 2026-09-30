@@ -82,6 +82,11 @@ export const SHOTS = [
   // right (the logic panels face the lens), looking up; head turned to the camera, hero arm
   // at rest. Phone lens at ~36 deg vertical field of view.
   { name: 'photo-oga-front-low', size: [900, 1200], pose: { head_pan: -24 }, cam: { pos: [-0.62, 0.44, 1.5], target: [0.08, 0.6, 0.05], fov: 36 }, ref: 'oga-front-low_wdwnt-2019.jpg' },
+  // StarWars.com gallery still (Oga's Cantina, 1280x640): square on to the logic panels and the
+  // RX-24 plate, lens between the rings and the head. The rest-pose check (show/SPEC.md "Frame
+  // and zeros"): panels under the plate, hero arm up on camera right, poker arm out toward camera
+  // right, throttle arm hanging on camera left.
+  { name: 'photo-starwars-front', size: [1036, 540], pose: { hero_shoulder: -20, poker_shoulder: 10, head_lift: 20 }, cam: { pos: [0, 0.6, 2.1], target: [0.02, 0.53, 0], fov: 23 }, ref: 'starwars-front_starwarscom.webp' },
   ...turntable,
 ];
 
