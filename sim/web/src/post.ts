@@ -9,49 +9,78 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { LUTCubeLoader } from 'three/addons/loaders/LUTCubeLoader.js';
 import { N8AOPass } from 'n8ao';
 import { STILL } from './still';
+import { FramePacer, type PaceRates } from './pacer';
 
 /**
  * The render pipeline after the scene is lit - everything between "the GPU drew the
  * droid" and "pixels on screen":
  *
- *   N8AO (high) or RenderPass (low)   HDR, half-float, linear
+ *   N8AO, or RenderPass (Performance)  HDR, half-float, linear
  *   UnrealBloomPass, threshold 1.0    only the LEDs cross 1.0 (look.ts's highlight knee)
  *   OutputPass                        tone mapping + sRGB
  *   SMAA                              edges (no MSAA: every pass is a full-screen quad)
  *   LUTPass                           the grade
  *   film                              vignette, edge-only chromatic aberration, grain
  *
- * Resolution is dynamic: the canvas renders at up to 1.5x (not the display's 2x) and
- * steps down when frames run long, back up when there is headroom. SMAA recovers the
- * edges the lower scale costs, and the saving pays for AO.
+ * Resolution is dynamic: the canvas renders at up to the quality's cap (not the display's
+ * 2x) and steps down when frames run long while someone is interacting, back up when there
+ * is headroom. SMAA recovers the edges the lower scale costs, and the saving pays for AO.
  *
- * URL flags: `?quality=low|high` (also the Camera section's control; remembered per
- * browser), `?tonemap=neutral|agx`, `?dpr=<n>` (fixed scale, no adaptation),
+ * Frames are paced (pacer.ts): 60 fps only while someone interacts, the quality's cap while
+ * the scene changes, a low floor while nothing does.
+ *
+ *   quality       scale cap  AO                  bloom      changing  quiet
+ *   performance   1.0x       off                 1/4 res    30 fps    10 fps
+ *   balanced      1.25x      half res, 16 spp    1/4 res    30 fps    15 fps   (default)
+ *   high          1.5x       half res, 16 spp +  1/2 res    60 fps    15 fps
+ *                            8-tap denoise
+ *
+ * URL flags: `?quality=performance|balanced|high` (also the viewport's control; remembered
+ * per browser), `?pace=0` (draw every animation frame), `?tonemap=neutral|agx`, `?dpr=<n>`
+ * (fixed scale, no adaptation),
  * `?lut=<url.cube>` (grade from a file instead of the built-in one), `?grain=0`,
  * `?post=hot` (HDR check: magenta where a pixel exceeds 1.0 before bloom, i.e. what
  * blooms; yellow for 0.9-1.0), `?post=ao` (the AO term alone, high quality only).
  */
 
-export type Quality = 'low' | 'high';
+export type Quality = 'performance' | 'balanced' | 'high';
 export type ToneMap = 'neutral' | 'agx';
 
 const params = new URLSearchParams(location.search);
 const QUALITY_KEY = 'r3x.quality';
 
+interface QualityPreset {
+  /** Render scale cap (x CSS pixels). */
+  scale: number;
+  ao: 'Low' | 'Medium' | null;
+  /** Bloom resolution as a fraction of the render size (UnrealBloomPass's own is 1/2). */
+  bloom: number;
+  pace: PaceRates;
+}
+
+export const QUALITY: Record<Quality, QualityPreset> = {
+  performance: { scale: 1.0, ao: null, bloom: 0.25, pace: { active: 30, quiet: 10 } },
+  balanced: { scale: 1.25, ao: 'Low', bloom: 0.25, pace: { active: 30, quiet: 15 } },
+  high: { scale: 1.5, ao: 'Medium', bloom: 0.5, pace: { active: 60, quiet: 15 } },
+};
+
+/** A quality name, with the old two-level names mapped on. */
+export function parseQuality(v: string | null): Quality | null {
+  if (v === 'low') return 'performance';
+  return v && v in QUALITY ? (v as Quality) : null;
+}
+
 function storedQuality(): Quality | null {
   try {
-    const v = localStorage.getItem(QUALITY_KEY);
-    return v === 'low' || v === 'high' ? v : null;
+    return parseQuality(localStorage.getItem(QUALITY_KEY));
   } catch {
     return null;
   }
 }
 
-/** URL flag, else what this browser picked last, else high. */
+/** URL flag, else what this browser picked last, else balanced. */
 export function initialQuality(): Quality {
-  const q = params.get('quality');
-  if (q === 'low' || q === 'high') return q;
-  return storedQuality() ?? 'high';
+  return parseQuality(params.get('quality')) ?? storedQuality() ?? 'balanced';
 }
 
 /**
@@ -285,6 +314,8 @@ export class PostPipeline {
   private readonly dyn: DynamicResolution | null;
   private quality: Quality;
   private lastFrame = -1;
+  /** When to draw (pacer.ts); main.ts asks it every animation frame. */
+  readonly pacer: FramePacer;
 
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
@@ -295,9 +326,11 @@ export class PostPipeline {
     renderer.toneMapping = tone.mapping;
     renderer.toneMappingExposure *= tone.exposureScale;
 
+    this.quality = initialQuality();
+    this.pacer = new FramePacer(QUALITY[this.quality].pace, !STILL && params.get('pace') !== '0');
     const dpr = window.devicePixelRatio || 1;
     const fixed = Number(params.get('dpr'));
-    const max = Math.min(dpr, 1.5);
+    const max = Math.min(dpr, QUALITY[this.quality].scale);
     if (fixed > 0) this.dyn = null;
     else if (STILL) this.dyn = null;
     else this.dyn = new DynamicResolution(Math.min(max, 0.75), max, max);
@@ -318,7 +351,7 @@ export class PostPipeline {
     c.distanceFalloff = 1.0;
     c.intensity = 4;
     c.color = new THREE.Color(0, 0, 0);
-    this.ao.setQualityMode('Medium');
+    this.ao.setQualityMode(QUALITY[this.quality].ao ?? 'Medium');
     // The LED glow sprites are additive and depth-less: skip N8AO's transparency pre-pass
     // (it would re-render them into two more full-size targets every frame).
     this.ao.autoDetectTransparency = false;
@@ -329,6 +362,12 @@ export class PostPipeline {
     // Threshold 1.0: only the LEDs (driven past 1.0) bloom; lit surfaces pass through
     // look.ts's soft knee and stay under it.
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.85, 0.35, 1.0);
+    // The composer sizes every pass to the render size; bloom (a blur) runs at a fraction.
+    const bloomSize = this.bloom.setSize.bind(this.bloom);
+    this.bloom.setSize = (w: number, h: number) => {
+      const k = QUALITY[this.quality].bloom * 2; // UnrealBloomPass halves it again itself
+      bloomSize(Math.max(2, Math.round(w * k)), Math.max(2, Math.round(h * k)));
+    };
     this.hot = params.get('post') === 'hot' ? new ShaderPass(HotShader) : null;
 
     this.lut = new LUTPass({ lut: makeGradeLut(), intensity: 1 });
@@ -342,7 +381,6 @@ export class PostPipeline {
     const grain = params.get('grain');
     if (grain === '0' || (STILL && grain !== '1')) this.film.uniforms.uGrain.value = 0;
 
-    this.quality = initialQuality();
     this.build();
     this.bindUi();
   }
@@ -353,7 +391,10 @@ export class PostPipeline {
     this.scaleOut = document.getElementById('render-scale') as HTMLOutputElement | null;
     if (sel) {
       sel.value = this.quality;
-      sel.onchange = () => this.setQuality(sel.value === 'low' ? 'low' : 'high');
+      sel.onchange = () => {
+        this.setQuality(parseQuality(sel.value) ?? 'balanced');
+        sel.blur();
+      };
     }
     this.showScale();
   }
@@ -364,7 +405,12 @@ export class PostPipeline {
   }
 
   get aoEnabled() {
-    return this.quality === 'high';
+    return QUALITY[this.quality].ao !== null;
+  }
+
+  /** Frames drawn since load. */
+  get frames() {
+    return this.pacer.frames;
   }
 
   get pixelRatio() {
@@ -380,6 +426,8 @@ export class PostPipeline {
     this.quality = q;
     try { localStorage.setItem(QUALITY_KEY, q); } catch { /* private mode: not remembered */ }
     this.build();
+    this.pacer.rates = QUALITY[q].pace;
+    this.pacer.touch();
     const sel = document.getElementById('quality') as HTMLSelectElement | null;
     if (sel) sel.value = q;
   }
@@ -387,19 +435,23 @@ export class PostPipeline {
   private build() {
     const passes = this.composer.passes;
     while (passes.length) this.composer.removePass(passes[passes.length - 1]);
-    this.composer.addPass(this.quality === 'high' ? this.ao : this.renderPass);
+    const preset = QUALITY[this.quality];
+    if (preset.ao) this.ao.setQualityMode(preset.ao);
+    this.composer.addPass(preset.ao ? this.ao : this.renderPass);
     if (this.hot) this.composer.addPass(this.hot);
     this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
     this.composer.addPass(this.lut);
     this.composer.addPass(this.film);
-    // Low is for weak GPUs: cap the scale a notch lower too.
     if (this.dyn) {
       const dpr = window.devicePixelRatio || 1;
-      this.dyn.max = this.quality === 'high' ? Math.min(dpr, 1.5) : Math.min(dpr, 1.25);
-      if (this.dyn.scale > this.dyn.max) this.applyScale(this.dyn.max);
+      this.dyn.max = Math.min(dpr, preset.scale);
+      if (this.dyn.scale !== this.dyn.max) this.applyScale(this.dyn.max);
     }
+    // Bloom's targets follow the preset's fraction.
+    const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.bloom.setSize(buf.x, buf.y);
   }
 
   setSize(w: number, h: number) {
@@ -424,11 +476,13 @@ export class PostPipeline {
 
   render() {
     const now = performance.now();
-    if (this.dyn && this.lastFrame >= 0) {
+    // Resolution adapts only while frames are meant to come at 60 fps (someone interacting);
+    // a paced 30 or 15 fps interval is not a slow frame.
+    if (this.dyn && this.lastFrame >= 0 && this.pacer.fps(now) === Infinity) {
       const s = this.dyn.sample(now - this.lastFrame);
       if (s !== null) this.applyScale(s);
     }
-    this.lastFrame = now;
+    this.lastFrame = this.pacer.fps(now) === Infinity ? now : -1;
     this.film.uniforms.uTime.value = STILL ? 0 : now / 1000;
     this.composer.render();
   }

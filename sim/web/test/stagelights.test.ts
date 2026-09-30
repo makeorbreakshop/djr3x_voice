@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GROUPS, RIGS, StageLights, flux, resolveCue, type Group, type RGB } from '../src/stagelights';
+import { CHARACTER, GROUPS, RIGS, StageLights, characterFloor, characterLit, flux, resolveCue, type Group, type RGB } from '../src/stagelights';
 
 const close = (a: RGB, b: RGB, eps = 1e-9) => a.every((v, i) => Math.abs(v - b[i]) < eps);
 const lerp = (a: RGB, b: RGB, t: number): RGB => [0, 1, 2].map((i) => a[i] + (b[i] - a[i]) * t) as RGB;
@@ -236,5 +236,23 @@ describe('modes', () => {
     expect(l.rigPreset).toBe('disneyland_2019');
     expect(l.cue).toBe(RIGS.disneyland_2019.initial);
     expect(l.mode).toBeNull();
+  });
+});
+
+describe('character light', () => {
+  it('never drops below the rig reference, lets the desk raise it, leaves the room alone', () => {
+    const floor = characterFloor('disneyland_2019');
+    const ref = resolveCue(RIGS.disneyland_2019, RIGS.disneyland_2019.initial);
+    // The idle interlude has the key and rims off; the floor puts them back at the reference.
+    const idle = resolveCue(RIGS.disneyland_2019, 'interlude');
+    expect(idle.droid_key).toEqual([0, 0, 0]);
+    const into = Object.fromEntries(GROUPS.map((g) => [g, [0, 0, 0]])) as unknown as Record<Group, RGB>;
+    const lit = characterLit(idle, floor, into);
+    for (const g of CHARACTER) expect(close(lit[g], ref[g])).toBe(true);
+    expect(close(lit.wall_wash_l, idle.wall_wash_l)).toBe(true);
+    // A brighter cue shows through.
+    const gold = resolveCue(RIGS.disneyland_2019, 'song_gold');
+    expect(characterLit(gold, floor, into).droid_key[0]).toBeCloseTo(gold.droid_key[0]);
+    expect(characterFloor('no_such_rig')).toEqual(floor);
   });
 });

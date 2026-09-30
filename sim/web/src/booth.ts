@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { LightProbeGridWebGL } from 'three/addons/lighting/LightProbeGridWebGL.js';
-import { GROUPS, RIGS, StageLights, type Group, type RGB, type StageLightsOptions } from './stagelights';
+import { GROUPS, RIGS, StageLights, characterFloor, characterLit, type Group, type RGB, type StageLightsOptions } from './stagelights';
 
 /**
  * The set: Oga's Cantina's DJ booth, built procedurally (no downloaded or kit assets),
@@ -758,11 +758,14 @@ export class BoothLights extends StageLights {
   setExternal(stage: ArrayLike<ArrayLike<number>> | null) {
     this.external = !!stage;
     if (!stage) return;
+    // Only a changed output re-mixes the bounce grid (a 3D texture upload) and the fixtures.
+    let changed = false;
     GROUPS.forEach((g, i) => {
       const c = stage[i];
       const o = this.out[g];
-      if (c) for (let k = 0; k < 3; k++) o[k] = c[k];
+      if (c) for (let k = 0; k < 3; k++) if (o[k] !== c[k]) { o[k] = c[k]; changed = true; }
     });
+    if (!changed) return;
     this.version++;
     this.sync();
   }
@@ -1117,14 +1120,21 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
   const q = new URLSearchParams(location.search);
   let env: { tex: THREE.Texture; lum: number } | undefined;
   let basisReady = false;
+  // His own light - key, head rims, fill - never drops below the rig's reference cue: the
+  // desk (idle interlude, blackout, a disabled stage output) may colour or raise it, but he
+  // reads the same in every operating mode and cue (characterLit).
+  let floor = characterFloor(q.get('rig') ?? '');
+  const lit = zeros();
   const lights = new BoothLights(
     { rig: q.get('rig') ?? undefined, cue: q.get('cue') ?? undefined },
     (d) => {
-      setFixtures(d.out);
-      if (basisReady) combine(d.out);
-      if (env && shown) scene.environmentIntensity = THREE.MathUtils.clamp(roomLum(d.out) / env.lum, 0.3, 2);
+      const out = characterLit(d.out, floor, lit);
+      setFixtures(out);
+      if (basisReady) combine(out);
+      if (env && shown) scene.environmentIntensity = THREE.MathUtils.clamp(roomLum(out) / env.lum, 0.3, 2);
     },
     (rig) => {
+      floor = characterFloor(rig);
       env = envs.get(rig) ?? env;
       if (env && shown) scene.environment = env.tex;
     },

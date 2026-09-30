@@ -18,6 +18,11 @@
         <option value="dark">Dark</option>
         <option value="light">Light</option>
       </select>
+      <select id="quality" aria-label="Render quality" title="Render quality. Balanced (default): 1.25x scale, lighter AO, draws only as often as the picture changes. High: 1.5x, full AO, 60 fps while anything moves fast. Performance: 1x, no AO, lowest rates.">
+        <option value="performance">Performance</option>
+        <option value="balanced">Balanced</option>
+        <option value="high">High</option>
+      </select>
       <button id="scene-work" aria-pressed="false" title="Work light: soft key, fill and rim, independent of the stage lights">Work light</button>
       <button id="scene-centres" aria-pressed="false" title="Centres: each joint's range, its 0 (home) tick and where it is now">Centres</button>
       <select id="gaze-src" aria-label="Gaze target" title="What R3X's head looks at in Show (Bench and Studio ignore it)" hidden>
@@ -309,12 +314,8 @@
             <button data-cam="arms">Arms</button>
             <button data-cam="chest">Chest</button>
           </div>
-          <label class="inline" title="High adds ambient occlusion. The render scale adapts to hold 60 fps either way.">
-            Render quality
-            <select id="quality" aria-label="Render quality" style="width:auto">
-              <option value="high">High (AO)</option>
-              <option value="low">Low (no AO)</option>
-            </select>
+          <label class="inline" title="Quality is the viewport's control (top left). The scale adapts to hold 60 fps while you interact.">
+            Render scale
             <output id="render-scale" class="hint" style="margin:0"></output>
           </label>
         </section>

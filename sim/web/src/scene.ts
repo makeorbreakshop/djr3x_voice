@@ -11,8 +11,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
  * only starts at 1.0 (post.ts) and look.ts keeps lit surfaces under it, so the eye and chest
  * LEDs stay the only glow.
  *
- * The choice is remembered once the operator picks one (`r3x.scene`); until then it follows
- * the operating mode: the booth in Show, Studio grey + work light in Bench and Studio.
+ * The choice is remembered (`r3x.scene`) and is the same in every operating mode: Show,
+ * Bench and Studio light R3X identically, so a mode switch never changes how he reads. The
+ * booth's own key/rims/fill have a floor (booth.ts `characterLit`), so the stage desk adds
+ * to his light but is never all of it.
  */
 
 export type Backdrop = 'booth' | 'grey' | 'dark' | 'light';
@@ -28,9 +30,7 @@ const PLAIN: Record<Exclude<Backdrop, 'booth'>, { bg: number; floor: number; env
 };
 const KEY = 'r3x.scene';
 
-export function defaultFor(mode: string): SceneChoice {
-  return mode === 'show' ? { backdrop: 'booth', workLight: false } : { backdrop: 'grey', workLight: true };
-}
+export const DEFAULT_CHOICE: SceneChoice = { backdrop: 'booth', workLight: false };
 
 export function storedChoice(): SceneChoice | null {
   try {
@@ -51,7 +51,6 @@ function store(c: SceneChoice) {
 
 export class SceneLook {
   choice: SceneChoice;
-  private picked: boolean;
   private plain = new THREE.Group();
   private floorMat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   private work = new THREE.Group();
@@ -94,14 +93,12 @@ export class SceneLook {
     this.work.visible = false;
     scene.add(this.plain, this.work);
 
-    const stored = storedChoice();
-    this.picked = !!stored;
-    this.choice = stored ?? defaultFor('show');
+    this.choice = storedChoice() ?? { ...DEFAULT_CHOICE };
     this.apply();
   }
 
   private listeners: (() => void)[] = [];
-  /** Called after every change (a mode default included), for the control's display. */
+  /** Called after every change, for the control's display. */
   onUpdate(fn: () => void) {
     this.listeners.push(fn);
   }
@@ -110,20 +107,14 @@ export class SceneLook {
     return this.choice.backdrop === 'booth';
   }
 
-  /** The operator's pick: remembered, and no longer follows the mode. */
+  /** The operator's pick: remembered, in every mode. */
   pick(c: Partial<SceneChoice>) {
     const next = { ...this.choice, ...c };
     // A plain backdrop without the work light is only the ambient environment; picking one
     // switches the light on (it can be turned off again).
     if (c.backdrop && c.backdrop !== 'booth' && this.choice.backdrop === 'booth' && c.workLight === undefined) next.workLight = true;
-    this.picked = true;
     store(next);
     this.set(next);
-  }
-
-  /** The operating mode changed: follow it unless the operator has picked. */
-  followMode(mode: string) {
-    if (!this.picked) this.set(defaultFor(mode));
   }
 
   private set(c: SceneChoice) {

@@ -199,6 +199,27 @@ export function resolveCue(rig: RigPreset, name: string): Record<Group, RGB> {
   return out;
 }
 
+// ------------------------------------------------------------------ character light
+
+/** The fixtures that light R3X himself rather than the room. */
+export const CHARACTER: readonly Group[] = ['droid_key', 'head_rim_l', 'head_rim_r', 'fill'];
+
+/** A rig's character groups at its reference (initial) cue; unknown rigs use the default. */
+export function characterFloor(rig: string): Partial<Record<Group, RGB>> {
+  const r = RIGS[rig] ?? RIGS[DEFAULT_RIG];
+  const c = resolveCue(r, r.initial);
+  return Object.fromEntries(CHARACTER.map((g) => [g, c[g]]));
+}
+
+/** `out` with each character group raised to at least `floor` (per channel), into `into`. */
+export function characterLit(out: Record<Group, RGB>, floor: Partial<Record<Group, RGB>>, into: Record<Group, RGB>): Record<Group, RGB> {
+  for (const g of GROUPS) {
+    const o = out[g], f = floor[g], d = into[g];
+    for (let k = 0; k < 3; k++) d[k] = f ? Math.max(o[k], f[k]) : o[k];
+  }
+  return into;
+}
+
 // ------------------------------------------------------------------ controller
 
 export interface StageLightsOptions {

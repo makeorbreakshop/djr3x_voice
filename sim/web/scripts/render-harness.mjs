@@ -5,7 +5,7 @@
  *   npm run render:check                 # render every shot, diff against baselines
  *   npm run render:check -- --update     # accept the current renders as the baselines
  *   npm run render:check -- --only face,photo-oga-front-low
- *   npm run render:perf                  # fps at 1440x900 @2x, both quality levels
+ *   npm run render:perf                  # fps at 1440x900 @2x, every quality level (unpaced)
  *
  * Headless Chrome is driven over the DevTools protocol (no puppeteer). The page runs in
  * still mode (src/still.ts): virtual clock, seeded Math.random, frozen film grain, fixed
@@ -22,7 +22,7 @@
  *   --baselines <dir>  baseline folder (default .render-baselines)
  *   --update           copy this run's renders over the baselines
  *   --only a,b         shots to run (names or prefixes, e.g. turn)
- *   --quality q        high | low (default high)
+ *   --quality q        high | balanced | performance (default high)
  *   --max-diff <pct>   fail when more than this % of pixels differ (default 0.5)
  *   --min-ssim <v>     fail when SSIM drops below this (default 0.98)
  *   --refs <dir>       reference photo folder (default ~/Desktop/DJ-R3X/Reference Photos)
@@ -337,12 +337,12 @@ async function shoot(server) {
 
 /** Frame rate at 1440x900 @2x with vsync off (so headroom above 60 shows). */
 async function perf(server) {
-  const qualities = opt('quality', null) ? [QUALITY] : ['high', 'low'];
+  const qualities = opt('quality', null) ? [QUALITY] : ['high', 'balanced', 'performance'];
   const seconds = Number(opt('seconds', 6));
   for (const q of qualities) {
     const chrome = await launchChrome({ uncapped: true });
     try {
-      await chrome.open(`${server.url}/?offline&quality=${q}${opt('extra', '') ? '&' + opt('extra', '') : ''}`, 1440, 900, 2);
+      await chrome.open(`${server.url}/?offline&pace=0&quality=${q}${opt('extra', '') ? '&' + opt('extra', '') : ''}`, 1440, 900, 2);
       await sleep(3000); // shader compiles, first frames, dynamic resolution settling
       const r = await chrome.js(`new Promise((done) => {
         const dts = []; let last = performance.now(); const end = last + ${seconds * 1000};

@@ -112,6 +112,9 @@ document.getElementById('scene-centres')!.onclick = (e) => {
 
 // AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
 const post = new PostPipeline(renderer, scene, camera);
+// Input anywhere and the orbit camera moving (or settling) draw at full rate (pacer.ts).
+post.pacer.listen();
+controls.addEventListener('change', () => post.pacer.interact());
 
 /** Height of the Studio dock over the stage bottom (0 = closed); the droid centres above it. */
 let viewInset = 0;
@@ -488,7 +491,6 @@ function onGatewayState(s: RetainedState) {
   $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
   stMode.textContent = s.engagement.engagement.toUpperCase();
   studio.setActive(s.stage.mode === 'studio');
-  sceneLook?.followMode(s.stage.mode);
   centresFollowMode(s.stage.mode);
   ghosts?.apply(s.stage.outputs);
   renderGaze(s);
@@ -581,7 +583,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) =>
 function setLocalStage(mode: string) {
   document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
   studio.setActive(mode === 'studio');
-  sceneLook?.followMode(mode);
   centresFollowMode(mode);
   renderHome();
 }
@@ -667,11 +668,14 @@ function dim(px: RGB[], output: string): RGB[] {
   return px.map((c) => c.map((v) => v * 0.15) as RGB);
 }
 
+let readoutAt = -1;
 function frame() {
-  requestAnimationFrame(frame);
+  post.pacer.next(frame);
   sendViewportGaze(); // every animation frame, drawn or not (it rate-limits itself)
+  // Draw only as often as the picture can change (pacer.ts; rates from the Quality setting).
+  if (!post.pacer.due(performance.now(), view)) return;
   const t = clock();
-  const dt = Math.min(0.05, t - last);
+  const dt = Math.min(0.1, t - last);
   last = t;
 
   tickPerformer(t);
@@ -684,13 +688,19 @@ function frame() {
     if (prevJoints && dt > 0) for (const [j, v] of values) speed += Math.abs(v - (prevJoints[j] ?? v)) / dt;
     prevJoints = view.joints;
     whine.update(speed, dt);
-    updateJointReadout();
-    updateServoTable();
+    // Panel readouts (text, a 2D canvas) at 10 Hz: nobody reads numbers faster.
+    if (t - readoutAt >= 0.1) {
+      readoutAt = t;
+      updateJointReadout();
+      updateServoTable();
+      drawLeds();
+    }
   }
   // The venue's light desk: the performer's stage output, or (look-dev pin) its own program.
+  // Not dimmed when the stage output is disabled: that gates the DMX driver, and the sim's
+  // desk also lights R3X, who must look the same in every mode.
   if (view?.stage) {
-    const off = gwState?.stage.outputs.stage === false;
-    set.lights?.setExternal(off ? view.stage.map((c) => c.map((v) => v * 0.15)) : view.stage);
+    set.lights?.setExternal(view.stage);
   } else {
     set.lights?.setExternal(null);
   }
@@ -701,7 +711,6 @@ function frame() {
   post.render();
   if (view) centres?.render(renderer, camera, view.joints);
   if (++homeTick % 12 === 0) updateJointTable();
-  drawLeds();
   if (logDirty) drawLog();
 }
 requestAnimationFrame(frame);
