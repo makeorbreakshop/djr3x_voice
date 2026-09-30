@@ -118,11 +118,13 @@ pub struct VisionConfig {
     pub scene_max_tokens: u32,
     /// Horizontal field of view (deg), for the face -> gaze mapping (`R3X_CAMERA_HFOV`).
     pub hfov_deg: f64,
+    /// A camera that failed to open (busy, unplugged) is tried again this often.
+    pub camera_retry: Duration,
 }
 
 impl Default for VisionConfig {
     fn default() -> Self {
-        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, scene_max_width: 768, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0 }
+        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, scene_max_width: 768, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0, camera_retry: Duration::from_secs(10) }
     }
 }
 
@@ -226,10 +228,10 @@ impl Vision {
             control: Mutex::new(ctl_tx),
             enabled: tokio::sync::watch::Sender::new(true),
         });
-        let (fps, initial) = (cfg.fps, cfg.camera);
+        let capture_cfg = cfg.clone();
         std::thread::Builder::new()
             .name("r3x-vision-capture".into())
-            .spawn(move || capture_loop(camera, recognizer, fps, initial, ctl_rx, obs_tx, status))
+            .spawn(move || capture_loop(camera, recognizer, &capture_cfg, ctl_rx, obs_tx, status))
             .expect("spawn vision capture thread");
         let v = Vision { inner };
         let task = tokio::spawn(v.clone().presence_loop(obs_rx));
@@ -463,12 +465,12 @@ impl Vision {
 fn capture_loop(
     camera: Box<dyn Camera>,
     mut recognizer: Box<dyn Recognizer>,
-    fps: f64,
-    initial: Option<u32>,
+    cfg: &VisionConfig,
     ctl: std_mpsc::Receiver<Control>,
     tx: mpsc::Sender<Observation>,
     status: Arc<Mutex<CameraStatus>>,
 ) {
+    let (fps, initial, retry) = (cfg.fps, cfg.camera, cfg.camera_retry);
     let cams = camera.list();
     let mut want = pick(&cams, initial);
     {
@@ -483,6 +485,8 @@ fn capture_loop(
     let mut source: Option<Box<dyn FrameSource>> = None;
     let mut next = Instant::now();
     let mut paused = false;
+    // After a failed open: when to try the same camera again.
+    let mut retry_at: Option<Instant> = None;
     loop {
         match ctl.try_recv() {
             Ok(Control::Select(i)) => {
@@ -511,6 +515,16 @@ fn capture_loop(
             continue;
         }
         let Some(src) = source.as_mut() else {
+            if let Some(at) = retry_at.filter(|at| *at > Instant::now()) {
+                match ctl.recv_timeout((at - Instant::now()).min(Duration::from_millis(500))) {
+                    Ok(Control::Select(i)) => (want, retry_at) = (Some(i), None),
+                    Ok(Control::Pause(p)) => paused = p,
+                    Ok(Control::Stop) | Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                continue;
+            }
+            retry_at = None;
             match want {
                 Some(i) => match camera.open(i, fps) {
                     Ok(s) => {
@@ -520,9 +534,9 @@ fn capture_loop(
                         tracing::info!("camera {i} open");
                     }
                     Err(e) => {
-                        tracing::warn!("camera {i}: {e}");
+                        tracing::warn!("{e}; retrying in {:.0} s", retry.as_secs_f64());
                         lock(&status).error = Some(e.to_string());
-                        want = None;
+                        retry_at = Some(Instant::now() + retry);
                     }
                 },
                 // Nothing to read: wait for a select (or stop).

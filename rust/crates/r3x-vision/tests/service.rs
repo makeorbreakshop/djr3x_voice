@@ -148,3 +148,29 @@ async fn switched_off_the_camera_closes_and_looks_are_refused() {
     assert!(vision.console("vision sideways").unwrap().starts_with("usage: vision on"));
     vision.shutdown();
 }
+
+/// A camera that is busy at first (another app holds it) is retried on its own, instead of
+/// vision staying dead until someone types `camera select`.
+#[tokio::test]
+async fn a_busy_camera_is_retried() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    struct Busy(AtomicU32);
+    impl Camera for Busy {
+        fn list(&self) -> Vec<CameraInfo> {
+            vec![CameraInfo { index: 1, name: "FaceTime HD Camera".into() }]
+        }
+        fn open(&self, _: u32, _: f64) -> Result<Box<dyn FrameSource>, VisionError> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(VisionError::Camera("camera 1 gave no frame within 5 s (in use by another app?)".into()));
+            }
+            Ok(Box::new(Script(vec![1u8; 20_000])))
+        }
+    }
+    let bus = Bus::new(BusConfig::default());
+    let mut rx = bus.subscribe(Domain::Vision);
+    let cfg = VisionConfig { fps: 50.0, camera_retry: Duration::from_millis(100), ..Default::default() };
+    let (vision, _task) = Vision::spawn(&bus, cfg, Box::new(Busy(AtomicU32::new(0))), Box::new(ByteRecognizer), None);
+    assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }), "opened on the retry");
+    assert!(vision.status().streaming);
+    vision.shutdown();
+}

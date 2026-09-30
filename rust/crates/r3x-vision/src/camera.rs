@@ -119,12 +119,14 @@ impl Camera for FfmpegCamera {
                 .spawn()
                 .map_err(|e| VisionError::Camera(format!("{}: {e}", self.ffmpeg)))?;
             let mut src = PipeSource::new(child, w, h);
-            match src.next_frame() {
+            match src.first_frame(FIRST_FRAME_TIMEOUT) {
                 Ok(Some(first)) => {
                     tracing::info!("camera {index} capturing at {rate} fps");
                     src.pending = Some(first);
                     return Ok(Box::new(src));
                 }
+                // Silent past the deadline: the camera is busy, not refusing a rate. Stop here.
+                Err(VisionError::Camera(e)) => return Err(VisionError::Camera(format!("camera {index} gave {e}"))),
                 // The device refused this rate (ffmpeg exits before the first frame): try the next.
                 _ if !last => continue,
                 Ok(None) => return Err(VisionError::Camera(format!("camera {index} gave no frames"))),
@@ -178,6 +180,43 @@ impl PipeSource {
     }
 }
 
+/// How long a camera may take to send its first frame before it counts as unavailable.
+pub const FIRST_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl PipeSource {
+    /// The first frame, or an error after `timeout`: a camera another app holds lets ffmpeg
+    /// start but never sends one, and a blocking read would hang the capture thread (and every
+    /// control it owes a reply, `vision off` included). On timeout the child is killed.
+    pub fn first_frame(&mut self, timeout: std::time::Duration) -> Result<Option<Frame>, VisionError> {
+        let Some(mut out) = self.child.stdout.take() else { return Ok(None) };
+        let n = self.width as usize * self.height as usize * 3;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("r3x-vision-first-frame".into())
+            .spawn(move || {
+                let mut buf = vec![0u8; n];
+                let r = out.read_exact(&mut buf).map(|()| buf);
+                let _ = tx.send((out, r));
+            })
+            .map_err(VisionError::Io)?;
+        match rx.recv_timeout(timeout) {
+            Ok((out, r)) => {
+                self.child.stdout = Some(out);
+                match r {
+                    Ok(buf) => Frame::new(self.width, self.height, buf).map(Some),
+                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
+            }
+            Err(_) => {
+                let _ = self.child.kill(); // the reader thread then sees EOF and ends
+                let _ = self.child.wait();
+                Err(VisionError::Camera(format!("no frame within {:.0} s (in use by another app?)", timeout.as_secs_f64())))
+            }
+        }
+    }
+}
+
 impl FrameSource for PipeSource {
     fn next_frame(&mut self) -> Result<Option<Frame>, VisionError> {
         if let Some(f) = self.pending.take() {
@@ -205,6 +244,13 @@ impl Drop for PipeSource {
 mod tests {
     use super::*;
 
+    /// Tests that spawn capture children share the process-wide capture list (and
+    /// `kill_captures` kills every child on it): one at a time.
+    static SERIAL: Mutex<()> = Mutex::new(());
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     const LIST: &str = "[AVFoundation indev @ 0x1] AVFoundation video devices:
 [AVFoundation indev @ 0x1] [0] Brandon's iPhone Camera
 [AVFoundation indev @ 0x1] [1] Desk View Camera
@@ -230,8 +276,30 @@ mod tests {
         assert_eq!(capture_rates(0.0), [30]);
     }
 
+    /// A camera another app holds: ffmpeg starts but never sends a frame (2026-09-30: the
+    /// capture thread then hung in open(), so `vision off` could not close it). The first
+    /// frame has a deadline; past it the child is killed and the error says why.
+    #[test]
+    fn a_first_frame_that_never_comes_times_out_and_kills_the_child() {
+        let _one = serial();
+        let child = Command::new("sleep").arg("30").stdout(Stdio::piped()).spawn().unwrap();
+        let mut src = PipeSource::new(child, 2, 2);
+        let t0 = std::time::Instant::now();
+        let e = src.first_frame(std::time::Duration::from_millis(300)).unwrap_err().to_string();
+        assert!(e.contains("no frame within") && e.contains("another app"), "{e}");
+        assert!(t0.elapsed() < std::time::Duration::from_secs(3), "did not wait for sleep 30");
+        assert!(src.child.try_wait().unwrap().is_some(), "the child was killed");
+
+        let child = Command::new("head").args(["-c", "24", "/dev/zero"]).stdout(Stdio::piped()).spawn().unwrap();
+        let mut src = PipeSource::new(child, 2, 2);
+        let f = src.first_frame(std::time::Duration::from_secs(5)).unwrap().expect("a frame");
+        assert_eq!((f.width, f.height), (2, 2));
+        assert!(src.next_frame().unwrap().is_some(), "the stream carries on after the first frame");
+    }
+
     #[test]
     fn kill_captures_ends_a_capture_child_nobody_dropped() {
+        let _one = serial();
         let child = Command::new("sleep").arg("30").stdout(Stdio::piped()).spawn().unwrap();
         let pid = child.id();
         let src = PipeSource::new(child, 2, 2);
