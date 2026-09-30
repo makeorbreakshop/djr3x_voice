@@ -64,9 +64,10 @@ PARAMS = {
     "servo_centre_us": 1500,
     "printed_wall_mm": 0.8,       # mass model: 2 x 0.4 mm perimeters on every face
     "neck_tube_bore": 26.0,       # the coupler's bore: 26 on Anderson's neck tube (the droid's default); Hunter's own neck is 32
-    "plate_insert_depth": 8.0,
-    "coupler_top_t": 7.0,         # the coupler's hub plate: 7 (was 5) so the hub screws' 6 mm inserts fit (fastening rule)
-    "visor_channel_mm": 1.5,      # clearance channel in the shells along the kit visor's sweep (0 = none)    # servo insert holes: 6 mm insert + 2 mm, so an M4 x 10 clears the drill point
+    "plate_insert_depth": 8.0,    # servo insert holes: 6 mm insert + 2 mm, so an M4 x 10 clears the drill point
+    "coupler_top_t": 10.0,        # the coupler's hub plate: 10 (was 5) so the hub screws' 6 mm inserts fit and M4 x 20s
+                                  # engage the whole insert and stop 1 mm short of the tube (fastening rule)
+    "visor_channel_mm": 1.5,      # clearance channel in the shells along the kit visor's sweep (0 = none)
     "printed_infill": 0.15,
 }
 STEP_G = np.array([0.0, 67.0, 0.0])  # gimbal centre in the STEP's frame
@@ -554,31 +555,43 @@ def build() -> Assembly:
             for e in V_.visor_channel(byid, visor_pivot, PARAMS["visor_limits"], PARAMS["visor_channel_mm"])])]
         out_dir = MECH / "out" / "hunter_head" / "clearance"
         out_dir.mkdir(parents=True, exist_ok=True)
+        shell_files = []
         for k, e in enumerate(envs):
             e.export(out_dir / f"visor_channel_{k + 1}.stl")  # head frame
             es = e.copy()
             es.apply_transform(np.linalg.inv(m_shell))
-            es.export(out_dir / f"visor_channel_{k + 1}_shell_frame.stl")  # the shell STLs' / parametric shells' frame
+            # the shells' frame, the content hash in the name (the parametric shells cache their cut on it)
+            fp = out_dir / f"visor_channel_{k + 1}_{mesh_hash(e)[:8]}_shell_frame.stl"
+            if not fp.exists():
+                es.export(fp)
+            shell_files.append(fp)
         cut_note = []
         for pid in V_.CHANNEL_SHELLS:
             p = byid.get(pid)
             if p is None or not envs:
                 continue
-            hit = [e for e in envs if np.all(e.bounds[0] <= p.mesh.bounds[1]) and np.all(e.bounds[1] >= p.mesh.bounds[0])]
+            hit = [k for k, e in enumerate(envs)
+                   if np.all(e.bounds[0] <= p.mesh.bounds[1]) and np.all(e.bounds[1] >= p.mesh.bounds[0])]
             if not hit:
                 continue
             before = float(p.mesh.volume)
-            vf = cached(_cache_key("channel-cut", mesh_hash(p.mesh), sorted(mesh_hash(e) for e in hit)),
-                        lambda: (lambda r: (np.asarray(r[0].vertices), np.asarray(r[0].faces), r[1]))(
-                            V_.cut_meshes(p.mesh, hit)))
-            cut, ok = trimesh.Trimesh(vf[0], vf[1], process=False), vf[2]
+            how = "parametric clearance_cuts"
+            try:  # the shell's own CAD cut (parts/head: clearance_cuts, cached there as BREP)
+                cut, _, _ = remodel(pid, m_shell, pid, **SHELL_PARAMS.get(pid, {}),
+                                    clearance_cuts=tuple(str(shell_files[k]) for k in hit))
+                ok = True
+            except Exception as ex:  # a mesh boolean if the model cannot take the cut
+                how = f"mesh boolean ({type(ex).__name__})"
+                vf = cached(_cache_key("channel-cut", mesh_hash(p.mesh), sorted(mesh_hash(envs[k]) for k in hit)),
+                            lambda: (lambda r: (np.asarray(r[0].vertices), np.asarray(r[0].faces), r[1]))(
+                                V_.cut_meshes(p.mesh, [envs[k] for k in hit])))
+                cut, ok = trimesh.Trimesh(vf[0], vf[1], process=False), vf[2]
             if ok:
                 p.mesh = cut
-                p.source["clearance_cuts"] = {"visor_channel_mm": PARAMS["visor_channel_mm"],
+                p.source["clearance_cuts"] = {"visor_channel_mm": PARAMS["visor_channel_mm"], "how": how,
                                               "removed_mm3": round(before - float(cut.volume), 1),
-                                              "envelopes": [f"out/hunter_head/clearance/visor_channel_{envs.index(e) + 1}.stl"
-                                                            for e in hit]}
-                cut_note.append(f"{pid} -{before - float(cut.volume):.0f} mm3")
+                                              "envelopes": [str(shell_files[k].relative_to(MECH)) for k in hit]}
+                cut_note.append(f"{pid} -{before - float(cut.volume):.0f} mm3 ({how})")
         asm.notes.append(f"Visor channel ({PARAMS['visor_channel_mm']} mm round the kit visor's sweep, "
                          f"{PARAMS['visor_limits'][0]:g}..{PARAMS['visor_limits'][1]:g} deg): {len(envs)} envelopes; "
                          + (", ".join(cut_note) or "no shell cut"))

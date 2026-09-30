@@ -405,6 +405,10 @@ def add_hardware(asm, fit, visor):
     for i, (c, r) in enumerate(sorted(c_holes, key=lambda h: (h[0][0], h[0][2]))):
         hw.hole("neck_coupler", f"cp{i + 1}", [c[0], c_top, c[2]], -UP, r)
         ins = hw.insert(f"ins_coupler_cp{i + 1}", "neck_coupler", f"cp{i + 1}", "s02")
+        # the hub plate is the whole thread: below it is the neck tube's top (the screw must stop short)
+        stop = cf.get("bore_stop")
+        if stop is not None:
+            ins.features["thread"]["depth"] = round(float(c_top - stop["p"][1]) - 0.5, 2)
         hw.hole("hub_bottom", f"cp{i + 1}", [c[0], hb_top, c[2]], -UP, 2.2)
         top = entry_point(uj, np.array([c[0], hb_top + 1.0, c[2]]), -UP, 2.0, probe=40.0)
         clamps = [("hub_bottom", f"cp{i + 1}")]

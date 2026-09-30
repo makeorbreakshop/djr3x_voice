@@ -333,10 +333,21 @@ def _geometry(V, alpha, theta, orient, phi=0):
 _STL = {}
 
 
+PARAMETRIC = {"visor-servo-horn": "parts.anderson.visor_horn", "visor-push-rod": "parts.anderson.visor_push_rod",
+              "visor-rod-tab": "parts.anderson.visor_rod_tab"}  # remodels in the STLs' own frames
+
+
 def _anderson_mesh(name):
-    """Anderson's STL, loaded once per process (the drive search places it thousands of times)."""
+    """Anderson's part, loaded once per process (the drive search places it thousands of times):
+    the parametric remodel (mech/parts/anderson) where there is one, else his STL."""
     if name not in _STL:
-        _STL[name] = geom.stl(anderson(name))
+        mod = PARAMETRIC.get(name)
+        if mod:
+            from workbench.geom import parametric_mesh
+
+            _STL[name] = parametric_mesh(mod)[0]
+        else:
+            _STL[name] = geom.stl(anderson(name))
     return _STL[name]
 
 
@@ -565,22 +576,23 @@ def drive_parts(asm, V, pick):
                         f"servo orientation {pick['orient']}).")
     lk.parts = ["visor_horn", "visor_push_rod"]
     sp = np.array([g["x_spline"] + SERVO_BOSS, g["C"][1], g["C"][2]])
-    src = lambda n: {"file": f"vendor/animation/{ANDERSON}/visor - {n}.stl", "kind": "stl", "placement": "mates"}
+    src = lambda n: {"kind": "parametric", "model": PARAMETRIC[n].replace(".", "/") + ".py",
+                     "reference": f"vendor/animation/{ANDERSON}/visor - {n}.stl", "placement": "mates"}
     parts = [
         Part("visor_servo", "Visor servo 35 kg standard (Anderson's; datasheet case)", "servo", "head", servo,
              {"kind": "parametric", "model": "parts/models.py:servo", "placement": "mates"}, "servo", False,
              (0, 0, 1), 40, 70.0, "catalogue", cad="parametric", inferred=True, inferred_note=lk.inferred_note,
              features={"spline": spline(sp, X, 25), "boss": plane(sp - X * SERVO_BOSS, X)}),
         Part("visor_horn", "Visor servo horn 25 mm (Anderson)", "mech", "head", horn, src("visor-servo-horn"),
-             "PETG (printed)", True, (1, 0, 0), 20, 3.0, "estimate", linkage="rod_visor", role="horn", cad="mesh",
+             "PETG (printed)", True, (1, 0, 0), 20, 3.0, "estimate", linkage="rod_visor", role="horn", cad="parametric",
              features={"spline": spline(sp, X, 25), "servo_face": plane(sp - X * SERVO_BOSS, -X),
                        "tip": axis([g["x_spline"], g["T"][1], g["T"][2]], X, 1.5)}),
         Part("visor_push_rod", "Visor push rod 58 mm (Anderson)", "mech", "head", rod, src("visor-push-rod"),
-             "PETG (printed)", True, (0, 1, 0), 20, 3.0, "estimate", linkage="rod_visor", role="rod", cad="mesh",
+             "PETG (printed)", True, (0, 1, 0), 20, 3.0, "estimate", linkage="rod_visor", role="rod", cad="parametric",
              features={"pin_a": axis([g["xr"] - ROD_T / 2, g["L"][1], g["L"][2]], X, 1.75),
                        "pin_b": axis([g["xr"] - ROD_T / 2, g["T"][1], g["T"][2]], X, 1.75)}),
         Part("visor_tab", "Visor rod tab 18 mm (Anderson)", "mech", "visor", tab, src("visor-rod-tab"),
-             "PETG (printed)", True, (1, 0, 0), 20, 3.0, "estimate", cad="mesh",
+             "PETG (printed)", True, (1, 0, 0), 20, 3.0, "estimate", cad="parametric",
              features={"socket": axis([TAB_X[0], V[1], V[2]], X, 4.0),
                        "tip": axis([TAB_X[0], g["L"][1], g["L"][2]], X, 1.75),
                        "cross": axis(np.array([(TAB_X[0] + TAB_X[1]) / 2, V[1], V[2]]) - 8.75 * np.cross(X, g["lev"]),
