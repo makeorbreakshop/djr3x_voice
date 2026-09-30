@@ -187,6 +187,10 @@ PARAMETRIC: dict[str, str] = {
     "neck_coupler": "parts.head.neck_coupler",
     "neck_joint_member": "parts.head.neck_joint_member",
     "custom_joint_piece": "parts.head.custom_joint_piece",
+    "head_bottom": "parts.head.head_bottom",
+    "side_left": "parts.head.side_left",
+    "side_right": "parts.head.side_right",
+    "head_top": "parts.head.head_top",
 }
 # the STEP's own placement of the cross (Custom_Joint_Piece at (0, 67, 0), -90 deg about Y)
 M_CJP = np.array([[0, 0, -1, 0], [0, 1, 0, 67.0], [1, 0, 0, 0], [0, 0, 0, 1.0]])
@@ -412,9 +416,15 @@ def build() -> Assembly:
         ("side_right", "Right side (alignment holes)", "Right Side w alignment holes.stl", (-1, 0, 0)),
         ("head_top", "Head top", "RX Head Top.stl", (0, 1, 0)),
     ]:
-        mesh = xf(geom.stl(vendor(f)), m_shell)
+        src, kw = shell_src(f), {}
+        if pid in PARAMETRIC:  # ours, in the STL's frame: the same fit places it
+            mesh, psrc, feats = remodel(pid, m_shell, pid)
+            src = dict(psrc, placement=src["placement"], fit=src["fit"])
+            kw = {"features": feats, "cad": "parametric"}
+        else:
+            mesh = xf(geom.stl(vendor(f)), m_shell)
         m, n = printed_mass(mesh)
-        add(Part(pid, name, "shell", "head", mesh, shell_src(f), "PLA (printed)", True, ex, 150, m, n))
+        add(Part(pid, name, "shell", "head", mesh, src, "PLA (printed)", True, ex, 150, m, n, **kw))
 
     # ---------------------------------------------------------- visor
     poly, circles = geom.dxf_profile(vendor("Visor Arm DXF.dxf"))
