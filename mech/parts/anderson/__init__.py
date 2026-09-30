@@ -20,4 +20,11 @@ PARTS = {
     "parts.anderson.neck_support_platform": "neck-support-platform",
     "parts.anderson.neck_support_ring_inner": "neck-support-ring-inner",
     "parts.anderson.neck_support_ring_outer": "neck-support-ring-outer",
+    "parts.anderson.pan_gear": "head-rotate-servo-gea",
+    "parts.anderson.pan_servo_mount": "neck-rotation-servo-mount",
+    "parts.anderson.base_servo_top": "base-servo-top",
+    "parts.anderson.lift_gear": "lift-gear",
+    "parts.anderson.lift_rack": "head-lift-straight-gear",
+    "parts.anderson.slide_platform": "slide-platform",
 }
+# not modelled: mgn12-rail-with-2020 is a stand-in for purchased parts (a 2020 extrusion + MGN12 rail)
