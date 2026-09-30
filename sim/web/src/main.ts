@@ -863,7 +863,8 @@ function setBpm(n: number) {
 }
 $<HTMLInputElement>('bpm').oninput = (e) => setBpm(Number((e.target as HTMLInputElement).value));
 
-document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => {
+// Buttons only: <body data-mode> (the stage mode, for CSS) would otherwise catch every click.
+document.querySelectorAll<HTMLButtonElement>('button[data-mode]').forEach((b) => {
   b.onclick = () => setMode(b.dataset.mode as SystemMode);
 });
 document.querySelectorAll<HTMLButtonElement>('[data-ev]').forEach((b) => {
