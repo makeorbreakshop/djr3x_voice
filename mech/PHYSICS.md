@@ -68,3 +68,23 @@ the commanded trajectory", not a simulation of what the robot would actually do.
 impulse joints for the rod loops, convex hulls from the same decomposition. Worth it only for
 interactive contact (a hand hitting the decks); the torque model above already covers loads, and
 MuJoCo is the better tool for validation. Decide after the MJCF comparison.
+
+## Direction (Brandon, 2026-09-30): physics built in, not exported
+
+Not scheduled yet; this is how it should be built when it is.
+
+- **MuJoCo in-process, no files.** Build the model with MuJoCo's `MjSpec` API straight from the
+  workbench assembly on every rebuild (links, masses/inertias from materials, joints + limits,
+  rod/rack loops as equality constraints, servos as position actuators with torque/speed limits,
+  friction/damping). MJCF is a debug dump only. The browser can run the same model via MuJoCo's
+  WebAssembly build for live physics in the 3D view.
+- **FEA (CalculiX) on load-bearing parts**, loads taken from the MuJoCo run of a clip (worst
+  instant per mount), plus modal analysis of the neck/lift stack at full extension; the
+  resulting stiffness goes back into MuJoCo as a compliant joint, so the sim wobbles like the
+  real head.
+- **"Simulate this clip"** in Build/Studio: servo torque, bearing/pin loads, tracking error and
+  overshoot over time; pass/warn/fail against safety factors.
+- **Materials drive mass and stiffness**: per-part material + print settings (walls, infill,
+  orientation), derated for printed plastic; calibrated by weighing parts and a phone
+  accelerometer tap test.
+- Brandon never edits CAD: intent -> parameters/designs -> rebuild -> checks + physics -> 3D view.
