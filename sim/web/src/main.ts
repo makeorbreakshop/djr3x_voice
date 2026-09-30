@@ -675,9 +675,12 @@ const workbench = new Workbench({
   interact: () => post.pacer.interact(),
   setDroidVisible(on) {
     if (droid) droid.visible = on;
+    // The booth would wall the parts in: Build stands them on Studio grey (the pick is kept).
+    sceneLook?.standIn(on || !sceneLook.showingBooth ? null : 'grey');
   },
 });
 mountBuildPanel(workbench);
+renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too
 addEventListener('r3x:mode', (e) => {
   const m = String((e as CustomEvent).detail);
   workbench.setActive(m === 'build');

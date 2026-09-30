@@ -13,8 +13,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { tameHighlights } from '../look';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
   defaultVariants, firstStep, hiddenByVariants, joinUrl, loadManifest,
@@ -59,15 +59,32 @@ export interface AsmNode {
   rods: Map<string, { servoDeg: number } | null>;
 }
 
+/**
+ * One readable colour per material class, CAD-viewport style: printed shell a warm grey (not
+ * white: a near-white albedo under a key light clips and loses its form), printed mechanism
+ * parts orange, vendor metal grey steel, servos slate, fasteners dark steel.
+ */
 const CLASS_LOOK: Record<PartClass, { color: number; metalness: number; roughness: number }> = {
-  shell: { color: 0xd8d2c4, metalness: 0.0, roughness: 0.62 },
-  mech: { color: 0xc9773d, metalness: 0.0, roughness: 0.55 },
-  servo: { color: 0x2c3444, metalness: 0.2, roughness: 0.5 },
-  hardware: { color: 0xb8b09a, metalness: 0.75, roughness: 0.35 },
-  bearing: { color: 0x9aa1ab, metalness: 0.85, roughness: 0.3 },
-  fastener: { color: 0x34353a, metalness: 0.7, roughness: 0.4 },
+  shell: { color: 0xb9b3a6, metalness: 0.0, roughness: 0.6 },
+  mech: { color: 0xc26a30, metalness: 0.0, roughness: 0.55 },
+  servo: { color: 0x3b4658, metalness: 0.15, roughness: 0.5 },
+  hardware: { color: 0x9ea2a8, metalness: 0.7, roughness: 0.38 },
+  bearing: { color: 0x8d949e, metalness: 0.8, roughness: 0.32 },
+  fastener: { color: 0x55585e, metalness: 0.7, roughness: 0.4 },
 };
 const CREASE = (30 * Math.PI) / 180;
+/** Feature edges drawn over the parts: folds sharper than this (clear edges on light parts). */
+const EDGE_ANGLE = 40;
+
+/**
+ * Build's lighting, "Inspection": a CAD viewport's neutral rig - a soft key from above front
+ * right, a fill from the left, a rim from behind and a low neutral room environment - that
+ * replaces the set's lights while Build is open (the booth key alone is 110 lm-ish on top of
+ * the work light, which is what blew the printed shells to white). Intensities are chosen so a
+ * light albedo peaks under 1.0 at exposure 1, with no highlight knee: form reads from shading.
+ * The Scene panel's Lighting levels still apply (key / fill / rim / ambient), by these names.
+ */
+const INSPECTION = { key: 1.7, fill: 0.55, rim: 0.9, hemi: 0.3, env: 0.35 };
 const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff4d4d, warn: 0xffb347 };
 
 export class Workbench {
@@ -100,6 +117,12 @@ export class Workbench {
   private readonly listeners = new Set<() => void>();
   private readonly plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
   private readonly lights = new THREE.Group();
+  /** The set's own lights, switched off while Build is open (restored on leaving). */
+  private setLights: THREE.Light[] = [];
+  private env: THREE.Texture | null = null;
+  private savedEnv: { env: THREE.Texture | null; intensity: number } | null = null;
+  private readonly edgeMat = new THREE.LineBasicMaterial({ color: 0x0b0c10, transparent: true, opacity: 0.38, depthWrite: false });
+  private readonly edgeGeo = new WeakMap<THREE.BufferGeometry, THREE.EdgesGeometry>();
   private saved: { pos: THREE.Vector3; target: THREE.Vector3; min: number; max: number; polar: [number, number]; az: [number, number] } | null = null;
   private anim: { from: number; dur: number; step: number } | null = null;
   private sweep: { node: AsmNode; joint: string; t0: number; path: [number, number][]; contact: number | null } | null = null;
@@ -110,12 +133,17 @@ export class Workbench {
     this.root.visible = false;
     this.root.scale.setScalar(0.001); // mm -> m
     host.scene.add(this.root);
-    const hemi = new THREE.HemisphereLight(0xf2f4ff, 0x2a2622, 1.6);
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(0.8, 1.6, 1.4);
-    const rim = new THREE.DirectionalLight(0xcfe0ff, 1.1);
-    rim.position.set(-1.2, 1.0, -1.4);
-    this.lights.add(hemi, key, key.target, rim);
+    const hemi = new THREE.HemisphereLight(0xf4f5f8, 0x3a3834, INSPECTION.hemi);
+    const key = new THREE.DirectionalLight(0xfffaf2, INSPECTION.key);
+    key.name = 'build_key';
+    key.position.set(0.9, 1.7, 1.3);
+    const fill = new THREE.DirectionalLight(0xe8eefc, INSPECTION.fill);
+    fill.name = 'build_fill';
+    fill.position.set(-1.5, 0.5, 0.9);
+    const rim = new THREE.DirectionalLight(0xe6eeff, INSPECTION.rim);
+    rim.name = 'build_rim';
+    rim.position.set(-0.6, 1.2, -1.6);
+    this.lights.add(hemi, key, key.target, fill, fill.target, rim, rim.target);
     this.lights.visible = false;
     host.scene.add(this.lights);
     const el = host.renderer.domElement;
@@ -147,8 +175,9 @@ export class Workbench {
     this.active = on;
     this.root.visible = on;
     this.lights.visible = on;
+    this.inspection(on);
     this.host.renderer.localClippingEnabled = on;
-    this.host.setDroidVisible(!on);
+    if (on) this.host.setDroidVisible(false);
     const c = this.host.controls;
     if (on) {
       this.saved = {
@@ -171,7 +200,48 @@ export class Workbench {
       [c.minAzimuthAngle, c.maxAzimuthAngle] = this.saved.az;
       this.sweep = null;
     }
+    // After the camera limits are back: showing the droid may bring the booth (and its limits) back.
+    if (!on) this.host.setDroidVisible(true);
     this.emit();
+  }
+
+  /** Swap the set's lights and environment for the Inspection rig (see INSPECTION). */
+  private inspection(on: boolean) {
+    const scene = this.host.scene;
+    if (on) {
+      this.setLights = [];
+      scene.traverse((o) => {
+        const l = o as THREE.Light;
+        if (!l.isLight || !l.visible || this.isOurs(l)) return;
+        this.setLights.push(l);
+        l.visible = false;
+      });
+      this.env ??= new THREE.PMREMGenerator(this.host.renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+      this.savedEnv = { env: scene.environment, intensity: scene.environmentIntensity };
+      this.holdInspection();
+    } else {
+      for (const l of this.setLights) l.visible = true;
+      this.setLights = [];
+      if (this.savedEnv) {
+        scene.environment = this.savedEnv.env;
+        scene.environmentIntensity = this.savedEnv.intensity;
+      }
+      this.savedEnv = null;
+    }
+  }
+
+  /** The set may re-light itself while Build is open (a backdrop pick, the booth desk): undo it. */
+  private holdInspection() {
+    const scene = this.host.scene;
+    for (const l of this.setLights) l.visible = false;
+    if (this.savedEnv && scene.environment !== this.env) this.savedEnv.env = scene.environment;
+    scene.environment = this.env;
+    scene.environmentIntensity = INSPECTION.env;
+  }
+
+  private isOurs(o: THREE.Object3D) {
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) if (p === this.lights || p === this.root) return true;
+    return false;
   }
 
   // ------------------------------------------------------------------ loading
@@ -227,8 +297,9 @@ export class Workbench {
     this.fast = fast;
     this.top = top;
     this.root.add(this.top.group);
-    // The droid's highlight knee (look.ts): lit surfaces stay under the bloom threshold.
-    tameHighlights(this.root);
+    // No highlight knee here (look.ts tameHighlights): it squeezes every lit value above 0.7
+    // into 0.85-1.0, which is what flattened the light shells. The Inspection rig keeps them
+    // under the bloom threshold instead.
     // The head mech's frame sits where the droid's head is (its mount, mm in the body frame).
     const mt = m.root.mount?.transform?.t ?? [0, 0, 0];
     this.root.position.set(mt[0] / 1000, mt[1] / 1000, mt[2] / 1000);
@@ -273,6 +344,13 @@ export class Workbench {
       mesh.name = p.id;
       mesh.userData.partId = p.id;
       mesh.castShadow = mesh.receiveShadow = false;
+      // Feature edges, drawn over the faces (pushed back a hair by polygonOffset).
+      let eg = this.edgeGeo.get(geo);
+      if (!eg) this.edgeGeo.set(geo, (eg = new THREE.EdgesGeometry(geo, EDGE_ANGLE)));
+      const edges = new THREE.LineSegments(eg, this.edgeMat);
+      edges.name = 'edges';
+      edges.raycast = () => {};
+      mesh.add(edges);
       const b = new THREE.Vector3(...p.transform.t);
       mesh.position.copy(b);
       let holder: THREE.Object3D = mesh;
@@ -330,7 +408,7 @@ export class Workbench {
 
   private material(cls: PartClass) {
     const look = CLASS_LOOK[cls];
-    return new THREE.MeshStandardMaterial({ ...look, side: THREE.DoubleSide });
+    return new THREE.MeshStandardMaterial({ ...look, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   }
 
   forEachNode(fn: (n: AsmNode) => void, from = this.top) {
@@ -496,6 +574,7 @@ export class Workbench {
   /** Per frame (main.ts). */
   tick(now = performance.now()) {
     if (!this.active) return;
+    this.holdInspection();
     let moving = false;
     if (this.sweep) {
       const s = this.sweep;
@@ -582,7 +661,11 @@ export class Workbench {
       }
       setLook(m, opacity, clip);
       po.mesh.renderOrder = opacity < 1 ? 2 : 0;
+      const edges = po.mesh.getObjectByName('edges');
+      if (edges) edges.visible = opacity >= 0.99;
     }
+    if ((clip?.length ?? 0) !== (this.edgeMat.clippingPlanes?.length ?? 0)) this.edgeMat.needsUpdate = true;
+    this.edgeMat.clippingPlanes = clip;
     const fastIn = new Set(cur?.fasteners ?? []);
     const stepIds = steps.map((s) => s.id);
     for (const [id, fo] of this.fast) {

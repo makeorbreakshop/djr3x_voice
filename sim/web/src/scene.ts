@@ -108,7 +108,16 @@ export class SceneLook {
   }
 
   get showingBooth() {
-    return this.choice.backdrop === 'booth';
+    return (this.stand ?? this.choice.backdrop) === 'booth';
+  }
+
+  /** A backdrop that stands in for the viewer's pick without replacing it (Build shows its
+   *  parts on Studio grey rather than inside the booth); null returns to the pick. */
+  private stand: Backdrop | null = null;
+  standIn(b: Backdrop | null) {
+    if (b === this.stand) return;
+    this.stand = b;
+    this.apply();
   }
 
   /** The operator's pick: remembered, in every mode. */
@@ -128,7 +137,8 @@ export class SceneLook {
   }
 
   private apply() {
-    const { backdrop, workLight } = this.choice;
+    const { workLight } = this.choice;
+    const backdrop = this.stand ?? this.choice.backdrop;
     const booth = backdrop === 'booth';
     const s = this.scene;
     this.showBooth(booth); // restores the booth's background, fog and environment

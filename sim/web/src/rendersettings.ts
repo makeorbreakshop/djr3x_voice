@@ -156,9 +156,9 @@ function tint(k: number): THREE.Color {
 // ------------------------------------------------------------------ lights
 
 const GROUP_LIGHTS: Record<'key' | 'fill' | 'rim' | 'desk', string[]> = {
-  key: ['droid_key', 'work_key'],
-  fill: ['fill', 'work_fill'],
-  rim: ['head_rim_l', 'head_rim_r', 'work_rim'],
+  key: ['droid_key', 'work_key', 'build_key'],
+  fill: ['fill', 'work_fill', 'build_fill'],
+  rim: ['head_rim_l', 'head_rim_r', 'work_rim', 'build_rim'],
   desk: ['back_uplight', 'wall_wash_l', 'wall_wash_r', 'ceiling_down'],
 };
 const WORK = new Set(['work_key', 'work_fill', 'work_rim']);
@@ -181,12 +181,26 @@ export class RenderSettings {
   private readonly listeners: (() => void)[] = [];
   private readonly stored: Stored;
 
-  constructor(private readonly post: PostPipeline, scene: THREE.Scene) {
+  private readonly seen = new Set<THREE.Light>();
+
+  constructor(private readonly post: PostPipeline, private readonly scene: THREE.Scene) {
     this.stored = load();
     this.values = sanitize(this.stored.values);
-    scene.traverse((o) => {
+    this.collect();
+    this.apply();
+  }
+
+  /** Pick up lights created after this (Build's Inspection rig) and apply the levels to them. */
+  rescan() {
+    this.apply();
+  }
+
+  /** Track lights added since (Build's Inspection rig), at the level they were built with. */
+  collect() {
+    this.scene.traverse((o) => {
       const l = o as ShadowLight;
-      if (!l.isLight) return;
+      if (!l.isLight || this.seen.has(l)) return;
+      this.seen.add(l);
       const t: Tracked = {
         light: l, intensity: l.intensity, color: l.color.clone(),
         shadowRadius: l.castShadow && l.shadow ? l.shadow.radius : null,
@@ -194,7 +208,6 @@ export class RenderSettings {
       if (l.name) (this.lights.get(l.name) ?? this.lights.set(l.name, []).get(l.name)!).push(t);
       if (t.shadowRadius !== null) this.casters.push(t);
     });
-    this.apply();
   }
 
   /** The face and chest LEDs, once the model has loaded (main.ts). */
@@ -264,6 +277,7 @@ export class RenderSettings {
   }
 
   private apply() {
+    this.collect();
     const v = this.values;
     this.post.setTone(v.toneMap, v.exposure);
     this.post.setBloom(v.bloom, v.bloomStrength, v.bloomThreshold, v.bloomRadius);
