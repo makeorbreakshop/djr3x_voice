@@ -1275,6 +1275,7 @@ gazeSel.onchange = () => {
   void send({ class: 'stage', type: 'set_gaze', source, ...(source === 'viewport' ? { owner: PANEL_ID } : {}) });
   gazeSel.blur();
 };
+if (!connected) renderGaze(null); // standalone until the gateway says hello
 
 /** The owning panel's camera as the gaze target: ~15 Hz while it moves, 2 Hz keepalive. */
 let lookSent = { pan: NaN, tilt: NaN, at: 0 };
