@@ -101,6 +101,10 @@ for (int i = 0; i < ${MAX_LEDS}; i++) {
 
 class LitPart {
   private readonly u?: DiffuserUniforms;
+  /** Viewer's LED level (Scene -> Rendering -> LED glow): scales everything this part emits. */
+  intensity = 1;
+  /** Viewer's halo amount: scales only the glow sprite, not the lit part or the bloom. */
+  glow = 1;
   readonly light: THREE.PointLight;
   private readonly glowMat: THREE.SpriteMaterial;
   private readonly acc = new THREE.Color();
@@ -117,6 +121,8 @@ class LitPart {
     lightRange: number,
     /** Emission gain: a diffusion bulb scatters the jewel's light through its whole body. */
     private readonly gain = LED_GAIN,
+    /** Halo sprite brightness per unit of LED light (before the viewer's glow amount). */
+    private readonly halo = 0.9,
   ) {
     if (diffuserMesh) {
       const { material, u } = makeDiffuser(diffuserMesh.material as THREE.Material, sigma);
@@ -144,12 +150,12 @@ class LitPart {
       ledColor(rgb, this.c);
       this.acc.add(this.c);
       if (this.u) {
-        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(this.gain);
+        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(this.gain * this.intensity);
         this.u.uLedPos.value[i].copy(this.local[i]).applyMatrix4(this.anchor.matrixWorld);
       }
     });
-    this.acc.multiplyScalar(1 / colors.length);
-    this.glowMat.color.copy(this.acc).multiplyScalar(0.9 * (this.gain / LED_GAIN));
+    this.acc.multiplyScalar(this.intensity / colors.length);
+    this.glowMat.color.copy(this.acc).multiplyScalar(this.halo * this.glow);
     this.light.color.copy(this.acc);
     this.light.intensity = Math.min(1, Math.max(this.acc.r, this.acc.g, this.acc.b)) * 0.4;
   }
@@ -219,8 +225,12 @@ export class FaceLeds {
         pos.push(new THREE.Vector3(Math.sin(t) * JEWEL_RING_RADIUS, Math.cos(t) * JEWEL_RING_RADIUS, z));
       }
       // sigma ~ bulb depth: the frosted bulb glows through its whole body, as a real
-      // diffuser does, rather than only at the face nearest the jewel.
-      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.05, 0.1, LED_GAIN * 3.5);
+      // diffuser does, rather than only at the face nearest the jewel. The bulb runs hot
+      // (21x) so the tone mapper whitens its core the way a camera sees the real eyes; the
+      // bloom only takes a capped share of that (post.ts capBloomInput). The halo sprite is
+      // bulb-sized: a lit lens, not a lamp (it was 5 cm across at 3.2, which washed an
+      // orange disc over the whole grille and bezel).
+      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.036, 0.1, LED_GAIN * 3.5, 2.25);
     };
     const [first, second] = LEFT_EYE_IS_DROIDS_LEFT ? (['L', 'R'] as const) : (['R', 'L'] as const);
     this.left = eye(first);
@@ -235,6 +245,14 @@ export class FaceLeds {
     const lit = findMesh(rig.root, pipe ? 'head_tilt__H_MOUTH_PIPE' : 'head_tilt__H_M_1');
     this.mouth = new LitPart(anchor('mouth'), mouthPos, lit, pipe ? 0.011 : 0.013,
       new THREE.Vector3(0, 0, 0.004), 0.06, 0.12);
+  }
+
+  /** The viewer's LED level and halo amount for one group (Scene -> Rendering). */
+  setLevels(group: 'eyes' | 'mouth', intensity: number, glow: number) {
+    for (const p of group === 'eyes' ? [this.left, this.right] : [this.mouth]) {
+      p.intensity = intensity;
+      p.glow = glow;
+    }
   }
 
   /** Firmware pixels, as frames carry them: 14 eye LEDs, 8 mouth LEDs. */

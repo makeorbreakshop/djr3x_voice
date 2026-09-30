@@ -1,9 +1,13 @@
 /**
  * The Scene panel (left): how this viewer sees R3X. Nothing here changes robot state; every
  * choice is this browser's own (localStorage, try/catch). The camera presets, backdrop, work
- * light, Centres and quality are wired where they live (main.ts, post.ts); this module owns
- * the rail's section icons plus the Captions and Frame stats overlays (collapse: layout.ts).
+ * light, Centres and quality are wired where they live (main.ts, post.ts), Lighting and
+ * Rendering in rendersettings.ts; this module owns the rail's section icons plus the Captions
+ * and Frame stats overlays (the frame diagnostics: framediag.ts; collapse: layout.ts).
  */
+
+import { FrameDiag } from './framediag';
+import type { PostPipeline } from './post';
 
 const KEY = 'r3x.scenePanel';
 
@@ -29,14 +33,8 @@ function save(s: Stored) {
   }
 }
 
-export interface FrameSource {
-  readonly frames: number;
-  readonly pixelRatio: number;
-  readonly currentQuality: string;
-}
-
 /** Mount the panel; `open` expands it (layout.ts). */
-export function mountScenePanel(post: FrameSource, open: () => void) {
+export function mountScenePanel(post: PostPipeline, open: () => void) {
   const $ = (id: string) => document.getElementById(id)!;
   const st = load();
   const panel = $('scene-panel');
@@ -48,8 +46,10 @@ export function mountScenePanel(post: FrameSource, open: () => void) {
     b.onclick = () => {
       open();
       const sec = $(b.dataset.sceneOpen!);
+      const det = sec.querySelector('details');
+      if (det) det.open = true;
       sec.scrollIntoView({ block: 'nearest' });
-      sec.querySelector<HTMLElement>('button, select')?.focus();
+      sec.querySelector<HTMLElement>(det ? 'summary' : 'button, select')?.focus();
     };
   });
 
@@ -64,25 +64,12 @@ export function mountScenePanel(post: FrameSource, open: () => void) {
     (e.currentTarget as HTMLElement).blur();
   };
 
-  const stats = $('frame-stats');
-  let timer = 0;
-  let prev = { frames: post.frames, at: performance.now() };
-  const tick = () => {
-    const now = performance.now();
-    const fps = ((post.frames - prev.frames) * 1000) / Math.max(1, now - prev.at);
-    prev = { frames: post.frames, at: now };
-    stats.textContent = `${fps.toFixed(0)} fps drawn · ${post.pixelRatio.toFixed(2)}x · ${post.currentQuality}`;
-  };
+  const diag = new FrameDiag(post, $('frame-stats'));
+  $('scene-stats').title = 'Frame diagnostics: fps and why (pacing), frame and GPU time, draw calls, passes; Profile 10 s';
   const setStats = (on: boolean) => {
     st.stats = on;
-    stats.hidden = !on;
     press('scene-stats', on);
-    clearInterval(timer);
-    if (on) {
-      prev = { frames: post.frames, at: performance.now() };
-      stats.textContent = '…';
-      timer = window.setInterval(tick, 1000);
-    }
+    diag.setEnabled(on);
   };
   $('scene-stats').onclick = (e) => {
     setStats(!st.stats);

@@ -1034,6 +1034,7 @@ function buildBooth(renderer: THREE.WebGLRenderer, scene: THREE.Scene): StageSet
   const fixtures: Partial<Record<Group, THREE.Light[]>> = {};
   const fx = <T extends THREE.Light>(g: Group, l: T) => {
     (fixtures[g] ??= []).push(l);
+    l.name = g; // the viewer's lighting levels find fixtures by group (rendersettings.ts)
     scene.add(l);
     const t = (l as unknown as THREE.SpotLight).target;
     if (t) scene.add(t);

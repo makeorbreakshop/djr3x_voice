@@ -16,7 +16,8 @@ import { FramePacer, type PaceRates } from './pacer';
  * droid" and "pixels on screen":
  *
  *   N8AO, or RenderPass (Performance)  HDR, half-float, linear
- *   UnrealBloomPass, threshold 1.0    only the LEDs cross 1.0 (look.ts's highlight knee)
+ *   UnrealBloomPass, threshold 1.0    only the LEDs cross 1.0 (look.ts's highlight knee); only
+ *                                     the excess blooms, soft-capped (capBloomInput)
  *   OutputPass                        tone mapping + sRGB
  *   SMAA                              edges (no MSAA: every pass is a full-screen quad)
  *   LUTPass                           the grade
@@ -35,8 +36,11 @@ import { FramePacer, type PaceRates } from './pacer';
  *   high          1.5x       half res, 16 spp +  1/2 res    60 fps    15 fps
  *                            8-tap denoise
  *
+ * Exposure, tone mapper, bloom, AO and the environment level are also live controls (Scene ->
+ * Rendering, rendersettings.ts), layered over the quality level.
+ *
  * URL flags: `?quality=performance|balanced|high` (also the viewport's control; remembered
- * per browser), `?pace=0` (draw every animation frame), `?tonemap=neutral|agx`, `?dpr=<n>`
+ * per browser), `?pace=0` (draw every animation frame), `?tonemap=neutral|agx|aces`, `?dpr=<n>`
  * (fixed scale, no adaptation),
  * `?lut=<url.cube>` (grade from a file instead of the built-in one), `?grain=0`,
  * `?post=hot` (HDR check: magenta where a pixel exceeds 1.0 before bloom, i.e. what
@@ -44,7 +48,7 @@ import { FramePacer, type PaceRates } from './pacer';
  */
 
 export type Quality = 'performance' | 'balanced' | 'high';
-export type ToneMap = 'neutral' | 'agx';
+export type ToneMap = 'neutral' | 'agx' | 'aces';
 
 const params = new URLSearchParams(location.search);
 const QUALITY_KEY = 'r3x.quality';
@@ -91,7 +95,49 @@ export function initialQuality(): Quality {
 const TONE: Record<ToneMap, { mapping: THREE.ToneMapping; exposureScale: number }> = {
   neutral: { mapping: THREE.NeutralToneMapping, exposureScale: 1.0 },
   agx: { mapping: THREE.AgXToneMapping, exposureScale: 1.35 },
+  aces: { mapping: THREE.ACESFilmicToneMapping, exposureScale: 0.9 },
 };
+
+/** The URL's tone mapper, else neutral. */
+export function initialToneMap(): ToneMap {
+  const t = params.get('tonemap');
+  return t && t in TONE ? (t as ToneMap) : 'neutral';
+}
+
+// ------------------------------------------------------------------ bloom input
+
+/**
+ * What the bloom blurs. UnrealBloomPass's own high pass keeps a pixel's WHOLE value once its
+ * luminance crosses the threshold, so an LED driven to 20x (the eye bulbs: that is what makes
+ * the tone mapper whiten their cores) poured 20x into the blur and haloed the whole face.
+ * Here only the excess over the threshold blooms, and it is soft-capped at uCap: a core can
+ * be as hot as the tone mapper wants, but its halo stays a modest, bounded glow.
+ */
+function capBloomInput(bloom: UnrealBloomPass, cap: number): { value: number } {
+  const u = { value: cap };
+  const m = bloom.materialHighPassFilter;
+  m.uniforms.uCap = u;
+  m.fragmentShader = /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float luminosityThreshold;
+    uniform float uCap;
+    varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float m = max(max(c.r, c.g), c.b);
+      float e = max(m - luminosityThreshold, 0.0);
+      float s = uCap * (1.0 - exp(-e / max(uCap, 1e-3)));
+      gl_FragColor = vec4(c * (s / max(m, 1e-4)), 1.0);
+    }`;
+  m.needsUpdate = true;
+  return u;
+}
+
+/** Per-frame measurement hooks (framediag.ts); null = none, no cost. */
+export interface RenderProbe {
+  frameStart(): void;
+  frameEnd(): void;
+}
 
 // ------------------------------------------------------------------ the grade
 
@@ -314,6 +360,15 @@ export class PostPipeline {
   private readonly dyn: DynamicResolution | null;
   private quality: Quality;
   private lastFrame = -1;
+  private toneMap: ToneMap;
+  private exposure = 1;
+  private bloomOn = true;
+  private aoOn = true;
+  private readonly bloomCap: { value: number };
+  /** Environment multiplier over whatever the set chose (the booth's desk drives it per cue). */
+  envScale = 1;
+  /** Frame diagnostics (framediag.ts), while its overlay is open. */
+  probe: RenderProbe | null = null;
   /** When to draw (pacer.ts); main.ts asks it every animation frame. */
   readonly pacer: FramePacer;
 
@@ -322,9 +377,8 @@ export class PostPipeline {
     readonly scene: THREE.Scene,
     readonly camera: THREE.PerspectiveCamera,
   ) {
-    const tone = TONE[(params.get('tonemap') as ToneMap) ?? ''] ?? TONE.neutral;
-    renderer.toneMapping = tone.mapping;
-    renderer.toneMappingExposure *= tone.exposureScale;
+    this.toneMap = initialToneMap();
+    this.applyTone();
 
     this.quality = initialQuality();
     this.pacer = new FramePacer(QUALITY[this.quality].pace, !STILL && params.get('pace') !== '0');
@@ -361,7 +415,8 @@ export class PostPipeline {
 
     // Threshold 1.0: only the LEDs (driven past 1.0) bloom; lit surfaces pass through
     // look.ts's soft knee and stay under it.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.85, 0.35, 1.0);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.6, 0.3, 1.0);
+    this.bloomCap = capBloomInput(this.bloom, 2.5);
     // The composer sizes every pass to the render size; bloom (a blur) runs at a fraction.
     const bloomSize = this.bloom.setSize.bind(this.bloom);
     this.bloom.setSize = (w: number, h: number) => {
@@ -405,7 +460,59 @@ export class PostPipeline {
   }
 
   get aoEnabled() {
+    return QUALITY[this.quality].ao !== null && this.aoOn;
+  }
+
+  /** Whether the quality level renders AO at all (Performance does not). */
+  get aoAvailable() {
     return QUALITY[this.quality].ao !== null;
+  }
+
+  get bloomEnabled() {
+    return this.bloomOn;
+  }
+
+  /** The WebGL renderer (frame diagnostics read its counters and context). */
+  get gl() {
+    return this.renderer;
+  }
+
+  private applyTone() {
+    const t = TONE[this.toneMap];
+    this.renderer.toneMapping = t.mapping;
+    this.renderer.toneMappingExposure = this.exposure * t.exposureScale;
+  }
+
+  /** Tone mapper and exposure (Scene -> Rendering). */
+  setTone(map: ToneMap, exposure: number) {
+    if (map === this.toneMap && exposure === this.exposure) return;
+    this.toneMap = map in TONE ? map : 'neutral';
+    this.exposure = exposure;
+    this.applyTone();
+    this.pacer.touch();
+  }
+
+  /** Bloom on/off and its shape; `cap` bounds any one pixel's halo (see capBloomInput). */
+  setBloom(on: boolean, strength: number, threshold: number, radius: number, cap = this.bloomCap.value) {
+    this.bloom.strength = strength;
+    this.bloom.threshold = threshold;
+    this.bloom.radius = radius;
+    this.bloomCap.value = cap;
+    if (on !== this.bloomOn) {
+      this.bloomOn = on;
+      this.build();
+    }
+    this.pacer.touch();
+  }
+
+  /** AO on/off (within what the quality allows) and its strength. */
+  setAO(on: boolean, intensity: number) {
+    this.ao.configuration.intensity = intensity;
+    if (on !== this.aoOn) {
+      this.aoOn = on;
+      this.build();
+    }
+    this.pacer.touch();
   }
 
   /** Frames drawn since load. */
@@ -436,10 +543,11 @@ export class PostPipeline {
     const passes = this.composer.passes;
     while (passes.length) this.composer.removePass(passes[passes.length - 1]);
     const preset = QUALITY[this.quality];
-    if (preset.ao) this.ao.setQualityMode(preset.ao);
-    this.composer.addPass(preset.ao ? this.ao : this.renderPass);
+    const ao = this.aoOn ? preset.ao : null;
+    if (ao) this.ao.setQualityMode(ao);
+    this.composer.addPass(ao ? this.ao : this.renderPass);
     if (this.hot) this.composer.addPass(this.hot);
-    this.composer.addPass(this.bloom);
+    if (this.bloomOn) this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
     this.composer.addPass(this.lut);
@@ -484,6 +592,15 @@ export class PostPipeline {
     }
     this.lastFrame = this.pacer.fps(now) === Infinity ? now : -1;
     this.film.uniforms.uTime.value = STILL ? 0 : now / 1000;
-    this.composer.render();
+    this.probe?.frameStart();
+    if (this.envScale === 1) {
+      this.composer.render();
+    } else {
+      const e = this.scene.environmentIntensity;
+      this.scene.environmentIntensity = e * this.envScale;
+      this.composer.render();
+      this.scene.environmentIntensity = e;
+    }
+    this.probe?.frameEnd();
   }
 }

@@ -58,6 +58,8 @@ export class FramePacer {
   private scratch: number[] = [];
   /** Frames drawn since load (for measurement). */
   frames = 0;
+  /** Draw every animation frame until then (a profiling run, framediag.ts). */
+  private continuousUntil = -Infinity;
 
   constructor(public rates: PaceRates, private readonly enabled = true) {}
 
@@ -107,9 +109,25 @@ export class FramePacer {
     return performance.now() < this.interactUntil;
   }
 
+  /** Draw every animation frame for `ms` (0 ends it early). */
+  continuous(ms: number, now = performance.now()) {
+    this.continuousUntil = ms > 0 ? now + ms : -Infinity;
+    this.wakeNow();
+  }
+
+  /**
+   * Why frames come as often as they do, for the frame diagnostics: a low rate while `quiet`
+   * is the pacing working, not the renderer struggling.
+   */
+  state(now = performance.now()): 'continuous' | 'interacting' | 'active' | 'quiet' {
+    if (!this.enabled || now < this.continuousUntil) return 'continuous';
+    if (now < this.interactUntil) return 'interacting';
+    return now < this.activeUntil ? 'active' : 'quiet';
+  }
+
   /** Target fps now. */
   fps(now: number): number {
-    if (!this.enabled || now < this.interactUntil) return Infinity;
+    if (!this.enabled || now < this.interactUntil || now < this.continuousUntil) return Infinity;
     return now < this.activeUntil ? this.rates.active : this.rates.quiet;
   }
 

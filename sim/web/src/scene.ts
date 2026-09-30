@@ -89,6 +89,10 @@ export class SceneLook {
     const rim = new THREE.SpotLight(0xdce8ff, 16, 8, 0.45, 0.9, 1.6);
     rim.position.set(-0.9, 2.4, -2.4);
     rim.target.position.set(0, 0.7, 0);
+    // Named for the viewer's lighting levels (rendersettings.ts).
+    key.name = 'work_key';
+    fill.name = 'work_fill';
+    rim.name = 'work_rim';
     this.work.add(key, key.target, fill, rim, rim.target);
     this.work.visible = false;
     scene.add(this.plain, this.work);

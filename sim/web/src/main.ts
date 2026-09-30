@@ -31,6 +31,7 @@ import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
 import { Centres, atHome, formatValue } from './centres';
 import { mountScenePanel } from './scenepanel';
+import { RenderSettings, mountRenderPanel } from './rendersettings';
 import { Workbench } from './workbench/workbench';
 import { injectBuildDom, mountBuildPanel } from './workbench/buildpanel';
 import { mountPanels } from './layout';
@@ -177,6 +178,10 @@ for (const id of ['panel', 'scene-panel']) {
 injectBuildDom(); // Build's markup, before the panels wire their rails and tabs
 const panels = mountPanels(fitView);
 mountScenePanel(post, () => panels.set('scene', false));
+// Scene -> Lighting / Rendering: this viewer's levels over the quality (rendersettings.ts).
+const renderLook = new RenderSettings(post, scene);
+mountRenderPanel(renderLook, () => set.booth && (!sceneLook || sceneLook.showingBooth), () => post.aoAvailable,
+  () => !!sceneLook?.choice.workLight);
 fitView();
 
 
@@ -712,6 +717,7 @@ async function load() {
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
   chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
+  renderLook.attachLeds(leds, chestLights);
   ghosts = new Ghosts(rig, PROFILE);
   ghosts.apply(gwState?.stage.outputs ?? null);
   centres = new Centres(rig, FULL_PROFILE.joints, $('centre-labels'));
