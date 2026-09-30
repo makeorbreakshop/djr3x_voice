@@ -297,7 +297,28 @@ body.scene-collapsed #scene-panel { width: 50px; padding: 8px; align-items: cent
 body.scene-collapsed #scene-panel h1, body.scene-collapsed .side-body { display: none; }
 body.scene-collapsed #scene-panel header { margin: 0; }
 body.scene-collapsed #scene-collapse svg { transform: scaleX(-1); }
-body.scene-collapsed .rail { display: flex; }
+body.scene-collapsed #scene-panel .rail { display: flex; }
+
+/* R3X collapsed: a rail with the link, the operating mode and the talk button (layout.ts). */
+.r3x-body { display: contents; }
+#panel header .status { margin-left: auto; margin-right: 8px; }
+body.r3x-collapsed #panel { width: 50px; padding: 8px; align-items: center; }
+body.r3x-collapsed #panel h1, body.r3x-collapsed #panel .status, body.r3x-collapsed .r3x-body { display: none; }
+body.r3x-collapsed #panel header { margin: 0; }
+body.r3x-collapsed #r3x-collapse svg { transform: scaleX(-1); }
+body.r3x-collapsed #r3x-rail { display: flex; align-items: center; }
+.rail-gw { width: 32px; height: 20px; display: grid; place-items: center; }
+.rail-gw::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3a3f4c; }
+.rail-gw.on::before { background: #57d38c; }
+.rail-modes { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-block: 1px solid var(--line); }
+.rail .rail-modes button { font: 600 11px/1 system-ui, sans-serif; }
+.rail .rail-modes button[aria-checked="true"] { border-color: var(--accent); color: var(--accent); }
+.rail .rail-ptt { width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; grid-template: none / none; place-items: center; }
+.rail-ptt .ptt-dot { grid-row: auto; width: 14px; height: 14px; }
+
+/* Collapse and expand are short, never gate input, and are instant under reduced motion. */
+#panel, #scene-panel { transition: width .16s ease-out, padding .16s ease-out; }
+@media (prefers-reduced-motion: reduce) { #panel, #scene-panel { transition: none; } }
 
 /* Toggles: pressed reads like a selected chip. */
 button[aria-pressed="true"], .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
@@ -375,6 +396,9 @@ details.debug small { opacity: .7; }
 @media (max-width: 720px) {
   #scene-panel { top: 8px; left: 8px; bottom: auto; max-height: 44vh; }
   body.scene-collapsed #scene-panel { max-height: none; }
+  body.r3x-collapsed #panel { left: auto; height: auto; width: auto; flex-direction: row; }
+  body.r3x-collapsed #r3x-rail, body.r3x-collapsed .rail-modes { flex-direction: row; margin: 0 0 0 6px; }
+  body.r3x-collapsed .rail-modes { border-block: 0; border-inline: 1px solid var(--line); padding: 0 6px; }
 }
 .seg button { min-width: 0; }
 .side .seg button { padding-inline: 2px; }

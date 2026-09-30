@@ -31,6 +31,7 @@ import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
 import { Centres, atHome, formatValue } from './centres';
 import { mountScenePanel } from './scenepanel';
+import { mountPanels } from './layout';
 import { BodyRegions } from './regions';
 import type { RobotProfile } from './generated/RobotProfile';
 import type { GazeSource } from './generated/GazeSource';
@@ -137,11 +138,40 @@ function fitView() {
   document.documentElement.style.setProperty('--scene-space', `${scenePanel || 12}px`);
   camera.aspect = w / h;
   camera.setViewOffset(w, h, (panel - scenePanel) / 2, viewInset / 2, w, h);
+  // The presets are framed for a visible area at least FIT_ASPECT wide; narrower (both panels
+  // open on a small window) widens the lens so he is not cut off behind a panel.
+  const seen = (w - panel - scenePanel) / Math.max(1, h - viewInset);
+  camera.zoom = Math.min(1, seen / FIT_ASPECT);
   camera.updateProjectionMatrix();
-  post.setSize(w, h);
+  if (w !== fitSize.w || h !== fitSize.h) post.setSize(w, h);
+  fitSize.w = w;
+  fitSize.h = h;
 }
+const FIT_ASPECT = 0.95;
+const fitSize = { w: 0, h: 0 };
 addEventListener('resize', fitView);
-mountScenePanel(post, fitView);
+// A panel sliding open or shut re-fits every frame until it settles.
+let fitting = 0;
+const fitFrame = () => {
+  fitView();
+  if (fitting) requestAnimationFrame(fitFrame);
+};
+for (const id of ['panel', 'scene-panel']) {
+  const el = document.getElementById(id)!;
+  el.addEventListener('transitionrun', (e) => {
+    if (e.target !== el || fitting++) return;
+    requestAnimationFrame(fitFrame);
+  });
+  const done = (e: TransitionEvent) => {
+    if (e.target !== el) return;
+    fitting = Math.max(0, fitting - 1);
+    fitView();
+  };
+  el.addEventListener('transitionend', done);
+  el.addEventListener('transitioncancel', done);
+}
+const panels = mountPanels(fitView);
+mountScenePanel(post, () => panels.set('scene', false));
 fitView();
 
 

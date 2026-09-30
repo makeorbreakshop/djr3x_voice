@@ -18,7 +18,7 @@
     <aside id="scene-panel" class="side" aria-label="Scene">
       <header>
         <h1>Scene</h1>
-        <button id="scene-collapse" class="icon" aria-expanded="true" aria-controls="scene-body" title="Collapse to icons">
+        <button id="scene-collapse" class="icon" aria-expanded="true" aria-controls="scene-body" title="Collapse the Scene panel ( [ )">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
         </button>
       </header>
@@ -89,7 +89,20 @@
           <span id="st-gw" class="pill live" title="r3x runtime gateway; start everything with ./r3x">Offline</span>
           <span id="st-live" class="pill live" title="CantinaOS SimBridge (./r3x --legacy only)" hidden>OFFLINE</span>
         </div>
+        <button id="r3x-collapse" class="icon" aria-expanded="true" aria-controls="r3x-body" title="Collapse to a rail ( ] )">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+        </button>
       </header>
+      <nav id="r3x-rail" class="rail" aria-label="R3X at a glance">
+        <span id="rail-gw" class="rail-gw" role="img" aria-label="Offline" title="Offline"></span>
+        <div class="rail-modes" role="radiogroup" aria-label="Operating mode">
+          <button role="radio" aria-checked="true" data-stage-mode="show" aria-label="Show" title="Show">Sh</button>
+          <button role="radio" aria-checked="false" data-stage-mode="bench" aria-label="Bench" title="Bench">Be</button>
+          <button role="radio" aria-checked="false" data-stage-mode="studio" aria-label="Studio" title="Studio">St</button>
+        </div>
+        <button id="rail-ptt" class="ptt rail-ptt" data-state="offline" aria-label="R3X offline" title="R3X offline" disabled><span class="ptt-dot"></span></button>
+      </nav>
+      <div id="r3x-body" class="r3x-body">
 
       <div class="row seg stage-modes" role="radiogroup" aria-label="Operating mode">
         <button role="radio" aria-checked="true" data-stage-mode="show" title="Brain, alive layers, idle policy and every output on">Show</button>
@@ -352,6 +365,7 @@
           <details><summary>Clips <small id="sh-n-clip"></small></summary><ul id="sh-list-clip" class="show-list"></ul></details>
           <p id="sh-status" class="hint" role="status"></p>
         </section>
+      </div>
       </div>
     </aside>
     <script type="module" src="/src/main.ts"></script>

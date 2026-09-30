@@ -2,19 +2,18 @@
  * The Scene panel (left): how this viewer sees R3X. Nothing here changes robot state; every
  * choice is this browser's own (localStorage, try/catch). The camera presets, backdrop, work
  * light, Centres and quality are wired where they live (main.ts, post.ts); this module owns
- * the panel itself - collapse to an icon rail - plus the Captions and Frame stats overlays.
+ * the rail's section icons plus the Captions and Frame stats overlays (collapse: layout.ts).
  */
 
 const KEY = 'r3x.scenePanel';
 
 interface Stored {
-  collapsed: boolean;
   captions: boolean;
   stats: boolean;
 }
 
 function load(): Stored {
-  const d: Stored = { collapsed: false, captions: true, stats: false };
+  const d: Stored = { captions: true, stats: false };
   try {
     return { ...d, ...(JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Stored>) };
   } catch {
@@ -36,32 +35,18 @@ export interface FrameSource {
   readonly currentQuality: string;
 }
 
-/** Mount the panel; `relayout` re-fits the 3D view when the panel's width changes. */
-export function mountScenePanel(post: FrameSource, relayout: () => void) {
+/** Mount the panel; `open` expands it (layout.ts). */
+export function mountScenePanel(post: FrameSource, open: () => void) {
   const $ = (id: string) => document.getElementById(id)!;
   const st = load();
   const panel = $('scene-panel');
-  const collapse = $('scene-collapse');
 
   const press = (id: string, on: boolean) => $(id).setAttribute('aria-pressed', String(on));
 
-  const setCollapsed = (on: boolean) => {
-    st.collapsed = on;
-    document.body.classList.toggle('scene-collapsed', on);
-    collapse.setAttribute('aria-expanded', String(!on));
-    collapse.title = on ? 'Expand' : 'Collapse to icons';
-    collapse.setAttribute('aria-label', on ? 'Expand the Scene panel' : 'Collapse the Scene panel');
-    relayout();
-  };
-  collapse.onclick = () => {
-    setCollapsed(!st.collapsed);
-    save(st);
-  };
   // A rail icon opens the panel at its section.
   panel.querySelectorAll<HTMLButtonElement>('[data-scene-open]').forEach((b) => {
     b.onclick = () => {
-      setCollapsed(false);
-      save(st);
+      open();
       const sec = $(b.dataset.sceneOpen!);
       sec.scrollIntoView({ block: 'nearest' });
       sec.querySelector<HTMLElement>('button, select')?.focus();
@@ -105,7 +90,6 @@ export function mountScenePanel(post: FrameSource, relayout: () => void) {
     (e.currentTarget as HTMLElement).blur();
   };
 
-  setCollapsed(st.collapsed);
   setCaptions(st.captions);
   setStats(st.stats);
 }

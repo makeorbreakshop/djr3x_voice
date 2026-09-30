@@ -126,10 +126,14 @@ export class ControlPanel {
     this.connected = on;
     document.body.classList.toggle('live', on);
     $('offline-note').hidden = on;
-    for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !on;
+    for (const id of ['ptt', 'rail-ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !on;
     const pill = $('st-gw');
     pill.textContent = on ? 'Connected' : 'Offline';
     pill.classList.toggle('on', on);
+    const dot = $('rail-gw');
+    dot.classList.toggle('on', on);
+    dot.title = on ? 'Connected' : 'Offline';
+    dot.setAttribute('aria-label', dot.title);
     this.pttInput({ kind: 'link', connected: on });
     if (!on) {
       this.setPhase('offline');
@@ -195,7 +199,7 @@ export class ControlPanel {
   private setStage(s: RetainedState) {
     if (s.stage.mode !== this.stageMode) this.applyMode(s.stage.mode);
     const brainOff = !s.stage.brain;
-    for (const id of ['ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
+    for (const id of ['ptt', 'rail-ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !this.connected || brainOff;
     if (this.ptt.enabled === brainOff) this.pttInput({ kind: 'enabled', enabled: !brainOff });
   }
 
@@ -272,6 +276,11 @@ export class ControlPanel {
     b.dataset.state = v.look;
     b.querySelector('.ptt-label')!.textContent = v.label;
     b.querySelector('.ptt-hint')!.textContent = v.hint;
+    // The collapsed panel's rail keeps the same button (layout.ts).
+    const rail = $('rail-ptt');
+    rail.dataset.state = v.look;
+    rail.title = v.hint ? `${v.label} (${v.hint})` : v.label;
+    rail.setAttribute('aria-label', v.label);
     return !!r.handled;
   }
 
@@ -376,17 +385,18 @@ export class ControlPanel {
   // ------------------------------------------------------------------ talk
 
   private bindTalk() {
-    const ptt = $<HTMLButtonElement>('ptt');
-    // On pointerdown, not click: the same instant as the OS mouse press, so the runtime's
-    // click-anywhere source (./r3x --click-anywhere) sees the panel's request and stands down.
-    ptt.addEventListener('pointerdown', (e) => {
-      if (e.button === 0) this.pttInput({ kind: 'click' });
-    });
-    // Keyboard activation (Enter on the focused button); pointer clicks were handled above.
-    ptt.addEventListener('click', (e) => {
-      if (e.detail === 0) this.pttInput({ kind: 'click' });
-    });
-    ptt.addEventListener('contextmenu', (e) => e.preventDefault());
+    for (const ptt of [$<HTMLButtonElement>('ptt'), $<HTMLButtonElement>('rail-ptt')]) {
+      // On pointerdown, not click: the same instant as the OS mouse press, so the runtime's
+      // click-anywhere source (./r3x --click-anywhere) sees the panel's request and stands down.
+      ptt.addEventListener('pointerdown', (e) => {
+        if (e.button === 0) this.pttInput({ kind: 'click' });
+      });
+      // Keyboard activation (Enter on the focused button); pointer clicks were handled above.
+      ptt.addEventListener('click', (e) => {
+        if (e.detail === 0) this.pttInput({ kind: 'click' });
+      });
+      ptt.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
 
     // Space anywhere (except while typing) is hold-to-talk.
     addEventListener('keydown', (e) => {
