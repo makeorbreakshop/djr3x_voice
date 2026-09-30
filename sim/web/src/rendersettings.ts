@@ -96,13 +96,16 @@ export const PRESETS: Record<PresetName, { label: string; values: RenderValues }
 
 const KEY = 'r3x.render';
 
+/** Collapsible parts of the panel, each remembered: the two sections, Advanced, LED halo. */
+type Disclosure = 'light' | 'render' | 'adv' | 'halo';
+
 interface Stored {
   values: Partial<RenderValues>;
-  open: { light: boolean; render: boolean };
+  open: Record<Disclosure, boolean>;
 }
 
 function load(): Stored {
-  const d: Stored = { values: {}, open: { light: false, render: false } };
+  const d: Stored = { values: {}, open: { light: false, render: false, adv: false, halo: false } };
   try {
     const s = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Partial<Stored>;
     return { values: { ...(s.values ?? {}) }, open: { ...d.open, ...(s.open ?? {}) } };
@@ -242,7 +245,7 @@ export class RenderSettings {
     return this.stored.open;
   }
 
-  setOpen(which: 'light' | 'render', open: boolean) {
+  setOpen(which: Disclosure, open: boolean) {
     this.stored.open[which] = open;
     this.save();
   }
@@ -293,6 +296,9 @@ export class RenderSettings {
 
 // ------------------------------------------------------------------ the panel
 
+/** Up to two decimals, no trailing zeros: 1, 0.6, 1.25. */
+const num = (x: number) => String(Math.round(x * 100) / 100);
+
 interface Slider {
   k: keyof RenderValues;
   label: string;
@@ -301,44 +307,12 @@ interface Slider {
   step: number;
   fmt?: (x: number) => string;
   title?: string;
+  /** The on/off this slider belongs to, drawn as a checkbox in front of its label. */
+  toggle?: keyof RenderValues;
 }
 
-const x2 = (x: number) => x.toFixed(2);
-const times = (x: number) => `${x.toFixed(2)}x`;
-
-const LIGHTING: (Slider | string)[] = [
-  { k: 'env', label: 'Environment', min: 0, max: 3, step: 0.05, fmt: times, title: 'Image-based ambient light and reflections, over what the backdrop or the booth desk sets' },
-  'Work light',
-  { k: 'work', label: 'Intensity', min: 0, max: 3, step: 0.05, fmt: times, title: 'The whole work light (key, fill and rim); turn it on under Environment' },
-  { k: 'workTemp', label: 'Colour temp', min: 2700, max: 8000, step: 100, fmt: (x) => `${Math.round(x)}K`, title: 'Warm (tungsten) to cool (daylight); 5000 K is as built' },
-  'Character lights',
-  { k: 'key', label: 'Key', min: 0, max: 3, step: 0.05, fmt: times, title: 'The main light on R3X: the booth key, or the work light key' },
-  { k: 'fill', label: 'Fill', min: 0, max: 3, step: 0.05, fmt: times, title: 'Softens the shadow side: the booth fill, or the work light fill' },
-  { k: 'rim', label: 'Rim', min: 0, max: 3, step: 0.05, fmt: times, title: 'Edge light from behind: the booth head rims, or the work light rim' },
-  'Stage',
-  { k: 'desk', label: 'Light desk', min: 0, max: 3, step: 0.05, fmt: times, title: 'The booth room fixtures the stage-light desk drives (washes, uplight, ceiling spot); Booth only' },
-];
-
-const RENDERING: (Slider | string | ['toggle', keyof RenderValues, string])[] = [
-  { k: 'exposure', label: 'Exposure', min: 0.3, max: 2.5, step: 0.05, fmt: x2 },
-  ['toggle', 'bloom', 'Bloom'],
-  { k: 'bloomStrength', label: 'Strength', min: 0, max: 2, step: 0.05, fmt: x2 },
-  { k: 'bloomThreshold', label: 'Threshold', min: 0.5, max: 3, step: 0.05, fmt: x2, title: 'Brightness where glow starts; 1.0 = only the LEDs' },
-  { k: 'bloomRadius', label: 'Radius', min: 0, max: 1, step: 0.05, fmt: x2 },
-  ['toggle', 'ao', 'Ambient occlusion'],
-  { k: 'aoIntensity', label: 'Intensity', min: 0, max: 10, step: 0.25, fmt: (x) => x.toFixed(1) },
-  ['toggle', 'shadows', 'Shadows'],
-  { k: 'shadowSoftness', label: 'Softness', min: 0, max: 4, step: 0.1, fmt: times },
-  'LED glow',
-  { k: 'eyes', label: 'Eyes', min: 0, max: 2, step: 0.05, fmt: times, title: 'All the light the eyes emit' },
-  { k: 'eyesGlow', label: 'Eye halo', min: 0, max: 3, step: 0.05, fmt: times, title: 'Only the halo round the eyes (not the lit lens, not the bloom)' },
-  { k: 'mouth', label: 'Mouth', min: 0, max: 2, step: 0.05, fmt: times },
-  { k: 'mouthGlow', label: 'Mouth halo', min: 0, max: 3, step: 0.05, fmt: times },
-  { k: 'body', label: 'Body', min: 0, max: 2, step: 0.05, fmt: times, title: 'The chest logic panel LEDs' },
-  { k: 'bodyGlow', label: 'Body halo', min: 0, max: 3, step: 0.05, fmt: times, title: 'How much of the chest LEDs’ brightness reaches the bloom' },
-];
-
-const TONE_LABEL: Record<ToneMap, string> = { neutral: 'Neutral', agx: 'AgX', aces: 'ACES Filmic' };
+const TONE_LABEL: Record<ToneMap, string> = { neutral: 'Neutral', agx: 'AgX', aces: 'ACES' };
+const PRESET_SHORT: Record<PresetName, string> = { default: 'Default', photo: 'Photo', flat: 'Flat', performance: 'Perf' };
 
 const svg = (d: string) => `<svg viewBox="0 0 16 16" aria-hidden="true">${d}</svg>`;
 const ICON_LIGHT = svg('<path d="M6 12.5h4M6.5 14.5h3" /><path d="M8 1.5a4.2 4.2 0 0 0-2.5 7.6c.6.5.9 1.1.9 1.9h3.2c0-.8.3-1.4.9-1.9A4.2 4.2 0 0 0 8 1.5z" />');
@@ -346,118 +320,136 @@ const ICON_RENDER = svg('<circle cx="8" cy="8" r="6" /><path d="M8 2a6 6 0 0 1 0
 
 /**
  * Build the Lighting (after Environment) and Rendering (after Performance) sections and their
- * rail icons. Both are collapsible; closed by default, and each viewer's open/closed is kept.
+ * rail icons. Both collapse (closed by default). Rendering shows the look presets and the few
+ * switches people reach for; the tuning knobs sit under Advanced, LED halos under Halo. Every
+ * explanation is a tooltip. Double-click a slider for its default.
  */
 export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, hasAO: () => boolean, workOn: () => boolean) {
   const body = document.getElementById('scene-body');
   if (!body) return;
-  const ids = new Map<keyof RenderValues, { input: HTMLInputElement | HTMLSelectElement | HTMLButtonElement; out?: HTMLOutputElement }>();
-  let n = 0;
+  const inputs = new Map<keyof RenderValues, { input: HTMLInputElement | HTMLSelectElement; out?: HTMLOutputElement; row: HTMLElement; fmt: (x: number) => string }>();
+
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = '') => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html) e.innerHTML = html;
+    return e;
+  };
+
+  const check = (k: keyof RenderValues, label: string, title = '') => {
+    const lab = el('label', 'rs-check');
+    lab.innerHTML = `<input type="checkbox" id="rs-${k}" /><span>${label}</span>`;
+    if (title) lab.title = title;
+    const input = lab.querySelector('input')!;
+    input.onchange = () => rs.set({ [k]: input.checked } as Partial<RenderValues>);
+    inputs.set(k, { input, row: lab, fmt: String });
+    return lab;
+  };
 
   const slider = (s: Slider, parent: HTMLElement) => {
     const id = `rs-${s.k}`;
-    const row = document.createElement('div');
-    row.className = 'rs-slider';
-    row.innerHTML = `<label for="${id}">${s.label}</label><input id="${id}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" /><output for="${id}"></output>`;
+    const row = el('div', 'rs-row');
     if (s.title) row.title = s.title;
-    const input = row.querySelector('input')!;
-    const out = row.querySelector('output')!;
+    row.append(s.toggle ? check(s.toggle, s.label) : el('label', '', s.label));
+    if (!s.toggle) (row.firstElementChild as HTMLLabelElement).htmlFor = id;
+    const input = el('input');
+    input.type = 'range';
+    input.id = id;
+    Object.assign(input, { min: String(s.min), max: String(s.max), step: String(s.step) });
+    if (s.toggle) input.setAttribute('aria-label', `${s.label} strength`);
+    const out = el('output');
+    out.htmlFor.add(id);
+    row.append(input, out);
     input.oninput = () => rs.set({ [s.k]: Number(input.value) } as Partial<RenderValues>);
     input.ondblclick = () => rs.set({ [s.k]: DEFAULT_VALUES[s.k] } as Partial<RenderValues>);
-    ids.set(s.k, { input, out });
-    (row as HTMLElement & { fmt?: Slider['fmt'] }).fmt = s.fmt;
-    parent.appendChild(row);
-  };
-  const sub = (label: string, parent: HTMLElement, toggle?: keyof RenderValues) => {
-    const h = document.createElement('div');
-    h.className = 'rs-sub';
-    h.innerHTML = `<h3 id="rs-h-${++n}">${label}</h3>`;
-    if (toggle) {
-      const b = document.createElement('button');
-      b.className = 'rs-switch';
-      b.setAttribute('aria-labelledby', `rs-h-${n}`);
-      b.onclick = () => {
-        rs.set({ [toggle]: !rs.values[toggle] } as Partial<RenderValues>);
-        b.blur();
-      };
-      h.appendChild(b);
-      ids.set(toggle, { input: b });
-    }
-    parent.appendChild(h);
+    inputs.set(s.k, { input, out, row, fmt: s.fmt ?? num });
+    parent.append(row);
+    return row;
   };
 
-  const section = (id: string, title: string, which: 'light' | 'render') => {
-    const sec = document.createElement('section');
-    sec.id = id;
-    sec.className = 'rs-section';
-    const det = document.createElement('details');
+  const disclosure = (which: Disclosure, cls: string, summary: string, title = '') => {
+    const det = el('details', cls);
     det.open = rs.openSections[which];
-    det.innerHTML = `<summary><h2>${title}</h2></summary>`;
+    det.innerHTML = `<summary${title ? ` title="${title}"` : ''}>${summary}</summary>`;
     det.ontoggle = () => rs.setOpen(which, det.open);
-    sec.appendChild(det);
-    const inner = document.createElement('div');
-    inner.className = 'rs-body';
-    det.appendChild(inner);
-    return { sec, inner };
+    const inner = el('div', 'rs-body');
+    det.append(inner);
+    return { det, inner };
+  };
+
+  const section = (id: string, which: Disclosure, title: string, tip: string) => {
+    const sec = el('section', 'rs-section');
+    sec.id = id;
+    const d = disclosure(which, '', `<h2>${title}</h2>`, tip);
+    sec.append(d.det);
+    return { sec, inner: d.inner };
   };
 
   // ---- Lighting
-  const light = section('sc-light', 'Lighting', 'light');
-  for (const item of LIGHTING) {
-    if (typeof item === 'string') sub(item, light.inner);
-    else slider(item, light.inner);
-  }
-  const deskHint = document.createElement('p');
-  deskHint.className = 'hint rs-note';
-  deskHint.textContent = 'The light desk lights the booth; pick Booth under Environment.';
-  light.inner.appendChild(deskHint);
+  const light = section('sc-light', 'light', 'Lighting', 'Light levels for this view only; not sent to R3X');
+  slider({ k: 'env', label: 'Ambient', min: 0, max: 3, step: 0.05, title: 'Environment: ambient light and reflections' }, light.inner);
+  const workRows = [
+    slider({ k: 'work', label: 'Work light', min: 0, max: 3, step: 0.05, title: 'Key, fill and rim of the work light together' }, light.inner),
+    slider({ k: 'workTemp', label: 'Warmth', min: 2700, max: 8000, step: 100, fmt: (x) => `${Math.round(x)}K`, title: 'Work light colour temperature; 5000 K as built' }, light.inner),
+  ];
+  slider({ k: 'key', label: 'Key', min: 0, max: 3, step: 0.05, title: 'Main light on R3X (booth key or work light key)' }, light.inner);
+  slider({ k: 'fill', label: 'Fill', min: 0, max: 3, step: 0.05, title: 'Shadow-side light (booth fill or work light fill)' }, light.inner);
+  slider({ k: 'rim', label: 'Rim', min: 0, max: 3, step: 0.05, title: 'Edge light from behind (booth head rims or work light rim)' }, light.inner);
+  const deskRow = slider({ k: 'desk', label: 'Stage desk', min: 0, max: 3, step: 0.05, title: 'The booth fixtures the light desk drives (washes, uplight, ceiling spot)' }, light.inner);
 
   // ---- Rendering
-  const render = section('sc-render', 'Rendering', 'render');
-  const presets = document.createElement('div');
-  presets.className = 'rs-presets';
-  presets.setAttribute('role', 'group');
-  presets.setAttribute('aria-label', 'Look preset');
+  const render = section('sc-render', 'render', 'Rendering', 'How this browser draws R3X; not sent to the robot. Layers over Quality.');
+  const seg = el('div', 'row seg rs-seg');
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Look preset');
   const presetBtns = new Map<PresetName, HTMLButtonElement>();
   for (const [name, p] of Object.entries(PRESETS) as [PresetName, (typeof PRESETS)[PresetName]][]) {
-    const b = document.createElement('button');
-    b.textContent = p.label;
+    const b = el('button', '', PRESET_SHORT[name]);
+    b.title = p.label;
     b.onclick = () => {
       rs.usePreset(name);
       b.blur();
     };
     presetBtns.set(name, b);
-    presets.appendChild(b);
+    seg.append(b);
   }
-  render.inner.appendChild(presets);
-  const tone = document.createElement('label');
-  tone.className = 'rs-slider rs-select';
-  tone.innerHTML = `<span>Tone map</span><select id="rs-toneMap">${(Object.keys(TONE_LABEL) as ToneMap[])
-    .map((t) => `<option value="${t}">${TONE_LABEL[t]}</option>`).join('')}</select>`;
-  const toneSel = tone.querySelector('select')!;
+  const custom = el('div', 'rs-custom', '<span>Custom</span><button type="button" title="Back to the Default look">Reset</button>');
+  custom.querySelector('button')!.onclick = (e) => {
+    rs.usePreset('default');
+    (e.currentTarget as HTMLElement).blur();
+  };
+  render.inner.append(seg, custom);
+  slider({ k: 'exposure', label: 'Exposure', min: 0.3, max: 2.5, step: 0.05 }, render.inner);
+  slider({ k: 'bloomStrength', label: 'Bloom', toggle: 'bloom', min: 0, max: 2, step: 0.05, title: 'Glow around the LEDs' }, render.inner);
+  const toggles = el('div', 'rs-toggles');
+  toggles.append(check('ao', 'AO', 'Ambient occlusion: contact darkening in seams and gaps'), check('shadows', 'Shadows'));
+  render.inner.append(toggles);
+
+  const adv = disclosure('adv', 'rs-disc', 'Advanced');
+  const toneRow = el('div', 'rs-row', `<label for="rs-toneMap">Tone map</label><select id="rs-toneMap">${(Object.keys(TONE_LABEL) as ToneMap[])
+    .map((t) => `<option value="${t}">${TONE_LABEL[t]}</option>`).join('')}</select>`);
+  const toneSel = toneRow.querySelector('select')!;
   toneSel.onchange = () => {
     rs.set({ toneMap: toneSel.value as ToneMap });
     toneSel.blur();
   };
-  ids.set('toneMap', { input: toneSel });
-  for (const item of RENDERING) {
-    if (typeof item === 'string') sub(item, render.inner);
-    else if (Array.isArray(item)) sub(item[2], render.inner, item[1]);
-    else slider(item, render.inner);
-    if (!Array.isArray(item) && typeof item !== 'string' && item.k === 'exposure') render.inner.appendChild(tone);
-  }
-  const aoHint = document.createElement('p');
-  aoHint.className = 'hint rs-note';
-  aoHint.textContent = 'Performance quality renders without AO.';
-  render.inner.insertBefore(aoHint, ids.get('aoIntensity')!.input.parentElement!.nextSibling);
-  const foot = document.createElement('div');
-  foot.className = 'row rs-foot';
-  foot.innerHTML = '<span class="rs-preset-name" aria-live="polite"></span><button id="rs-reset" title="Back to the Default look (lighting and rendering)">Reset</button>';
-  foot.querySelector('button')!.onclick = (e) => {
-    rs.usePreset('default');
-    (e.currentTarget as HTMLElement).blur();
-  };
-  render.inner.appendChild(foot);
+  inputs.set('toneMap', { input: toneSel, row: toneRow, fmt: String });
+  adv.inner.append(toneRow);
+  slider({ k: 'bloomThreshold', label: 'Threshold', min: 0.5, max: 3, step: 0.05, title: 'Bloom threshold: 1 = only the LEDs glow' }, adv.inner);
+  slider({ k: 'bloomRadius', label: 'Radius', min: 0, max: 1, step: 0.05, title: 'Bloom radius' }, adv.inner);
+  slider({ k: 'aoIntensity', label: 'AO depth', min: 0, max: 10, step: 0.25, title: 'Ambient occlusion intensity' }, adv.inner);
+  slider({ k: 'shadowSoftness', label: 'Softness', min: 0, max: 4, step: 0.1, title: 'Shadow edge softness' }, adv.inner);
+  render.inner.append(adv.det);
+
+  render.inner.append(el('h3', 'rs-h', 'LED glow'));
+  slider({ k: 'eyes', label: 'Eyes', min: 0, max: 2, step: 0.05, title: 'All the light the eyes emit' }, render.inner);
+  slider({ k: 'mouth', label: 'Mouth', min: 0, max: 2, step: 0.05 }, render.inner);
+  slider({ k: 'body', label: 'Body', min: 0, max: 2, step: 0.05, title: 'Chest logic panel LEDs' }, render.inner);
+  const halo = disclosure('halo', 'rs-disc', 'Halo', 'The glow round each LED group only: not the lit parts, not bloom elsewhere');
+  slider({ k: 'eyesGlow', label: 'Eyes', min: 0, max: 3, step: 0.05 }, halo.inner);
+  slider({ k: 'mouthGlow', label: 'Mouth', min: 0, max: 3, step: 0.05 }, halo.inner);
+  slider({ k: 'bodyGlow', label: 'Body', min: 0, max: 3, step: 0.05 }, halo.inner);
+  render.inner.append(halo.det);
 
   document.getElementById('sc-env')?.after(light.sec);
   document.getElementById('sc-perf')?.after(render.sec);
@@ -465,11 +457,10 @@ export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, has
   // Rail icons, in section order.
   const rail = document.querySelector('#scene-panel .rail');
   const railBtn = (target: string, label: string, icon: string, after: string) => {
-    const b = document.createElement('button');
+    const b = el('button', '', icon);
     b.dataset.sceneOpen = target;
     b.setAttribute('aria-label', label);
     b.title = label;
-    b.innerHTML = icon;
     rail?.querySelector(`[data-scene-open="${after}"]`)?.after(b);
   };
   railBtn('sc-light', 'Lighting', ICON_LIGHT, 'sc-env');
@@ -477,39 +468,32 @@ export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, has
 
   const sync = () => {
     const v = rs.values;
-    for (const [k, { input, out }] of ids) {
+    for (const [k, { input, out, fmt }] of inputs) {
       const val = v[k];
-      if (input instanceof HTMLButtonElement) {
-        input.setAttribute('aria-pressed', String(val));
-        input.textContent = val ? 'On' : 'Off';
-      } else if (document.activeElement !== input || input instanceof HTMLSelectElement) {
-        input.value = String(val);
-      }
-      if (out) {
-        const fmt = (out.parentElement as HTMLElement & { fmt?: Slider['fmt'] }).fmt;
-        out.textContent = fmt ? fmt(val as number) : String(val);
-      }
+      if (input instanceof HTMLInputElement && input.type === 'checkbox') input.checked = !!val;
+      else if (document.activeElement !== input || input instanceof HTMLSelectElement) input.value = String(val);
+      if (out) out.textContent = fmt(val as number);
     }
-    const dis = (keys: (keyof RenderValues)[], off: boolean) => keys.forEach((k) => {
-      const e = ids.get(k)?.input;
-      if (e) {
-        (e as HTMLInputElement).disabled = off;
-        e.parentElement!.classList.toggle('off', off);
-      }
+    const dim = (keys: (keyof RenderValues)[], off: boolean) => keys.forEach((k) => {
+      const e = inputs.get(k);
+      if (!e) return;
+      e.input.disabled = off;
+      e.row.classList.toggle('off', off);
     });
-    dis(['bloomStrength', 'bloomThreshold', 'bloomRadius'], !v.bloom);
-    dis(['aoIntensity'], !v.ao || !hasAO());
-    aoHint.hidden = !v.ao || hasAO();
-    dis(['shadowSoftness'], !v.shadows);
-    dis(['desk'], !isBooth());
-    dis(['work', 'workTemp'], !workOn());
-    deskHint.hidden = isBooth();
+    dim(['bloomStrength', 'bloomThreshold', 'bloomRadius'], !v.bloom);
+    const aoOk = hasAO();
+    (inputs.get('ao')!.input as HTMLInputElement).disabled = !aoOk;
+    inputs.get('ao')!.row.title = aoOk ? 'Ambient occlusion: contact darkening in seams and gaps' : 'Performance quality renders without AO';
+    dim(['aoIntensity'], !v.ao || !aoOk);
+    dim(['shadowSoftness'], !v.shadows);
+    deskRow.hidden = !isBooth();
+    for (const r of workRows) r.hidden = !workOn();
     const p = rs.preset;
     for (const [name, b] of presetBtns) b.setAttribute('aria-pressed', String(name === p));
-    foot.querySelector('.rs-preset-name')!.textContent = p ? '' : 'Custom';
+    custom.hidden = p !== null;
   };
   rs.onChange(sync);
-  // Backdrop (the desk needs the booth) and quality (Performance has no AO) change what applies.
+  // Backdrop (the desk needs the booth), work light and quality (Performance has no AO).
   for (const id of ['quality', 'scene-bg']) document.getElementById(id)?.addEventListener('change', () => setTimeout(sync));
   document.getElementById('scene-work')?.addEventListener('click', () => setTimeout(sync));
   sync();

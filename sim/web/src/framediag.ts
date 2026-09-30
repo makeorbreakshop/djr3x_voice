@@ -70,6 +70,22 @@ interface Profile {
   cpu: Map<string, number[]>;
 }
 
+const UI_KEY = 'r3x.frameDiag';
+function loadUi(): { more: boolean; breakdown: boolean } {
+  try {
+    return { more: false, breakdown: false, ...(JSON.parse(localStorage.getItem(UI_KEY) ?? '{}') as object) };
+  } catch {
+    return { more: false, breakdown: false };
+  }
+}
+function saveUi(v: { more: boolean; breakdown: boolean }) {
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(v));
+  } catch {
+    /* storage blocked */
+  }
+}
+
 const pct = (sorted: number[], p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] ?? 0;
 const avg = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 const fmtN = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${(n / 1e3).toFixed(0)}k` : String(n));
@@ -77,7 +93,7 @@ const fmtN = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? 
 export class FrameDiag implements RenderProbe {
   private readonly el: HTMLElement;
   private readonly spark: HTMLCanvasElement;
-  private readonly lines: Record<string, HTMLElement> = {};
+  private readonly q: Record<string, HTMLElement> = {};
   private samples: Sample[] = [];
   private lastStart = -1;
   private t0 = 0;
@@ -96,6 +112,8 @@ export class FrameDiag implements RenderProbe {
   private autoReset = true;
   /** GPU timer answers that cannot be true (see the header); sticky for the session. */
   private gpuBogus = false;
+  /** The GPU timer has passed that check once (drawing flat out); only then is GPU time shown. */
+  private gpuTrusted = false;
   private readonly buf = new THREE.Vector2();
 
   constructor(private readonly post: PostPipeline, el: HTMLElement) {
@@ -103,18 +121,55 @@ export class FrameDiag implements RenderProbe {
     el.className = 'frame-diag';
     el.setAttribute('role', 'status');
     el.setAttribute('aria-label', 'Frame diagnostics');
-    el.innerHTML = `<div class="fd-head"><span class="fd-fps">…</span><span class="fd-pace"></span>
-<button type="button" title="Draw every frame for 10 s and summarise (also logged to the console)">Profile 10 s</button></div>
-<canvas width="280" height="28" aria-hidden="true"></canvas>
-<p data-l="frame"></p><p data-l="time"></p><p data-l="count"></p><p data-l="scale"></p>
-<p data-l="passes" class="fd-passes"></p><p data-l="heap"></p><p class="fd-summary" hidden></p>`;
+    const cell = (k: string, label: string, tip = '') => `<div data-k="${k}"${tip ? ` title="${tip}"` : ''}><dt>${label}</dt><dd></dd></div>`;
+    el.innerHTML = `<div class="fd-head">
+<span class="fd-big"><b data-q="fps">…</b><small>fps</small></span><span class="fd-ms"><b data-q="ms"></b><small>ms</small></span>
+<span class="fd-chip" data-q="pace"></span></div>
+<canvas width="440" height="56" aria-hidden="true" title="Frame time, last 5 s (guides: 16.7 ms = 60 fps, 33 ms = 30 fps)"></canvas>
+<dl class="fd-grid">${cell('p95', 'p95', 'Frame time, 95th percentile over the last 5 s')}${cell('worst', 'worst', 'Longest frame in the last 5 s')}
+${cell('cpu', 'CPU', 'JS time per frame (submitting the passes)')}${cell('gpu', 'GPU', 'GPU time per frame (timer query)')}
+${cell('draws', 'draws', 'Draw calls per frame, every pass')}${cell('tris', 'tris', 'Triangles per frame, every pass')}
+${cell('scale', 'scale', 'Render scale (x CSS pixels); adapts while you interact')}</dl>
+<ol class="fd-passes" data-q="passes"></ol>
+<p class="fd-result" data-q="result" hidden></p>
+<div class="fd-prof"><button type="button" data-q="run" title="Draw every frame for 10 s; AO and bloom switch off briefly at the end to time them. Logged to the console.">Profile 10 s</button>
+<button type="button" class="fd-tog" data-q="bdBtn" aria-expanded="false" aria-controls="fd-bd" hidden>Breakdown</button>
+<button type="button" class="fd-tog" data-q="moreBtn" aria-expanded="false" aria-controls="fd-more">More</button></div>
+<dl class="fd-grid fd-panel" id="fd-bd" data-q="bd" hidden></dl>
+<dl class="fd-grid fd-panel" id="fd-more" data-q="more" hidden>${cell('dpr', 'DPR')}${cell('buf', 'buffer')}
+${cell('tex', 'textures')}${cell('geo', 'geometries')}${cell('quality', 'quality')}${cell('heap', 'heap', 'JS heap in use')}</dl>`;
     this.spark = el.querySelector('canvas')!;
-    el.querySelectorAll<HTMLElement>('[data-l]').forEach((p) => (this.lines[p.dataset.l!] = p));
-    this.lines.summary = el.querySelector('.fd-summary')!;
-    el.querySelector('button')!.onclick = (e) => {
+    el.querySelectorAll<HTMLElement>('[data-q]').forEach((e) => (this.q[e.dataset.q!] = e));
+    el.querySelectorAll<HTMLElement>('[data-k]').forEach((e) => (this.q[`k:${e.dataset.k}`] = e));
+    this.q.run.onclick = (e) => {
       this.runProfile();
       (e.currentTarget as HTMLElement).blur();
     };
+    // Disclosures remember their state per viewer.
+    const ui = loadUi();
+    for (const [k, btn, panel] of [['more', 'moreBtn', 'more'], ['breakdown', 'bdBtn', 'bd']] as const) {
+      const b = this.q[btn];
+      const show = (open: boolean) => {
+        b.setAttribute('aria-expanded', String(open));
+        this.q[panel].hidden = !open;
+      };
+      show(ui[k]);
+      b.onclick = () => {
+        const open = b.getAttribute('aria-expanded') !== 'true';
+        show(open);
+        saveUi({ ...loadUi(), [k]: open });
+        b.blur();
+      };
+    }
+    this.q.bd.hidden = true; // no profile yet
+  }
+
+  /** Set one grid value (hidden when null). */
+  private val(k: string, v: string | null, unit = '') {
+    const c = this.q[`k:${k}`];
+    if (!c) return;
+    c.hidden = v === null;
+    if (v !== null) c.querySelector('dd')!.innerHTML = unit ? `${v}<small>${unit}</small>` : v;
   }
 
   private get renderer(): THREE.WebGLRenderer {
@@ -273,16 +328,16 @@ export class FrameDiag implements RenderProbe {
 
   // ---------------------------------------------------------------- display
 
-  private paceLabel(): { state: string; text: string } {
-    if (document.hidden) return { state: 'hidden', text: 'hidden (paused)' };
+  private paceLabel(): { state: string; text: string; tip: string } {
+    if (document.hidden) return { state: 'hidden', text: 'hidden', tip: 'Tab hidden: the browser stops drawing' };
     const p = this.post.pacer;
     const st = p.state();
     const r = p.rates;
     return {
-      continuous: { state: st, text: 'continuous' },
-      interacting: { state: st, text: 'interacting · 60' },
-      active: { state: st, text: `on-demand · ${r.active}` },
-      quiet: { state: st, text: `idle · ${r.quiet} fps cap` },
+      continuous: { state: st, text: 'continuous', tip: 'Drawing every animation frame' },
+      interacting: { state: st, text: 'interacting', tip: 'Someone is interacting: full rate' },
+      active: { state: st, text: 'on-demand', tip: `Something moves fast: up to ${r.active} fps` },
+      quiet: { state: st, text: `idle ${r.quiet}`, tip: `Nothing moves fast: capped at ${r.quiet} fps on purpose, not slowness` },
     }[st];
   }
 
@@ -294,6 +349,7 @@ export class FrameDiag implements RenderProbe {
     const recent = this.samples.slice(-60).map((x) => x.interval).sort((a, b) => a - b);
     if (recent.length < 30) return;
     const sum = names.reduce((a, n) => a + avg((this.passGpu.get(n) ?? []).slice(-60)), 0);
+    if (sum > 0 && sum <= 1.15 * pct(recent, 0.5)) this.gpuTrusted = true;
     if (sum > 1.15 * pct(recent, 0.5)) {
       this.gpuBogus = true;
       console.info(`[r3x frame stats] GPU timer reports ${sum.toFixed(1)} ms per frame at a ${pct(recent, 0.5).toFixed(1)} ms interval: not GPU time on this driver; showing CPU per pass`);
@@ -304,7 +360,7 @@ export class FrameDiag implements RenderProbe {
     const names = [...new Set(this.post.composer.passes.map((p) => this.passName(p)))];
     this.checkGpu(names);
     return names.map((name) => {
-      const g = this.gpuBogus ? undefined : this.passGpu.get(name);
+      const g = this.gpuBogus || !this.gpuTrusted ? undefined : this.passGpu.get(name);
       const c = this.passCpu.get(name);
       return g?.length ? { name, ms: avg(g.slice(-120)), gpu: true } : { name, ms: avg((c ?? []).slice(-120)), gpu: false };
     });
@@ -315,27 +371,58 @@ export class FrameDiag implements RenderProbe {
     const iv = s.map((x) => x.interval);
     const sorted = [...iv].sort((a, b) => a - b);
     const mean = avg(iv);
-    const fps = mean ? 1000 / mean : 0;
     const pace = this.paceLabel();
-    (this.el.querySelector('.fd-fps') as HTMLElement).textContent = s.length ? `${fps.toFixed(0)} fps` : '… fps';
-    const paceEl = this.el.querySelector('.fd-pace') as HTMLElement;
-    paceEl.textContent = pace.text;
-    paceEl.dataset.state = pace.state;
-    this.lines.frame.innerHTML = s.length
-      ? `frame avg <b>${mean.toFixed(1)}</b> p95 <b>${pct(sorted, 0.95).toFixed(1)}</b> worst <b>${(sorted[sorted.length - 1] ?? 0).toFixed(1)}</b> ms`
-      : 'frame: no frames drawn yet';
+    this.q.fps.textContent = s.length ? (1000 / mean).toFixed(0) : '…';
+    this.q.ms.textContent = s.length ? mean.toFixed(1) : '';
+    this.q.pace.textContent = pace.text;
+    this.q.pace.title = pace.tip;
+    this.q.pace.dataset.state = pace.state;
+    const f1 = (x: number) => x.toFixed(1);
+    this.val('p95', s.length ? f1(pct(sorted, 0.95)) : '…', 'ms');
+    this.val('worst', s.length ? f1(sorted[sorted.length - 1]) : '…', 'ms');
     const costs = this.passCosts();
-    const gpuTotal = costs.every((c) => c.gpu) && costs.length ? costs.reduce((a, c) => a + c.ms, 0) : null;
-    this.lines.time.innerHTML = `cpu <b>${avg(s.map((x) => x.cpu)).toFixed(1)}</b> ms · gpu ${gpuTotal !== null
-      ? `<b>${gpuTotal.toFixed(1)}</b> ms` : !this.ext ? 'n/a (no timer query)' : this.gpuBogus ? 'n/a (unreliable timer)' : 'measuring…'}`;
+    const gpu = costs.length && costs.every((c) => c.gpu) ? costs.reduce((a, c) => a + c.ms, 0) : null;
+    this.val('cpu', f1(avg(s.map((x) => x.cpu))), 'ms');
+    this.val('gpu', gpu === null ? null : f1(gpu), 'ms');
+    this.q['k:cpu'].title = gpu === null
+      ? `JS time per frame. GPU time: ${!this.ext ? 'no timer query in this browser' : this.gpuBogus ? 'the timer reports wall time on this driver, so it is not shown' : 'shown once checked against a Profile run or interaction'}`
+      : 'JS time per frame (submitting the passes)';
+    this.val('draws', fmtN(this.calls));
+    this.val('tris', fmtN(this.tris));
+    this.val('scale', `${this.post.pixelRatio.toFixed(2)}×`);
+
+    // Per-pass cost, most expensive first, as bars.
+    const byCost = [...costs].sort((a, b) => b.ms - a.ms);
+    const max = Math.max(1e-6, ...byCost.map((c) => c.ms));
+    const list = this.q.passes;
+    list.title = gpu === null ? 'Per-pass CPU (submit) time; no reliable GPU timer here' : 'Per-pass GPU time';
+    while (list.children.length > byCost.length) list.lastElementChild!.remove();
+    byCost.forEach((c, i) => {
+      let li = list.children[i] as HTMLElement | undefined;
+      if (!li) {
+        li = document.createElement('li');
+        li.innerHTML = '<span></span><i><u></u></i><b></b>';
+        list.appendChild(li);
+      }
+      li.children[0].textContent = c.name;
+      (li.children[1].firstElementChild as HTMLElement).style.width = `${(100 * c.ms) / max}%`;
+      li.children[2].textContent = c.ms < 0.1 ? c.ms.toFixed(2) : c.ms.toFixed(1);
+    });
+
     const info = this.renderer.info;
-    this.lines.count.innerHTML = `<b>${fmtN(this.calls)}</b> draws · <b>${fmtN(this.tris)}</b> tris · <b>${info.memory.textures}</b> tex · <b>${info.memory.geometries}</b> geo`;
     const buf = this.renderer.getDrawingBufferSize(this.buf);
-    this.lines.scale.innerHTML = `scale <b>${this.post.pixelRatio.toFixed(2)}x</b> · dpr ${window.devicePixelRatio} · ${buf.x}×${buf.y} · ${this.post.currentQuality}`;
-    this.lines.passes.innerHTML = costs.map((c) => `${c.name} <b>${c.ms.toFixed(2)}</b>`).join(' · ') + ` ms ${costs.some((c) => c.gpu) ? 'gpu' : 'cpu submit'}`;
-    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
-    this.lines.heap.hidden = !mem;
-    if (mem) this.lines.heap.innerHTML = `heap <b>${(mem.usedJSHeapSize / 2 ** 20).toFixed(0)}</b> / ${(mem.jsHeapSizeLimit / 2 ** 20).toFixed(0)} MB`;
+    this.val('dpr', String(window.devicePixelRatio));
+    this.val('buf', `${buf.x}×${buf.y}`);
+    this.val('tex', String(info.memory.textures));
+    this.val('geo', String(info.memory.geometries));
+    this.val('quality', this.post.currentQuality);
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    this.val('heap', mem ? (mem.usedJSHeapSize / 2 ** 20).toFixed(0) : null, 'MB');
+    if (this.profile) {
+      const left = Math.max(0, this.profile.phases.slice(this.profile.i).reduce((a, p) => a + p.ms, 0)
+        - (performance.now() - (this.profile.phaseEnd - this.profile.phases[this.profile.i].ms)));
+      this.q.result.textContent = `profiling… ${Math.ceil(left / 1000)} s`;
+    }
     this.drawSpark(iv);
   }
 
@@ -346,25 +433,25 @@ export class FrameDiag implements RenderProbe {
     const w = c.width;
     const h = c.height;
     g.clearRect(0, 0, w, h);
-    const fps = this.post.pacer.fps(performance.now());
-    const target = Number.isFinite(fps) ? 1000 / fps : 1000 / 60;
-    const top = Math.max(40, target * 1.5, ...iv);
-    const y = (ms: number) => h - 1 - (Math.min(ms, top) / top) * (h - 2);
-    g.strokeStyle = 'rgba(138,144,156,.55)';
-    g.setLineDash([3, 3]);
-    g.beginPath();
-    g.moveTo(0, y(target));
-    g.lineTo(w, y(target));
-    g.stroke();
-    g.setLineDash([]);
+    const top = Math.max(40, ...iv) * 1.08;
+    const y = (ms: number) => h - 2 - (Math.min(ms, top) / top) * (h - 4);
+    g.strokeStyle = 'rgba(138,144,156,.28)';
+    g.lineWidth = 1;
+    for (const ms of [1000 / 60, 1000 / 30]) {
+      g.beginPath();
+      g.moveTo(0, Math.round(y(ms)) + 0.5);
+      g.lineTo(w, Math.round(y(ms)) + 0.5);
+      g.stroke();
+    }
     if (!iv.length) return;
-    const n = Math.min(iv.length, w);
+    const n = Math.min(iv.length, w / 2);
     const tail = iv.slice(-n);
     g.strokeStyle = '#e8762a';
-    g.lineWidth = 1.25;
+    g.lineWidth = 2;
+    g.lineJoin = 'round';
     g.beginPath();
     tail.forEach((ms, i) => {
-      const x = w - n + i;
+      const x = w - (n - i) * 2;
       if (i) g.lineTo(x, y(ms));
       else g.moveTo(x, y(ms));
     });
@@ -390,9 +477,9 @@ export class FrameDiag implements RenderProbe {
       samples: [], gpu: new Map(), cpu: new Map(),
     };
     post.pacer.continuous(ms + 500);
-    const sum = this.lines.summary;
-    sum.hidden = false;
-    sum.textContent = `Profiling ${ms / 1000} s, drawing every frame${ablate.length ? `; ${ablate.map((p) => p.name).join(' and ')} switch off briefly at the end to time them` : ''}…`;
+    this.q.result.hidden = false;
+    this.q.result.textContent = `profiling… ${Math.ceil(ms / 1000)} s`;
+    this.q.run.toggleAttribute('disabled', true);
   }
 
   private nextPhase(now: number) {
@@ -438,7 +525,27 @@ export class FrameDiag implements RenderProbe {
       `cpu ${cpu.toFixed(1)} ms${gpu === null ? '' : `, gpu ${gpu.toFixed(1)} ms`}${bound}; ` +
       `biggest cost: ${top && !(atRate && top.how !== 'gpu' && top.ms < 1) ? `${top.name} ${top.ms.toFixed(2)} ms ${top.how}` : atRate ? 'none visible' : 'n/a'}` +
       `${saved.length ? `; off saves ${saved.map((p) => `${p.name} ${p.ms.toFixed(1)} ms`).join(', ')}${vsync}` : ''}`;
-    this.lines.summary.textContent = `Profile: ${text}`;
+    // One result row (the biggest cost highlighted); the rest behind Breakdown.
+    const f0 = (x: number) => (1000 / (x || 1)).toFixed(0);
+    const shown = top && !(atRate && top.how !== 'gpu' && top.ms < 1);
+    const delta = (ms: number) => `${ms >= 0 ? '−' : '+'}${Math.abs(ms).toFixed(1)}`;
+    const esc = (t: string) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+    this.q.result.innerHTML = `avg ${f0(mean)} · p95 ${f0(p95)} fps${shown
+      ? ` · <em>${esc(top.name)} ${top.how === 'gpu' ? top.ms.toFixed(1) : delta(top.ms)} ms</em>` : atRate ? ' · <span title="Holding the display rate: costs under the frame budget do not show">at vsync</span>' : ''}`;
+    this.q.result.title = text;
+    this.q.run.toggleAttribute('disabled', false);
+    const row = (k: string, v: string) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`;
+    this.q.bd.innerHTML = [
+      row('frames', String(iv.length)),
+      row('avg', `${(1000 / (mean || 1)).toFixed(1)}<small>fps</small>`),
+      row('p95', `${p95.toFixed(1)}<small>ms</small>`),
+      row('CPU', `${cpu.toFixed(1)}<small>ms</small>`),
+      ...(gpu === null ? [] : [row('GPU', `${gpu.toFixed(1)}<small>ms</small>`), row('bound', gpu > cpu ? 'GPU' : 'CPU')]),
+      ...saved.map((p) => row(`${p.name} off`, `${delta(p.ms)}<small>ms</small>`)),
+      ...passes.map((p) => row(p.name, `${p.ms.toFixed(2)}<small>ms</small>`)),
+    ].join('');
+    this.q.bdBtn.hidden = false;
+    this.q.bd.hidden = this.q.bdBtn.getAttribute('aria-expanded') !== 'true';
     const buf = this.renderer.getDrawingBufferSize(this.buf);
     console.log(`[r3x profile] ${text}\n  quality ${this.post.currentQuality}, scale ${this.post.pixelRatio.toFixed(2)}x, buffer ${buf.x}x${buf.y}, ` +
       `passes ${passes.map((p) => `${p.name} ${p.ms.toFixed(2)}`).join(', ')} ms, ${navigator.userAgent}`);
