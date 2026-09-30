@@ -145,3 +145,4 @@ i.cad.placeholder { color: #ff8a8a; border-color: #6b2a2a; }
 .checks li.grp:first-child { margin-top: 0; }
 .checks li.explained { border-color: #23405e; }
 .badge.explained { color: var(--accent-2); border-color: #23405e; }
+.checks b small.secs { font: 400 10px ui-monospace, Menlo, monospace; color: #5b6170; margin-left: 4px; }

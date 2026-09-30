@@ -134,6 +134,8 @@ export interface MCheck {
   pose?: Record<string, number>;
   parts?: string[];
   assumptions?: string[];
+  /** Suite timing: how long this check took (s). */
+  seconds?: number;
 }
 
 export interface MVariant {

@@ -2,9 +2,9 @@
  "schema": "r3x.mech.parts",
  "version": 1,
  "counts": {
-  "vendor": 0,
-  "parametric": 90,
-  "placeholder": 29
+  "vendor": 17,
+  "parametric": 82,
+  "placeholder": 20
  },
  "parts": [
   {
@@ -586,8 +586,9 @@
    "spec": {},
    "qty": 1,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1309-0016-4008.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -603,8 +604,9 @@
    "spec": {},
    "qty": 1,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1311-0016-4008.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -625,8 +627,8 @@
    "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0430",
    "qty": 2,
    "cad": {
-    "status": "parametric",
-    "note": "standoff to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1501-0006-0430.step"
    }
   },
   {
@@ -647,8 +649,8 @@
    "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0460",
    "qty": 1,
    "cad": {
-    "status": "parametric",
-    "note": "standoff to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1501-0006-0460.step"
    }
   },
   {
@@ -669,8 +671,8 @@
    "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0600",
    "qty": 1,
    "cad": {
-    "status": "parametric",
-    "note": "standoff to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1501-0006-0600.step"
    }
   },
   {
@@ -686,8 +688,9 @@
    "spec": {},
    "qty": 1,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1516-4008-0960.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -703,8 +706,9 @@
    "spec": {},
    "qty": 2,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1602-0032-0006.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -720,8 +724,8 @@
    "spec": {},
    "qty": 2,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1906-0025-0032.step"
    }
   },
   {
@@ -737,8 +741,8 @@
    "spec": {},
    "qty": 2,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/1916-0014-0048.step"
    }
   },
   {
@@ -757,8 +761,8 @@
    },
    "qty": 2,
    "cad": {
-    "status": "parametric",
-    "note": "servo to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2000-0025-0002.step"
    }
   },
   {
@@ -778,8 +782,8 @@
    },
    "qty": 4,
    "cad": {
-    "status": "parametric",
-    "note": "screw to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2800-0004-0014.step"
    }
   },
   {
@@ -799,8 +803,9 @@
    "url": "https://www.gobilda.com/search.php?search_query=2802-0004-0014",
    "qty": 0,
    "cad": {
-    "status": "parametric",
-    "note": "screw to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2802-0004-0014.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -820,8 +825,9 @@
    "url": "https://www.gobilda.com/search.php?search_query=2802-0004-0022",
    "qty": 0,
    "cad": {
-    "status": "parametric",
-    "note": "screw to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2802-0004-0022.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -841,8 +847,8 @@
    },
    "qty": 1,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2808-0004-0050.step"
    }
   },
   {
@@ -858,8 +864,8 @@
    "spec": {},
    "qty": 2,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2913-0004-0241.step"
    }
   },
   {
@@ -877,8 +883,9 @@
    "url": "https://www.gobilda.com/search.php?search_query=2913-0104-0294",
    "qty": 1,
    "cad": {
-    "status": "parametric",
-    "note": "ball_link to spec"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/2913-0104-0294.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {
@@ -894,8 +901,9 @@
    "spec": {},
    "qty": 1,
    "cad": {
-    "status": "placeholder",
-    "note": "no model yet"
+    "status": "vendor",
+    "file": "vendor/parts_cad/gobilda/4005-0016-0001.step",
+    "note": "frame not yet mapped: placed parts use the parametric model"
    }
   },
   {

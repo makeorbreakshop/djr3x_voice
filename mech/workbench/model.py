@@ -186,6 +186,7 @@ class Check:
     pose: dict = field(default_factory=dict)
     parts: list = field(default_factory=list)
     assumptions: list = field(default_factory=list)
+    seconds: Optional[float] = None  # how long the check took (suite timing)
 
 
 @dataclass

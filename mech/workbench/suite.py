@@ -83,6 +83,11 @@ class Suite:
             m = (f.mesh if f.mesh is not None else fastener_mesh(f.spec)).copy()
             m.apply_transform(f.matrix)
             self.bodies[f.id] = Body(f.id, f.link, m, "fastener", f.linkage, f.role)
+        from .collide import DiskCache, Scene
+
+        self.scene = Scene({k: b.mesh for k, b in self.bodies.items()})
+        self.cache = DiskCache("suite")
+        self.timing: dict[str, float] = {}
         self.features = {p.id: p.features for p in asm.parts}
         self.features.update({f.id: f.features for f in asm.fasteners})
         self.mated = {frozenset((m.a[0], m.b[0])) for m in asm.mates}
@@ -116,7 +121,9 @@ class Suite:
             from .kinematics import rot, trans
 
             return ms[lk.horn_link] @ trans(c) @ rot(n, ang) @ trans(-c)
-        z = solve_linkages(self.asm, {})[lk.id]
+        if not hasattr(self, "_zero_sol"):
+            self._zero_sol = solve_linkages(self.asm, {})
+        z = self._zero_sol[lk.id]
         a0, b0 = z[1], z[2]
         return _rod_matrix(a0, b0, a, bb)
 
@@ -256,11 +263,17 @@ class Suite:
             p0 = f.matrix[:3, 3]
             out = -f.matrix[:3, 2]
             head_top = p0 + out * (_nominal(f.spec["thread"]) * 1.1)
+            seg_lo = np.minimum(head_top, head_top + out * self.tol["tool_reach_mm"]) - 0.5
+            seg_hi = np.maximum(head_top, head_top + out * self.tol["tool_reach_mm"]) + 0.5
             for b in present:
                 lo, hi = b.mesh.bounds
-                if np.any(head_top > hi + self.tol["tool_reach_mm"]) and np.any(head_top < lo - self.tol["tool_reach_mm"]):
+                if np.any(seg_lo > hi) or np.any(seg_hi < lo):  # the segment's box misses the part's
                     continue
-                hits = b.mesh.ray.intersects_location([head_top], [out])[0]
+                k = ("ray", self.scene.hash[b.id]) + tuple(np.round(np.concatenate([head_top, out]), 3))
+                hits = self.cache.get(k)
+                if hits is None:
+                    hits = b.mesh.ray.intersects_location([head_top], [out])[0]
+                    self.cache.put(k, hits)
                 hits = [h for h in hits if 0.3 < (h - head_top) @ out < self.tol["tool_reach_mm"]]
                 if hits:
                     tool.append(((f.id, b.id), f"{f.id} blocked by {b.id} at {min((h - head_top) @ out for h in hits):.0f} mm"))
@@ -276,31 +289,67 @@ class Suite:
 
     # ------------------------------------------------------------------ 4 no overlaps at rest
     def overlaps(self):
+        """At rest: FCL finds the intersecting pairs (AABB broad phase first); only those get the
+        exact penetration depth, cached by the two meshes' hashes."""
         bad = []
         ids = list(self.bodies)
-        boxes = {i: self.bodies[i].mesh.bounds for i in ids}
-        for a, b in itertools.combinations(ids, 2):
-            la, ha = boxes[a]
-            lb, hb = boxes[b]
-            if np.any(la > hb) or np.any(lb > ha):
+        idx = {k: i for i, k in enumerate(self.scene.ids)}
+        eye = np.eye(4)
+        boxes = self.scene.aabbs({k: eye for k in self.scene.ids})
+        pairs = list(itertools.combinations(ids, 2))
+        ia = np.array([idx[a] for a, _ in pairs])
+        ib = np.array([idx[b] for _, b in pairs])
+        near = self.scene.gaps(boxes, ia, ib) <= 0.0
+        for (a, b), n in zip(pairs, near):
+            if not n:
                 continue
-            depth, where = self.penetration(a, b)
+            k = ("pen", self.scene.hash[a], self.scene.hash[b])
+            hit = self.cache.get(k)
+            if hit is None:
+                hit = (None, None)
+                if self.scene.collide(a, eye, b, eye):
+                    hit = self.penetration(a, b)
+                self.cache.put(k, hit)
+            depth, where = hit
             if depth is None:
                 continue
             limit = self.tol["press_mm"] if frozenset((a, b)) in self.mated else self.tol["overlap_mm"]
             if depth > limit:
                 bad.append((depth, a, b, where))
-        bad.sort(reverse=True)
+        bad.sort(key=lambda t: -t[0])
         self.verdict("no_overlap", "No overlaps at rest (mated parts only touch at their mate)",
                      [((a, b), f"{a} x {b}: {d:.2f} mm deep at {np.round(w, 1).tolist()}") for d, a, b, w in bad],
                      "no penetration beyond tolerance",
-                     assumptions=[f"penetration = depth of one part's surface samples inside the other (closed meshes); "
-                              f"mated pairs may overlap {self.tol['press_mm']} mm, others {self.tol['overlap_mm']} mm",
-                              "pairs where neither mesh is closed are measured by surface distance only"])
+                     assumptions=[f"FCL finds intersecting pairs; depth = deepest point of one closed mesh inside the "
+                                  f"other (exact); mated pairs may overlap {self.tol['press_mm']} mm, others "
+                                  f"{self.tol['overlap_mm']} mm", "results cached by geometry hash"])
 
     def penetration(self, a, b):
-        """Deepest point of one body inside the other (mm), or None when they do not touch."""
+        """Deepest point of one body inside the other (mm), or None when they do not touch.
+        Closed pair: the intersection solid (manifold3d), its vertices' exact distance to the
+        surfaces. Otherwise: surface samples of one inside the other."""
         A, B = self.bodies[a].mesh, self.bodies[b].mesh
+        if A.is_watertight and B.is_watertight:
+            try:
+                import manifold3d as mf
+
+                def man(m):
+                    return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                               tri_verts=np.asarray(m.faces, np.uint32)))
+                I = man(A) ^ man(B)
+                if I.is_empty():
+                    return None, None
+                mm = I.to_mesh()
+                V = np.asarray(mm.vert_properties)[:, :3]
+                if len(V) > 600:
+                    V = V[np.random.default_rng(0).choice(len(V), 600, replace=False)]
+                _, da, _ = trimesh.proximity.closest_point(A, V)
+                _, db, _ = trimesh.proximity.closest_point(B, V)
+                d = np.maximum(da, db)
+                k = int(np.argmax(d))
+                return float(d[k]), V[k]
+            except Exception:
+                pass
         best = None
         for X, Y, yid in ((A, B, b), (B, A, a)):
             if not Y.is_watertight:
@@ -309,6 +358,13 @@ class Suite:
             P = self.pts(xid)
             lo, hi = Y.bounds
             sel = P[np.all((P >= lo - 0.01) & (P <= hi + 0.01), axis=1)]
+            if not len(sel):
+                continue
+            # only where the other part is near (KD-tree on its samples), at most 1500 points
+            dn, _ = self.tree(yid).query(sel, distance_upper_bound=3.0)
+            sel = sel[np.isfinite(dn)]
+            if len(sel) > 1500:
+                sel = sel[np.random.default_rng(1).choice(len(sel), 1500, replace=False)]
             if not len(sel):
                 continue
             inside = sel[Y.contains(sel)]
@@ -400,47 +456,119 @@ class Suite:
         return max(math.degrees(math.asin(min(1.0, abs(float(r @ n))))),
                    math.degrees(math.asin(min(1.0, abs(float(r @ ng))))))
 
+    def moving_joints(self, bid):
+        """Joints that move a body: its link chain, plus the joints its linkage follows."""
+        b = self.bodies[bid]
+        js = set(self.asm.link_chain(b.link))
+        if b.linkage:
+            js |= {j.id for j in self.asm.joints if b.linkage in (j.drive or {}).get("linkages", [])}
+        return js
+
     def clearance(self, poses):
-        """Moving pairs (different links / linkage parts, not mated): the smallest gap across the
-        motion must stay >= the print tolerance."""
-        ids = [i for i, b in self.bodies.items()]
-        pairs = []
+        """Moving pairs (their links move relative to each other, not mated): the smallest gap
+        across the motion must stay >= the print tolerance. Pairs are grouped by the joints that
+        move them; each group is swept on its own grid (a clearance map), AABBs prune far pairs
+        per pose, FCL measures the rest; show-clip poses are checked only for pairs the map
+        finds near. Results are cached by geometry hash."""
+        tol = self.tol["clearance_mm"]
+        margin = 3.0
+        ids = list(self.bodies)
+        mv = {k: self.moving_joints(k) for k in ids}
+        groups: dict[tuple, list] = defaultdict(list)
         for a, b in itertools.combinations(ids, 2):
-            A, B = self.bodies[a], self.bodies[b]
             if frozenset((a, b)) in self.mated:
                 continue
+            A, B = self.bodies[a], self.bodies[b]
             if A.link == B.link and not (A.linkage or B.linkage):
                 continue
             if A.linkage and A.linkage == B.linkage and A.role == B.role:
                 continue
-            pairs.append((a, b))
-        sub = [p for s, p in poses]
-        best: dict = {}
-        for pose in sub:
-            ms = link_matrices(self.asm, pose)
-            sol = solve_linkages(self.asm, pose)
-            mats = {i: self.body_matrix(b, ms, sol) for i, b in self.bodies.items()}
-            for a, b in pairs:
-                d = self._dist(a, mats[a], b, mats[b])
-                if d < best.get((a, b), (math.inf,))[0]:
-                    best[(a, b)] = (d, pose)
-        rest = {}
-        ms0 = link_matrices(self.asm, {})
-        sol0 = solve_linkages(self.asm, {})
-        m0 = {i: self.body_matrix(b, ms0, sol0) for i, b in self.bodies.items()}
-        low = []
-        for (a, b), (d, pose) in best.items():
-            d0 = rest.setdefault((a, b), self._dist(a, m0[a], b, m0[b]))
-            if d < self.tol["clearance_mm"] and d < d0 - 0.05:  # a gap the motion closes
-                low.append((d, a, b, pose))
-        low.sort()
+            js = tuple(sorted(mv[a] ^ mv[b] if not (A.linkage or B.linkage) else mv[a] | mv[b]))
+            if js:
+                groups[js].append((a, b))
+        joints = {j.id: j for j in self.asm.joints}
+        step1 = 1.0 if self.full else 5.0
+        stepn = self.tol["grid_deg"] if self.full else 2 * self.tol["grid_deg"]
+        results = {}  # pair -> (min d, pose, d at rest)
+        idx = {k: i for i, k in enumerate(self.scene.ids)}
+        mat_cache: dict = {}
+
+        def mats_at(pose):
+            key = tuple(sorted(pose.items()))
+            if key not in mat_cache:
+                ms = link_matrices(self.asm, pose)
+                sol = solve_linkages(self.asm, pose)
+                mat_cache[key] = {k: self.body_matrix(self.bodies[k], ms, sol) for k in ids}
+            return mat_cache[key]
+
+        n_fcl = 0
+        for js, pairs in groups.items():
+            axes = []
+            for j in js:
+                lo, hi = joints[j].limits
+                st = step1 if len(js) == 1 else stepn
+                axes.append(sorted(set(np.round(np.append(np.arange(lo, hi + 1e-9, st), [lo, hi, 0.0]), 3))))
+            grid = [dict(zip(js, map(float, c))) for c in itertools.product(*axes)]
+            spec = (js, tuple(len(ax) for ax in axes),
+                    tuple((j, joints[j].limits, tuple(joints[j].pivot), tuple(joints[j].axis)) for j in js),
+                    tuple((lk.id, lk.rod_length, lk.radius, tuple(lk.zero_dir), tuple(lk.ground_point))
+                          for lk in self.asm.linkages))
+            keys = [("clr", self.scene.hash[a], self.scene.hash[b], spec) for a, b in pairs]
+            D = np.full((len(pairs), len(grid)), np.inf)
+            todo = []
+            for i, k in enumerate(keys):
+                row = self.cache.get(k)
+                if row is None:
+                    todo.append(i)
+                else:
+                    D[i] = row
+            if todo:  # only the pairs whose geometry (or motion) changed since the last run
+                ia = np.array([idx[pairs[i][0]] for i in todo])
+                ib = np.array([idx[pairs[i][1]] for i in todo])
+                for k, pose in enumerate(grid):
+                    mats = mats_at(pose)
+                    gaps = self.scene.gaps(self.scene.aabbs(mats), ia, ib)
+                    for t, i in enumerate(todo):
+                        if gaps[t] >= tol + margin:
+                            D[i, k] = gaps[t]
+                        else:
+                            a, b = pairs[i]
+                            D[i, k] = self.scene.distance(a, mats[a], b, mats[b])
+                            n_fcl += 1
+                for i in todo:
+                    self.cache.put(keys[i], D[i].copy())
+            rest = next((k for k, p in enumerate(grid) if all(abs(v) < 1e-9 for v in p.values())), 0)
+            for i, (a, b) in enumerate(pairs):
+                k = int(np.argmin(D[i]))
+                results[(a, b)] = (float(D[i, k]), grid[k], float(D[i, rest]))
+        # show clips: exact checks only for pairs the map found near
+        near = [pr for pr, (d, _, _) in results.items() if d < tol + margin]
+        clips = [p for src, p in poses if src.startswith("clip")]
+        lk_key = tuple((lk.id, lk.rod_length, lk.radius, tuple(lk.zero_dir), tuple(lk.ground_point)) for lk in self.asm.linkages)
+        for pose in clips:
+            ptuple = tuple(sorted((k, round(v, 3)) for k, v in pose.items()))
+            mats = None
+            for a, b in near:
+                ck = ("clip", self.scene.hash[a], self.scene.hash[b], ptuple, lk_key)
+                d = self.cache.get(ck)
+                if d is None:
+                    mats = mats or mats_at(pose)
+                    d = self.scene.distance(a, mats[a], b, mats[b])
+                    self.cache.put(ck, d)
+                    n_fcl += 1
+                if d < results[(a, b)][0]:
+                    results[(a, b)] = (d, pose, results[(a, b)][2])
+        low = sorted((d, a, b, p) for (a, b), (d, p, d0) in results.items() if d < tol and d < d0 - 0.05)
         fmt = lambda p: ", ".join(f"{k} {v:+g}" for k, v in p.items()) or "rest"
+        self.n_fcl = n_fcl
         self.verdict("clearance", "Moving gaps stay at least the print tolerance",
                      [((a, b), f"{a} to {b}: {d:.2f} mm at {fmt(p)}") for d, a, b, p in low],
-                     f">= {self.tol['clearance_mm']} mm across {len(sub)} poses", pose=low[0][3] if low else None,
-                     assumptions=[f"surface samples every 1.2 mm (a gap is good to ~0.6 mm); {len(sub)} poses",
-                              "pairs that touch through a mate are not gaps; a gap the motion does not change "
-                              "(parts turning about a shared axis) is left to the overlap test"])
+                     f">= {tol} mm across {sum(len(p) for p in groups.values())} moving pairs", pose=low[0][3] if low else None,
+                     assumptions=[f"{len(groups)} joint groups, each on its own grid ({'1/5' if self.full else '5/10'} deg "
+                                  "for 1/n joints) + every show-clip keyframe for the pairs the grid finds within 3 mm",
+                                  "AABB broad phase, FCL distance on the parts' BVHs; cached by geometry hash",
+                                  "pairs that touch through a mate are not gaps; a gap the motion does not change "
+                                  "(parts turning about a shared axis) is left to the overlap test"])
 
     def _dist(self, a, ma, b, mb, far=25.0):
         if len(self.pts(a)) > len(self.pts(b)):
@@ -463,7 +591,11 @@ class Suite:
             ext = sorted(p.mesh.extents)
             if any(e > b for e, b in zip(ext, bed)):
                 too_big.append(f"{p.id} {np.round(p.mesh.extents).astype(int).tolist()} mm")
-            w = _thin_wall(p.mesh)
+            k = ("wall", self.scene.hash.get(p.id))
+            w = self.cache.get(k)
+            if w is None:
+                w = _thin_wall(p.mesh)
+                self.cache.put(k, w)
             if w is not None and w < self.tol["wall_min_mm"]:
                 thin.append(f"{p.id} {w:.2f} mm")
         self.add("printable_bed", "Printed parts fit the bed", "fail" if too_big else "pass",
@@ -474,27 +606,40 @@ class Suite:
                  assumptions=["2nd-percentile ray thickness from 3000 surface samples (closed meshes only)"])
 
     def run(self) -> list[Check]:
-        self.connected()
-        self.mates_hold()
-        self.fasteners_real()
-        self.overlaps()
-        self.motion()
-        self.printable()
+        import time
+
+        for name, fn in (("connected", self.connected), ("mates_hold", self.mates_hold),
+                         ("fasteners_real", self.fasteners_real), ("no_overlap", self.overlaps),
+                         ("motion", self.motion), ("printable", self.printable)):
+            t0 = time.perf_counter()
+            n0 = len(self.results)
+            fn()
+            dt = time.perf_counter() - t0
+            for c in self.results[n0:]:
+                c.seconds = round(dt / max(1, len(self.results) - n0), 3)
+        self.cache.save()
         return self.results
 
 
 def _check_mesh(m: trimesh.Trimesh, faces: int = 20000) -> trimesh.Trimesh:
     """A lighter copy for the checks (inside tests and exact distances scale with faces): decimated
-    only while it stays closed, so penetration depths stay exact to ~0.05 mm."""
+    only while it stays closed, so penetration depths stay exact to ~0.05 mm. Cached by hash."""
     if len(m.faces) <= faces:
         return m
-    try:
-        d = m.simplify_quadric_decimation(face_count=faces)
-        if d.is_watertight or not m.is_watertight:
-            return d
-    except Exception:
-        pass
-    return m
+    from .collide import mesh_hash
+    from .geom import cached
+
+    def make():
+        try:
+            d = m.simplify_quadric_decimation(face_count=faces)
+            if d.is_watertight or not m.is_watertight:
+                return np.asarray(d.vertices), np.asarray(d.faces)
+        except Exception:
+            pass
+        return np.asarray(m.vertices), np.asarray(m.faces)
+
+    v, f = cached(f"checkmesh-{mesh_hash(m)}-{faces}", make)
+    return trimesh.Trimesh(v, f, process=False)
 
 
 def _nominal(thread: str) -> float:

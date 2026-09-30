@@ -171,7 +171,8 @@ def fit_shell():
 def leaf_axis(v: np.ndarray):
     """Principal axis, centre and length of a slender leaf (screws, shafts)."""
     c = v.mean(0)
-    _, _, vt = np.linalg.svd(v - c)
+    sub = v[:: max(1, len(v) // 4000)]
+    _, _, vt = np.linalg.svd(sub - c, full_matrices=False)
     a = vt[0]
     s = (v - c) @ a
     return c, a, float(s.max() - s.min()), s
@@ -204,7 +205,9 @@ def remodel(name: str, M: np.ndarray, part_id: str | None = None, **params):
     else:
         r = hunter.REMODELS[name](**params)
     ref = vendor(r.reference)
-    mesh = r.mesh()
+    vf = cached(_cache_key("remodel-mesh", name, sorted((k, str(v)) for k, v in r.params.items()), 1),
+                lambda: (lambda m: (np.asarray(m.vertices), np.asarray(m.faces)))(r.mesh()))
+    mesh = trimesh.Trimesh(*vf, process=False)
 
     def reg():
         R = geom.stl(ref)
@@ -565,6 +568,18 @@ def key_of(spec):
 
 
 def fit_1311(inst_1309: trimesh.Trimesh, coupler=None) -> trimesh.Trimesh:
+    """Cached by the two meshes' hashes (see _fit_1311)."""
+    from workbench.collide import mesh_hash
+    from workbench.geom import cached
+
+    global HUB_1311_M
+    M, verts, faces = cached(f"fit1311-{mesh_hash(inst_1309)}-{mesh_hash(coupler) if coupler is not None else 0}-2",
+                             lambda: (lambda o: (HUB_1311_M, np.asarray(o.vertices), np.asarray(o.faces)))(_fit_1311(inst_1309, coupler)))
+    HUB_1311_M = M
+    return trimesh.Trimesh(verts, faces, process=False)
+
+
+def _fit_1311(inst_1309: trimesh.Trimesh, coupler=None) -> trimesh.Trimesh:
     """goBILDA's 1311 (thru-hole) hub, fitted onto the STEP's 1309 instance: the same outer
     cylinder (axis, centre) and clamp clocking. Both are 32 x 10 mm sonic hubs."""
     from workbench.geom import step_leaves
@@ -627,6 +642,17 @@ SERVO_FLANGE = {"holes": [(10 + sx * 24.0, sz * 4.89) for sx in (-1, 1) for sz i
 
 
 def place_visor_mount(mount, m_servo, others, squared=False):
+    """Cached by the inputs' hashes (see _place_visor_mount)."""
+    from workbench.collide import key_of, mesh_hash
+    from workbench.geom import cached
+
+    k = key_of("vmount", mesh_hash(mount), np.asarray(m_servo), [mesh_hash(o.mesh) for o in others], squared, 2)
+    v, f, how = cached(k, lambda: (lambda r: (np.asarray(r[0].vertices), np.asarray(r[0].faces), r[1]))(
+        _place_visor_mount(mount, m_servo, others, squared)))
+    return trimesh.Trimesh(v, f, process=False), how
+
+
+def _place_visor_mount(mount, m_servo, others, squared=False):
     """The mount's four insert bosses (measured) onto the servo's flange holes (goBILDA 2000:
     48 x 9.8 mm, the same pattern Hunter's plate uses), its face on the flange's underside.
     Every face/flip is tried; the one whose mount overlaps nothing is kept."""

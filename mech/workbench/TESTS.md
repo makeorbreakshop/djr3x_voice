@@ -7,6 +7,17 @@ results in the manifest's `checks` (kind `test`), so Build's Checks tab lists th
 the parts it names and a pose that shows it. In pytest: `workbench/tests/test_assemblies.py`
 (set `R3X_MECH_SUITE=1`; it needs the vendored sources, so it skips without them).
 
+**Speed.** Analytic tests (connectivity, mates, engagement, linkage closure, travel, leverage)
+do no mesh work. Geometric tests run on `workbench/collide.py`: an FCL BVH per part (built once,
+only transforms change per pose), a vectorised AABB broad phase, FCL distance / collision in
+the narrow phase, and exact depth (manifold3d intersection) only for pairs that intersect.
+Pairs on the same rigid link and mated pairs are never tested for clearance; the rest are
+grouped by the joints that move them and each group is swept on its own grid (a clearance map);
+show-clip keyframes are checked only for pairs the map finds within 3 mm. Every result is
+cached per part pair by geometry hash (`out/.cache/suite/`), so an edit recomputes only the
+pairs that involve the changed parts. Hunter's head, quick mode: ~30 s cold, ~0.3 s warm;
+`--full` uses 1 deg sweeps and 5 deg grids. Each check reports its time (Build shows it).
+
 A module can declare `EXPLAINED`: failures traced to a named cause, each with a proposed
 fix, matched by test id and part-name patterns. A matched failure is reported as `explained`
 with its cause and fix, never hidden; anything unmatched still fails. `TOLERANCES` overrides

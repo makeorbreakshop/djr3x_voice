@@ -517,7 +517,7 @@ export function mountBuildPanel(wb: Workbench) {
       ? `${counts.fail} fail · ${counts.explained} explained · ${counts.warn} warn · ${counts.pass} pass` : '';
     const row = (c: MCheck) => `<li class="${c.status}${wb.check?.id === c.id ? ' on' : ''}">
       <button data-bp="check" data-id="${esc(c.id)}" data-asm="${esc(a!.id)}" aria-pressed="${wb.check?.id === c.id}">
-        <span class="badge ${c.status}">${c.status}</span><b>${esc(c.title)}</b><span class="sum">${esc(c.summary)}</span></button>
+        <span class="badge ${c.status}">${c.status}</span><b>${esc(c.title)}${c.seconds != null ? ` <small class="secs">${num(c.seconds, 2)} s</small>` : ''}</b><span class="sum">${esc(c.summary)}</span></button>
       ${c.assumptions?.length ? `<details><summary>Assumptions</summary><ul>${c.assumptions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</li>`;
     const order = { fail: 0, explained: 1, warn: 2, pass: 3 };
     const tests = checks.filter((c) => c.kind === 'test').sort((x, y) => order[x.status] - order[y.status]);

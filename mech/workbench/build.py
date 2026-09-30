@@ -247,7 +247,7 @@ def run_suite(name: str, out_root: Path = OUT, full: bool = False) -> dict:
         md.append(f"| {c.title} | **{c.status}** | {c.summary.replace('|', '/')} |")
     (out / "test_report.md").write_text("\n".join(md) + "\n")
     for c in tests:
-        print(f"{c.status:9} {c.title}: {c.summary}")
+        print(f"{c.status:9} {c.seconds if c.seconds is not None else 0:6.2f}s  {c.title}: {c.summary[:300]}")
     print(f"{len(tests)} tests, {len(failed)} failed, {report['explained']} explained, {report['mode']} run "
           f"{took:.0f} s -> {out / 'test_report.md'}")
     report["failed"] = len(failed)
