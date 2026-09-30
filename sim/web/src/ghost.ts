@@ -2,7 +2,9 @@
  * Disabled outputs, ghosted: the stage manager's output enables (`state.stage.outputs`,
  * Robot Profile actuator and light-group names) gate drivers, so a disabled actuator's
  * joint still moves in frames but the real one would not. The sim shows that by drawing
- * the joint's own meshes (not its children's) semi-transparent and desaturated.
+ * the joint's own meshes (not its children's) dimmed and desaturated, as if unpowered.
+ * They stay opaque: Bench starts with every output off, and a see-through robot read as a
+ * rendering bug.
  */
 import * as THREE from 'three';
 import type { Rig } from './rig';
@@ -56,11 +58,8 @@ export class Ghosts {
     let g = this.ghostMat.get(mat);
     if (!g) {
       g = mat.clone();
-      g.transparent = true;
-      g.opacity = 0.3;
-      g.depthWrite = false;
       const c = (g as THREE.MeshStandardMaterial).color;
-      if (c) c.lerp(new THREE.Color(0x8fa6c8), 0.6);
+      if (c) c.lerp(new THREE.Color(0x3a3f47), 0.65);
       this.ghostMat.set(mat, g);
     }
     return g;
