@@ -193,9 +193,11 @@ def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
         a.guide = {"title": g.get("source", "DJ R3X v2 Guide.pdf"), "pages": sec.get("pages")}
         for st in sec.get("steps", []):
             n = len(a.steps) + 1
-            parts = []
+            parts, foreign = [], []
+            own = {p.id for p in a.parts}
             for stem in st.get("parts", []):
-                parts += parts_by_stem.get(stem, [])
+                for pid_ in parts_by_stem.get(stem, []):
+                    (parts if pid_ in own else foreign).append(pid_)
             a.steps.append({
                 "id": f"{a.id}_s{n:02d}", "n": n, "title": (st.get("notes") or "")[:80] or f"Step {st.get('n')}",
                 "parts": parts, "fasteners": [],
@@ -204,7 +206,8 @@ def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
                               "count": fz.get("qty"), "note": fz.get("where", "")}
                              for fz in st.get("fasteners", [])],
                 "notes": [x for x in [st.get("notes")] + [f"consumables: {', '.join(st['consumables'])}"
-                                                          if st.get("consumables") else None] if x],
+                                                          if st.get("consumables") else None]
+                          + [f"also uses (other sub-assembly): {', '.join(foreign)}" if foreign else None] if x],
                 "guide_page": st.get("page"), "subassembly": st.get("subassembly"),
                 "inferred": False, "inferred_note": "",
             })
