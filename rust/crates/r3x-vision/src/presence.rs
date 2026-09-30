@@ -3,7 +3,8 @@
 //! (time, recognition) so it tests without a camera or a clock.
 //!
 //! Preserved: an exit only after `exit_frames` consecutive frames without the person (10 at
-//! 5 fps = 2 s); a capture on the first frame, on a new person unless they left < 120 s ago
+//! 5 fps = 2 s) or, as analysis is adaptive (`cadence`: 1-2 fps when nothing changes), the
+//! same `exit_after_s` since they were last seen, whichever comes first; a capture on the first frame, on a new person unless they left < 120 s ago
 //! (re-entry grace) or were captured < 300 s ago (per-person cooldown), on an exit after > 30 s
 //! present, and when the last capture is > 300 s old.
 //! Differences: CantinaOS declared but never applied its 60 s minimum between automatic
@@ -16,6 +17,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PresenceConfig {
     pub exit_frames: u32,
+    /// Seconds since last seen (the time `exit_frames` spans at 5 fps).
+    pub exit_after_s: f64,
     pub reentry_grace_s: f64,
     pub person_scene_cooldown_s: f64,
     pub staleness_s: f64,
@@ -29,6 +32,7 @@ impl Default for PresenceConfig {
     fn default() -> Self {
         Self {
             exit_frames: 10,
+            exit_after_s: 2.0,
             reentry_grace_s: 120.0,
             person_scene_cooldown_s: 300.0,
             staleness_s: 300.0,
@@ -57,6 +61,7 @@ pub struct Presence {
     cfg: PresenceConfig,
     current: Option<(String, f32, f64)>,
     missing: u32,
+    last_seen: f64,
     frames: u64,
     last_capture: Option<f64>,
     person_capture: HashMap<String, f64>,
@@ -81,6 +86,7 @@ impl Presence {
         match seen {
             Some((name, conf)) => {
                 self.missing = 0;
+                self.last_seen = now;
                 match &mut self.current {
                     Some((n, c, _)) if n == name => {
                         if (conf - *c).abs() > 0.1 {
@@ -109,7 +115,7 @@ impl Presence {
             None => {
                 if let Some((name, _, t0)) = &self.current {
                     self.missing += 1;
-                    if self.missing >= self.cfg.exit_frames {
+                    if self.missing >= self.cfg.exit_frames || now - self.last_seen >= self.cfg.exit_after_s {
                         let (name, duration_s) = (name.clone(), now - t0);
                         self.person_exit.insert(name.clone(), now);
                         if duration_s > self.cfg.exit_capture_after_s {
@@ -207,6 +213,16 @@ mod tests {
         let s = run(&mut p, &mut t, 2, Some(("Brandon", 0.7)));
         assert_eq!(s[0].capture.as_deref(), Some("scene_staleness_exceeded"));
         assert!(s[1].capture.is_none());
+    }
+
+    #[test]
+    fn exit_by_time_at_a_slower_analysis_rate() {
+        let mut p = Presence::new(PresenceConfig::default());
+        assert!(!p.observe(0.0, Some(("Brandon", 0.7))).transitions.is_empty());
+        // At 1 fps the 10-frame count would take 10 s; the 2 s since last seen rules.
+        assert!(p.observe(1.0, None).transitions.is_empty());
+        let s = p.observe(2.0, None);
+        assert!(matches!(&s.transitions[..], [Transition::Exited { name, .. }] if name == "Brandon"));
     }
 
     #[test]

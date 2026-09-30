@@ -155,7 +155,8 @@ fn decode(heads: &[Vec<f32>], threshold: f32) -> Vec<Face> {
     faces
 }
 
-fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
+/// Intersection over union of two x, y, w, h boxes.
+pub fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let (x1, y1) = (a[0].max(b[0]), a[1].max(b[1]));
     let (x2, y2) = ((a[0] + a[2]).min(b[0] + b[2]), (a[1] + a[3]).min(b[1] + b[3]));
     let inter = (x2 - x1).max(0.0) * (y2 - y1).max(0.0);

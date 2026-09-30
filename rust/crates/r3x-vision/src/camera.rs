@@ -2,7 +2,9 @@
 //!
 //! The real one is AVFoundation through an `ffmpeg` child (the same device list and indexes
 //! CantinaOS reads, `vision_service.py` `_get_camera_names`): ffmpeg drops to the loop rate and
-//! scales to a fixed size, so a frame is exactly `w * h * 3` bytes on its stdout. Continuity
+//! scales to a fixed size, so a frame is exactly `w * h * 3` bytes on its stdout. The device is
+//! asked for the lowest capture rate it supports at or above the loop rate (5, 10, 15, 24, then
+//! 30 fps), so ffmpeg does not convert 30 frames a second to keep 5. Continuity
 //! (iPhone), Desk View and screen-capture devices are never auto-selected.
 
 use std::io::Read;
@@ -102,18 +104,42 @@ impl Camera for FfmpegCamera {
     fn open(&self, index: u32, fps: f64) -> Result<Box<dyn FrameSource>, VisionError> {
         let (w, h) = (self.width, self.height);
         let vf = format!("fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2");
-        let child = Command::new(&self.ffmpeg)
-            // nv12: a native format of Mac cameras; the default (yuv420p) makes ffmpeg complain.
-            .args(["-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", "30", "-pixel_format", "nv12", "-i"])
-            .arg(format!("{index}:none"))
-            .args(["-vf", &vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| VisionError::Camera(format!("{}: {e}", self.ffmpeg)))?;
-        Ok(Box::new(PipeSource::new(child, w, h)))
+        let rates = capture_rates(fps);
+        for (i, rate) in rates.iter().enumerate() {
+            let last = i + 1 == rates.len();
+            let child = Command::new(&self.ffmpeg)
+                // nv12: a native format of Mac cameras; the default (yuv420p) makes ffmpeg complain.
+                .args(["-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", &rate.to_string(), "-pixel_format", "nv12", "-i"])
+                .arg(format!("{index}:none"))
+                .args(["-vf", &vf, "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                // An unsupported rate is expected on the way down the list: keep that quiet.
+                .stderr(if last { Stdio::inherit() } else { Stdio::null() })
+                .spawn()
+                .map_err(|e| VisionError::Camera(format!("{}: {e}", self.ffmpeg)))?;
+            let mut src = PipeSource::new(child, w, h);
+            match src.next_frame() {
+                Ok(Some(first)) => {
+                    tracing::info!("camera {index} capturing at {rate} fps");
+                    src.pending = Some(first);
+                    return Ok(Box::new(src));
+                }
+                // The device refused this rate (ffmpeg exits before the first frame): try the next.
+                _ if !last => continue,
+                Ok(None) => return Err(VisionError::Camera(format!("camera {index} gave no frames"))),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(VisionError::Camera(format!("camera {index}: no capture rate")))
     }
+}
+
+/// Capture rates to ask the device for, lowest first: at or above the loop rate, then 30.
+pub fn capture_rates(fps: f64) -> Vec<u32> {
+    let mut v: Vec<u32> = [5, 10, 15, 24].into_iter().filter(|r| fps > 0.0 && f64::from(*r) >= fps).collect();
+    v.push(30);
+    v
 }
 
 /// Capture children alive in this process. Their `PipeSource`s live on the capture thread,
@@ -140,18 +166,23 @@ pub struct PipeSource {
     child: Child,
     width: u32,
     height: u32,
+    /// A frame already read (the capture-rate probe), returned first.
+    pending: Option<Frame>,
 }
 
 impl PipeSource {
     /// Take over `child` (registered for [`kill_captures`] until dropped).
     pub fn new(child: Child, width: u32, height: u32) -> Self {
         captures().push(child.id());
-        Self { child, width, height }
+        Self { child, width, height, pending: None }
     }
 }
 
 impl FrameSource for PipeSource {
     fn next_frame(&mut self) -> Result<Option<Frame>, VisionError> {
+        if let Some(f) = self.pending.take() {
+            return Ok(Some(f));
+        }
         let Some(out) = self.child.stdout.as_mut() else { return Ok(None) };
         let mut buf = vec![0u8; self.width as usize * self.height as usize * 3];
         match out.read_exact(&mut buf) {
@@ -190,6 +221,13 @@ mod tests {
         assert_eq!(pick(&cams, None), Some(2));
         assert_eq!(pick(&cams, Some(0)), Some(0));
         assert_eq!(pick(&cams[..2], None), None);
+    }
+
+    #[test]
+    fn capture_rates_start_at_the_loop_rate() {
+        assert_eq!(capture_rates(5.0), [5, 10, 15, 24, 30]);
+        assert_eq!(capture_rates(12.0), [15, 24, 30]);
+        assert_eq!(capture_rates(0.0), [30]);
     }
 
     #[test]

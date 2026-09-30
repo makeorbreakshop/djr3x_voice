@@ -13,6 +13,7 @@
 //! Models: `crates/r3x-vision/scripts/download_models.sh` (YuNet + SFace into `~/.cache/dj-r3x/vision`).
 //! Enrolment: `cargo run -p r3x-vision --release -- enroll ../cantina_os/vision_data/training` (from `rust/`).
 
+pub mod cadence;
 pub mod camera;
 pub mod face;
 pub mod frame;

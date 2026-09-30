@@ -15,8 +15,9 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::cadence::{Cadence, Seen, Thumb};
 use crate::camera::{pick, Camera, CameraInfo, FrameSource};
-use crate::face::FaceEngine;
+use crate::face::{align, iou, FaceEngine};
 use crate::frame::Frame;
 use crate::gallery::Gallery;
 use crate::presence::{Presence, PresenceConfig, Transition};
@@ -33,15 +34,33 @@ pub trait Recognizer: Send {
 }
 
 /// The real recognizer: largest face, nearest gallery match above the threshold.
+///
+/// The embedding (the costly half) runs when a face appears or tracking is lost; while the
+/// largest face stays where it was (box overlap, [`TRACK_IOU`]) the identity carries over,
+/// re-checked every [`REVERIFY`].
 pub struct GalleryRecognizer {
     pub engine: FaceEngine,
     pub gallery: Gallery,
     last_face: Option<[f32; 2]>,
+    track: Option<Track>,
+    /// Embeddings computed (for measurement and tests).
+    pub embeddings: u64,
 }
+
+struct Track {
+    bbox: [f32; 4],
+    who: Option<(String, f32)>,
+    at: Instant,
+}
+
+/// Minimum box overlap between consecutive analyses to count as the same face.
+pub const TRACK_IOU: f32 = 0.3;
+/// A tracked identity is re-embedded at least this often.
+pub const REVERIFY: Duration = Duration::from_secs(10);
 
 impl GalleryRecognizer {
     pub fn new(engine: FaceEngine, gallery: Gallery) -> Self {
-        Self { engine, gallery, last_face: None }
+        Self { engine, gallery, last_face: None, track: None, embeddings: 0 }
     }
 }
 
@@ -52,18 +71,36 @@ impl Recognizer for GalleryRecognizer {
 
     fn recognize(&mut self, frame: &Frame) -> Option<(String, f32)> {
         self.last_face = None;
-        match self.engine.largest(frame) {
-            Ok(Some((f, e))) => {
-                let [x, y, w, h] = f.bbox;
-                self.last_face = Some([(x + w / 2.0) / frame.width as f32, (y + h / 2.0) / frame.height as f32]);
-                self.gallery.identify(&e).map(|m| (m.name, m.similarity))
-            }
-            Ok(None) => None,
+        let faces = match self.engine.detector.detect(frame) {
+            Ok(f) => f,
             Err(e) => {
-                tracing::warn!("face recognition failed: {e}");
-                None
+                tracing::warn!("face detection failed: {e}");
+                self.track = None;
+                return None;
             }
+        };
+        let Some(f) = faces.into_iter().max_by(|a, b| a.area().total_cmp(&b.area())) else {
+            self.track = None;
+            return None;
+        };
+        let [x, y, w, h] = f.bbox;
+        self.last_face = Some([(x + w / 2.0) / frame.width as f32, (y + h / 2.0) / frame.height as f32]);
+        let now = Instant::now();
+        if let Some(t) = self.track.as_mut().filter(|t| iou(&t.bbox, &f.bbox) >= TRACK_IOU && now.duration_since(t.at) < REVERIFY) {
+            t.bbox = f.bbox;
+            return t.who.clone();
         }
+        self.embeddings += 1;
+        let who = match self.engine.embedder.embed(&align(frame, &f)) {
+            Ok(e) => self.gallery.identify(&e).map(|m| (m.name, m.similarity)),
+            Err(e) => {
+                tracing::warn!("face embedding failed: {e}");
+                self.track = None;
+                return None;
+            }
+        };
+        self.track = Some(Track { bbox: f.bbox, who: who.clone(), at: now });
+        who
     }
 }
 
@@ -111,8 +148,12 @@ pub struct CameraStatus {
     pub selected: Option<u32>,
     pub streaming: bool,
     pub frames: u64,
+    /// Frames that went through face recognition (the rest only updated the latest frame).
+    pub analysed: u64,
     pub error: Option<String>,
     pub person: Option<String>,
+    #[serde(skip)]
+    present: bool,
 }
 
 enum Control {
@@ -120,7 +161,14 @@ enum Control {
     Stop,
 }
 
-type Observation = (Arc<Frame>, Option<(String, f32)>, Option<[f32; 2]>);
+/// Who recognition matched (name, similarity) and the largest face's centre.
+type Analysis = (Option<(String, f32)>, Option<[f32; 2]>);
+
+/// A captured frame, and what recognition saw in it if it was analysed (see `cadence`).
+struct Observation {
+    frame: Arc<Frame>,
+    analysed: Option<Analysis>,
+}
 
 /// A face centre (0..1 of the frame) -> a gaze target (pan, tilt) in degrees, for a camera
 /// that looks where R3X faces at rest: a face right of centre in the image is on R3X's right
@@ -279,7 +327,9 @@ impl Vision {
         let mut presence = Presence::new(self.inner.cfg.presence.clone());
         let clock = self.inner.bus.clock();
         let mut gaze: Option<(f64, f64)> = None;
-        while let Some((frame, seen, face)) = rx.recv().await {
+        while let Some(Observation { frame, analysed }) = rx.recv().await {
+            *lock(&self.inner.latest) = Some((frame.clone(), Instant::now()));
+            let Some((seen, face)) = analysed else { continue };
             let at = face.map(|c| face_to_gaze(c, frame.width, frame.height, self.inner.cfg.hfov_deg));
             let moved = match (gaze, at) {
                 (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()) > 1.0,
@@ -293,7 +343,6 @@ impl Vision {
                 };
                 self.inner.bus.publish(Source::System, None, Event::Vision(e));
             }
-            *lock(&self.inner.latest) = Some((frame.clone(), Instant::now()));
             let now = clock.t_mono();
             let step = presence.observe(now, seen.as_ref().map(|(n, c)| (n.as_str(), *c)));
             for t in step.transitions {
@@ -310,7 +359,11 @@ impl Vision {
                 self.inner.bus.publish(Source::System, None, Event::Vision(e));
             }
             let person = presence.current().map(|(n, c)| (n.to_string(), c));
-            lock(&self.inner.status).person = person.as_ref().map(|p| p.0.clone());
+            {
+                let mut st = lock(&self.inner.status);
+                st.person = person.as_ref().map(|p| p.0.clone());
+                st.present = person.is_some();
+            }
             if let (Some(reason), true) = (step.capture, self.inner.llm.is_some()) {
                 presence.captured(now, person.as_ref().map(|p| p.0.as_str()));
                 let prompt = match &person {
@@ -352,6 +405,7 @@ fn capture_loop(
         }
     }
     let period = if fps > 0.0 { Duration::from_secs_f64(1.0 / fps) } else { Duration::ZERO };
+    let mut cadence = Cadence::new(fps);
     let mut source: Option<Box<dyn FrameSource>> = None;
     let mut next = Instant::now();
     loop {
@@ -389,10 +443,23 @@ fn capture_loop(
         };
         match src.next_frame() {
             Ok(Some(frame)) => {
-                let seen = recognizer.recognize(&frame);
-                let face = recognizer.face_centre();
-                lock(&status).frames += 1;
-                if tx.blocking_send((Arc::new(frame), seen, face)).is_err() {
+                let now = Instant::now();
+                let thumb = Thumb::of(&frame);
+                let analysed = cadence.due(now, &thumb).then(|| {
+                    let seen = recognizer.recognize(&frame);
+                    let face = recognizer.face_centre();
+                    // Presence (the async side) says who is present; this frame's own result is
+                    // the best guess until it has seen it.
+                    let present = seen.is_some() || lock(&status).present;
+                    cadence.analysed(now, thumb, Seen { face, name: seen.as_ref().map(|s| s.0.clone()) }, present);
+                    (seen, face)
+                });
+                {
+                    let mut st = lock(&status);
+                    st.frames += 1;
+                    st.analysed += u64::from(analysed.is_some());
+                }
+                if tx.blocking_send(Observation { frame: Arc::new(frame), analysed }).is_err() {
                     break;
                 }
                 next += period;
