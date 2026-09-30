@@ -280,7 +280,7 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
         log(f"checks {time.time() - t1:.1f} s")
     if run_checks:
         t2 = time.time()
-        asm.tests = suite_for(mod, asm)
+        asm.tests = suite_for(mod, asm, out=out_root / asm.id)
         log(f"suite {time.time() - t2:.1f} s: " + ", ".join(f"{c.id[5:]} {c.status}" for c in asm.tests))
     out = out_root / asm.id
     out.mkdir(parents=True, exist_ok=True)
@@ -305,7 +305,24 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     return out / "manifest.json"
 
 
-def suite_for(mod, asm, full: bool = False, whole: bool = False):
+def write_interference(suite, out: Path):
+    """out/interference.json (+ interference/<n>.glb, the shared solid of each pair) for Build's
+    Interference overlay: every overlapping pair at rest, explained or not."""
+    rows = []
+    (out / "interference").mkdir(parents=True, exist_ok=True)
+    for k, it in enumerate(getattr(suite, "interference", []) or []):
+        row = {x: it[x] for x in ("a", "b", "depth_mm", "at", "explained", "volume_mm3")}
+        if it.get("mesh") is not None:
+            v, f, _ = it["mesh"]
+            rel = f"interference/{k + 1}.glb"
+            _glb(trimesh.Trimesh(v, f, process=False), out / rel)
+            row["mesh"] = rel
+        rows.append(row)
+    _atomic_json({"pairs": rows, "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")},
+                 out / "interference.json")
+
+
+def suite_for(mod, asm, full: bool = False, whole: bool = False, out: Path | None = None):
     """The suite on `asm`. A root that only holds sub-assemblies (the droid) is tested whole when
     `whole` (the `test` command: every sub-assembly flattened into one, workbench/droid.py);
     a build skips it (the flatten builds each ChildRef's module)."""
@@ -321,21 +338,28 @@ def suite_for(mod, asm, full: bool = False, whole: bool = False):
         explained = list(getattr(mod, "EXPLAINED", None) or [])
         for cid, modname in REFS.items():  # a child module's own explanations hold inside the droid too
             explained += list(getattr(importlib.import_module(modname), "EXPLAINED", None) or [])
-        explained += explained_placement(info)
+        explained += explained_placement(info, flat)
         tol = {**(getattr(mod, "TOLERANCES", None) or {}), "max_grid_poses": 3000}
         s = Suite(flat, tol=tol, explained=explained, full=full)
         res = s.run()
+        if out is not None:
+            write_interference(s, out)
         from .model import Check
 
         res.insert(0, Check("test_droid_tree", "test", "pass", "Whole droid: the tree, flattened",
                             f"{len(info['assemblies'])} assemblies, {len(flat.parts)} parts, {len(flat.fasteners)} fasteners, "
-                            f"{len(flat.joints)} joints, {len(flat.mates)} mates; left out (unselected variants): "
+                            f"{len(flat.joints)} joints, {len(flat.mates)} mates ({sum(m.type == 'placed' for m in flat.mates)} placement-only); "
+                            f"superseded kit parts left out: {len(info['superseded'])}; left out (unselected variants): "
                             f"{', '.join(info['left_out']) or 'none'}; interface: {'; '.join(info['interfaces']) or 'none'}; "
                             f"flatten {time.time() - t0:.1f} s (child builds included)",
                             parts=[], assumptions=[f"{a['path']}: {a['parts']} parts, {a['mates']} mates"
                                                    for a in info["assemblies"]]))
         return res
-    return Suite(asm, tol=getattr(mod, "TOLERANCES", None), explained=getattr(mod, "EXPLAINED", None), full=full).run()
+    s = Suite(asm, tol=getattr(mod, "TOLERANCES", None), explained=getattr(mod, "EXPLAINED", None), full=full)
+    res = s.run()
+    if out is not None:
+        write_interference(s, out)
+    return res
 
 
 def run_suite(name: str, out_root: Path = OUT, full: bool = False) -> dict:
@@ -345,7 +369,7 @@ def run_suite(name: str, out_root: Path = OUT, full: bool = False) -> dict:
     asm: Assembly = mod.build()
     asm.validate()
     t0 = time.time()
-    tests = suite_for(mod, asm, full, whole=True)
+    tests = suite_for(mod, asm, full, whole=True, out=out_root / asm.id)
     took = time.time() - t0
     out = out_root / asm.id
     out.mkdir(parents=True, exist_ok=True)

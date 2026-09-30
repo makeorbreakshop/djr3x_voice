@@ -25,12 +25,13 @@ import copy
 import importlib
 import math
 import time
+from pathlib import Path
 
 import numpy as np
 import trimesh
 
 from .mates import Mate, moved
-from .model import Assembly, Fastener, Joint, Link, Linkage, Part
+from .model import Assembly, BomLine, Fastener, Joint, Link, Linkage, Part, Step
 
 REFS = {"hunter_head": "assemblies.hunter_head.assembly"}
 
@@ -67,7 +68,8 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
     """(one Assembly in the root frame, info) - see the module doc."""
     out = Assembly(id=root.id, name=root.name, description="whole droid (flattened for the suite)")
     out.links.append(Link("ground", "Ground", None))
-    info = {"assemblies": [], "no_mates": {}, "left_out": [], "interfaces": []}
+    info = {"assemblies": [], "no_mates": {}, "left_out": [], "interfaces": [], "superseded": []}
+    ground = [None]
     seen_ids: set[str] = set()
     seen_links = {"ground"}
     interfaces = []
@@ -75,7 +77,7 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
     def uniq(aid, pid):
         return pid if pid not in seen_ids else f"{aid}/{pid}"
 
-    def walk(a: Assembly, M: np.ndarray, parent_link: str, path: str):
+    def walk(a: Assembly, M: np.ndarray, parent_link: str, path: str, parent_anchor: str | None = None):
         R = M[:3, :3]
         lmap = {}
         for l in a.links:
@@ -89,7 +91,11 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
                     seen_links.add(name)
         # a jointless link that is a joint's parent still maps to the parent link (handled above)
         pmap = {}
+        dropped = [p.id for p in a.parts if "superseded" in (p.note or "")]
+        info["superseded"] += [f"{a.id}/{x}" for x in dropped]
         for p in a.parts:
+            if p.id in dropped:
+                continue
             nid = uniq(a.id, p.id)
             seen_ids.add(nid)
             pmap[p.id] = nid
@@ -132,10 +138,33 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
         for m in a.mates:
             out.mates.append(Mate(f"{a.id}:{m.id}", m.type, (pmap.get(m.a[0], m.a[0]), m.a[1]),
                                   (pmap.get(m.b[0], m.b[0]), m.b[1]), dict(m.params), m.solved, m.note))
-        info["assemblies"].append({"id": a.id, "path": path, "parts": len(a.parts), "fasteners": len(a.fasteners),
+        # steps and BOM lines, per sub-assembly (ids prefixed where they would clash)
+        for st in a.steps:
+            out.steps.append(Step(f"{a.id}:{st.id}", st.title, [pmap.get(x, x) for x in st.parts],
+                                  [pmap.get(x, x) for x in st.fasteners], st.unplaced, st.tools, st.notes,
+                                  [pmap.get(x, x) for x in st.context], f"{a.id}:{st.joint}" if st.joint else None,
+                                  {f"{a.id}:{k}": v for k, v in (st.pose or {}).items()}, st.guide_page))
+        for f in out.fasteners[len(out.fasteners) - len(a.fasteners):]:
+            f.step = f"{a.id}:{f.step}" if f.step else f.step
+        for bl in a.bom:  # one line per key across the tree (quantities add)
+            ex = next((x for x in out.bom if x.key == bl.key), None)
+            if ex is None:
+                out.bom.append(copy.copy(bl))
+            else:
+                ex.qty += bl.qty
+        kept = [pmap[p.id] for p in a.parts if p.id in pmap]
+        info["assemblies"].append({"id": a.id, "path": path, "parts": len(kept), "fasteners": len(a.fasteners),
                                    "mates": len(a.mates), "joints": len(a.joints)})
-        if a.parts and not a.mates:
-            info["no_mates"][a.id] = [pmap[p.id] for p in a.parts]
+        parent_anchor = parent_anchor or ground[0]
+        anchor = kept[0] if kept else parent_anchor
+        if anchor and ground[0] is None:
+            ground[0] = anchor  # the first part on the ground: what parentless sub-assemblies join
+        if kept and not a.mates:
+            # a placement model: its parts joined to its first part, that to the parent's (connected test only)
+            info["no_mates"][a.id] = kept
+            for q in kept[1:] + ([parent_anchor] if parent_anchor else []):
+                out.mates.append(Mate(f"placed:{a.id}:{q}", "placed", (kept[0], ""), (q, ""), {}, False,
+                                      "placement only (no mate modelled)"))
         for c in a.children:
             v = (c.mount if isinstance(c, Assembly) else c.get("mount") or {}) or {}
             var = v.get("variant")
@@ -150,11 +179,12 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
             cm = M @ mount_matrix(ca.mount)
             cpl = lmap.get((ca.mount or {}).get("parent_link", ""), parent_link)
             n0 = len(out.parts)
-            walk(ca, cm, cpl, f"{path}/{ca.id}")
+            walk(ca, cm, cpl, f"{path}/{ca.id}", None if ref.get("interface") else anchor)
             if ref.get("interface"):
                 interfaces.append((ca.id, pmap, ref["interface"], cm))
 
     t0 = time.perf_counter()
+    ground = [None]
     walk(root, np.eye(4), "ground", root.id)
     info["flatten_s"] = round(time.perf_counter() - t0, 2)
     # interfaces: '<child>/<id>' names the child's side; plain ids the parent's
@@ -213,14 +243,97 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
     return out, info
 
 
-def explained_placement(info) -> list[dict]:
-    """The connected test's explanation for sub-assemblies that model no mates: their parts are
-    placed (kit export, fitted STL) rather than mated - named per assembly, so any other floating
-    part still fails."""
+def explained_placement(info, flat) -> list[dict]:
+    """Droid-level explanations that follow from what the kit is: its printed parts come as the
+    kit cuts them (sized for a larger bed than the H2D's)."""
+    kit = [p.id for p in flat.parts if (p.source or {}).get("origin") == "kit" and p.printed]
+    kit_all = [p.id for p in flat.parts if (p.source or {}).get("origin") == "kit"]
+    morton = [p.id for p in flat.parts if p.id.startswith("morton_")]
     out = []
-    for aid, pids in info["no_mates"].items():
-        out.append({"test": "connected", "parts": list(pids),
-                    "cause": f"{aid}: a placement model (the kit / R-3X Animation export, fitted STLs): its parts are "
-                             "placed, not mated, so the mate graph cannot reach them",
-                    "fix": f"model {aid}'s joins as mates (screws, glue seams) as hunter_head does"})
+    if kit:
+        out.append({"test": "printable_bed", "parts": kit,
+                    "cause": "the kit's printed parts as the kit cuts them (its 'Large Cut' STLs, for a larger bed)",
+                    "fix": "print on a larger bed, or use the kit's 'Small Cut' set for these pieces"})
+    if kit_all:
+        out.append({"test": "no_overlap", "parts": kit_all, "max_mm": 0.4,
+                    "cause": "kit part against kit part, <= 0.4 mm: the kit export's own fit (its pieces are drawn to "
+                             "touch; the STL tessellation and the kit's snug joints overlap a few tenths)",
+                    "fix": "none in the model; on the print, the usual clean-up of a tight kit joint"})
+    if morton:
+        out.append({"test": "no_overlap", "parts": morton, "max_mm": 1.1,
+                    "cause": "Sam Morton's 2020 posts run up to 1.1 mm into his own frame rings (his export: the post "
+                             "ends sit in the rings' sockets)",
+                    "fix": "none if the sockets take them on the print; else trim the posts 1 mm"})
     return out
+
+
+def overlap_requests(out_dir: Path | None = None) -> Path:
+    """The unexplained overlaps of the whole droid as change requests, with geometry:
+
+        cd mech && .venv/bin/python -c "from workbench.droid import overlap_requests; overlap_requests()"
+
+    For a pair where one side is a kit / community part (a vendored STL we do not own), the request
+    is a clearance cut on that part: the other part grown by 0.5 mm, as a cutter STL in the kit
+    part's own STL frame (so a parametric remodel, or a mesh edit, subtracts it directly). Pairs
+    inside one designer's own assembly are listed as placement conflicts to review. Reads
+    out/r3x_droid/interference.json (run `python -m workbench test kit` first)."""
+    import json as _json
+
+    from assemblies.kit.assembly import build_model
+    from r3xmech.meshes import part_mesh
+
+    MECHD = Path(__file__).resolve().parents[1]
+    out_dir = out_dir or MECHD / "out" / "r3x_droid" / "requests"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pairs = [p for p in _json.loads((MECHD / "out" / "r3x_droid" / "interference.json").read_text())["pairs"]
+             if not p["explained"]]
+    root = build_model()
+    by = {p.id: p for p in root.all_parts()}
+    hunter = importlib.import_module(REFS["hunter_head"]).build()
+    M_h = mount_matrix({"transform": {"t": [0, 738.3, 0]}})
+    for p in hunter.parts:
+        m = p.mesh.copy()
+        m.apply_transform(M_h)
+        by.setdefault(p.id, type("P", (), {"id": p.id, "origin": "ours (hunter_head)", "T": M_h, "mesh": m,
+                                            "file": None})())
+
+    def owner(p):
+        o = getattr(p, "origin", "") or ""
+        return "kit" if o == "kit" else "community" if o == "community" else o or "?"
+
+    def world(p):
+        return p.mesh if hasattr(p, "mesh") and not hasattr(p, "cls") else part_mesh(p)
+
+    rows = []
+    for k, it in enumerate(pairs, 1):
+        a, b = by.get(it["a"].split("/")[-1]), by.get(it["b"].split("/")[-1])
+        if a is None or b is None:
+            rows.append((it, "?", "not found in the model", ""))
+            continue
+        oa, ob = owner(a), owner(b)
+        vendor = [x for x in (a, b) if owner(x) in ("kit", "community")]
+        if len(vendor) == 1:
+            v = vendor[0]
+            o = b if v is a else a
+            cut = world(o).copy()
+            # grow 0.5 mm: offset along vertex normals (cutters are for clearance, not for fit)
+            cut.vertices = cut.vertices + cut.vertex_normals * 0.5
+            cut.apply_transform(np.linalg.inv(v.T))  # into the vendored part's STL frame
+            fn = f"cut_{v.id}__by__{o.id}.stl"
+            cut.export(out_dir / fn)
+            rows.append((it, f"{owner(v)} part", f"clearance cut on {v.id} ({Path(str(v.file)).name if v.file else ''}): "
+                                                  f"subtract {o.id} + 0.5 mm", fn))
+        elif not vendor:
+            rows.append((it, f"{oa} / {ob}", "placement / pocket conflict inside our models: review the placement "
+                                             "(inferred) or the servo case vs its pocket", ""))
+        else:
+            rows.append((it, "kit / kit", "two vendored parts: a variant or placement question", ""))
+    L = ["# Overlap requests: the droid's unexplained overlaps at rest", "",
+         f"{len(pairs)} pairs from out/r3x_droid/interference.json. Cutters are STLs in the vendored part's own "
+         "STL frame (the part's mesh grown 0.5 mm): subtract them from that part.", "",
+         "| # | pair | depth mm | shared mm3 | whose | request | cutter |", "|---|---|---|---|---|---|---|"]
+    for k, (it, who, req, fn) in enumerate(rows, 1):
+        L.append(f"| {k} | {it['a']} x {it['b']} | {it['depth_mm']} | {it.get('volume_mm3')} | {who} | {req} | {fn} |")
+    f = out_dir / "requests.md"
+    f.write_text("\n".join(L) + "\n")
+    return f

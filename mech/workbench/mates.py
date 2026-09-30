@@ -30,7 +30,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-MATE_TYPES = ("concentric", "seated", "coplanar", "spline", "ball_link", "threaded", "press", "glue")
+MATE_TYPES = ("concentric", "seated", "coplanar", "spline", "ball_link", "threaded", "press", "glue", "placed")
+# "placed": no geometric mate - a part set where a placement model (the kit export, a fitted STL)
+# puts it, joined to its assembly for the connected test only (the whole-droid suite names them)
 
 
 def unit(v):

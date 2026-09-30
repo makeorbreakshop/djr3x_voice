@@ -90,7 +90,7 @@ class Suite:
         self.timing: dict[str, float] = {}
         self.features = {p.id: p.features for p in asm.parts}
         self.features.update({f.id: f.features for f in asm.fasteners})
-        self.mated = {frozenset((m.a[0], m.b[0])) for m in asm.mates}
+        self.mated = {frozenset((m.a[0], m.b[0])) for m in asm.mates if m.type != "placed"}
         self._pts: dict[str, np.ndarray] = {}
         self._trees: dict[str, cKDTree] = {}
         self.results: list[Check] = []
@@ -138,8 +138,13 @@ class Suite:
 
         open_, used = [], []
         for parts, text in items:
+            import re
+
+            m = re.search(r"([0-9.]+) mm deep", text)
+            depth = float(m.group(1)) if m else None
             hit = next((e for e in self.explained if e["test"] in (test_id, "*") and
-                        all(any(fnmatch(p, pat) for pat in e["parts"]) for p in parts)), None)
+                        all(any(fnmatch(p, pat) for pat in e["parts"]) for p in parts)
+                        and (e.get("max_mm") is None or (depth is not None and depth <= e["max_mm"]))), None)
             if hit is None:
                 open_.append((parts, text))
             elif hit not in used:
@@ -171,8 +176,10 @@ class Suite:
                     seen.add(n)
                     stack.append(n)
         floating = [i for i in ids if i not in seen]
+        placed = sum(1 for m in self.asm.mates if m.type == "placed")
         self.add("connected", "Every part reaches the root through mates", "fail" if floating else "pass",
-                 f"{len(ids) - len(floating)} of {len(ids)} connected to {root}" +
+                 f"{len(ids) - len(floating)} of {len(ids)} connected to {root}"
+                 + (f" ({placed} joins are placement-only: sub-assemblies that model no mates)" if placed else "") +
                  (f"; floating: {', '.join(floating[:12])}{' …' if len(floating) > 12 else ''}" if floating else ""),
                  parts=floating[:20], assumptions=["joints connect links only through the bearing/pivot mates"])
         # every placed fastener in a mate, BOM counts = placed + unplaced
@@ -183,7 +190,7 @@ class Suite:
             have[f.key] += 1
         for s in self.asm.steps:
             for u in s.unplaced:
-                have[u["key"]] += u.get("count", 0)
+                have[u["key"]] += u.get("count") or 0
         bad = [f"{k}: BOM {bom.get(k, 0):g}, model {have.get(k, 0):g}" for k in sorted(set(bom) | set(have))
                if abs(bom.get(k, 0) - have.get(k, 0)) > 1e-6]
         self.add("fasteners_used", "Every BOM fastener is used where the BOM says", "fail" if unmated or bad else "pass",
@@ -195,6 +202,8 @@ class Suite:
     def mates_hold(self):
         bad = []
         for m in self.asm.mates:
+            if m.type == "placed":
+                continue
             fa = self.features[m.a[0]][m.a[1]]
             fb = self.features[m.b[0]][m.b[1]]
             r = residual(m, fa, fb)
@@ -416,12 +425,45 @@ class Suite:
             if depth > limit:
                 bad.append((depth, a, b, where))
         bad.sort(key=lambda t: -t[0])
+        items = [((a, b), f"{a} x {b}: {d:.2f} mm deep at {np.round(w, 1).tolist()}") for d, a, b, w in bad]
+        # for Build's Interference overlay: every pair, explained or not, with its intersection solid
+        open_ = {pr for pr, _ in self.split("no_overlap", items)[0]}
+        self.interference = []
+        for d, a, b, w in bad:
+            ki = ("imesh", self.scene.hash[a], self.scene.hash[b])
+            im = self.cache.get(ki)
+            if im is None:
+                im = self._intersection(a, b)
+                self.cache.put(ki, im)
+            self.interference.append({"a": a, "b": b, "depth_mm": round(float(d), 2),
+                                      "at": [round(float(x), 2) for x in w], "explained": (a, b) not in open_,
+                                      "volume_mm3": None if im is None else round(float(im[2]), 1), "mesh": im})
         self.verdict("no_overlap", "No overlaps at rest (mated parts only touch at their mate)",
-                     [((a, b), f"{a} x {b}: {d:.2f} mm deep at {np.round(w, 1).tolist()}") for d, a, b, w in bad],
+                     items,
                      "no penetration beyond tolerance",
                      assumptions=[f"FCL finds intersecting pairs; depth = deepest point of one closed mesh inside the "
                                   f"other (exact); mated pairs may overlap {self.tol['press_mm']} mm, others "
                                   f"{self.tol['overlap_mm']} mm", "results cached by geometry hash"])
+
+    def _intersection(self, a, b):
+        """(vertices, faces, volume) of the solid two bodies share at rest (manifold3d), or None
+        when either is not closed."""
+        A, B = self.bodies[a].mesh, self.bodies[b].mesh
+        if not (A.is_watertight and B.is_watertight):
+            return None
+        try:
+            import manifold3d as mf
+
+            def man(m):
+                return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                           tri_verts=np.asarray(m.faces, np.uint32)))
+            I = man(A) ^ man(B)
+            if I.is_empty():
+                return None
+            mm = I.to_mesh()
+            return np.asarray(mm.vert_properties)[:, :3].astype(np.float32), np.asarray(mm.tri_verts), float(I.volume())
+        except Exception:
+            return None
 
     def penetration(self, a, b):
         """Deepest point of one body inside the other (mm), or None when they do not touch.
@@ -712,9 +754,9 @@ class Suite:
                 self.cache.put(k, w)
             if w is not None and w < self.tol["wall_min_mm"]:
                 thin.append(f"{p.id} {w:.2f} mm")
-        self.add("printable_bed", "Printed parts fit the bed", "fail" if too_big else "pass",
-                 "; ".join(too_big) or f"all fit {'x'.join(str(int(b)) for b in self.tol['bed_mm'])} mm (any orientation)",
-                 parts=[t.split(" ")[0] for t in too_big], assumptions=["Bambu H2D envelope until Brandon confirms"])
+        self.verdict("printable_bed", "Printed parts fit the bed", [((t.split(" ")[0],), t) for t in too_big],
+                     f"all fit {'x'.join(str(int(b)) for b in self.tol['bed_mm'])} mm (any orientation)",
+                     assumptions=["Bambu H2D envelope until Brandon confirms"])
         self.add("printable_wall", "Printed parts keep the minimum wall", "warn" if thin else "pass",
                  "; ".join(thin[:8]) or f">= {self.tol['wall_min_mm']} mm", parts=[t.split(" ")[0] for t in thin],
                  assumptions=["2nd-percentile ray thickness from 3000 surface samples (closed meshes only)"])
