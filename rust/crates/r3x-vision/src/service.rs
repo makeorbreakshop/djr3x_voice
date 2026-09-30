@@ -25,18 +25,39 @@ use crate::VisionError;
 /// One analysed frame -> who (if anyone enrolled) is in it, with a confidence.
 pub trait Recognizer: Send {
     fn recognize(&mut self, frame: &Frame) -> Option<(String, f32)>;
+    /// Centre of the largest face in the last recognised frame, 0..1 of width and height
+    /// (enrolled or not): the vision gaze target.
+    fn face_centre(&self) -> Option<[f32; 2]> {
+        None
+    }
 }
 
 /// The real recognizer: largest face, nearest gallery match above the threshold.
 pub struct GalleryRecognizer {
     pub engine: FaceEngine,
     pub gallery: Gallery,
+    last_face: Option<[f32; 2]>,
+}
+
+impl GalleryRecognizer {
+    pub fn new(engine: FaceEngine, gallery: Gallery) -> Self {
+        Self { engine, gallery, last_face: None }
+    }
 }
 
 impl Recognizer for GalleryRecognizer {
+    fn face_centre(&self) -> Option<[f32; 2]> {
+        self.last_face
+    }
+
     fn recognize(&mut self, frame: &Frame) -> Option<(String, f32)> {
+        self.last_face = None;
         match self.engine.largest(frame) {
-            Ok(Some((_, e))) => self.gallery.identify(&e).map(|m| (m.name, m.similarity)),
+            Ok(Some((f, e))) => {
+                let [x, y, w, h] = f.bbox;
+                self.last_face = Some([(x + w / 2.0) / frame.width as f32, (y + h / 2.0) / frame.height as f32]);
+                self.gallery.identify(&e).map(|m| (m.name, m.similarity))
+            }
             Ok(None) => None,
             Err(e) => {
                 tracing::warn!("face recognition failed: {e}");
@@ -56,11 +77,13 @@ pub struct VisionConfig {
     /// `analyze_scene` refuses a frame older than this.
     pub frame_max_age: Duration,
     pub scene_max_tokens: u32,
+    /// Horizontal field of view (deg), for the face -> gaze mapping (`R3X_CAMERA_HFOV`).
+    pub hfov_deg: f64,
 }
 
 impl Default for VisionConfig {
     fn default() -> Self {
-        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200 }
+        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0 }
     }
 }
 
@@ -73,6 +96,9 @@ impl VisionConfig {
         c.camera = get("R3X_CAMERA_INDEX").and_then(|v| v.parse().ok());
         if let Some(f) = get("R3X_VISION_FPS").and_then(|v| v.parse().ok()) {
             c.fps = f;
+        }
+        if let Some(f) = get("R3X_CAMERA_HFOV").and_then(|v| v.parse().ok()) {
+            c.hfov_deg = f;
         }
         c.presence.scenes = get("R3X_VISION_SCENES").is_none_or(|v| !matches!(v.as_str(), "0" | "false" | "no" | "off"));
         c
@@ -94,7 +120,17 @@ enum Control {
     Stop,
 }
 
-type Observation = (Arc<Frame>, Option<(String, f32)>);
+type Observation = (Arc<Frame>, Option<(String, f32)>, Option<[f32; 2]>);
+
+/// A face centre (0..1 of the frame) -> a gaze target (pan, tilt) in degrees, for a camera
+/// that looks where R3X faces at rest: a face right of centre in the image is on R3X's right
+/// (negative pan); lower in the image tilts the head down (positive tilt). Pinhole model.
+pub fn face_to_gaze(centre: [f32; 2], width: u32, height: u32, hfov_deg: f64) -> (f64, f64) {
+    let half = (hfov_deg / 2.0).to_radians().tan();
+    let x = (f64::from(centre[0]) - 0.5) * 2.0 * half;
+    let y = (f64::from(centre[1]) - 0.5) * 2.0 * half * f64::from(height) / f64::from(width.max(1));
+    (-x.atan().to_degrees(), y.atan().to_degrees())
+}
 
 struct Inner {
     bus: Bus,
@@ -242,7 +278,21 @@ impl Vision {
     async fn presence_loop(self, mut rx: mpsc::Receiver<Observation>) {
         let mut presence = Presence::new(self.inner.cfg.presence.clone());
         let clock = self.inner.bus.clock();
-        while let Some((frame, seen)) = rx.recv().await {
+        let mut gaze: Option<(f64, f64)> = None;
+        while let Some((frame, seen, face)) = rx.recv().await {
+            let at = face.map(|c| face_to_gaze(c, frame.width, frame.height, self.inner.cfg.hfov_deg));
+            let moved = match (gaze, at) {
+                (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()) > 1.0,
+                (a, b) => a.is_some() != b.is_some(),
+            };
+            if moved {
+                gaze = at;
+                let e = match at {
+                    Some((pan, tilt)) => VisionEvent::FaceAt { pan, tilt },
+                    None => VisionEvent::FaceLost,
+                };
+                self.inner.bus.publish(Source::System, None, Event::Vision(e));
+            }
             *lock(&self.inner.latest) = Some((frame.clone(), Instant::now()));
             let now = clock.t_mono();
             let step = presence.observe(now, seen.as_ref().map(|(n, c)| (n.as_str(), *c)));
@@ -340,8 +390,9 @@ fn capture_loop(
         match src.next_frame() {
             Ok(Some(frame)) => {
                 let seen = recognizer.recognize(&frame);
+                let face = recognizer.face_centre();
                 lock(&status).frames += 1;
-                if tx.blocking_send((Arc::new(frame), seen)).is_err() {
+                if tx.blocking_send((Arc::new(frame), seen, face)).is_err() {
                     break;
                 }
                 next += period;
@@ -375,11 +426,27 @@ pub fn link_memory(bus: &Bus, memory: Arc<r3x_memory::Memory>) -> JoinHandle<()>
             let r = match e {
                 VisionEvent::PersonDetected { name, .. } => memory.person_detected(name).map(|_| ()),
                 VisionEvent::PersonExited { name, .. } => memory.person_exited(name),
-                VisionEvent::SceneCaptured { .. } => Ok(()),
+                VisionEvent::SceneCaptured { .. } | VisionEvent::FaceAt { .. } | VisionEvent::FaceLost => Ok(()),
             };
             if let Err(e) = r {
                 tracing::warn!("memory: {e}");
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::face_to_gaze;
+
+    #[test]
+    fn face_centre_maps_to_gaze_through_the_fov() {
+        let (pan, tilt) = face_to_gaze([0.5, 0.5], 1280, 720, 70.0);
+        assert!(pan.abs() < 1e-9 && tilt.abs() < 1e-9, "centre = straight ahead");
+        let (pan, _) = face_to_gaze([1.0, 0.5], 1280, 720, 70.0);
+        assert!((pan + 35.0).abs() < 1e-9, "the image's right edge is half the FOV to R3X's right");
+        let (_, tilt) = face_to_gaze([0.5, 1.0], 1280, 720, 70.0);
+        let vhalf = ((35f64).to_radians().tan() * 720.0 / 1280.0).atan().to_degrees();
+        assert!((tilt - vhalf).abs() < 1e-9 && tilt > 0.0, "lower in the frame tilts down");
+    }
 }

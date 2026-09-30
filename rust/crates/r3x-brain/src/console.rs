@@ -7,7 +7,7 @@
 
 use r3x_bus::Bus;
 use r3x_contracts::{
-    Ack, Command, Engagement, IntentCommand, MusicCommand, OperatingMode, PerfCommand, PerfLayer, RetainedState, Source, StageCommand,
+    Ack, Command, Engagement, GazeSource, IntentCommand, MusicCommand, OperatingMode, PerfCommand, PerfLayer, RetainedState, Source, StageCommand,
     StopTarget, TelemetryCommand,
 };
 
@@ -41,6 +41,10 @@ r3x commands:
   dj transition now                        run the next transition immediately
   show list | show <id> [intensity] [speed] | show stop [id|show|gesture|all]
   freeze | unfreeze
+  gaze viewport|vision|off                 Show: what the head looks at (a panel's 3D view, the camera's
+                                           face, or straight ahead)
+  home [joint ...]                         Bench/Studio: stop runs, release the puppet, alive layers +
+                                           autonomy off, ease every joint home (or just those joints)
   eye pattern <pattern> | eye status       idle engaged listening thinking speaking flash ...
   emote <slot|cue>                         a profile emote
   mode show|bench|studio                   operating mode
@@ -143,6 +147,14 @@ pub fn parse(line: &str, emotes: &[String]) -> Parsed {
         (Some("dj"), Some("transition")) if w(2) == Some("now") && words.len() == 3 => pass(),
         (Some("dj"), Some("queue")) => Parsed::Reply("dj queue is not available; DJ mode picks the next track itself".into()),
         (Some("dj"), _) => Parsed::Error("usage: dj start|stop|next|test | dj transition now".into()),
+        (Some("gaze"), g) => match g {
+            Some("viewport") => stage(StageCommand::SetGaze { source: GazeSource::Viewport, owner: None }),
+            Some("vision") => stage(StageCommand::SetGaze { source: GazeSource::Vision, owner: None }),
+            Some("audio") => stage(StageCommand::SetGaze { source: GazeSource::Audio, owner: None }),
+            Some("off") => stage(StageCommand::SetGaze { source: GazeSource::Off, owner: None }),
+            _ => Parsed::Error("usage: gaze viewport|vision|off".into()),
+        },
+        (Some("home"), _) => perf(PerfCommand::Home { joints: words[1..].iter().map(|w| (*w).to_owned()).collect() }),
         (Some("freeze"), None) => stage(StageCommand::Freeze { on: true }),
         (Some("unfreeze"), None) => stage(StageCommand::Freeze { on: false }),
         (Some("show"), None | Some("list")) => Parsed::ShowList,
@@ -301,12 +313,14 @@ fn show_list(ctx: &ConsoleCtx) -> String {
 
 pub fn status(s: &RetainedState) -> String {
     let mut out = format!(
-        "engagement {:?} | mode {:?} | brain {} | autonomy {}{}\nmusic: {}{}",
+        "engagement {:?} | mode {:?} | brain {} | autonomy {} | gaze {:?}{}{}\nmusic: {}{}",
         s.engagement.engagement,
         s.stage.mode,
         if s.stage.brain { "on" } else { "off" },
         if s.stage.autonomy { "on" } else { "off" },
+        s.stage.gaze,
         if s.stage.frozen { " | FROZEN" } else { "" },
+        if s.perf.at_home { " | at home" } else { "" },
         match (&s.music.track, s.music.playing) {
             (Some(t), true) => t.title.clone(),
             _ => "nothing playing".into(),
@@ -345,6 +359,9 @@ mod tests {
         assert_eq!(send("freeze"), Command::Stage(StageCommand::Freeze { on: true }));
         assert_eq!(send("emote no"), Command::Perf(PerfCommand::Emote { slot: 1 }));
         assert_eq!(send("mode bench"), Command::Stage(StageCommand::SetMode { mode: OperatingMode::Bench }));
+        assert_eq!(send("gaze vision"), Command::Stage(StageCommand::SetGaze { source: GazeSource::Vision, owner: None }));
+        assert_eq!(send("home"), Command::Perf(PerfCommand::Home { joints: vec![] }));
+        assert_eq!(send("home head_pan visor"), Command::Perf(PerfCommand::Home { joints: vec!["head_pan".into(), "visor".into()] }));
         assert_eq!(send("output neck on"), Command::Stage(StageCommand::SetOutput { output: "neck".into(), enabled: true }));
         assert_eq!(send("eye pattern Thinking"), Command::Perf(PerfCommand::Eyes { pattern: "thinking".into(), duration: None }));
         assert_eq!(send("eye pattern happy red"), Command::Perf(PerfCommand::Eyes { pattern: "happy".into(), duration: None }));

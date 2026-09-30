@@ -19,7 +19,17 @@
         <option value="light">Light</option>
       </select>
       <button id="scene-work" aria-pressed="false" title="Work light: soft key, fill and rim, independent of the stage lights">Work light</button>
+      <button id="scene-centres" aria-pressed="false" title="Centres: each joint's range, its 0 (home) tick and where it is now">Centres</button>
+      <select id="gaze-src" aria-label="Gaze target" title="What R3X's head looks at in Show (Bench and Studio ignore it)" hidden>
+        <option value="viewport">Gaze: view</option>
+        <option value="vision">Gaze: face</option>
+        <option value="audio" disabled>Gaze: sound (later)</option>
+        <option value="off">Gaze: off</option>
+      </select>
+      <span id="gaze-owner" class="scene-note" hidden></span>
+      <button id="scene-home" class="home-btn" title="Home: stop every run, release the puppet, alive layers and autonomy off, ease every joint to its home pose" hidden>Home</button>
     </div>
+    <div id="centre-labels" class="centre-labels" hidden></div>
 
     <aside id="panel">
       <header>
@@ -79,6 +89,10 @@
       <!-- ================================================================ Drive -->
       <div class="tab-body" data-body="drive" id="drive" hidden>
         <section class="first">
+          <h2>Home <small id="home-state">-</small></h2>
+          <div class="row"><button id="drive-home" class="primary home-btn" title="Stop every run, release the puppet, alive layers and autonomy off, then ease every joint to its home pose (Bench or Studio)">Home</button></div>
+        </section>
+        <section>
           <h2>Autonomy</h2>
           <div class="chips" id="drive-toggles"></div>
         </section>
@@ -95,6 +109,10 @@
           <p class="hint">Gate drivers, not layers. Bench starts with every output off.</p>
           <div class="chips" id="drive-outputs"></div>
           <div class="row"><button data-outputs="on">All on</button><button data-outputs="off">All off</button></div>
+        </section>
+        <section>
+          <h2>Joints <small>now / home, deg or mm</small></h2>
+          <table class="joints-table"><tbody id="joint-rows"></tbody></table>
         </section>
       </div>
 

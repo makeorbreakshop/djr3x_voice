@@ -32,6 +32,29 @@ pub struct StageState {
     pub autonomy: bool,
     /// Every run stopped, new ones refused; the chest holds its state.
     pub frozen: bool,
+    /// Where the head looks in Show (Bench and Studio ignore it).
+    #[serde(default)]
+    pub gaze: GazeSource,
+    /// With `gaze: viewport`: the panel whose 3D camera is the target (the last to select it);
+    /// none = whichever panel sends one.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub gaze_owner: Option<String>,
+}
+
+/// The look target the head attends to in Show.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GazeSource {
+    /// A panel's 3D camera (`perf.look` from the owning panel).
+    #[default]
+    Viewport,
+    /// The largest detected face (r3x-vision); straight ahead when nobody is seen.
+    Vision,
+    /// Sound-source direction. Not implemented yet.
+    Audio,
+    /// Straight ahead; idle glances only.
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
@@ -155,7 +178,16 @@ pub struct PerfState {
     pub runs: Vec<RunInfo>,
     /// Puppeted channels and their current values.
     pub puppet: BTreeMap<String, f64>,
+    /// A whole-body Home is holding the home pose.
+    #[serde(default)]
+    pub homing: bool,
+    /// Every joint is within [`HOME_TOLERANCE`] of its home value.
+    #[serde(default)]
+    pub at_home: bool,
 }
+
+/// How close (deg or mm) a joint must be to count as home.
+pub const HOME_TOLERANCE: f64 = 0.5;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct LightsState {

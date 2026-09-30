@@ -37,6 +37,7 @@ export type PerfCmd =
   | { cmd: 'dj'; on: boolean }
   | { cmd: 'tempo'; bpm: number }
   | { cmd: 'look'; pan_tilt: [number, number] | null }
+  | { cmd: 'home'; joints?: string[] }
   | { cmd: 'background'; activity: Activity; id: string | null }
   | { cmd: 'service_status'; service: string; status: string; detail?: string; latched?: boolean }
   | { cmd: 'autonomy'; on: boolean }

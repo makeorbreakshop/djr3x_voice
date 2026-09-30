@@ -3,4 +3,4 @@
 /**
  * `r3x-vision` (Phase 6): presence transitions and scene descriptions, never per frame.
  */
-export type VisionEvent = { "type": "person_detected", name: string, confidence: number, } | { "type": "person_exited", name: string, duration_s: number, } | { "type": "scene_captured", description: string, reason: string, person?: string, };
+export type VisionEvent = { "type": "person_detected", name: string, confidence: number, } | { "type": "person_exited", name: string, duration_s: number, } | { "type": "face_at", pan: number, tilt: number, } | { "type": "face_lost" } | { "type": "scene_captured", description: string, reason: string, person?: string, };

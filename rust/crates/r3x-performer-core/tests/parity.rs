@@ -301,6 +301,14 @@ fn parity_procedural_layers() {
     let mut rng = Rng::new(doc["seed"].as_u64().unwrap() as u32);
     let mut p = Procedural::default();
     let mut worst: f64 = 0.0;
+    // Intended difference (2026-09-30): idle/engaged glances are centre-weighted (`centred`)
+    // where the TS reference drew uniformly over +/-45 deg. Same number of draws, so only the
+    // gaze joints differ, and only while idle/engaged plus the 1 s the rings trail the head.
+    let gaze_idx: Vec<usize> = ["head_pan", "head_tilt", "torso_top", "torso_lower"]
+        .iter()
+        .map(|g| joints.iter().position(|j| j == g).unwrap())
+        .collect();
+    let mut gaze_changed_until = f64::NEG_INFINITY;
     for fr in doc["frames"].as_array().unwrap() {
         let t = f(&fr["t"]);
         for (at, a) in acts.iter_mut() {
@@ -308,6 +316,9 @@ fn parity_procedural_layers() {
                 p.set_activity(*a, t);
                 *at = f64::NAN;
             }
+        }
+        if matches!(p.activity, Activity::Idle | Activity::Engaged) {
+            gaze_changed_until = t + 1.2;
         }
         let ctx = PerformContext {
             amplitude: f(&fr["amplitude"]),
@@ -317,10 +328,17 @@ fn parity_procedural_layers() {
         };
         let pose = p.update(t, f(&fr["dt"]), &ctx, &mut rng, &joints);
         if !fr["pose"].is_null() {
-            let got: Vec<f64> = joints.iter().map(|j| pose[j]).collect();
+            let mut got: Vec<f64> = joints.iter().map(|j| pose[j]).collect();
+            let mut want = fr["pose"].clone();
+            if t < gaze_changed_until {
+                for &i in &gaze_idx {
+                    got[i] = 0.0;
+                    want[i] = json!(0.0);
+                }
+            }
             worst = worst.max(assert_close(
                 &got,
-                &fr["pose"],
+                &want,
                 ULPS,
                 &format!("behavior at t={t}"),
             ));

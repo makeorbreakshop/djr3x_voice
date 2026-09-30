@@ -33,6 +33,13 @@ pub enum Activity {
     Dj,
 }
 
+/// A centre-weighted draw in `-max..max` (one uniform, cubed): most mass near 0, rare
+/// excursions to the ends. Uses exactly one draw, like the uniform it replaced.
+pub fn centred(rng: &mut Rng, max: f64) -> f64 {
+    let s = 1.0 - 2.0 * rng.next_f64();
+    max * s * s * s
+}
+
 /// The procedural layers that can be switched off (the Robot Profile's `alive` map; Bench
 /// toggles them). Output enables gate drivers; these gate motion layers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +116,9 @@ pub struct Procedural {
     anchor: Gaze,
     glance_back: bool,
     wobble_phase: f64,
+    /// While set and a look target exists: the gaze tracks the target plus this (pan, tilt)
+    /// offset every frame, so a moving listener is followed between saccades.
+    follow: Option<(f64, f64)>,
 }
 
 impl Default for Procedural {
@@ -132,6 +142,7 @@ impl Default for Procedural {
             anchor: Gaze::default(),
             glance_back: false,
             wobble_phase: 0.0,
+            follow: None,
         }
     }
 }
@@ -149,6 +160,7 @@ impl Procedural {
         self.since = t;
         self.next_saccade = t;
         self.glance_back = false;
+        self.follow = None;
     }
 
     /// 0..1: how frozen the listening hold is right now.
@@ -239,16 +251,12 @@ impl Procedural {
                 let calm = self.activity == Activity::Idle;
                 if saccades && t >= self.next_saccade {
                     let attend = !calm && rng.next_f64() < 0.6;
-                    let pan = if attend {
-                        look.0
-                    } else {
-                        rng.spread(if calm { 90.0 } else { 60.0 })
-                    };
-                    let tilt = if attend {
-                        look.1
-                    } else {
-                        rng.range(-10.0, 6.0)
-                    };
+                    // Centre-weighted around the target (straight ahead without one): ~80% of
+                    // glances within +/-15 deg of it, ~6% past 25. The TS reference drew
+                    // uniformly over +/-45, which read as staring off to one side.
+                    let pan = look.0 + if attend { 0.0 } else { centred(rng, if calm { 30.0 } else { 25.0 }) };
+                    let tilt = look.1 + if attend { 0.0 } else { -2.0 + centred(rng, 8.0) };
+                    self.follow = ctx.look.map(|l| (pan - l.0, tilt - l.1));
                     self.look(t, pan, tilt);
                     let j = jitter(rng);
                     self.next_saccade =
@@ -260,6 +268,7 @@ impl Procedural {
                 // Orient to the listener once, then hold (Reachy's listening freeze).
                 if t >= self.next_saccade {
                     self.look(t, look.0, look.1 - 4.0);
+                    self.follow = ctx.look.map(|_| (0.0, -4.0));
                     self.next_saccade = f64::INFINITY;
                 }
                 set(&mut pose, "visor", -8.0); // brow up: attentive
@@ -271,6 +280,7 @@ impl Procedural {
                     let mag = rng.range(15.0, 30.0);
                     let side = if rng.next_f64() < 0.5 { -1.0 } else { 1.0 };
                     self.look(t, mag * side, -14.0);
+                    self.follow = None;
                     self.next_saccade = t + 1.1 * jitter(rng);
                 }
                 set(&mut pose, "visor", 6.0); // brow down: concentrating
@@ -306,6 +316,7 @@ impl Procedural {
                         self.look(t, p, self.anchor.tilt);
                         self.next_saccade = t + 1.3 * jitter(rng);
                     }
+                    self.follow = ctx.look.map(|l| (self.gaze.pan - l.0, self.gaze.tilt - l.1));
                 }
                 set(&mut pose, "head_lift", 3.0 + bob * 5.0 + accent(0.3) * 6.0);
                 set(&mut pose, "visor", -4.0 - bob * 4.0 - accent(0.25) * 9.0);
@@ -361,6 +372,13 @@ impl Procedural {
                 set(&mut pose, "poker_wrist", if up { -18.0 } else { 18.0 });
                 set(&mut pose, "poker_claw_upper", if up { 4.0 } else { 20.0 });
                 set(&mut pose, "poker_claw_lower", if up { 4.0 } else { 20.0 });
+            }
+        }
+
+        // ---------------------------------------------------------------- follow a live target
+        if let (Some((dp, dt_)), Some((lp, lt))) = (self.follow, ctx.look) {
+            if self.activity != Activity::Dj {
+                self.gaze = Gaze { pan: lp + dp, tilt: lt + dt_ };
             }
         }
 

@@ -17,7 +17,7 @@ use r3x_bus::{Bus, CommandRequest, Received};
 use r3x_contracts::{
     Ack, Body, Command, ConversationEvent, DjEvent, Domain, EndReason, Engagement, EngagementState,
     Event, LightsState, MessageClass, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer,
-    OperatingMode, PerfState, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState,
+    GazeSource, OperatingMode, PerfState, VisionEvent, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState, HOME_TOLERANCE,
 };
 use r3x_drivers::DriverSet;
 use r3x_performer_core::behavior::AliveLayers;
@@ -173,6 +173,9 @@ pub fn enables(profile: &RobotProfile, outputs: &BTreeMap<String, bool>) -> Enab
     }
 }
 
+/// A viewport look target older than this lapses to straight ahead.
+const LOOK_STALE_S: f64 = 1.0;
+
 struct Host {
     bus: Bus,
     profile: Arc<RobotProfile>,
@@ -180,6 +183,12 @@ struct Host {
     drivers: Option<DriverSet>,
     stage: StageState,
     show_dir: PathBuf,
+    /// Latest viewport target and when it arrived (bus seconds).
+    viewport: Option<((f64, f64), f64)>,
+    /// Latest face from vision.
+    face: Option<(f64, f64)>,
+    /// What the performer was last told to look at.
+    look: Option<(f64, f64)>,
 }
 
 impl Host {
@@ -206,8 +215,39 @@ impl Host {
         self.stage = s;
     }
 
+    /// The gaze target the stage selects (Show only; Bench and Studio hold still), clamped to
+    /// the head's animation range so a target behind him parks at the limit.
+    fn gaze_target(&self) -> Option<(f64, f64)> {
+        if self.stage.mode != OperatingMode::Show {
+            return None;
+        }
+        let raw = match self.stage.gaze {
+            GazeSource::Viewport => self.viewport.filter(|(_, at)| self.now() - at < LOOK_STALE_S).map(|(pt, _)| pt),
+            GazeSource::Vision => self.face,
+            GazeSource::Audio | GazeSource::Off => None,
+        }?;
+        let clamp = |j: &str, v: f64| self.profile.joint(j).map_or(v, |j| j.animation.clamp(v));
+        Some((clamp("head_pan", raw.0), clamp("head_tilt", raw.1)))
+    }
+
+    fn update_look(&mut self) {
+        let want = self.gaze_target();
+        if want != self.look {
+            self.look = want;
+            self.p.command(PCmd::Look { pan_tilt: want });
+        }
+    }
+
     fn on_event(&mut self, ev: &Event) {
         let c = match ev {
+            Event::Vision(VisionEvent::FaceAt { pan, tilt }) => {
+                self.face = Some((*pan, *tilt));
+                return;
+            }
+            Event::Vision(VisionEvent::FaceLost) => {
+                self.face = None;
+                return;
+            }
             Event::Conversation(c) => match c {
                 ConversationEvent::ListeningStarted => PCmd::ListeningStarted,
                 ConversationEvent::ListeningStopped { .. } => PCmd::ListeningStopped,
@@ -271,6 +311,45 @@ impl Host {
                 };
                 req.ack(ack);
             }
+            PerfCommand::Look { pan, tilt, owner } => {
+                // The retained state, not our copy: a claim acked a moment ago must count.
+                let s = self.bus.get::<StageState>();
+                let ack = if s.gaze != GazeSource::Viewport {
+                    Ack::rejected(format!("the gaze follows {:?}, not the viewport", s.gaze).to_lowercase())
+                } else if s.gaze_owner.is_some() && s.gaze_owner != *owner {
+                    Ack::rejected("another panel owns the viewport gaze")
+                } else if !(pan.is_finite() && tilt.is_finite()) {
+                    Ack::rejected("look target must be finite")
+                } else {
+                    self.viewport = Some(((*pan, *tilt), self.now()));
+                    Ack::Accepted
+                };
+                req.ack(ack);
+            }
+            PerfCommand::Home { .. } if !matches!(source, Source::Ui | Source::Cli) => {
+                req.ack(Ack::rejected("home comes from the panel or the CLI"));
+            }
+            PerfCommand::Home { .. } if self.stage.mode == OperatingMode::Show => {
+                req.ack(Ack::rejected("home runs in Bench or Studio; switch out of Show first"));
+            }
+            PerfCommand::Home { joints } => match self.p.home(joints) {
+                Ok(()) => {
+                    tracing::info!(?joints, "home");
+                    // The performer switched its idle policy and layers off already; make the
+                    // stage state agree, so nothing turns them back on under the hold.
+                    // One change: layer-by-layer would pass through states that re-enable some.
+                    let still = joints.is_empty();
+                    let bus = self.bus.clone();
+                    tokio::spawn(async move {
+                        if still {
+                            bus.command(Source::System, None, Command::Stage(StageCommand::Still)).await;
+                        }
+                        req.ack(Ack::Accepted);
+                    });
+                    self.flush(None);
+                }
+                Err(e) => req.ack(Ack::rejected(e)),
+            },
             PerfCommand::Preview { .. } if self.stage.mode == OperatingMode::Show => {
                 req.ack(Ack::rejected("preview runs in Studio or Bench, not Show"));
             }
@@ -305,16 +384,27 @@ impl Host {
     /// Publish what the performer did since the last call; hand drivers their share.
     fn flush(&mut self, frames: Option<r3x_performer_core::Frames>) {
         let outs = self.p.take_events();
-        let mut runs_changed = false;
+        // Retained state first, so whoever reacts to `perf.started|ended` sees the run list.
+        let runs_changed = outs.iter().any(|o| matches!(o, Out::Started { .. } | Out::Ended { .. }));
+        let (homing, at_home) = (self.p.homing(), self.p.at_home(HOME_TOLERANCE));
+        let cur = self.bus.get::<PerfState>();
+        if runs_changed || cur.frozen != self.p.frozen() || cur.homing != homing || cur.at_home != at_home {
+            let runs: Vec<RunInfo> = self.p.player.running().into_iter().map(run_info).collect();
+            let frozen = self.p.frozen();
+            self.bus.update(Source::System, |s: &mut PerfState| {
+                s.runs = runs;
+                s.frozen = frozen;
+                s.homing = homing;
+                s.at_home = at_home;
+            });
+        }
         for o in &outs {
             let ev = match o {
                 Out::Started { run } => {
-                    runs_changed = true;
                     let r = run_info(run);
                     PerfEvent::Started { id: r.id, kind: r.kind, source: r.source, run_id: r.run_id }
                 }
                 Out::Ended { run, reason } => {
-                    runs_changed = true;
                     let r = run_info(run);
                     let reason = match reason {
                         PEnd::Done => EndReason::Done,
@@ -346,14 +436,6 @@ impl Host {
             };
             self.bus.publish(Source::System, None, Event::Perf(ev));
         }
-        if runs_changed || self.bus.get::<PerfState>().frozen != self.p.frozen() {
-            let runs: Vec<RunInfo> = self.p.player.running().into_iter().map(run_info).collect();
-            let frozen = self.p.frozen();
-            self.bus.update(Source::System, |s: &mut PerfState| {
-                s.runs = runs;
-                s.frozen = frozen;
-            });
-        }
         match (&self.drivers, frames) {
             (Some(d), Some(f)) => d.tick(&outs, f),
             // Event-time outputs between ticks (a command's face line, a goal) go out now.
@@ -383,6 +465,9 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         drivers,
         stage: StageState::default(),
         show_dir: cfg.show_dir.clone(),
+        viewport: None,
+        face: None,
+        look: None,
     };
     let mut events = bus.subscribe_all();
     let mut stage = bus.watch::<StageState>();
@@ -399,6 +484,7 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
+                    host.update_look();
                     let t = host.now();
                     let frames = host.p.tick(t);
                     host.flush(Some(frames));

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::envelope::Source;
-use crate::state::{Engagement, OperatingMode, ServiceStatus, Track};
+use crate::state::{Engagement, GazeSource, OperatingMode, ServiceStatus, Track};
 
 /// Message class; the gateway maps each authenticated client to an allowed set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, JsonSchema)]
@@ -132,6 +132,24 @@ pub enum PerfCommand {
         #[ts(optional)]
         limits_us: Option<[f64; 2]>,
     },
+    /// Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and
+    /// the alive layers off, and hold every joint at the profile's home pose (reached through
+    /// the followers, inside each joint's v/a/j limits); the hold ends when something moves the
+    /// body again. With `joints`: hold just those at home. `ui`/`cli` only.
+    Home {
+        #[serde(default)]
+        joints: Vec<String>,
+    },
+    /// The viewport gaze target: (pan, tilt) degrees in the head_pan parent frame, from the panel
+    /// that owns `state.stage.gaze_owner`. Send ~15 Hz while it moves; a target older than 1 s
+    /// lapses to straight ahead.
+    Look {
+        pan: f64,
+        tilt: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        owner: Option<String>,
+    },
     /// Stop every run, refuse new ones; `on: false` releases. Same switch as
     /// `StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.
     Freeze { on: bool },
@@ -181,6 +199,15 @@ pub enum StageCommand {
     SetLayer { layer: String, enabled: bool },
     SetBrain { enabled: bool },
     SetAutonomy { enabled: bool },
+    /// Autonomy and every alive layer off, in one change (Bench/Studio Home).
+    Still,
+    /// Choose the gaze target. `owner`: the panel claiming the viewport target.
+    SetGaze {
+        source: GazeSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        owner: Option<String>,
+    },
     Freeze { on: bool },
 }
 
@@ -436,6 +463,11 @@ pub enum VisionEvent {
     PersonDetected { name: String, confidence: f64 },
     /// They were absent for the exit hysteresis (10 frames at 5 fps).
     PersonExited { name: String, duration_s: f64 },
+    /// Where the largest face is, as a gaze target: (pan, tilt) degrees from the camera's
+    /// field of view (published when it moves by more than a degree).
+    FaceAt { pan: f64, tilt: f64 },
+    /// No face in view any more.
+    FaceLost,
     /// A Claude description of the current frame; `reason` is why it was taken.
     SceneCaptured {
         description: String,

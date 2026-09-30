@@ -462,3 +462,51 @@ fn studio_preview_scrubs_on_the_real_body_path() {
     let bad = serde_json::json!({"id": "s", "kind": "cue"});
     assert!(p.perf_command(&PerfCommand::Preview { clip: bad, at: 0.0, hold: true }, r3x_contracts::Source::Ui).is_err());
 }
+
+#[test]
+fn home_eases_every_joint_home_inside_its_limits() {
+    let mut prof = profile();
+    prof.home.insert("head_pan".into(), 10.0); // a non-centre home is honoured
+    let mut p = Performer::new(Arc::new(show_catalog()), &prof, PerformerConfig::default()).unwrap();
+    // Busy: alive layers on, a show running, a joint jogged, a puppet intent held.
+    assert!(p.perform("nod", Source::Ui, Params::default(), None).is_some());
+    p.perf_command(&PerfCommand::Puppet { channels: [("visor".to_string(), 20.0), ("energy".to_string(), 1.0)].into() }, r3x_contracts::Source::Ui).unwrap();
+    run(&mut p, 0.0, 1.0);
+    assert!(!p.at_home(0.5));
+
+    p.command(Command::Freeze { on: true });
+    assert!(p.home(&[]).is_err(), "frozen motion is not homed");
+    p.command(Command::Freeze { on: false });
+    p.home(&[]).unwrap();
+    assert!(p.player.running().is_empty() && p.homing());
+    assert_eq!(p.procedural.layers, AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false });
+    assert!(!p.idle.enabled);
+
+    let dt = 1.0 / 50.0;
+    let mut t = 1.0 + dt;
+    while t < 8.0 {
+        p.tick(t);
+        for ch in &p.actuation.channels {
+            let l = ch.follower.limits;
+            assert!(ch.follower.v.abs() <= l.v_max * 1.001, "{} v {} > {}", ch.primary_joint, ch.follower.v, l.v_max);
+            assert!(ch.follower.a.abs() <= l.a_max * 1.001, "{} a {} > {}", ch.primary_joint, ch.follower.a, l.a_max);
+        }
+        t += dt;
+    }
+    let joints = p.tick(t).joints;
+    assert!(p.at_home(0.5), "{joints:?}");
+    assert!((joints["head_pan"] - 10.0).abs() < 0.5);
+
+    // One joint only: a jog to its home value, without ending anything else.
+    p.perf_command(&PerfCommand::Puppet { channels: [("head_tilt".to_string(), 12.0)].into() }, r3x_contracts::Source::Ui).unwrap();
+    run(&mut p, t, t + 2.0);
+    assert!(!p.at_home(0.5));
+    p.perf_command(&PerfCommand::Home { joints: vec!["head_tilt".into()] }, r3x_contracts::Source::Ui).unwrap();
+    run(&mut p, t + 2.0, t + 4.0);
+    assert!(p.at_home(0.5) && p.homing());
+    assert!(p.home(&["tail".into()]).is_err());
+
+    // Anything that moves the body again ends the hold.
+    p.perform("nod", Source::Ui, Params::default(), None).unwrap();
+    assert!(!p.homing());
+}

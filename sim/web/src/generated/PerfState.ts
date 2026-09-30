@@ -5,4 +5,12 @@ export type PerfState = { frozen: boolean, runs: Array<RunInfo>,
 /**
  * Puppeted channels and their current values.
  */
-puppet: { [key in string]: number }, };
+puppet: { [key in string]: number }, 
+/**
+ * A whole-body Home is holding the home pose.
+ */
+homing: boolean, 
+/**
+ * Every joint is within [`HOME_TOLERANCE`] of its home value.
+ */
+at_home: boolean, };

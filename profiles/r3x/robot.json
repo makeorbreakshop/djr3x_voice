@@ -1421,5 +1421,6 @@
     "saccades": true,
     "gaze_wander": true,
     "speech_bob": true
-  }
+  },
+  "home": {}
 }

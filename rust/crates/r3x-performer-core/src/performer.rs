@@ -212,6 +212,11 @@ pub enum Command {
         value: Option<f64>,
     },
     JogRelease,
+    /// Bench/Studio Home (`PerfCommand::Home`): no joints = the whole-body reset.
+    Home {
+        #[serde(default)]
+        joints: Vec<String>,
+    },
     /// EYE_COMMAND: a named face pattern for `duration` s (0 = until the state changes).
     Eyes {
         pattern: String,
@@ -391,6 +396,10 @@ pub struct Performer {
     sent_goals: BTreeMap<String, f64>,
     /// Direct jog targets (joint -> value), applied after the compositor.
     jog: BTreeMap<String, f64>,
+    /// Every joint's home value (the profile's `home`, else 0).
+    home_pose: BTreeMap<String, f64>,
+    /// A whole-body Home holds `home_pose` under the jog until something moves the body.
+    home_hold: bool,
     goal_seq: u64,
     goal_deadband: f64,
     out: Vec<Out>,
@@ -433,7 +442,7 @@ impl Performer {
             take: TakeRecorder::default(),
             enables: Enables::default(),
             slots: profile.emotes.clone(),
-            joints: joints.into_iter().map(|j| j.name).collect(),
+            joints: joints.iter().map(|j| j.name.clone()).collect(),
             rng: derive(cfg.seed, 4),
             idle_rng: derive(cfg.seed, 5),
             now: 0.0,
@@ -452,6 +461,8 @@ impl Performer {
             tags: Vec::new(),
             sent_goals: BTreeMap::new(),
             jog: BTreeMap::new(),
+            home_pose: joints.iter().map(|j| (j.name.clone(), profile.home_of(&j.name))).collect(),
+            home_hold: false,
             goal_seq: 0,
             goal_deadband: cfg.goal_deadband,
             catalog,
@@ -491,13 +502,23 @@ impl Performer {
             }
             Command::Stop(sel) => self.stop(&sel),
             Command::Freeze { on } => self.freeze(on),
-            Command::Puppet { intent, value } => self.puppet.set(&intent, value),
+            Command::Puppet { intent, value } => {
+                self.home_hold = false;
+                self.puppet.set(&intent, value)
+            }
             Command::PuppetRelease => self.puppet.release(),
             Command::PuppetMode { mode } => self.puppet.set_mode(mode),
             Command::Emote { slot } => self.puppet.trigger(slot),
             Command::Pad(p) => self.pad = Some(p),
             Command::Enables(e) => self.enables = e,
-            Command::Alive(a) => self.procedural.layers = a,
+            Command::Alive(a) => {
+                // A layer switched back on ends the hold (switching them off does not).
+                let o = self.procedural.layers;
+                if (a.breathing && !o.breathing) || (a.saccades && !o.saccades) || (a.gaze_wander && !o.gaze_wander) || (a.speech_bob && !o.speech_bob) {
+                    self.home_hold = false;
+                }
+                self.procedural.layers = a;
+            }
             Command::Mode { mode } => {
                 self.host.set_mode(mode);
                 if !self.dj {
@@ -581,6 +602,7 @@ impl Performer {
                 self.host.chest.service_status(&service, &status, latched)
             }
             Command::Autonomy { on } => {
+                self.home_hold &= !on;
                 self.idle.enabled = on;
                 if !on {
                     self.poke_idle();
@@ -598,6 +620,9 @@ impl Performer {
                 }
             },
             Command::JogRelease => self.jog.clear(),
+            Command::Home { joints } => {
+                let _ = self.home(&joints);
+            }
         }
     }
 
@@ -668,6 +693,7 @@ impl Performer {
                     if self.joints.contains(k) {
                         self.jog.insert(k.clone(), *v);
                     } else {
+                        self.home_hold = false;
                         self.puppet.set(k, *v);
                     }
                 }
@@ -700,11 +726,61 @@ impl Performer {
                     return Err(format!("no eye pattern {pattern:?}"));
                 }
             }
+            PerfCommand::Home { joints } => self.home(joints)?,
+            PerfCommand::Look { pan, tilt, .. } => self.look = Some((*pan, *tilt)),
             PerfCommand::Preview { clip, at, hold } => self.preview(clip, *at, *hold)?,
             PerfCommand::PreviewStop => self.preview_stop(),
             PerfCommand::SaveShow { .. } => return Err("saving is the runtime's job".into()),
         }
         Ok(())
+    }
+
+    /// Home. No joints: stop every run and preview, release jog and puppet, idle policy and
+    /// alive layers off (the host mirrors that into the stage state), and hold every joint at
+    /// its home value; the followers get there inside each joint's v/a/j limits. The hold ends
+    /// when a run starts, a puppet intent moves, or a layer or the idle policy comes back on.
+    /// With joints: jog just those to their home values.
+    pub fn home(&mut self, joints: &[String]) -> Result<(), String> {
+        if self.frozen {
+            return Err("motion is frozen; unfreeze first".into());
+        }
+        if let Some(j) = joints.iter().find(|j| !self.home_pose.contains_key(*j)) {
+            return Err(format!("no joint {j:?}"));
+        }
+        if !joints.is_empty() {
+            for j in joints {
+                self.jog.insert(j.clone(), self.home_pose[j]);
+            }
+            return Ok(());
+        }
+        self.stop(&StopSel::all());
+        self.preview_stop();
+        self.jog.clear();
+        self.puppet.release();
+        self.command(Command::Autonomy { on: false });
+        self.procedural.layers = AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false };
+        self.home_hold = true;
+        Ok(())
+    }
+
+    /// Whether a whole-body Home is holding the home pose.
+    pub fn homing(&self) -> bool {
+        self.home_hold
+    }
+
+    /// Every joint's commanded position (the follower the controller runs, not the simulated
+    /// servo, which settles inside its deadband) within `tol` of its home value.
+    pub fn at_home(&self, tol: f64) -> bool {
+        self.actuation.channels.iter().all(|ch| {
+            ch.cfg.joints.iter().all(|(j, k)| {
+                self.home_pose.get(j).is_none_or(|h| (ch.follower.x * k - h).abs() <= tol)
+            })
+        })
+    }
+
+    /// Every joint's home value.
+    pub fn home_pose(&self) -> &BTreeMap<String, f64> {
+        &self.home_pose
     }
 
     /// Swap in a reloaded show folder. Running runs keep the items they started with;
@@ -787,6 +863,7 @@ impl Performer {
             return Err("motion is frozen".into());
         }
         let clip = parse_clip(doc)?;
+        self.home_hold = false;
         let at = at.clamp(0.0, clip.duration);
         self.body.scrub(PREVIEW_RUN, clip, RunLayer::Show, at, hold, self.now);
         Ok(())
@@ -832,6 +909,7 @@ impl Performer {
             match e {
                 PEv::Dispatch(a, run, at) => self.dispatch(a, &run, at),
                 PEv::Started(run) => {
+                    self.home_hold = false;
                     if let Some(owns) = &run.owns {
                         self.body.own(&run.run_id, run.layer, owns, self.now);
                     }
@@ -957,7 +1035,7 @@ impl Performer {
 
     fn update_background(&mut self) {
         let a = self.procedural.activity;
-        let want = if self.frozen {
+        let want = if self.frozen || self.home_hold {
             None
         } else {
             match a {
@@ -1031,6 +1109,9 @@ impl Performer {
             .procedural
             .update(t, dt, &ctx, &mut self.rng, &self.joints);
         self.body.apply(&mut pose, t, Some(&self.puppet));
+        if self.home_hold && !self.frozen {
+            pose.extend(self.home_pose.iter().map(|(j, v)| (j.clone(), *v)));
+        }
         if !self.frozen {
             for (j, v) in &self.jog {
                 pose.insert(j.clone(), *v);

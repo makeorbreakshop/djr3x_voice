@@ -94,3 +94,78 @@ async fn performer_on_the_bus() {
     let moved = x.joints.iter().map(|(j, v)| (v - y.joints[j]).abs()).fold(0.0, f64::max);
     assert!(moved > 1e-3, "alive again in Show (moved {moved})");
 }
+
+async fn until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+/// Bench Home: runs stopped, puppet released, layers and autonomy off, every joint home.
+/// Show gaze: the owning panel's viewport target steers head_pan; another panel's does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn home_resets_the_bench_and_gaze_follows_the_owning_panel() {
+    use r3x_contracts::{GazeSource, StageState, StopTarget};
+    let bus = Bus::default();
+    let profile = Arc::new(RobotProfile::load(r3x_runtime::default_profile_path()).unwrap());
+    r3x_stage::spawn(&bus, r3x_stage::StageConfig::from_profile(&profile), None).unwrap();
+    let mut frames = bus.subscribe_frames();
+    let cfg = PerformerHostConfig { profile, show_dir: performer::default_show_dir(), drivers: Some(DriverOptions { leds: false }), catalog: None };
+    performer::spawn(&bus, cfg).unwrap();
+    let cmd = |c| bus.command(Source::Ui, None, c);
+    let stage = |c| Command::Stage(c);
+
+    // Show refuses Home.
+    let home = Command::Perf(PerfCommand::Home { joints: vec![] });
+    assert!(matches!(cmd(home.clone()).await, Ack::Rejected { reason } if reason.contains("Bench")));
+
+    // Show gaze: panel-a owns the viewport; its target moves the head, panel-b's is refused.
+    assert!(cmd(stage(StageCommand::SetLayer { layer: "saccades".into(), enabled: false })).await.is_accepted());
+    assert!(cmd(stage(StageCommand::SetAutonomy { enabled: false })).await.is_accepted());
+    let claim = stage(StageCommand::SetGaze { source: GazeSource::Viewport, owner: Some("panel-a".into()) });
+    assert!(cmd(claim).await.is_accepted());
+    let look = |pan: f64, owner: &str| Command::Perf(PerfCommand::Look { pan, tilt: 0.0, owner: Some(owner.into()) });
+    assert!(!cmd(look(-40.0, "panel-b")).await.is_accepted(), "not the owner");
+    // Engaged attends to the target (idle glances centre on it); keep it fresh.
+    assert!(cmd(stage(StageCommand::SetEngagement { engagement: r3x_contracts::Engagement::Ambient })).await.is_accepted());
+    assert!(cmd(stage(StageCommand::SetLayer { layer: "saccades".into(), enabled: true })).await.is_accepted());
+    for _ in 0..40 {
+        assert!(cmd(look(30.0, "panel-a")).await.is_accepted());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let pan = frame(&mut frames).await.joints["head_pan"];
+    assert!(pan > 5.0, "head follows the viewport to the left (pan {pan})");
+    // Off: no target; glances around straight ahead.
+    assert!(cmd(stage(StageCommand::SetGaze { source: GazeSource::Off, owner: None })).await.is_accepted());
+    assert!(!cmd(look(30.0, "panel-a")).await.is_accepted(), "the viewport is not the source");
+
+    // Bench, made busy: layers + autonomy on, a show, a jogged joint.
+    assert!(cmd(stage(StageCommand::SetMode { mode: OperatingMode::Bench })).await.is_accepted());
+    for l in ["breathing", "saccades", "gaze_wander", "speech_bob"] {
+        assert!(cmd(stage(StageCommand::SetLayer { layer: l.into(), enabled: true })).await.is_accepted());
+    }
+    assert!(cmd(stage(StageCommand::SetAutonomy { enabled: true })).await.is_accepted());
+    assert_eq!(cmd(play("nod")).await, Ack::Accepted);
+    let jog = Command::Perf(PerfCommand::Puppet { channels: [("head_pan".to_string(), 35.0)].into() });
+    assert_eq!(cmd(jog).await, Ack::Accepted);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(!bus.get::<PerfState>().at_home);
+
+    assert_eq!(cmd(home).await, Ack::Accepted);
+    let s = bus.get::<StageState>();
+    assert!(!s.autonomy && s.layers.values().all(|on| !on), "{s:?}");
+    let ps = bus.get::<PerfState>();
+    assert!(ps.runs.is_empty() && ps.homing, "{ps:?}");
+    until("at home", || bus.get::<PerfState>().at_home).await;
+    let f = frame_after(&mut frames, Duration::from_millis(500)).await; // the servo settles too
+    assert!(f.joints["head_pan"].abs() < 1.0, "{}", f.joints["head_pan"]);
+
+    // A run ends the hold.
+    let _ = cmd(Command::Perf(PerfCommand::Stop(StopTarget::All))).await;
+    assert_eq!(cmd(play("nod")).await, Ack::Accepted);
+    until("hold released", || !bus.get::<PerfState>().homing).await;
+}

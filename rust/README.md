@@ -107,6 +107,26 @@ Aloogahoo with its recorded line. Acceptance (`#[ignore]`d, ~15 s):
 `cargo test -p r3x-runtime --test dj_test_acceptance -- --ignored --nocapture` checks
 seek -> ending soon -> duck -> commentary -> crossfade -> next track -> unduck in the session log.
 
+## Bench: Home, Centres, gaze
+
+- **Home** (Drive tab, the viewport's Home button, or `home` in the console; Bench and Studio
+  only): stops every run, releases the puppet, turns autonomy and the alive layers off in one
+  stage change (`stage.still`), and holds every joint at the profile's `home` pose (a joint not
+  listed = 0) through the normal followers, so each moves inside its v/a/j limits and only
+  enabled outputs move. `state.perf.at_home` is true once every follower is within 0.5 (deg or
+  mm). The hold ends when a run starts, a puppet intent moves, or a layer or autonomy comes back
+  on. `home head_pan visor` (or a row's button in Drive -> Joints) holds just those joints.
+- **Centres** (viewport toggle; on by default in Bench and Studio): per joint, its animation
+  range, soft (blue) and hard (red) ends, a white 0 tick, an amber needle and the value; a floor
+  ring with a "front" marker under the base. Hover a joint, a Joints row or an output chip to
+  highlight it. 0 deg of `head_pan` faces +Z, towards the default camera.
+- **Gaze** (`state.stage.gaze`; viewport selector or `gaze viewport|vision|off`): what the head
+  attends to in Show. `viewport` = the owning panel's 3D camera (`perf.look`, ~15 Hz, lapses
+  after 1 s; the last panel to select it owns it); `vision` = the largest face
+  (`vision.face_at`, `R3X_CAMERA_HFOV`, default 70 deg, camera assumed to face R3X's front);
+  `off` = straight ahead. Targets are clamped to the head's animation range. Idle glances are
+  centre-weighted around the target (about 80% within 15 deg). Bench and Studio ignore it.
+
 ## Run (Phase 1, bridged to CantinaOS)
 
 ```bash

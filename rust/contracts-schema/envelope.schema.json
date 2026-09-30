@@ -1015,6 +1015,31 @@
       ],
       "type": "object"
     },
+    "GazeSource": {
+      "description": "The look target the head attends to in Show.",
+      "oneOf": [
+        {
+          "const": "viewport",
+          "description": "A panel's 3D camera (`perf.look` from the owning panel).",
+          "type": "string"
+        },
+        {
+          "const": "vision",
+          "description": "The largest detected face (r3x-vision); straight ahead when nobody is seen.",
+          "type": "string"
+        },
+        {
+          "const": "audio",
+          "description": "Sound-source direction. Not implemented yet.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Straight ahead; idle glances only.",
+          "type": "string"
+        }
+      ]
+    },
     "Hello": {
       "description": "`hello` body: who the gateway thinks you are, full retained state, the robot profile.",
       "properties": {
@@ -2091,6 +2116,55 @@
           "type": "object"
         },
         {
+          "description": "Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and\nthe alive layers off, and hold every joint at the profile's home pose (reached through\nthe followers, inside each joint's v/a/j limits); the hold ends when something moves the\nbody again. With `joints`: hold just those at home. `ui`/`cli` only.",
+          "properties": {
+            "joints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "home",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The viewport gaze target: (pan, tilt) degrees in the head_pan parent frame, from the panel\nthat owns `state.stage.gaze_owner`. Send ~15 Hz while it moves; a target older than 1 s\nlapses to straight ahead.",
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pan": {
+              "format": "double",
+              "type": "number"
+            },
+            "tilt": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "look",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pan",
+            "tilt"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Stop every run, refuse new ones; `on: false` releases. Same switch as\n`StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.",
           "properties": {
             "on": {
@@ -2442,7 +2516,17 @@
     },
     "PerfState": {
       "properties": {
+        "at_home": {
+          "default": false,
+          "description": "Every joint is within [`HOME_TOLERANCE`] of its home value.",
+          "type": "boolean"
+        },
         "frozen": {
+          "type": "boolean"
+        },
+        "homing": {
+          "default": false,
+          "description": "A whole-body Home is holding the home pose.",
           "type": "boolean"
         },
         "puppet": {
@@ -2559,6 +2643,15 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "home": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "default": {},
+          "description": "The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not\nlisted homes to 0 (its centre).",
+          "type": "object"
         },
         "joints": {
           "items": {
@@ -2885,6 +2978,42 @@
           "type": "object"
         },
         {
+          "description": "Autonomy and every alive layer off, in one change (Bench/Studio Home).",
+          "properties": {
+            "type": {
+              "const": "still",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Choose the gaze target. `owner`: the panel claiming the viewport target.",
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/GazeSource"
+            },
+            "type": {
+              "const": "set_gaze",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "on": {
               "type": "boolean"
@@ -2959,6 +3088,19 @@
         "frozen": {
           "description": "Every run stopped, new ones refused; the chest holds its state.",
           "type": "boolean"
+        },
+        "gaze": {
+          "$ref": "#/$defs/GazeSource",
+          "default": "viewport",
+          "description": "Where the head looks in Show (Bench and Studio ignore it)."
+        },
+        "gaze_owner": {
+          "default": null,
+          "description": "With `gaze: viewport`: the panel whose 3D camera is the target (the last to select it);\nnone = whichever panel sends one.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "layers": {
           "additionalProperties": {
@@ -3301,6 +3443,42 @@
             "type",
             "name",
             "duration_s"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Where the largest face is, as a gaze target: (pan, tilt) degrees from the camera's\nfield of view (published when it moves by more than a degree).",
+          "properties": {
+            "pan": {
+              "format": "double",
+              "type": "number"
+            },
+            "tilt": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "face_at",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pan",
+            "tilt"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "No face in view any more.",
+          "properties": {
+            "type": {
+              "const": "face_lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         },

@@ -13,4 +13,9 @@ emotes: Array<string>,
 /**
  * Procedural alive layer -> enabled by default.
  */
-alive: { [key in string]: boolean }, };
+alive: { [key in string]: boolean }, 
+/**
+ * The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not
+ * listed homes to 0 (its centre).
+ */
+home: { [key in string]: number }, };

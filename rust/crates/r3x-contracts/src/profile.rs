@@ -38,6 +38,10 @@ pub struct RobotProfile {
     /// Procedural alive layer -> enabled by default.
     #[serde(default)]
     pub alive: BTreeMap<String, bool>,
+    /// The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not
+    /// listed homes to 0 (its centre).
+    #[serde(default)]
+    pub home: BTreeMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -269,6 +273,11 @@ impl RobotProfile {
         self.joints.iter().find(|j| j.name == name)
     }
 
+    /// A joint's home value (`home`, else 0).
+    pub fn home_of(&self, joint: &str) -> f64 {
+        self.home.get(joint).copied().unwrap_or(0.0)
+    }
+
     /// Report every problem, not just the first.
     pub fn validate(&self) -> Result<(), ProfileError> {
         let mut errs = Vec::new();
@@ -318,6 +327,16 @@ impl RobotProfile {
                     break;
                 }
                 cur = self.joint(p).and_then(|pj| pj.parent.as_deref());
+            }
+        }
+
+        for (joint, v) in &self.home {
+            match self.joint(joint) {
+                None => errs.push(format!("home: unknown joint {joint}")),
+                Some(j) if !(j.soft.min <= *v && *v <= j.soft.max) => {
+                    errs.push(format!("home: {joint} = {v} outside its soft range"))
+                }
+                Some(_) => {}
             }
         }
 
@@ -415,8 +434,10 @@ mod tests {
         p.actuators[0].joints.insert("nope".into(), 1.0); // unknown joint
         p.actuators[1].channel = p.actuators[0].channel; // duplicate channel
         p.joints[2].parent = Some("ghost".into());
+        p.home.insert("tail".into(), 0.0); // unknown joint
+        p.home.insert("head_pan".into(), 500.0); // outside soft
         let ProfileError::Invalid(errs) = p.validate().unwrap_err() else { panic!() };
-        assert_eq!(errs.len(), 5, "{errs:#?}");
+        assert_eq!(errs.len(), 7, "{errs:#?}");
     }
 
     #[test]

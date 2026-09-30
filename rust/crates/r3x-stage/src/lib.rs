@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use r3x_bus::Bus;
 use r3x_contracts::{
-    Ack, Command, Engagement, EngagementState, Event, MessageClass, OperatingMode, RobotProfile,
+    Ack, Command, Engagement, EngagementState, Event, GazeSource, MessageClass, OperatingMode, RobotProfile,
     Source, StageCommand, StageEvent, StageState,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -51,6 +51,7 @@ impl StageConfig {
             brain: show,
             autonomy: show,
             frozen,
+            ..Default::default()
         }
     }
 }
@@ -92,7 +93,7 @@ fn apply(bus: &Bus, cfg: &StageConfig, cmd: StageCommand) -> Ack {
     match cmd {
         StageCommand::SetMode { mode } => {
             if mode != cur.mode {
-                next = cfg.defaults(mode, cur.frozen);
+                next = StageState { gaze: cur.gaze, gaze_owner: cur.gaze_owner.clone(), ..cfg.defaults(mode, cur.frozen) };
             }
         }
         StageCommand::SetOutput { output, enabled } => match next.outputs.get_mut(&output) {
@@ -105,7 +106,18 @@ fn apply(bus: &Bus, cfg: &StageConfig, cmd: StageCommand) -> Ack {
         },
         StageCommand::SetBrain { enabled } => next.brain = enabled,
         StageCommand::SetAutonomy { enabled } => next.autonomy = enabled,
+        StageCommand::Still => {
+            next.autonomy = false;
+            next.layers.values_mut().for_each(|on| *on = false);
+        }
         StageCommand::Freeze { on } => next.frozen = on,
+        StageCommand::SetGaze { source: GazeSource::Audio, .. } => {
+            return Ack::rejected("sound-source gaze is not implemented yet")
+        }
+        StageCommand::SetGaze { source, owner } => {
+            next.gaze = source;
+            next.gaze_owner = if source == GazeSource::Viewport { owner } else { None };
+        }
         StageCommand::SetEngagement { .. } => unreachable!("handled by the caller"),
     }
     if next.mode != cur.mode {
@@ -181,6 +193,7 @@ mod tests {
         assert_eq!(s.mode, OperatingMode::Bench);
         assert!(!s.brain && !s.autonomy && s.frozen, "freeze survives the mode change");
         assert!(s.outputs.values().chain(s.layers.values()).all(|v| !*v));
+        assert_eq!((s.gaze, s.gaze_owner.as_deref()), (GazeSource::Viewport, None));
 
         let one = stage(StageCommand::SetOutput { output: "neck".into(), enabled: true });
         assert!(bus.command(Source::Ui, None, one).await.is_accepted());
@@ -193,6 +206,22 @@ mod tests {
         assert!(bus.command(Source::Ui, None, stage(StageCommand::SetBrain { enabled: true })).await.is_accepted());
         assert!(bus.command(Source::Ui, None, talk).await.is_accepted());
         assert_eq!(bus.get::<EngagementState>().engagement, Engagement::Interactive);
+    }
+
+    #[tokio::test]
+    async fn gaze_source_and_owner_survive_mode_changes() {
+        let bus = Bus::default();
+        spawn(&bus, cfg(), None).unwrap();
+        let gaze = |source, owner: Option<&str>| stage(StageCommand::SetGaze { source, owner: owner.map(Into::into) });
+        assert!(bus.command(Source::Ui, None, gaze(GazeSource::Viewport, Some("panel-a"))).await.is_accepted());
+        assert!(bus.command(Source::Ui, None, gaze(GazeSource::Viewport, Some("panel-b"))).await.is_accepted(), "last one wins");
+        assert!(!bus.command(Source::Ui, None, gaze(GazeSource::Audio, None)).await.is_accepted(), "not implemented");
+        let bench = stage(StageCommand::SetMode { mode: OperatingMode::Bench });
+        assert!(bus.command(Source::Ui, None, bench).await.is_accepted());
+        let s = bus.get::<StageState>();
+        assert_eq!((s.gaze, s.gaze_owner.as_deref()), (GazeSource::Viewport, Some("panel-b")));
+        assert!(bus.command(Source::Cli, None, gaze(GazeSource::Off, Some("x"))).await.is_accepted());
+        assert_eq!(bus.get::<StageState>().gaze_owner, None, "only the viewport has an owner");
     }
 
     #[tokio::test]

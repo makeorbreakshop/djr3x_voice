@@ -32,7 +32,7 @@ pub fn start(bus: &Bus, memory: Option<Arc<r3x_memory::Memory>>) -> Option<Visio
     // Scene descriptions are paid calls: only with a key, and never when R3X_VISION_SCENES=0
     // (on-demand analyze_scene still needs the client).
     let llm = r3x_llm::LlmClient::from_env().ok().flatten();
-    let (vision, _task) = Vision::spawn(bus, cfg, Box::new(FfmpegCamera::default()), Box::new(GalleryRecognizer { engine, gallery }), llm);
+    let (vision, _task) = Vision::spawn(bus, cfg, Box::new(FfmpegCamera::default()), Box::new(GalleryRecognizer::new(engine, gallery)), llm);
     if let Some(m) = memory {
         r3x_vision::link_memory(bus, m);
     }

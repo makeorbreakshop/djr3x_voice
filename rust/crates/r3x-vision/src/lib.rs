@@ -4,7 +4,7 @@
 //! let engine = FaceEngine::load(&face::model_dir())?;
 //! let gallery = Gallery::load(&gallery::default_path())?;
 //! let (vision, _task) = Vision::spawn(&bus, VisionConfig::from_env(), Box::new(FfmpegCamera::default()),
-//!                                     Box::new(GalleryRecognizer { engine, gallery }), llm);
+//!                                     Box::new(GalleryRecognizer::new(engine, gallery)), llm);
 //! link_memory(&bus, memory.clone());                    // person detected/exited -> r3x-memory
 //! let ctx = memory.turn_context(vision.scene().as_ref().map(|(s, t)| (s.as_str(), *t)), 5)?;
 //! let answer = vision.analyze_scene("what am I holding?", Some(turn)).await?;   // the tool
@@ -25,7 +25,7 @@ pub use face::{FaceEngine, Face};
 pub use frame::Frame;
 pub use gallery::{Gallery, Match};
 pub use presence::{Presence, PresenceConfig};
-pub use service::{link_memory, CameraStatus, GalleryRecognizer, Recognizer, Vision, VisionConfig};
+pub use service::{face_to_gaze, link_memory, CameraStatus, GalleryRecognizer, Recognizer, Vision, VisionConfig};
 
 #[derive(Debug, thiserror::Error)]
 pub enum VisionError {

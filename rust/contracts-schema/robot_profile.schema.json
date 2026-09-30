@@ -497,6 +497,15 @@
       },
       "type": "array"
     },
+    "home": {
+      "additionalProperties": {
+        "format": "double",
+        "type": "number"
+      },
+      "default": {},
+      "description": "The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not\nlisted homes to 0 (its centre).",
+      "type": "object"
+    },
     "joints": {
       "items": {
         "$ref": "#/$defs/Joint"

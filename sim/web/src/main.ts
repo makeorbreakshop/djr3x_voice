@@ -29,6 +29,9 @@ import { Ghosts } from './ghost';
 import { ServoWhine } from './servowhine';
 import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
+import { Centres, atHome, formatValue, shortName } from './centres';
+import type { RobotProfile } from './generated/RobotProfile';
+import type { GazeSource } from './generated/GazeSource';
 import {
   INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
   type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
@@ -78,6 +81,35 @@ const sceneLook = set.show && !STILL
   sync();
 }
 
+// Centres (centres.ts): on by default in Bench and Studio, off in Show, until the operator picks.
+const CENTRES_KEY = 'r3x.centres';
+let centresPick: boolean | null = null;
+try {
+  const v = localStorage.getItem(CENTRES_KEY);
+  centresPick = v === null ? null : v === '1';
+} catch {
+  /* storage blocked */
+}
+let centresOn = centresPick ?? false;
+function setCentres(on: boolean) {
+  centresOn = on;
+  document.getElementById('scene-centres')!.setAttribute('aria-pressed', String(on));
+  centres?.setVisible(on);
+}
+function centresFollowMode(mode: string) {
+  if (centresPick === null) setCentres(mode !== 'show');
+}
+document.getElementById('scene-centres')!.onclick = (e) => {
+  centresPick = !centresOn;
+  try {
+    localStorage.setItem(CENTRES_KEY, centresPick ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+  setCentres(centresPick);
+  (e.currentTarget as HTMLElement).blur();
+};
+
 // AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
 const post = new PostPipeline(renderer, scene, camera);
 
@@ -112,6 +144,21 @@ interface Profile {
   emotes: string[];
 }
 const PROFILE = JSON.parse(PROFILE_JSON) as Profile;
+const FULL_PROFILE = JSON.parse(PROFILE_JSON) as RobotProfile;
+const JOINTS = FULL_PROFILE.joints.map((j) => j.name);
+const HOME: Record<string, number> = Object.fromEntries(JOINTS.map((j) => [j, FULL_PROFILE.home?.[j] ?? 0]));
+/** This page's id for the viewport gaze (kept across reloads of this tab). */
+const PANEL_ID = (() => {
+  const fresh = `panel-${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    const v = sessionStorage.getItem('r3x.panel-id');
+    if (v) return v;
+    sessionStorage.setItem('r3x.panel-id', fresh);
+  } catch {
+    /* storage blocked: a new id per load */
+  }
+  return fresh;
+})();
 const SLOTS = PROFILE.emotes;
 /** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
 const SUBSYSTEMS: [string, string][] = [
@@ -136,6 +183,7 @@ let rig: Rig | null = null;
 let leds: FaceLeds | null = null;
 let chestLights: ChestLights | null = null;
 let ghosts: Ghosts | null = null;
+let centres: Centres | null = null;
 let performer: Performer | null = null;
 let view: View | null = null;
 let clips: string[] = [];
@@ -441,7 +489,10 @@ function onGatewayState(s: RetainedState) {
   stMode.textContent = s.engagement.engagement.toUpperCase();
   studio.setActive(s.stage.mode === 'studio');
   sceneLook?.followMode(s.stage.mode);
+  centresFollowMode(s.stage.mode);
   ghosts?.apply(s.stage.outputs);
+  renderGaze(s);
+  renderHome();
   showUiDirty = true;
 }
 
@@ -459,6 +510,7 @@ function setConnected(on: boolean) {
   if (!on) {
     gwState = null;
     ghosts?.apply(null);
+    renderGaze(null);
     perf({ cmd: 'autonomy', on: autonomy });
     $<HTMLInputElement>('sh-idle').checked = autonomy;
     $('btn-dj').classList.toggle('on', djOn);
@@ -530,6 +582,8 @@ function setLocalStage(mode: string) {
   document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
   studio.setActive(mode === 'studio');
   sceneLook?.followMode(mode);
+  centresFollowMode(mode);
+  renderHome();
 }
 if (studio.wantsOpen()) setLocalStage('studio');
 
@@ -565,7 +619,10 @@ async function load() {
   chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
   ghosts = new Ghosts(rig, PROFILE);
   ghosts.apply(gwState?.stage.outputs ?? null);
+  centres = new Centres(rig, FULL_PROFILE.joints, $('centre-labels'));
+  centres.setVisible(centresOn);
   buildJointUi(rig);
+  buildJointTable();
   document.getElementById('loading')!.remove();
 }
 
@@ -612,6 +669,7 @@ function dim(px: RGB[], output: string): RGB[] {
 
 function frame() {
   requestAnimationFrame(frame);
+  sendViewportGaze(); // every animation frame, drawn or not (it rate-limits itself)
   const t = clock();
   const dt = Math.min(0.05, t - last);
   last = t;
@@ -641,6 +699,8 @@ function frame() {
   controls.update();
   if (!sceneLook || sceneLook.showingBooth) set.constrain(camera, controls.target);
   post.render();
+  if (view) centres?.render(renderer, camera, view.joints);
+  if (++homeTick % 12 === 0) updateJointTable();
   drawLeds();
   if (logDirty) drawLog();
 }
@@ -1065,4 +1125,145 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
     $('take-info').textContent = !take ? '' : take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
     if (!connected) stMode.textContent = mode;
   };
+}
+
+// ------------------------------------------------------------------ Home (Bench / Studio)
+let homeTick = 0;
+/** Where the Studio preview or the offline demo runs: the embedded performer. */
+const local = () => !connected || studioLocal;
+
+function home(joints: string[] = []) {
+  if (!local()) return void send({ class: 'perf', type: 'home', joints });
+  perf({ cmd: 'home', joints });
+  if (studioLocal) performer?.command({ cmd: 'home', joints }); // perf() stands down while connected
+}
+$('drive-home').onclick = () => home();
+$('scene-home').onclick = (e) => {
+  home();
+  (e.currentTarget as HTMLElement).blur();
+};
+
+function renderHome() {
+  const mode = gwState?.stage.mode ?? null;
+  const allowed = !connected || mode === 'bench' || mode === 'studio';
+  for (const id of ['drive-home', 'scene-home']) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = !allowed;
+    b.title = allowed ? b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '') : `${b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '')} (Show: switch to Bench or Studio)`;
+  }
+  $('scene-home').hidden = !allowed || !(connected ? mode !== 'show' : true);
+}
+
+function renderHomeState() {
+  const el = $('home-state');
+  let text = '-';
+  let on = false;
+  if (connected && !studioLocal && gwState?.perf.at_home !== undefined) {
+    on = gwState.perf.at_home;
+    text = on ? 'at home' : gwState.perf.homing ? 'homing…' : 'off home';
+  } else if (view) {
+    on = atHome(view.joints, HOME, JOINTS, 1); // simulated servo output, not the follower
+    text = on ? 'at home' : 'off home';
+  }
+  el.textContent = text;
+  el.classList.toggle('on', on);
+}
+
+/** Drive -> Joints: current and home value per joint, a per-joint Home, hover = gizmo highlight. */
+const jointRows = new Map<string, HTMLElement>();
+function buildJointTable() {
+  const body = $('joint-rows');
+  body.innerHTML = FULL_PROFILE.joints.map((j) => `<tr data-joint="${j.name}" title="${j.name}">
+    <td>${shortName(j.name)}</td><td class="num">-</td>
+    <td class="home">${formatValue(HOME[j.name], j.unit)}</td>
+    <td><button data-home-joint="${j.name}" title="Ease ${j.name} to its home value (held until released)">home</button></td></tr>`).join('');
+  for (const tr of Array.from(body.querySelectorAll<HTMLElement>('tr'))) jointRows.set(tr.dataset.joint!, tr);
+  body.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-home-joint]');
+    if (b) home([b.dataset.homeJoint!]);
+  };
+  body.onmouseover = (e) => centres?.highlight([(e.target as HTMLElement).closest<HTMLElement>('tr')?.dataset.joint ?? ''].filter(Boolean));
+  body.onmouseleave = () => centres?.highlight(null);
+  // The Drive outputs are actuators: hover one to see the joints it drives.
+  $('drive-outputs').onmouseover = (e) => {
+    const out = (e.target as HTMLElement).closest<HTMLElement>('[data-output]')?.dataset.output;
+    const a = FULL_PROFILE.actuators.find((x) => x.name === out);
+    centres?.highlight(a ? Object.keys(a.joints) : null);
+  };
+  $('drive-outputs').onmouseleave = () => centres?.highlight(null);
+}
+
+function updateJointTable() {
+  renderHomeState();
+  if (!view) return;
+  for (const [j, tr] of jointRows) {
+    const v = view.joints[j] ?? 0;
+    const unit = FULL_PROFILE.joints.find((x) => x.name === j)!.unit;
+    tr.children[1].textContent = formatValue(v, unit);
+    // What the (simulated) servo reached, which settles inside its deadband: amber past 1.
+    tr.classList.toggle('off', Math.abs(v - HOME[j]) > 1);
+  }
+}
+
+// Hovering the droid highlights the joint under the pointer (Centres on only; ~10 Hz).
+{
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let pending = false;
+  let last: PointerEvent | null = null;
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    last = e;
+    if (pending || !centres?.shown || !rig) return;
+    pending = true;
+    setTimeout(() => {
+      pending = false;
+      if (!last || !rig) return;
+      ndc.set((last.clientX / innerWidth) * 2 - 1, -(last.clientY / innerHeight) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      let o: THREE.Object3D | null = ray.intersectObject(rig.root, true)[0]?.object ?? null;
+      while (o && !o.name.startsWith('j_')) o = o.parent;
+      centres?.highlight(o ? [o.name.slice(2)] : null);
+    }, 100);
+  });
+  renderer.domElement.addEventListener('pointerleave', () => centres?.highlight(null));
+}
+
+// ------------------------------------------------------------------ gaze target (Show)
+const gazeSel = $<HTMLSelectElement>('gaze-src');
+let claimed = false;
+function renderGaze(s: RetainedState | null) {
+  // A runtime without gaze support (older build) leaves the selector hidden.
+  const g = s?.stage.gaze;
+  gazeSel.hidden = !g;
+  $('gaze-owner').hidden = !g || g !== 'viewport';
+  if (!s || !g) return;
+  if (document.activeElement !== gazeSel) gazeSel.value = g;
+  const owner = s.stage.gaze_owner ?? null;
+  $('gaze-owner').textContent = owner === PANEL_ID ? 'this panel' : owner ? `owned by ${owner}` : 'no owner';
+  gazeSel.title = `What R3X's head looks at in Show (Bench and Studio ignore it). This panel: ${PANEL_ID}`;
+  // Nobody owns the viewport: the first panel to see that claims it.
+  if (g === 'viewport' && !owner && !claimed) {
+    claimed = true;
+    void send({ class: 'stage', type: 'set_gaze', source: 'viewport', owner: PANEL_ID });
+  }
+}
+gazeSel.onchange = () => {
+  const source = gazeSel.value as GazeSource;
+  void send({ class: 'stage', type: 'set_gaze', source, ...(source === 'viewport' ? { owner: PANEL_ID } : {}) });
+  gazeSel.blur();
+};
+
+/** The owning panel's camera as the gaze target: ~15 Hz while it moves, 2 Hz keepalive. */
+let lookSent = { pan: NaN, tilt: NaN, at: 0 };
+function sendViewportGaze() {
+  const st = gwState?.stage;
+  if (!connected || !st || st.mode !== 'show' || st.gaze !== 'viewport' || (st.gaze_owner && st.gaze_owner !== PANEL_ID)) return;
+  const now = performance.now();
+  if (now - lookSent.at < 66) return;
+  const pt = aimAt(camera.position);
+  if (!pt) return;
+  const moved = Math.abs(pt[0] - lookSent.pan) > 0.3 || Math.abs(pt[1] - lookSent.tilt) > 0.3;
+  if (!moved && now - lookSent.at < 500) return;
+  lookSent = { pan: pt[0], tilt: pt[1], at: now };
+  void panel.gw.send({ class: 'perf', type: 'look', pan: pt[0], tilt: pt[1], owner: PANEL_ID });
 }
