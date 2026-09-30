@@ -183,8 +183,13 @@ def leaf_axis(v: np.ndarray):
 # ({name: axis/plane dict}, SCHEMA.md) and optionally REFERENCE (the STL's file name) for the
 # regression. Without an entry, parts use parts/hunter.py (or their source mesh).
 PARAMETRIC: dict[str, str] = {
-    # "mount_plate": "parts.head.base_plate",
+    "mount_plate": "parts.head.base_plate",
+    "neck_coupler": "parts.head.neck_coupler",
+    "neck_joint_member": "parts.head.neck_joint_member",
+    "custom_joint_piece": "parts.head.custom_joint_piece",
 }
+# the STEP's own placement of the cross (Custom_Joint_Piece at (0, 67, 0), -90 deg about Y)
+M_CJP = np.array([[0, 0, -1, 0], [0, 1, 0, 67.0], [1, 0, 0, 0], [0, 0, 0, 1.0]])
 
 
 def remodel(name: str, M: np.ndarray, part_id: str | None = None, **params):
@@ -353,11 +358,16 @@ def build() -> Assembly:
                  (1 if side == "l" else -1, 0, 0), 25, metal_mass(b, 7.85), "steel 7.85 g/cc"))
 
     cjp = step_part("Custom_Joint_Piece")
+    cjsrc, cjkw = src_step("Custom_Joint_Piece", also=["Custom Joint Piece.step"]), {}
+    if "custom_joint_piece" in PARAMETRIC:  # ours, on the STEP's own placement of the cross
+        cjp, cjsrc, cjfeat = remodel("custom_joint_piece", M_STEP @ M_CJP, "custom_joint_piece")
+        cjsrc["placement"] = "step (the STEP's own cross instance)"
+        cjkw = {"features": cjfeat, "cad": "parametric"}
     m, n = printed_mass(cjp)
     add(Part("custom_joint_piece", "Custom Joint Piece", "mech", "cross", cjp,
-             src_step("Custom_Joint_Piece", also=["Custom Joint Piece.step"]), "PLA (printed)", True,
+             cjsrc, "PLA (printed)", True,
              (0, 0, 0), 0, m, n, note="The gimbal cross: tilt axis (X) in the U-joint bearings, "
-                                      "roll axis (Z) in the pillow-block bearings."))
+                                      "roll axis (Z) in the pillow-block bearings.", **cjkw))
 
     plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate")
     step_plate = step_part("Head_Mounting_Plate")
