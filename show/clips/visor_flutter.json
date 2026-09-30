@@ -1,0 +1,11 @@
+{
+  "id": "visor_flutter",
+  "kind": "clip",
+  "title": "Visor flutter",
+  "description": "Visor flutters like a nervous blink",
+  "tags": ["nervous", "blink", "flutter"],
+  "tier": "free",
+  "duration": 1.3,
+  "interruptible_after": 0.2,
+  "tracks": {"visor": {"mode": "additive", "keys": [[0, 0], [0.2, -6], [0.42, 1], [0.64, -6], [0.86, 1], [1.07, -4], [1.3, 0]]}}
+}

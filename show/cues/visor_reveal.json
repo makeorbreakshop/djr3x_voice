@@ -1,0 +1,16 @@
+{
+  "id": "visor_reveal",
+  "kind": "cue",
+  "title": "Visor reveal",
+  "description": "Dark stage, then the visor flips open with a boot sweep and synth",
+  "tags": ["reveal", "intro", "entrance"],
+  "tier": "cheap",
+  "actions": [
+    {"at": 0, "do": "lights", "cue": "blackout", "fade": 0.2, "hold": 1.4},
+    {"at": 0, "do": "eyes", "pattern": "idle"},
+    {"at": 0.8, "do": "clip", "id": "visor_flip"},
+    {"at": 0.8, "do": "eyes", "pattern": "flash", "duration": 0.8},
+    {"at": 0.8, "do": "chest", "command": "X1", "hold": 2.4},
+    {"at": 0.8, "do": "sfx", "id": "synth"}
+  ]
+}

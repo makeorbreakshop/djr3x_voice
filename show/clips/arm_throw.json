@@ -1,0 +1,17 @@
+{
+  "id": "arm_throw",
+  "kind": "clip",
+  "title": "Arm throw",
+  "description": "Big arm throw with a wind-up, for a drop",
+  "tags": ["drop", "hype", "throw"],
+  "tier": "cheap",
+  "duration": 2.5,
+  "interruptible_after": 1.0,
+  "tracks": {
+    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.3, -5], [1.04, 40], [1.26, 36], [1.8, 36], [2.5, 0]]},
+    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.3, 12], [1.04, -45], [1.8, -45], [2.5, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, -3], [1.02, 8], [1.8, 4], [2.5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 3], [1.0, -9], [1.8, -5], [2.5, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.0, 8], [1.8, 8], [2.5, 0]]}
+  }
+}

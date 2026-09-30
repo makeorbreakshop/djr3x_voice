@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+r3x-contracts = { path = "crates/r3x-contracts" }
+r3x-bus = { path = "crates/r3x-bus" }
+r3x-ops = { path = "crates/r3x-ops" }
+r3x-stage = { path = "crates/r3x-stage" }
+r3x-gateway = { path = "crates/r3x-gateway" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+ts-rs = { version = "12", features = ["serde-json-impl", "no-serde-warnings"] }
+schemars = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.8", features = ["ws"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

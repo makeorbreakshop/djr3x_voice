@@ -1,0 +1,3715 @@
+{
+  "$defs": {
+    "Ack": {
+      "description": "Reply to every command.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "accepted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "status": {
+              "const": "rejected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Actuator": {
+      "description": "A physical actuator driving one or more joints (coupling factor per joint).",
+      "properties": {
+        "calibration": {
+          "$ref": "#/$defs/Calibration"
+        },
+        "channel": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "driver": {
+          "$ref": "#/$defs/DriverKind"
+        },
+        "extended": {
+          "default": false,
+          "type": "boolean"
+        },
+        "joints": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "servo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "joints",
+        "driver",
+        "channel",
+        "calibration"
+      ],
+      "type": "object"
+    },
+    "AudioConfig": {
+      "properties": {
+        "ducking": {
+          "$ref": "#/$defs/Ducking",
+          "default": {
+            "level": 0.5,
+            "ramp_ms": 80.0
+          }
+        },
+        "mouth_hz": {
+          "default": 30.0,
+          "description": "Mouth amplitude rate (plan §7b: one rate, here).",
+          "format": "double",
+          "type": "number"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AudioOutput"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "AudioDirection": {
+      "enum": [
+        "in",
+        "out"
+      ],
+      "type": "string"
+    },
+    "AudioMeta": {
+      "properties": {
+        "channels": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "direction": {
+          "$ref": "#/$defs/AudioDirection",
+          "description": "`in` = client mic to runtime, `out` = runtime TTS to client."
+        },
+        "sample_rate": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "direction",
+        "sample_rate",
+        "channels"
+      ],
+      "type": "object"
+    },
+    "AudioOutput": {
+      "properties": {
+        "device": {
+          "default": null,
+          "description": "Device name; `None` = system default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Calibration": {
+      "properties": {
+        "center_us": {
+          "description": "Pulse at which the joint sits at `center_value`.",
+          "format": "double",
+          "type": "number"
+        },
+        "center_value": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "gear": {
+          "description": "Servo degrees per joint degree (revolute).",
+          "format": "double",
+          "type": "number"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mm_per_deg": {
+          "description": "Prismatic joints: mm of travel per servo degree.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pulse_max_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "pulse_min_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "range_deg": {
+          "description": "Servo travel over the full pulse range.",
+          "format": "double",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/CalibrationStatus",
+          "default": "assumed"
+        },
+        "trim_us": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "center_us",
+        "gear",
+        "pulse_min_us",
+        "pulse_max_us",
+        "range_deg"
+      ],
+      "type": "object"
+    },
+    "CalibrationStatus": {
+      "enum": [
+        "assumed",
+        "measured"
+      ],
+      "type": "string"
+    },
+    "ClientInfo": {
+      "description": "An authenticated gateway client. `source` is stamped on everything it sends.",
+      "properties": {
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/MessageClass"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "classes"
+      ],
+      "type": "object"
+    },
+    "Command": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/IntentCommand",
+          "properties": {
+            "class": {
+              "const": "intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PerfCommand",
+          "properties": {
+            "class": {
+              "const": "perf",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StageCommand",
+          "properties": {
+            "class": {
+              "const": "stage",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TelemetryCommand",
+          "properties": {
+            "class": {
+              "const": "telemetry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "class"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CommentaryStatus": {
+      "description": "Where the DJ's next transition line is.",
+      "oneOf": [
+        {
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "writing",
+          "description": "Claude is writing it.",
+          "type": "string"
+        },
+        {
+          "const": "synthesizing",
+          "description": "Written; the speech cache is synthesising it.",
+          "type": "string"
+        },
+        {
+          "const": "ready",
+          "description": "Cached audio, ready to play.",
+          "type": "string"
+        }
+      ]
+    },
+    "ConversationEvent": {
+      "description": "Turn lifecycle. The turn id rides on the envelope's `conversation_id`.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "listening_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "transcript": {
+              "type": "string"
+            },
+            "type": {
+              "const": "listening_stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "transcript"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "is_final": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "transcript",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "is_final"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "const": "intent_detected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Streaming reply text (a delta).",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reply_delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The whole reply, show tags stripped.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reply",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "First audible sample.",
+          "properties": {
+            "type": {
+              "const": "speech_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "speech_ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Mouth amplitude 0..1 at the profile's `audio.mouth_hz`, in step with playback.",
+          "properties": {
+            "level": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "mouth",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Character timing of the line being spoken: ms from its first audible sample, which was\nheard at `audio_t0` (bus `t_mono` seconds). One event per synthesis chunk.",
+          "properties": {
+            "audio_t0": {
+              "format": "double",
+              "type": "number"
+            },
+            "chars": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "duration_ms": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "start_ms": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "speech_timing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "chars",
+            "start_ms",
+            "duration_ms",
+            "audio_t0"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Brain -> voice: queue this line on the one speech FIFO. `reply` = the turn's reply (the\nenvelope's `conversation_id` is the turn); plan lines carry their `clip_id` instead.",
+          "properties": {
+            "clip_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "plan_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reply": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speak",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "reply"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tool the brain executed (router or Claude, per the envelope `source`) and its outcome.",
+          "properties": {
+            "parameters": true,
+            "result": true,
+            "success": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool",
+            "parameters",
+            "success",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Brain -> speech cache: synthesise `text` now and hold it under `key`.",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "cache_speech",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speech_cached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "duration_s"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speech_cache_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Play a cached line; exactly one `CachedPlaybackEnded` with the same `playback_id` follows.",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "playback_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "play_cached",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "key",
+            "playback_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "playback_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "cached_playback_ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "playback_id",
+            "ok"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConversationPhase": {
+      "enum": [
+        "idle",
+        "listening",
+        "thinking",
+        "speaking"
+      ],
+      "type": "string"
+    },
+    "ConversationState": {
+      "properties": {
+        "conversation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/$defs/ConversationPhase"
+        },
+        "ptt_owner": {
+          "description": "Client id holding push-to-talk, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "type": "object"
+    },
+    "DjEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "track": {
+              "$ref": "#/$defs/Track"
+            },
+            "type": {
+              "const": "next_selected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "track"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DjState": {
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "commentary": {
+          "$ref": "#/$defs/CommentaryStatus",
+          "default": "none",
+          "description": "The transition line into `next`."
+        },
+        "current": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Track"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Track"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "step": {
+          "default": null,
+          "description": "The running transition plan's step, e.g. `music_crossfade (5/7)`; none between them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "active"
+      ],
+      "type": "object"
+    },
+    "DriverKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "virtual",
+            "r3x_servo",
+            "pca9685",
+            "maestro"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "feetech_sts",
+          "description": "Stub.",
+          "type": "string"
+        },
+        {
+          "const": "dynamixel",
+          "description": "Stub.",
+          "type": "string"
+        }
+      ]
+    },
+    "Ducking": {
+      "properties": {
+        "level": {
+          "description": "Music gain while ducked, 0..1.",
+          "format": "double",
+          "type": "number"
+        },
+        "ramp_ms": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "level",
+        "ramp_ms"
+      ],
+      "type": "object"
+    },
+    "EndReason": {
+      "enum": [
+        "done",
+        "interrupted",
+        "rejected"
+      ],
+      "type": "string"
+    },
+    "Engagement": {
+      "description": "Today's STARTUP/IDLE/AMBIENT/INTERACTIVE; gates the STT socket, ducking, mouse trigger.",
+      "enum": [
+        "startup",
+        "idle",
+        "ambient",
+        "interactive"
+      ],
+      "type": "string"
+    },
+    "EngagementState": {
+      "properties": {
+        "engagement": {
+          "$ref": "#/$defs/Engagement"
+        }
+      },
+      "required": [
+        "engagement"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ConversationEvent",
+          "properties": {
+            "domain": {
+              "const": "conversation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/PerfEvent",
+          "properties": {
+            "domain": {
+              "const": "perf",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MusicEvent",
+          "properties": {
+            "domain": {
+              "const": "music",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/DjEvent",
+          "properties": {
+            "domain": {
+              "const": "dj",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StageEvent",
+          "properties": {
+            "domain": {
+              "const": "stage",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/OpsEvent",
+          "properties": {
+            "domain": {
+              "const": "ops",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/VisionEvent",
+          "properties": {
+            "domain": {
+              "const": "vision",
+              "type": "string"
+            }
+          },
+          "required": [
+            "domain"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Frames": {
+      "description": "50 Hz body snapshot for the sim, the virtual driver and logs (plan §3b, D6).\nHardware servo controllers receive goals at event time, not frames.",
+      "properties": {
+        "joints": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Joint name -> value in the joint's unit (deg or mm).",
+          "type": "object"
+        },
+        "lights": {
+          "additionalProperties": {
+            "items": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "description": "Light group name -> one colour per pixel.",
+          "type": "object"
+        },
+        "t_mono": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "t_mono",
+        "joints",
+        "lights"
+      ],
+      "type": "object"
+    },
+    "GazeSource": {
+      "description": "The look target the head attends to in Show.",
+      "oneOf": [
+        {
+          "const": "viewport",
+          "description": "A panel's 3D camera (`perf.look` from the owning panel).",
+          "type": "string"
+        },
+        {
+          "const": "vision",
+          "description": "The largest detected face (r3x-vision); straight ahead when nobody is seen.",
+          "type": "string"
+        },
+        {
+          "const": "audio",
+          "description": "Sound-source direction. Not implemented yet.",
+          "type": "string"
+        },
+        {
+          "const": "off",
+          "description": "Straight ahead; idle glances only.",
+          "type": "string"
+        }
+      ]
+    },
+    "Hello": {
+      "description": "`hello` body: who the gateway thinks you are, full retained state, the robot profile.",
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RobotProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/RetainedState"
+        }
+      },
+      "required": [
+        "client",
+        "state"
+      ],
+      "type": "object"
+    },
+    "IntentCommand": {
+      "description": "Things you ask the character to do; the brain decides how.",
+      "oneOf": [
+        {
+          "description": "Inject a line as if spoken.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "say",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Push-to-talk; ownership lands in `state.conversation.ptt_owner`.",
+          "properties": {
+            "type": {
+              "const": "ptt_start",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "ptt_stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/MusicCommand",
+          "properties": {
+            "type": {
+              "const": "music",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "dj",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "active"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A line for the runtime's command console (`help`, `status`, `eye pattern ...`): the\npanel's command line and `r3x-cli` both send raw lines; the reply is `ops.console`.",
+          "properties": {
+            "line": {
+              "type": "string"
+            },
+            "type": {
+              "const": "console",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "line"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Joint": {
+      "description": "A joint. Ranges nest: `hard ⊇ soft ⊇ animation` (motion-control.md §3).",
+      "properties": {
+        "a_max": {
+          "format": "double",
+          "type": "number"
+        },
+        "animation": {
+          "$ref": "#/$defs/Range",
+          "description": "What authored motion may use."
+        },
+        "extended": {
+          "default": false,
+          "description": "Only present on the extended build.",
+          "type": "boolean"
+        },
+        "hard": {
+          "$ref": "#/$defs/Range",
+          "description": "Mechanical stop."
+        },
+        "j_max": {
+          "format": "double",
+          "type": "number"
+        },
+        "kind": {
+          "$ref": "#/$defs/JointKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "soft": {
+          "$ref": "#/$defs/Range",
+          "description": "Where the follower brakes."
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        },
+        "v_max": {
+          "description": "Per-second limits in the joint's unit.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "unit",
+        "hard",
+        "soft",
+        "animation",
+        "v_max",
+        "a_max",
+        "j_max"
+      ],
+      "type": "object"
+    },
+    "JointKind": {
+      "enum": [
+        "revolute",
+        "prismatic"
+      ],
+      "type": "string"
+    },
+    "LedProtocol": {
+      "oneOf": [
+        {
+          "const": "named_v1",
+          "description": "Existing firmware named commands (`SI SE ...`, `Mnnn`, `Bnnn`, `Xn`, `Hxxx`).",
+          "type": "string"
+        }
+      ]
+    },
+    "LightDriver": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "virtual",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "board": {
+              "description": "Which board (`face`, `chest`); the identity check expects it.",
+              "type": "string"
+            },
+            "port_hint": {
+              "description": "Env var or path hint for the serial port.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "protocol": {
+              "$ref": "#/$defs/LedProtocol"
+            },
+            "type": {
+              "const": "serial_led",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "board",
+            "protocol"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LightGroup": {
+      "properties": {
+        "channels": {
+          "default": [],
+          "description": "Named channels (stage fixtures). Length must equal `pixels` when present.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "driver": {
+          "$ref": "#/$defs/LightDriver"
+        },
+        "layout": {
+          "default": [],
+          "description": "Per-pixel placement, when known. Length must equal `pixels`.",
+          "items": {
+            "$ref": "#/$defs/LightPixel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pixels": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "pixels",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "LightPixel": {
+      "properties": {
+        "h": {
+          "format": "double",
+          "type": "number"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "normal": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "pos": {
+          "description": "Model space, metres, Y-up, front = +Z.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "w": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "pos",
+        "normal",
+        "w",
+        "h"
+      ],
+      "type": "object"
+    },
+    "LightsState": {
+      "properties": {
+        "chest_mode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eye_color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eye_pattern": {
+          "description": "Last named eye pattern sent (e.g. `SPEAKING`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage_cue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LogLine": {
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "target",
+        "message"
+      ],
+      "type": "object"
+    },
+    "MessageClass": {
+      "description": "Message class; the gateway maps each authenticated client to an allowed set.",
+      "enum": [
+        "intent",
+        "perf",
+        "stage",
+        "telemetry"
+      ],
+      "type": "string"
+    },
+    "MusicCommand": {
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "const": "play",
+              "type": "string"
+            },
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action": {
+              "const": "next",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Jump in the current track: to `seconds`, or `seconds` before the end with `from_end`.",
+          "properties": {
+            "action": {
+              "const": "seek",
+              "type": "string"
+            },
+            "from_end": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seconds": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "action",
+            "seconds"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MusicEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "track": {
+              "$ref": "#/$defs/Track"
+            },
+            "type": {
+              "const": "track_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "track"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "track_stopped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "remaining_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "track_ending_soon",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "remaining_s"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "level": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "ducked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "unducked",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Play `query` (a title, words of one, or `@semantic ...`); none = engine's choice.",
+          "properties": {
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "play",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Music owns `next` (plan 7b); DJ mode layers its own transition on top.",
+          "properties": {
+            "type": {
+              "const": "next",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Jump in the current track (see [`MusicCommand::Seek`]).",
+          "properties": {
+            "from_end": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seconds": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "seek",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seconds"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Crossfade to `track` (library title) over `duration_s`; `CrossfadeComplete{id}` follows.",
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "track": {
+              "type": "string"
+            },
+            "type": {
+              "const": "crossfade",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "track",
+            "duration_s",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Duck to `level` (0..1) over `fade_ms`.",
+          "properties": {
+            "fade_ms": {
+              "format": "double",
+              "type": "number"
+            },
+            "level": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "duck",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level",
+            "fade_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "fade_ms": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "unduck",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "fade_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "crossfade_complete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MusicState": {
+      "properties": {
+        "ducked": {
+          "type": "boolean"
+        },
+        "ending_at_s": {
+          "default": null,
+          "description": "Position (s) in `track` where `music.track_ending_soon` fires (the DJ's transition\npoint); none for a track shorter than the threshold.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "library": {
+          "description": "Track titles in the local library, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "paused": {
+          "default": false,
+          "type": "boolean"
+        },
+        "playing": {
+          "type": "boolean"
+        },
+        "position_s": {
+          "default": 0.0,
+          "description": "Position (s) in `track` at bus time `position_t` (`t_mono`); extrapolate while\n`playing`. With `track.bpm`/`first_beat_s` this is the performer's beat clock anchor.",
+          "format": "double",
+          "type": "number"
+        },
+        "position_t": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "track": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Track"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volume": {
+          "description": "0..1",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "playing",
+        "volume",
+        "ducked",
+        "library"
+      ],
+      "type": "object"
+    },
+    "OperatingMode": {
+      "description": "Operating mode (plan §4). Distinct from [`Engagement`].",
+      "enum": [
+        "show",
+        "bench",
+        "studio"
+      ],
+      "type": "string"
+    },
+    "OpsEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "detail": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "service": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/ServiceStatus"
+            },
+            "type": {
+              "const": "service_status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "service",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One measured latency leg of a turn.",
+          "properties": {
+            "leg": {
+              "type": "string"
+            },
+            "ms": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "latency",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "leg",
+            "ms"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reply to an `intent.console` line.",
+          "properties": {
+            "is_error": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "console",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message",
+            "is_error"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Brain plan executor: a plan started on `layer` (ambient / foreground / show / override).",
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "plan_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "plan_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plan_id",
+            "layer"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "`status`: completed | failed | cancelled | paused.",
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "plan_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "type": {
+              "const": "plan_ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "plan_id",
+            "layer",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Servo controller telemetry (rate-limited by the driver).",
+          "properties": {
+            "channels": {
+              "additionalProperties": {
+                "$ref": "#/$defs/ServoChannelTelemetry"
+              },
+              "description": "Joint -> commanded pulse (µs, 0 = off) and follower position (joint units).",
+              "type": "object"
+            },
+            "flags": {
+              "description": "Controller status flags (`r3x-drivers` `servo::proto::flag`).",
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rail_ma": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "servo_telemetry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "flags",
+            "rail_ma",
+            "channels"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PerfCommand": {
+      "description": "Direct body control. Goes to the performer.",
+      "oneOf": [
+        {
+          "description": "Play a clip, cue or sequence by id.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "intensity": {
+              "default": 1.0,
+              "format": "double",
+              "type": "number"
+            },
+            "layer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PerfLayer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Defaults to the item's own layer."
+            },
+            "speed": {
+              "default": 1.0,
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "play",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/StopTarget",
+          "properties": {
+            "type": {
+              "const": "stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Per-channel override: channel (joint or intent) -> value.",
+          "properties": {
+            "channels": {
+              "additionalProperties": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "type": {
+              "const": "puppet",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "channels"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Release puppeted channels (empty = all); they ease back.",
+          "properties": {
+            "channels": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "release",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fire an emote slot from the profile's `emotes`.",
+          "properties": {
+            "slot": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "emote",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "slot"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Bench calibration wizard: a raw pulse (us) to one servo actuator. Bench mode, `ui`/`cli`\nonly; the controller still moves it through its follower, inside the soft limits.",
+          "properties": {
+            "actuator": {
+              "type": "string"
+            },
+            "type": {
+              "const": "cal_jog",
+              "type": "string"
+            },
+            "us": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "actuator",
+            "us"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Bench calibration wizard: write what was measured into the robot profile\n(`calibrated: measured`). `limits_us`: the pulses at the two soft-limit ends.",
+          "properties": {
+            "actuator": {
+              "type": "string"
+            },
+            "center_us": {
+              "format": "double",
+              "type": "number"
+            },
+            "invert": {
+              "type": "boolean"
+            },
+            "limits_us": {
+              "items": {
+                "format": "double",
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "cal_save",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actuator",
+            "center_us",
+            "invert"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and\nthe alive layers off, and hold every joint at the profile's home pose (reached through\nthe followers, inside each joint's v/a/j limits); the hold ends when something moves the\nbody again. With `joints`: hold just those at home. `ui`/`cli` only.",
+          "properties": {
+            "joints": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "home",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The viewport gaze target: (pan, tilt) degrees in the head_pan parent frame, from the panel\nthat owns `state.stage.gaze_owner`. Send ~15 Hz while it moves; a target older than 1 s\nlapses to straight ahead.",
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pan": {
+              "format": "double",
+              "type": "number"
+            },
+            "tilt": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "look",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pan",
+            "tilt"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Stop every run, refuse new ones; `on: false` releases. Same switch as\n`StageCommand::Freeze` (`state.stage.frozen`); kept here for the puppeteer.",
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "freeze",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "on"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Show a named face pattern (`happy`, `thinking`, ...) through the face board, for\n`duration` s; none = until the interaction state next changes (EYE_COMMAND).",
+          "properties": {
+            "duration": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "const": "eyes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Studio: play an unsaved clip document (SPEC clip JSON) from clip time `at`; `hold`\npins it there (scrubbing). The runtime takes it only from `ui`/`cli`, in Studio or\nBench, and only when the clip lints clean against the profile (Bench-safe limits).",
+          "properties": {
+            "at": {
+              "default": 0.0,
+              "format": "double",
+              "type": "number"
+            },
+            "clip": true,
+            "hold": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "clip"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Studio: blend the preview out.",
+          "properties": {
+            "type": {
+              "const": "preview_stop",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Studio: write a clip or cue into the show folder as `<kind>s/<id>.json`. The runtime\nvalidates and lints it first (it may add no new lint error); the folder reload\npicks it up. `overwrite` is needed to replace an existing file.",
+          "properties": {
+            "doc": true,
+            "overwrite": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "save_show",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PerfEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/RunKind"
+            },
+            "run_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "$ref": "#/$defs/Source"
+            },
+            "type": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind",
+            "source",
+            "run_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/RunKind"
+            },
+            "reason": {
+              "$ref": "#/$defs/EndReason"
+            },
+            "run_id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "$ref": "#/$defs/Source"
+            },
+            "type": {
+              "const": "ended",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "kind",
+            "source",
+            "run_id",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "sfx",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cue": {
+              "type": "string"
+            },
+            "slot": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "emote",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "slot",
+            "cue"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A show's spoken line, for the voice to say (never from a Claude-sourced run).",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "speak",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A show ducks (`on`) or restores the music.",
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "duck",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "on"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A show's stage-light action (the venue desk; frames carry the resulting output).",
+          "properties": {
+            "cue": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fade": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "hold": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "mode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rig": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lights",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A show's face pattern (the performer renders it; mirrored to a board it does not own).",
+          "properties": {
+            "duration": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "const": "eyes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pattern"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A show's chest override word, held for `hold` s (0 = until the status changes).",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "hold": {
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "chest",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "command"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PerfLayer": {
+      "description": "Performance layer a run occupies.",
+      "oneOf": [
+        {
+          "enum": [
+            "gesture",
+            "show"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "background",
+          "description": "Authored loops under the activity (idle/DJ bop); lowest.",
+          "type": "string"
+        }
+      ]
+    },
+    "PerfState": {
+      "properties": {
+        "at_home": {
+          "default": false,
+          "description": "Every joint is within [`HOME_TOLERANCE`] of its home value.",
+          "type": "boolean"
+        },
+        "frozen": {
+          "type": "boolean"
+        },
+        "homing": {
+          "default": false,
+          "description": "A whole-body Home is holding the home pose.",
+          "type": "boolean"
+        },
+        "puppet": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Puppeted channels and their current values.",
+          "type": "object"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/RunInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "frozen",
+        "runs",
+        "puppet"
+      ],
+      "type": "object"
+    },
+    "Range": {
+      "properties": {
+        "max": {
+          "format": "double",
+          "type": "number"
+        },
+        "min": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "RetainedState": {
+      "description": "All retained state; the gateway `hello` body.",
+      "properties": {
+        "conversation": {
+          "$ref": "#/$defs/ConversationState"
+        },
+        "dj": {
+          "$ref": "#/$defs/DjState"
+        },
+        "engagement": {
+          "$ref": "#/$defs/EngagementState"
+        },
+        "lights": {
+          "$ref": "#/$defs/LightsState"
+        },
+        "music": {
+          "$ref": "#/$defs/MusicState"
+        },
+        "perf": {
+          "$ref": "#/$defs/PerfState"
+        },
+        "services": {
+          "$ref": "#/$defs/ServicesState"
+        },
+        "stage": {
+          "$ref": "#/$defs/StageState"
+        }
+      },
+      "required": [
+        "stage",
+        "conversation",
+        "engagement",
+        "music",
+        "dj",
+        "perf",
+        "lights",
+        "services"
+      ],
+      "type": "object"
+    },
+    "RobotProfile": {
+      "properties": {
+        "actuators": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Actuator"
+          },
+          "type": "array"
+        },
+        "alive": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {},
+          "description": "Procedural alive layer -> enabled by default.",
+          "type": "object"
+        },
+        "audio": {
+          "$ref": "#/$defs/AudioConfig",
+          "default": {
+            "ducking": {
+              "level": 0.5,
+              "ramp_ms": 80.0
+            },
+            "mouth_hz": 30.0,
+            "outputs": []
+          }
+        },
+        "emotes": {
+          "default": [],
+          "description": "Emote slot index -> cue id.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "home": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "default": {},
+          "description": "The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not\nlisted homes to 0 (its centre).",
+          "type": "object"
+        },
+        "joints": {
+          "items": {
+            "$ref": "#/$defs/Joint"
+          },
+          "type": "array"
+        },
+        "label": {
+          "default": "",
+          "type": "string"
+        },
+        "lights": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LightGroup"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "servo_controller": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ServoController"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "joints"
+      ],
+      "type": "object"
+    },
+    "RunInfo": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunKind"
+        },
+        "layer": {
+          "$ref": "#/$defs/PerfLayer"
+        },
+        "run_id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "run_id",
+        "id",
+        "kind",
+        "layer",
+        "source"
+      ],
+      "type": "object"
+    },
+    "RunKind": {
+      "enum": [
+        "clip",
+        "cue",
+        "sequence"
+      ],
+      "type": "string"
+    },
+    "ServiceHealth": {
+      "properties": {
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/ServiceStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "ServiceStatus": {
+      "enum": [
+        "starting",
+        "running",
+        "degraded",
+        "error",
+        "stopped"
+      ],
+      "type": "string"
+    },
+    "ServicesState": {
+      "properties": {
+        "services": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ServiceHealth"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "services"
+      ],
+      "type": "object"
+    },
+    "ServoChannelTelemetry": {
+      "properties": {
+        "flags": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "us": {
+          "format": "double",
+          "type": "number"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "us",
+        "x",
+        "flags"
+      ],
+      "type": "object"
+    },
+    "ServoController": {
+      "properties": {
+        "channels": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_hz": {
+          "format": "double",
+          "type": "number"
+        },
+        "resolution_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "supply_volts": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "channels",
+        "frame_hz",
+        "resolution_us",
+        "supply_volts"
+      ],
+      "type": "object"
+    },
+    "Source": {
+      "description": "Who originated a message. Stamped by the bus/gateway, never self-declared by a client.",
+      "oneOf": [
+        {
+          "enum": [
+            "claude",
+            "cli"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "jev",
+          "description": "Jev fast intent router.",
+          "type": "string"
+        },
+        {
+          "const": "timeline",
+          "description": "Plan/timeline executor.",
+          "type": "string"
+        },
+        {
+          "const": "ui",
+          "description": "Authenticated control panel / Studio.",
+          "type": "string"
+        },
+        {
+          "const": "idle",
+          "description": "Idle policy.",
+          "type": "string"
+        },
+        {
+          "const": "public",
+          "description": "Anonymous public-site visitor.",
+          "type": "string"
+        },
+        {
+          "const": "system",
+          "description": "The runtime itself (stage manager, drivers, health).",
+          "type": "string"
+        },
+        {
+          "const": "bridge",
+          "description": "CantinaOS bridge (Phase 1-6 strangler).",
+          "type": "string"
+        }
+      ]
+    },
+    "StageCommand": {
+      "description": "Stage manager: operating mode, output and layer switches.",
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/OperatingMode"
+            },
+            "type": {
+              "const": "set_mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "engagement": {
+              "$ref": "#/$defs/Engagement"
+            },
+            "type": {
+              "const": "set_engagement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "engagement"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Gate a driver output (profile actuator or light group name).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "output": {
+              "type": "string"
+            },
+            "type": {
+              "const": "set_output",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "output",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Toggle a procedural alive layer (e.g. `breathing`).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "layer": {
+              "type": "string"
+            },
+            "type": {
+              "const": "set_layer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "layer",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "set_brain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "set_autonomy",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Autonomy and every alive layer off, in one change (Bench/Studio Home).",
+          "properties": {
+            "type": {
+              "const": "still",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Choose the gaze target. `owner`: the panel claiming the viewport target.",
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/GazeSource"
+            },
+            "type": {
+              "const": "set_gaze",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "freeze",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "on"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StageEvent": {
+      "oneOf": [
+        {
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/OperatingMode"
+            },
+            "to": {
+              "$ref": "#/$defs/OperatingMode"
+            },
+            "type": {
+              "const": "mode_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/Engagement"
+            },
+            "to": {
+              "$ref": "#/$defs/Engagement"
+            },
+            "type": {
+              "const": "engagement_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "from",
+            "to"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StageState": {
+      "properties": {
+        "autonomy": {
+          "description": "Idle policy and DJ autonomy.",
+          "type": "boolean"
+        },
+        "brain": {
+          "description": "Voice/LLM brain accepts turns.",
+          "type": "boolean"
+        },
+        "frozen": {
+          "description": "Every run stopped, new ones refused; the chest holds its state.",
+          "type": "boolean"
+        },
+        "gaze": {
+          "$ref": "#/$defs/GazeSource",
+          "default": "viewport",
+          "description": "Where the head looks in Show (Bench and Studio ignore it)."
+        },
+        "gaze_owner": {
+          "default": null,
+          "description": "With `gaze: viewport`: the panel whose 3D camera is the target (the last to select it);\nnone = whichever panel sends one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "layers": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Procedural alive layer -> enabled.",
+          "type": "object"
+        },
+        "mode": {
+          "$ref": "#/$defs/OperatingMode"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Output name -> enabled. Enables gate drivers, not layers.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "mode",
+        "outputs",
+        "layers",
+        "brain",
+        "autonomy",
+        "frozen"
+      ],
+      "type": "object"
+    },
+    "StateUpdate": {
+      "description": "A whole-domain replacement; the gateway `state` body.",
+      "oneOf": [
+        {
+          "properties": {
+            "domain": {
+              "const": "stage",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/StageState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "conversation",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/ConversationState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "engagement",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/EngagementState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "music",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/MusicState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "dj",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/DjState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "perf",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/PerfState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "lights",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/LightsState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "domain": {
+              "const": "services",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/ServicesState"
+            }
+          },
+          "required": [
+            "domain",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StopTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "target": {
+              "const": "id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "layer": {
+              "$ref": "#/$defs/PerfLayer"
+            },
+            "target": {
+              "const": "layer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target",
+            "layer"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "target": {
+              "const": "all",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TelemetryCommand": {
+      "oneOf": [
+        {
+          "properties": {
+            "level": {
+              "type": "string"
+            },
+            "type": {
+              "const": "set_log_level",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "level"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Subscribe this client to 50 Hz `frames`.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "frames",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Track": {
+      "properties": {
+        "artist": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bpm": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "duration_s": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "first_beat_s": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "deg",
+        "mm"
+      ],
+      "type": "string"
+    },
+    "VisionEvent": {
+      "description": "`r3x-vision` (Phase 6): presence transitions and scene descriptions, never per frame.",
+      "oneOf": [
+        {
+          "description": "An enrolled person appeared (edge, not per frame). `confidence` is cosine similarity.",
+          "properties": {
+            "confidence": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "person_detected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "confidence"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "They were absent for the exit hysteresis (10 frames at 5 fps).",
+          "properties": {
+            "duration_s": {
+              "format": "double",
+              "type": "number"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "person_exited",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "duration_s"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Where the largest face is, as a gaze target: (pan, tilt) degrees from the camera's\nfield of view (published when it moves by more than a degree).",
+          "properties": {
+            "pan": {
+              "format": "double",
+              "type": "number"
+            },
+            "tilt": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "face_at",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pan",
+            "tilt"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "No face in view any more.",
+          "properties": {
+            "type": {
+              "const": "face_lost",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A Claude description of the current frame; `reason` is why it was taken.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "person": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "scene_captured",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "description",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "One message on the bus or the wire.\n\n`t_mono` is seconds since the runtime's monotonic epoch; `t_wall` is Unix seconds.",
+  "oneOf": [
+    {
+      "description": "First message on connect.",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Hello"
+        },
+        "kind": {
+          "const": "hello",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/StateUpdate"
+        },
+        "kind": {
+          "const": "state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Event"
+        },
+        "kind": {
+          "const": "event",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Command"
+        },
+        "kind": {
+          "const": "command",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Ack"
+        },
+        "kind": {
+          "const": "ack",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": true,
+        "kind": {
+          "const": "result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Frames"
+        },
+        "kind": {
+          "const": "frames",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Metadata for a following binary audio frame.",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/AudioMeta"
+        },
+        "kind": {
+          "const": "audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/LogLine"
+        },
+        "kind": {
+          "const": "log",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "body"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "conversation_id": {
+      "description": "Turn id minted at capture and adopted downstream.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "Client-chosen id on a command; echoed as `re` on its ack/result.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "re": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "seq": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "t_mono": {
+      "format": "double",
+      "type": "number"
+    },
+    "t_wall": {
+      "format": "double",
+      "type": "number"
+    },
+    "v": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "seq",
+    "t_mono",
+    "t_wall",
+    "source"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}

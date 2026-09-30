@@ -25,6 +25,7 @@ os.environ['VLC_VERBOSE'] = '-1'  # Suppress all VLC logging
 # NOTE: Do NOT set VLC_PLUGIN_PATH to empty string - it breaks VLC initialization!
 
 from cantina_os.base_service import BaseService
+from cantina_os.tap import fixtures as tap_fixtures
 from cantina_os.core.event_topics import EventTopics
 from cantina_os.event_payloads import (
     MusicCommandPayload,
@@ -54,6 +55,7 @@ from cantina_os.core.event_schemas import (
 # Import music backends
 from .music_backends import MusicBackend, LocalMusicBackend, SpotifyMusicBackend
 from .semantic_music_search import SemanticMusicSearch
+from .beat_analysis import BackgroundBeatAnalyzer, BeatCache, BeatInfo
 
 # Use MusicTrack class from shared models instead
 # class MusicTrack(BaseModel):
@@ -88,6 +90,13 @@ class MusicControllerConfig(BaseModel):
     semantic_device: str = Field(default="cpu", description="Torch device for CLAP text/audio encoding")
     semantic_cache_path: Optional[str] = Field(default=None, description="Persistent local embedding cache")
     semantic_negative_weight: float = Field(default=0.5, ge=0.0, le=2.0)
+
+    # Offline beat analysis (beat_analysis.py): tempo for beat clocks, the chest and the sim.
+    # Off at class level for the same reason as semantic search - a directly constructed
+    # service in a test must not spawn an analysis process. Main turns it on
+    # (ENABLE_BEAT_ANALYSIS, default true).
+    enable_beat_analysis: bool = Field(default=False, description="Attach cached bpm and analyse new local tracks in the background")
+    beat_cache_dir: Optional[str] = Field(default=None, description="Beat cache directory (default ~/.cache/dj-r3x/beats)")
 
 class MusicControllerService(BaseService):
     """
@@ -134,6 +143,8 @@ class MusicControllerService(BaseService):
         self._semantic_search: Optional[SemanticMusicSearch] = None
         self._semantic_search_task: Optional[asyncio.Task[None]] = None
         self._last_semantic_candidates: List[str] = []
+        self._beat_cache = BeatCache(self._config.beat_cache_dir)
+        self._beat_task: Optional[asyncio.Task[None]] = None
         
         # Create VLC instance with proper configuration to reduce verbose logging
         # and prevent Core Audio property listener errors
@@ -227,6 +238,15 @@ class MusicControllerService(BaseService):
     async def stop(self):
         """Stop the music controller service and cleanup resources."""
         try:
+            beat_task = getattr(self, "_beat_task", None)
+            if beat_task is not None and not beat_task.done():
+                beat_task.cancel()  # kills the worker process (BackgroundBeatAnalyzer.run)
+                try:
+                    await beat_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._beat_task = None
+
             semantic_task = getattr(self, "_semantic_search_task", None)
             if semantic_task is not None:
                 if not semantic_task.done():
@@ -323,6 +343,53 @@ class MusicControllerService(BaseService):
                 severity=LogLevel.ERROR
             )
             raise
+
+    # ------------------------------------------------------------------
+    # Beat analysis (tempo for show beat clocks, chest and sim; see beat_analysis.py)
+    # ------------------------------------------------------------------
+    def _local_tracks_by_path(self) -> Dict[str, MusicTrack]:
+        return {os.path.abspath(t.path): t for t in self.libraries.get("local", {}).values() if t.path}
+
+    def _apply_beat_info(self, path: str, info: BeatInfo) -> None:
+        track = self._local_tracks_by_path().get(os.path.abspath(path))
+        if track is None:
+            return
+        track.bpm = info.bpm
+        track.first_beat_s = info.first_beat_s
+        self.logger.debug(f"Tempo for {track.name}: {info.bpm} bpm (first beat {info.first_beat_s}s)")
+
+    def _beats_enabled(self) -> bool:
+        config = getattr(self, "_config", None)  # absent on __new__-built test doubles
+        return bool(config is not None and config.enable_beat_analysis)
+
+    def _attach_cached_beats(self) -> None:
+        """Attach every still-valid cached tempo. Fail-open: a miss is simply no bpm."""
+        if not self._beats_enabled():
+            return
+        attached = 0
+        for path, track in self._local_tracks_by_path().items():
+            info = self._beat_cache.get(path)
+            if info is not None:
+                track.bpm, track.first_beat_s = info.bpm, info.first_beat_s
+                attached += 1
+        self.logger.info(f"Beat cache: {attached}/{len(self.libraries.get('local', {}))} local track(s) have a tempo")
+
+    def _start_beat_analysis(self) -> None:
+        """Analyse unknown tracks in a background process; never on the playback path."""
+        if not self._beats_enabled():
+            return
+        if getattr(self, "_beat_task", None) is not None and not self._beat_task.done():
+            return  # already running; a reload's new files are picked up next start
+        paths = list(self._local_tracks_by_path())
+        analyzer = BackgroundBeatAnalyzer(self._beat_cache, logger_=self.logger)
+        if not analyzer.pending(paths):
+            return
+        try:
+            self._beat_task = asyncio.get_running_loop().create_task(
+                analyzer.run(paths, self._apply_beat_info), name="beat-analysis"
+            )
+        except RuntimeError:
+            self._beat_task = None  # no running loop (sync caller): cached tempos only
 
     def _start_semantic_search_initialization(self) -> None:
         """Schedule semantic initialization without delaying service startup."""
@@ -623,7 +690,16 @@ class MusicControllerService(BaseService):
             # Alert if no music found
             if music_files_count == 0:
                 self.logger.warning("No music files found. Music playback will be unavailable.")
-            
+
+            # Tempo: cached results attach now (small JSON reads); anything new or changed is
+            # analysed in a background process and attaches as it finishes.
+            # Fail-open: a tempo problem must never cost the library.
+            try:
+                self._attach_cached_beats()
+                self._start_beat_analysis()
+            except Exception as e:
+                self.logger.warning(f"Beat analysis unavailable: {e}")
+
             # Publish a music library updated event with proper track data
             track_data = await self.get_track_list()
             await self.emit(
@@ -1298,7 +1374,7 @@ class MusicControllerService(BaseService):
         current_track = getattr(self, "current_track", None)
         if current_track and len(choices) > 1:
             choices = [name for name in choices if name != current_track.name]
-        track_name = random.choice(choices)
+        track_name = tap_fixtures.choice("music.random_track", choices)
         self.logger.info(f"No track named; playing {track_name}")
         await self._play_track_by_name(track_name, source)
 
@@ -1739,7 +1815,9 @@ class MusicControllerService(BaseService):
             artist=track.artist or "Cantina Band",  # Use default if None
             album=track.album,
             genre=track.genre,
-            duration=track.duration
+            duration=track.duration,
+            bpm=track.bpm,
+            first_beat_s=track.first_beat_s,
         )
 
     async def _emit_track_ending_soon(self) -> None:
@@ -1913,6 +1991,18 @@ class MusicControllerService(BaseService):
                 }
             )
             
+            # A crossfade starts a new track as surely as play does. Announce it the same way,
+            # so every tempo follower (show beat clocks, chest, sim light desk) picks up the
+            # new track's bpm; before 2026-09-29 only the first track of a DJ set was announced.
+            await self.emit(
+                EventTopics.MUSIC_PLAYBACK_STARTED,
+                {
+                    "track": next_track_data.model_dump(),
+                    "source": source,
+                    "mode": self.current_mode,
+                },
+            )
+
             # Emit simple coordination event for timeline services (new track is now playing)
             await self.emit(EventTopics.TRACK_PLAYING, {})
 
@@ -2005,8 +2095,7 @@ class MusicControllerService(BaseService):
                 # Get a random track
                 available_tracks = list(self.tracks.values())
                 if available_tracks:
-                    import random
-                    random_track = random.choice(available_tracks)
+                    random_track = tap_fixtures.choice("music.dj_random_track", available_tracks, lambda t: t.name)
                     await self._play_track_by_name(random_track.name, source="dj")
                     
         except Exception as e:

@@ -1,0 +1,19 @@
+{ "fixture": { "root": "fx_intro", "bpm": 100 },
+  "items": [
+    { "id": "fx_intro", "kind": "sequence", "tier": "show", "description": "fixture sequence",
+      "clock": "beat", "bpm": 120,
+      "track": [
+        { "at": 0, "cue": "fx_hype" },
+        { "at": 4, "clip": "fx_nod", "speed": 1.5, "intensity": 0.5 },
+        { "at": 6, "do": "speak", "text": "Time to boogie!" },
+        { "at": 6, "do": "wait", "for": "speech_end" },
+        { "at": 7.5, "sequence": "fx_tail" }
+      ] },
+    { "id": "fx_tail", "kind": "sequence", "tier": "cheap", "description": "fixture nested",
+      "clock": "time",
+      "track": [ { "at": 0.25, "do": "lights", "mode": "dj" }, { "at": 0, "do": "unduck" } ] },
+    { "id": "fx_hype", "kind": "cue", "tier": "cheap", "description": "fixture cue",
+      "actions": [ { "at": 0, "do": "clip", "id": "fx_nod" }, { "at": 0.05, "do": "sfx", "id": "airhorn" } ] },
+    { "id": "fx_nod", "kind": "clip", "tier": "free", "description": "fixture clip", "duration": 0.9,
+      "tracks": { "head_tilt": { "mode": "additive", "keys": [[0,0],[0.25,-8],[0.5,4],[0.9,0]] } } }
+  ] }

@@ -1,9 +1,15 @@
 import * as THREE from 'three';
-import {
-  LEDS_PER_EYE, LEFT_EYE_START, NUM_MOUTH_LEDS, OUTPUT_BRIGHTNESS, RIGHT_EYE_START,
-  RexFaceFirmware, RGB,
-} from './firmware';
 import { Rig } from './rig';
+
+/** One LED: WS2812 channel values 0..255 (PWM duty, i.e. linear light). */
+export type RGB = [number, number, number];
+export const LEDS_PER_EYE = 7;
+/** Eye strip: LEDs 0-6 the left eye, 7-13 the right (rex_face firmware). */
+export const LEFT_EYE_START = 0;
+export const RIGHT_EYE_START = 7;
+export const NUM_MOUTH_LEDS = 8;
+/** FastLED.setBrightness on the face board. */
+export const OUTPUT_BRIGHTNESS = 128;
 
 /**
  * Where the light physically comes from.
@@ -31,10 +37,16 @@ const LED_GAIN = 6;
 /** Mouth V (left arm, top to tip) as fractions of the lit part's half-width / half-height. */
 const MOUTH_V: [number, number][] = [[-0.82, 0.8], [-0.58, 0.3], [-0.34, -0.22], [-0.1, -0.74]];
 
-/** Linear LED light after FastLED.setBrightness(128). */
+/**
+ * Linear LED light after FastLED.setBrightness(128). A WS2812 channel value is a PWM duty
+ * cycle, so it is already linear light - decoding it as sRGB would dim a half-lit LED to
+ * a fifth and push every mixed colour toward its dominant primary (the amber idle eyes
+ * came out deep red), leaving nothing bright enough for the tone mapper to whiten the
+ * core the way a camera sees a real LED.
+ */
 export function ledColor(rgb: RGB, out: THREE.Color): THREE.Color {
   const k = (OUTPUT_BRIGHTNESS + 1) / 256 / 255;
-  return out.setRGB(rgb[0] * k, rgb[1] * k, rgb[2] * k, THREE.SRGBColorSpace);
+  return out.setRGB(rgb[0] * k, rgb[1] * k, rgb[2] * k, THREE.LinearSRGBColorSpace);
 }
 
 // ------------------------------------------------------------------ diffuser shader
@@ -103,6 +115,8 @@ class LitPart {
     glowAt: THREE.Vector3,
     glowSize: number,
     lightRange: number,
+    /** Emission gain: a diffusion bulb scatters the jewel's light through its whole body. */
+    private readonly gain = LED_GAIN,
   ) {
     if (diffuserMesh) {
       const { material, u } = makeDiffuser(diffuserMesh.material as THREE.Material, sigma);
@@ -130,12 +144,12 @@ class LitPart {
       ledColor(rgb, this.c);
       this.acc.add(this.c);
       if (this.u) {
-        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(LED_GAIN);
+        this.u.uLedCol.value[i].copy(this.c).multiplyScalar(this.gain);
         this.u.uLedPos.value[i].copy(this.local[i]).applyMatrix4(this.anchor.matrixWorld);
       }
     });
     this.acc.multiplyScalar(1 / colors.length);
-    this.glowMat.color.copy(this.acc).multiplyScalar(0.9);
+    this.glowMat.color.copy(this.acc).multiplyScalar(0.9 * (this.gain / LED_GAIN));
     this.light.color.copy(this.acc);
     this.light.intensity = Math.min(1, Math.max(this.acc.r, this.acc.g, this.acc.b)) * 0.4;
   }
@@ -204,7 +218,9 @@ export class FaceLeds {
         const t = (k * Math.PI) / 3;
         pos.push(new THREE.Vector3(Math.sin(t) * JEWEL_RING_RADIUS, Math.cos(t) * JEWEL_RING_RADIUS, z));
       }
-      return new LitPart(a, pos, bulb, 0.0055, new THREE.Vector3(0, 0, front + 0.004), 0.045, 0.1);
+      // sigma ~ bulb depth: the frosted bulb glows through its whole body, as a real
+      // diffuser does, rather than only at the face nearest the jewel.
+      return new LitPart(a, pos, bulb, 0.011, new THREE.Vector3(0, 0, front + 0.004), 0.05, 0.1, LED_GAIN * 3.5);
     };
     const [first, second] = LEFT_EYE_IS_DROIDS_LEFT ? (['L', 'R'] as const) : (['R', 'L'] as const);
     this.left = eye(first);
@@ -221,9 +237,10 @@ export class FaceLeds {
       new THREE.Vector3(0, 0, 0.004), 0.06, 0.12);
   }
 
-  update(fw: RexFaceFirmware) {
-    this.left.update(fw.eyeLeds.slice(LEFT_EYE_START, LEFT_EYE_START + LEDS_PER_EYE));
-    this.right.update(fw.eyeLeds.slice(RIGHT_EYE_START, RIGHT_EYE_START + LEDS_PER_EYE));
-    this.mouth.update(fw.mouthLeds.slice(0, NUM_MOUTH_LEDS));
+  /** Firmware pixels, as frames carry them: 14 eye LEDs, 8 mouth LEDs. */
+  update(eyes: RGB[], mouth: RGB[]) {
+    this.left.update(eyes.slice(LEFT_EYE_START, LEFT_EYE_START + LEDS_PER_EYE));
+    this.right.update(eyes.slice(RIGHT_EYE_START, RIGHT_EYE_START + LEDS_PER_EYE));
+    this.mouth.update(mouth.slice(0, NUM_MOUTH_LEDS));
   }
 }

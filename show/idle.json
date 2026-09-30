@@ -1,0 +1,13 @@
+{
+  "after_s": 30,
+  "choices": [
+    {"id": "idle_still", "weight": 0.35},
+    {"id": "look_around", "weight": 0.2},
+    {"id": "idle_tinker", "weight": 0.15},
+    {"id": "glance_left", "weight": 0.08},
+    {"id": "glance_right", "weight": 0.08},
+    {"id": "look_up_think", "weight": 0.07},
+    {"id": "glitch_small", "weight": 0.07}
+  ],
+  "while_music": [{"id": "bop_loop", "weight": 0.6}, {"id": "beat_bop", "weight": 0.15}, {"id": "look_around", "weight": 0.25}]
+}

@@ -44,6 +44,7 @@ OPENROUTER_MODEL_MAP: Dict[str, str] = {
     "claude-haiku-4-5-20251001": "anthropic/claude-haiku-4.5",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-sonnet-5-5": "anthropic/claude-sonnet-5.5",
     "claude-opus-5": "anthropic/claude-opus-5",
 }
 

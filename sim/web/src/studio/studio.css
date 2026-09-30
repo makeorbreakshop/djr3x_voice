@@ -1,0 +1,57 @@
+/* Studio dock: bottom of the stage, the whole width left of the control panel (never under
+   it). Dense, monospace numbers. */
+.studio { position: fixed; left: 12px; right: var(--panel-space, 404px); bottom: 12px; height: clamp(260px, 46vh, 540px);
+  display: flex; flex-direction: column; background: rgba(11, 13, 18, .96); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; z-index: 5; font-size: 12px; }
+.studio[hidden] { display: none; }
+.st-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.st-group { display: flex; gap: 4px; align-items: center; }
+.st-bar button { flex: 0 0 auto; padding: 3px 8px; border-radius: 5px; font-size: 12px; }
+.st-bar button.rec { color: #ff4d4d; border-color: #ff4d4d; }
+.st-bar button.bad { border-color: #7a2c28; color: #ff8a80; }
+.st-bar input, .st-bar select { background: #0f1117; color: var(--text); border: 1px solid var(--line); border-radius: 5px;
+  padding: 3px 6px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; flex: 0 1 auto; min-width: 0; }
+.st-bar input[type=number] { width: 62px; }
+.st-bar select { max-width: 150px; }
+.st-time { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); min-width: 118px; white-space: nowrap; }
+.st-body { flex: 1; display: grid; grid-template-columns: 188px 1fr; overflow-y: auto; overflow-x: hidden; }
+.st-heads { border-right: 1px solid var(--line); }
+.st-head-top, .st-top { position: sticky; top: 0; z-index: 1; background: #0e1016; }
+.st-head-top { border-bottom: 1px solid var(--line); }
+.st-lane { height: 22px; padding: 0 8px; color: #5b6170; font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+  display: flex; align-items: center; }
+.st-lane.st-audio { height: 46px; }
+.st-lane:last-child { height: 18px; }
+.st-lanes { min-width: 0; }
+.st-lanes canvas { display: block; }
+.st-top { border-bottom: 1px solid var(--line); }
+.st-row { display: grid; grid-template-columns: 1fr 34px 40px; grid-template-rows: 25px auto; align-items: center; gap: 0 4px;
+  padding: 0 6px 0 8px; border-bottom: 1px solid #0b0d12; background: #12151c; cursor: default; overflow: hidden; }
+.st-row.sel { background: #161a23; box-shadow: inset 2px 0 var(--accent); }
+.st-name { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-row button.st-mode { padding: 1px 0; font: 600 9px ui-monospace, Menlo, monospace; color: var(--muted); border-radius: 4px; }
+.st-row button.st-mode.add { color: #8fd18b; }
+.st-val { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); text-align: right; }
+.st-row input[type=range] { grid-column: 1 / -1; width: 100%; margin: 4px 0 0; display: none; }
+.st-row.sel input[type=range] { display: block; }
+.st-status { padding: 4px 10px; border-top: 1px solid var(--line); color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 22px; }
+.st-status.err { color: #ff8a80; }
+body.studio-open #caption { display: none; }
+
+/* Small windows: a narrower panel leaves the timeline more room. */
+@media (max-width: 1100px) {
+  body.studio-open #panel:not(.wide) { width: 320px; }
+  .st-body { grid-template-columns: 150px 1fr; }
+  /* One toolbar row that scrolls sideways, so the tracks keep the height. */
+  .st-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+}
+/* Short windows: the dock takes half the height (the droid keeps the top half). */
+@media (max-height: 700px) and (min-width: 721px) {
+  .studio { height: max(260px, 50vh); }
+}
+/* Phones: the panel is a bottom sheet; the dock sits above it, not over its mode buttons. */
+@media (max-width: 720px) {
+  .studio { left: 8px; right: 8px; bottom: calc(52vh + 16px); height: auto; top: 8px; }
+  .st-body { grid-template-columns: 124px 1fr; }
+}

@@ -1,170 +1,629 @@
+/**
+ * The 3D sim. It never conducts: the Rust performer does (plan D4).
+ *
+ * - Connected (the r3x gateway is up): a follower. It renders the runtime's `frames`
+ *   (joints + light pixels) and shows its events (captions, sfx, show runs, rig switches).
+ * - Standalone (`?offline`, or whenever the gateway is down): the same performer, embedded
+ *   as WASM (src/performer.ts) and ticked every animation frame - idle life, LED firmware,
+ *   the stage-light desk and actuation all come from it.
+ */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+import { STILL } from './still'; // first: ?still swaps the clock and RNG before anything reads them
+import { PostPipeline } from './post';
 
-import { RexFaceFirmware, RGB, OUTPUT_BRIGHTNESS } from './firmware';
-import { CantinaHostEmulator, SystemMode, TtsAmplitudeAgc } from './host';
 import { Rig, RigDoc } from './rig';
-import { FaceLeds } from './leds';
-import { Activity, Performer } from './behavior';
-import { SpeechAudio } from './audio';
-import { LiveEvent, LiveLink } from './link';
-import { Actuation, DEFAULT_PROFILE, PROFILES } from './actuation/pipeline';
-import { MaestroScript, MaestroScriptError } from './actuation/maestro';
-
-// ------------------------------------------------------------------ palette
-// Oga's Cantina R-3X: weathered orange body, grey head and arms, blue headphone cups and
-// RX-24 plate. The model only carries material *classes*; tune colours here.
-const PALETTE: Record<string, THREE.MeshPhysicalMaterialParameters> = {
-  paint_orange: { color: 0xb65a22, roughness: 0.55, metalness: 0.12, clearcoat: 0.25, clearcoatRoughness: 0.5 },
-  metal_grey: { color: 0x8a8f96, roughness: 0.5, metalness: 0.6 },
-  metal_dark: { color: 0x3a3d43, roughness: 0.5, metalness: 0.6 },
-  rubber: { color: 0x141416, roughness: 0.92, metalness: 0 },
-  accent_blue: { color: 0x2f64a6, roughness: 0.42, metalness: 0.3, clearcoat: 0.3 },
-  // H_*Eye_4 'diffusion bulbs': frosted, lit from behind by the WS2812 jewel.
-  eye_lens: { color: 0x3a4048, roughness: 0.35, metalness: 0, clearcoat: 0.6 },
-  // Mic-Mouth-Split light pipe: translucent print, lit by the mouth V behind it.
-  light_pipe: { color: 0x2a2622, roughness: 0.55, metalness: 0 },
-};
+import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
+import { ChestLights } from './chestlights';
+import { SpeechAudio, TtsAmplitudeAgc } from './audio';
+import { accessToken, LiveLink } from './link';
+import { ControlPanel } from './panel';
+import type { Event as R3xEvent, Frames, RetainedState } from './gateway';
+import type { Command } from './generated/Command';
+import { limitControls, setupStage } from './booth'; // before any material compiles (patches a chunk)
+import { prepareDroidMaterials, tameHighlights } from './look';
+import { Ghosts } from './ghost';
+import { ServoWhine } from './servowhine';
+import { Studio } from './studio/studio';
+import { SceneLook, type Backdrop } from './scene';
+import { Centres, atHome, formatValue, shortName } from './centres';
+import type { RobotProfile } from './generated/RobotProfile';
+import type { GazeSource } from './generated/GazeSource';
+import {
+  INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
+  type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
+} from './performer';
 
 // ------------------------------------------------------------------ renderer / scene
+// The droid's look (per-class materials, weathering) lives in look.ts; the booth set and
+// its lights in booth.ts; tone mapping and the rest of the image in post.ts.
 const stage = document.getElementById('stage')!;
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// No MSAA: the canvas only ever receives full-screen post quads; SMAA does the edges and
+// post.ts owns the pixel ratio (dynamic resolution).
+const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // PCFSoft was removed in r18x; soft edges via shadow.radius
 stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0d12);
-scene.fog = new THREE.Fog(0x0b0d12, 4, 9);
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.35;
+// The set - Oga's Cantina DJ booth, its lights, baked bounce and reflections - is booth.ts.
+// ?booth=0 swaps it for a clean turntable stage.
+const set = setupStage(renderer, scene, new URLSearchParams(location.search).get('booth') !== '0');
 
 const camera = new THREE.PerspectiveCamera(35, window.innerWidth / window.innerHeight, 0.02, 30);
-camera.position.set(0.9, 0.85, 1.9);
+camera.position.copy(set.cams.full[0]);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.5, 0);
+controls.target.copy(set.cams.full[1]);
 controls.enableDamping = true;
-controls.minDistance = 0.25;
-controls.maxDistance = 5;
+limitControls(controls, set.booth);
 
-const key = new THREE.DirectionalLight(0xffe2c4, 1.9);
-key.position.set(1.6, 2.6, 2.0);
-key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.left = key.shadow.camera.bottom = -0.8;
-key.shadow.camera.right = key.shadow.camera.top = 0.8;
-key.shadow.bias = -0.0004;
-scene.add(key);
-const rim = new THREE.DirectionalLight(0x5aa0ff, 1.6);
-rim.position.set(-2, 1.5, -2);
-scene.add(rim);
-scene.add(new THREE.HemisphereLight(0x8090a8, 0x1a120c, 0.5));
+// Backdrop + work light (scene.ts), over the booth; `?booth=0` keeps the turntable stage.
+const sceneLook = set.show && !STILL
+  ? new SceneLook(scene, renderer, (on) => set.show!(on), (booth) => limitControls(controls, booth))
+  : null;
+{
+  const ctl = document.getElementById('scene-ctl')!;
+  const bg = document.getElementById('scene-bg') as HTMLSelectElement;
+  const work = document.getElementById('scene-work') as HTMLButtonElement;
+  const sync = () => {
+    if (!sceneLook) return;
+    bg.value = sceneLook.choice.backdrop;
+    work.setAttribute('aria-pressed', String(sceneLook.choice.workLight));
+  };
+  ctl.hidden = !sceneLook;
+  bg.onchange = () => { sceneLook?.pick({ backdrop: bg.value as Backdrop }); sync(); bg.blur(); };
+  work.onclick = () => { sceneLook?.pick({ workLight: !sceneLook.choice.workLight }); sync(); work.blur(); };
+  sceneLook?.onUpdate(sync);
+  sync();
+}
 
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(4, 64),
-  new THREE.MeshStandardMaterial({ color: 0x15171d, roughness: 0.85, metalness: 0.1 }),
-);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
+// Centres (centres.ts): on by default in Bench and Studio, off in Show, until the operator picks.
+const CENTRES_KEY = 'r3x.centres';
+let centresPick: boolean | null = null;
+try {
+  const v = localStorage.getItem(CENTRES_KEY);
+  centresPick = v === null ? null : v === '1';
+} catch {
+  /* storage blocked */
+}
+let centresOn = centresPick ?? false;
+function setCentres(on: boolean) {
+  centresOn = on;
+  document.getElementById('scene-centres')!.setAttribute('aria-pressed', String(on));
+  centres?.setVisible(on);
+}
+function centresFollowMode(mode: string) {
+  if (centresPick === null) setCentres(mode !== 'show');
+}
+document.getElementById('scene-centres')!.onclick = (e) => {
+  centresPick = !centresOn;
+  try {
+    localStorage.setItem(CENTRES_KEY, centresPick ? '1' : '0');
+  } catch {
+    /* storage blocked */
+  }
+  setCentres(centresPick);
+  (e.currentTarget as HTMLElement).blur();
+};
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-// Threshold above 1: only the LEDs (unlit, not tone-mapped, driven past 1.0) bloom.
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.85, 0.35, 1.0);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
+// AO, bloom (LEDs only), tone mapping, SMAA, grade, film - and the render scale: post.ts.
+const post = new PostPipeline(renderer, scene, camera);
+// Input anywhere and the orbit camera moving (or settling) draw at full rate (pacer.ts).
+post.pacer.listen();
+controls.addEventListener('change', () => post.pacer.interact());
 
+/** Height of the Studio dock over the stage bottom (0 = closed); the droid centres above it. */
+let viewInset = 0;
 /** Centre the droid in the space left of the control panel (full width on phones). */
 function fitView() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const panel = w > 720 ? 364 : 0;
+  const panelEl = document.getElementById('panel');
+  const panel = w > 720 && !STILL && panelEl ? panelEl.offsetWidth + 24 : 0;
+  document.documentElement.style.setProperty('--panel-space', `${panel}px`);
   camera.aspect = w / h;
-  camera.setViewOffset(w, h, panel / 2, 0, w, h);
+  camera.setViewOffset(w, h, panel / 2, viewInset / 2, w, h);
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  composer.setSize(w, h);
+  post.setSize(w, h);
 }
 addEventListener('resize', fitView);
 fitView();
 
-// ------------------------------------------------------------------ simulation core
+
+// ------------------------------------------------------------------ state
+const params = new URLSearchParams(location.search);
+const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const t0 = performance.now();
-const fw = new RexFaceFirmware();
-const log: { dir: 'tx' | 'rx'; line: string; at: number }[] = [];
-const host = new CantinaHostEmulator(fw, (dir, line, at) => pushLog(dir, line, at));
-const agc = new TtsAmplitudeAgc();
-const audio = new SpeechAudio();
+const clock = () => (performance.now() - t0) / 1000;
+const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+interface Profile {
+  actuators: { name: string; joints: Record<string, number>; channel: number; servo: string }[];
+  emotes: string[];
+}
+const PROFILE = JSON.parse(PROFILE_JSON) as Profile;
+const FULL_PROFILE = JSON.parse(PROFILE_JSON) as RobotProfile;
+const JOINTS = FULL_PROFILE.joints.map((j) => j.name);
+const HOME: Record<string, number> = Object.fromEntries(JOINTS.map((j) => [j, FULL_PROFILE.home?.[j] ?? 0]));
+/** This page's id for the viewport gaze (kept across reloads of this tab). */
+const PANEL_ID = (() => {
+  const fresh = `panel-${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    const v = sessionStorage.getItem('r3x.panel-id');
+    if (v) return v;
+    sessionStorage.setItem('r3x.panel-id', fresh);
+  } catch {
+    /* storage blocked: a new id per load */
+  }
+  return fresh;
+})();
+const SLOTS = PROFILE.emotes;
+/** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
+const SUBSYSTEMS: [string, string][] = [
+  ['mic / speech-to-text', 'DeepgramDirectMicService'], ['LLM', 'ClaudeService'], ['text-to-speech', 'ElevenLabsService'],
+  ['intent routing', 'IntentRouterService'], ['music', 'MusicControllerService'], ['memory', 'MemoryService'],
+  ['vision', 'VisionService'], ['face LEDs', 'EyeLightControllerService'], ['show control', 'BrainService'],
+];
+
+/** What gets drawn this frame, from whichever conductor is live. */
+interface View {
+  joints: Record<string, number>;
+  eyes: RGB[];
+  mouth: RGB[];
+  chest: RGB[];
+  /** Linear flux per stage group (GROUPS order), or null to leave the desk alone. */
+  stage: number[][] | null;
+  /** Controller units per channel (standalone only). */
+  servo: number[] | null;
+}
 
 let rig: Rig | null = null;
 let leds: FaceLeds | null = null;
+let chestLights: ChestLights | null = null;
+let ghosts: Ghosts | null = null;
+let centres: Centres | null = null;
 let performer: Performer | null = null;
-let actuation: Actuation | null = null;
-let rigDoc: RigDoc | null = null;
-let script: MaestroScript | null = null;
-/** Joints with no servo in the active profile: hand-posed, like the static kit. */
-const posed = new Map<string, number>();
-let amplitude = 0;
-let speaking = false;
-let busy = false;
+let view: View | null = null;
 let clips: string[] = [];
 
-function pushLog(dir: 'tx' | 'rx', line: string, at: number) {
-  log.push({ dir, line, at });
+/** Gateway up: follow its frames; the embedded performer stands down. */
+let connected = false;
+let gwState: RetainedState | null = null;
+// Standalone bits the performer does not report back.
+let mode: SystemMode = 'IDLE';
+let speaking = false;
+let busy = false;
+let djOn = false;
+let bpm = 118;
+let frozen = false;
+let manual = false;
+let lookAtCamera = true;
+let autonomy = true;
+
+const agc = new TtsAmplitudeAgc();
+const audio = new SpeechAudio();
+const whine = new ServoWhine();
+/** Look-dev URL params pin the booth's own desk in standalone mode (the performer's desk has no rig/cue command). */
+const pinDesk = params.has('rig') || params.has('cue');
+
+/** A command for the embedded performer (standalone only; ignored while it stands down). */
+function perf(c: PerfCmd) {
+  if (performer && !connected) performer.command(c);
+}
+
+/** A typed command to the r3x gateway; a rejection shows in the show status line. */
+async function send(c: Command) {
+  const a = await panel.gw.send(c);
+  if (a.status === 'rejected') showStatus(a.reason);
+}
+
+const log: { line: string; at: number }[] = [];
+let logDirty = true;
+function pushLog(line: string) {
+  log.push({ line, at: clock() });
   if (log.length > 40) log.shift();
   logDirty = true;
 }
 
-function setActivity(a: Activity) {
-  performer?.setActivity(a, clock());
+let statusTimer = 0;
+function showStatus(msg: string) {
+  const el = $('sh-status');
+  el.textContent = msg;
+  clearTimeout(statusTimer);
+  statusTimer = window.setTimeout(() => (el.textContent = ''), 5000);
 }
 
-const clock = () => (performance.now() - t0) / 1000;
-const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
+// ------------------------------------------------------------------ sounds, speech, captions
+/** Kit sounds by normalised stem ("airhorn" -> "Air Horn.mp3"); loaded apart from the model. */
+const sfxFiles = new Map<string, string>();
+fetch('/sfx/index.json')
+  .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
+  .then((list) => {
+    clips = list;
+    list.forEach((f) => sfxFiles.set(norm(f.replace(/\.[^.]+$/, '')), f));
+  })
+  .catch(() => { /* no kit sounds on this machine */ });
+
+function playSfx(id: string) {
+  const f = sfxFiles.get(norm(id));
+  if (!f) return void console.warn(`sfx: no kit sound matches "${id}" (sim/web/public/sfx is built locally)`);
+  const el = new Audio(`/sfx/${encodeURIComponent(f)}`);
+  el.volume = 0.7;
+  void el.play().catch(() => { /* autoplay before a user gesture */ });
+}
+
+const capHeard = $('cap-heard');
+const capSaid = $('cap-said');
+const caption = $('caption');
+const updateCaption = () => (caption.hidden = !(capHeard.textContent || capSaid.textContent));
+
+function randomClip() {
+  return clips.length ? `/sfx/${clips[Math.floor(Math.random() * clips.length)]}` : null;
+}
+
+function setMode(m: SystemMode) {
+  mode = m;
+  perf({ cmd: 'mode', mode: m });
+}
+
+/** One reply: speech_started -> amplitude stream (frame loop) -> speech_ended. */
+async function speak(url: string) {
+  agc.reset();
+  await audio.play(url, () => {
+    speaking = true;
+    perf({ cmd: 'speech_started' });
+  });
+  speaking = false;
+  perf({ cmd: 'speech_ended' });
+}
+
+/** Without the kit's clips: a synthetic syllable envelope instead of audio. */
+async function fakeSpeech(seconds: number) {
+  agc.reset();
+  speaking = true;
+  perf({ cmd: 'speech_started' });
+  const start = clock();
+  while (clock() - start < seconds) await sleep(0.05);
+  speaking = false;
+  perf({ cmd: 'speech_ended' });
+}
+
+async function sayLine() {
+  const url = randomClip();
+  if (url) await speak(url);
+  else await fakeSpeech(2.5);
+}
+
+async function converse() {
+  if (busy || connected) return;
+  busy = true;
+  try {
+    if (mode !== 'INTERACTIVE') {
+      setMode('INTERACTIVE');
+      await sleep(0.8);
+    }
+    perf({ cmd: 'listening_started' });
+    await sleep(2.4);
+    perf({ cmd: 'listening_stopped' });
+    await sleep(0.9 + Math.random() * 0.8);
+    await sayLine();
+  } finally {
+    busy = false;
+  }
+}
+
+/** A show's `speak` (standalone): a caption plus the fake-amplitude speaking path. */
+async function showSpeak(text: string) {
+  if (mode === 'IDLE') setMode('INTERACTIVE');
+  capSaid.textContent = text;
+  updateCaption();
+  await fakeSpeech(Math.max(1.2, 0.06 * text.length + 0.4));
+  setTimeout(() => {
+    if (capSaid.textContent !== text) return;
+    capSaid.textContent = '';
+    updateCaption();
+  }, 1500);
+}
+
+// ------------------------------------------------------------------ standalone performer
+Performer.create(Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31)))
+  .then((p) => {
+    performer = p;
+    const cat = p.catalog();
+    if (cat.errors.length) console.warn(`show: ${cat.errors.length} problem(s)\n  ${cat.errors.join('\n  ')}`);
+    buildShowUi(cat.items, cat.idle_after_s);
+    p.command({ cmd: 'tempo', bpm });
+    if (studioLocal) studioPerformer();
+    studio.refresh();
+  })
+  .catch((e) => {
+    console.error('performer (wasm) failed to load - run `npm run build:wasm`', e);
+    showStatus('Embedded performer failed to load (npm run build:wasm).');
+  });
+
+/** Outgoing performer events, standalone: what the real drivers would get. */
+function onPerfOut(o: PerfOut) {
+  switch (o.type) {
+    case 'started':
+      showUiDirty = true;
+      break;
+    case 'ended':
+      if (o.reason === 'rejected') showStatus(frozen ? `${o.run.id}: rejected (motion frozen)` : `${o.run.id}: rejected - unknown, or its tier does not allow source "${o.run.source}"`);
+      showUiDirty = true;
+      break;
+    case 'sfx':
+      playSfx(o.id);
+      break;
+    case 'speak':
+      void showSpeak(o.text);
+      break;
+    case 'stage_lights':
+      if (o.action.rig) set.lights?.setRig(o.action.rig, o.action.fade || 1);
+      break;
+    case 'face_line':
+      pushLog(`face  ${o.line}`);
+      break;
+    case 'chest_line':
+      pushLog(`chest ${o.line}`);
+      break;
+    case 'freeze':
+      frozen = o.on;
+      $('sh-freeze').classList.toggle('on', o.on);
+      break;
+  }
+}
+
+/** The droid's head as the performer wants a look target: (pan, tilt) degrees in the head_pan parent frame. */
+const tmpV = new THREE.Vector3();
+function aimAt(p: THREE.Vector3): [number, number] | null {
+  const pan = rig?.joints.get('head_pan')?.node;
+  const tilt = rig?.joints.get('head_tilt')?.node;
+  if (!pan?.parent || !tilt) return null;
+  const local = pan.parent.worldToLocal(tmpV.copy(p));
+  const dy = local.y - (pan.position.y + tilt.position.y);
+  const yaw = THREE.MathUtils.radToDeg(Math.atan2(local.x, local.z));
+  // Rotation about +X tips the face down, so looking up is negative tilt.
+  const pitch = -THREE.MathUtils.radToDeg(Math.atan2(dy, Math.hypot(local.x, local.z)));
+  return [yaw, pitch];
+}
+
+let hadPad = false;
+function pollGamepad() {
+  const pad = [...(navigator.getGamepads?.() ?? [])].find((g) => g && g.mapping === 'standard');
+  if (pad) {
+    perf({ cmd: 'pad', axes: [...pad.axes], buttons: pad.buttons.map((b) => [b.pressed, b.value] as [boolean, number]) });
+  } else if (hadPad) {
+    // The performer has no "pad gone": park it at neutral.
+    perf({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
+  }
+  if (!!pad !== hadPad) {
+    hadPad = !!pad;
+    $('pp-pad').hidden = hadPad;
+  }
+}
+
+function tickPerformer(t: number) {
+  if (!performer || (connected && !studioLocal)) return studio.tick(null);
+  if (speaking || audio.micOn) {
+    let a = 0;
+    if (audio.active) a = agc.next(audio.rmsInt16());
+    else if (speaking) {
+      const syl = Math.max(0, Math.sin(t * 9.5) * Math.sin(t * 2.3 + 1));
+      a = agc.next(1200 + syl * 9000 + Math.random() * 800);
+    }
+    perf({ cmd: 'amplitude', value: a });
+  }
+  if (lookAtCamera && !studio.active) {
+    const pt = aimAt(camera.position);
+    if (pt) perf({ cmd: 'look', pan_tilt: pt });
+  }
+  pollGamepad();
+  const f = performer.tick(t);
+  for (const o of performer.events()) onPerfOut(o);
+  studio.tick(f);
+  view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets };
+}
+
+// ------------------------------------------------------------------ gateway follower
+function onFrames(f: Frames) {
+  if (studioLocal) return; // Studio previews on the embedded performer
+  const px = (k: string) => f.lights[k] ?? [];
+  view = {
+    joints: f.joints, eyes: px('eyes'), mouth: px('mouth'), chest: px('chest'),
+    stage: f.lights.stage ? f.lights.stage.map((c) => c.map((v) => v / 255)) : null, servo: null,
+  };
+}
+
+function onGatewayEvent(e: R3xEvent) {
+  switch (e.domain) {
+    case 'conversation':
+      switch (e.type) {
+        case 'listening_started':
+          capHeard.textContent = '';
+          capSaid.textContent = '';
+          break;
+        case 'transcript':
+          capHeard.textContent = e.text;
+          break;
+        case 'listening_stopped':
+          if (e.transcript) capHeard.textContent = e.transcript;
+          break;
+        case 'reply_delta':
+          capSaid.textContent += e.text;
+          break;
+        case 'reply':
+          capSaid.textContent = e.text;
+          break;
+      }
+      updateCaption();
+      break;
+    case 'perf':
+      switch (e.type) {
+        case 'sfx':
+          playSfx(e.id);
+          break;
+        case 'lights':
+          if (e.rig) set.lights?.setRig(e.rig, e.fade || 1);
+          break;
+        case 'started':
+        case 'ended':
+          if (e.type === 'ended' && e.reason === 'rejected') showStatus(`${e.id}: rejected (tier) from ${e.source}`);
+          showUiDirty = true;
+          break;
+      }
+      break;
+    case 'music':
+      if (e.type === 'track_started' && e.track.bpm) setBpm(e.track.bpm);
+      break;
+  }
+}
+
+function onGatewayState(s: RetainedState) {
+  gwState = s;
+  frozen = s.stage.frozen;
+  $('sh-freeze').classList.toggle('on', frozen);
+  $('btn-dj').classList.toggle('on', s.dj.active);
+  $<HTMLInputElement>('sh-idle').checked = s.stage.autonomy;
+  stMode.textContent = s.engagement.engagement.toUpperCase();
+  studio.setActive(s.stage.mode === 'studio');
+  centresFollowMode(s.stage.mode);
+  ghosts?.apply(s.stage.outputs);
+  renderGaze(s);
+  renderHome();
+  showUiDirty = true;
+}
+
+function setConnected(on: boolean) {
+  if (on === connected) return;
+  if (on) {
+    // The runtime conducts from now on: the embedded performer stands down.
+    performer?.command({ cmd: 'stop', all: true });
+    performer?.command({ cmd: 'autonomy', on: false });
+    if (speaking) performer?.command({ cmd: 'speech_ended' });
+    audio.stop();
+    speaking = false;
+  }
+  connected = on;
+  if (!on) {
+    gwState = null;
+    ghosts?.apply(null);
+    renderGaze(null);
+    perf({ cmd: 'autonomy', on: autonomy });
+    $<HTMLInputElement>('sh-idle').checked = autonomy;
+    $('btn-dj').classList.toggle('on', djOn);
+    frozen = false;
+    $('sh-freeze').classList.remove('on');
+    stMode.textContent = mode;
+  }
+  showUiDirty = true;
+}
+
+// CantinaOS's SimBridge feed (`./r3x --legacy` opens the panel with ?legacy): the panel reads
+// its log lines; the 3D view no longer does. The standalone runtime's logs come from the gateway.
+const liveEl = $('st-live');
+const legacy = params.has('legacy');
+liveEl.hidden = !legacy;
+const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=${encodeURIComponent(accessToken())}`, {
+  onHello: () => {},
+  onEvent: () => {},
+  onStatus(on) {
+    liveEl.textContent = on ? 'LIVE' : 'OFFLINE';
+    liveEl.classList.toggle('on', on);
+  },
+});
+const panel = new ControlPanel(link);
+panel.gw.subscribe({
+  onHello: (h) => {
+    setConnected(true);
+    onGatewayState(h.state);
+    void panel.gw.send({ class: 'telemetry', type: 'frames', enabled: true });
+  },
+  onStatus: (on) => setConnected(on),
+  onState: (s) => onGatewayState(s),
+  onEvent: (e) => onGatewayEvent(e),
+  onFrames,
+});
+// ------------------------------------------------------------------ Studio (plan Phase 9)
+/** Studio open with the embedded performer as its preview: the 3D view follows it, not the gateway. */
+let studioLocal = false;
+const studio = new Studio({
+  performer: () => performer,
+  connected: () => connected,
+  send: (c) => panel.gw.send(c),
+  studioView(open, local, inset) {
+    const was = studioLocal;
+    studioLocal = open && local;
+    document.body.classList.toggle('studio-open', open);
+    viewInset = open ? inset : 0;
+    fitView();
+    if (open && !was && studioLocal) studioPerformer();
+    else if (was && !studioLocal) {
+      performer?.command({ cmd: 'alive', breathing: true, saccades: true, gaze_wander: true, speech_bob: true });
+      if (!connected) performer?.command({ cmd: 'autonomy', on: autonomy });
+    }
+  },
+});
+/** Studio: alive layers and autonomy off; only the clip moves the body. */
+function studioPerformer() {
+  performer?.command({ cmd: 'stop', all: true });
+  performer?.command({ cmd: 'autonomy', on: false });
+  performer?.command({ cmd: 'alive', breathing: false, saccades: false, gaze_wander: false, speech_bob: false });
+}
+// Offline there is no StageManager: the mode switch is local (Studio only; Show/Bench need the runtime).
+document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) => b.addEventListener('click', (e) => {
+  if (connected) return;
+  e.stopPropagation();
+  setLocalStage(b.dataset.stageMode ?? 'show');
+}));
+function setLocalStage(mode: string) {
+  document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((x) => x.classList.toggle('on', x.dataset.stageMode === mode));
+  studio.setActive(mode === 'studio');
+  centresFollowMode(mode);
+  renderHome();
+}
+if (studio.wantsOpen()) setLocalStage('studio');
+
+// ?offline keeps a tab on the embedded performer even while the runtime is running.
+if (legacy && !params.has('offline')) link.start();
 
 // ------------------------------------------------------------------ load model
 async function load() {
+  // Meshes are Draco, textures KTX2 (transcoded to the GPU's own format); both decoders are
+  // copied into public/ by scripts/copy-draco.mjs.
   const draco = new DRACOLoader().setDecoderPath('/draco/');
-  const loader = new GLTFLoader().setDRACOLoader(draco);
-  const [gltf, doc, clipList] = await Promise.all([
+  const ktx2 = new KTX2Loader().setTranscoderPath('/basis/').detectSupport(renderer);
+  const loader = new GLTFLoader().setDRACOLoader(draco).setKTX2Loader(ktx2);
+  const [gltf, doc] = await Promise.all([
     loader.loadAsync('/model/r3x.glb'),
     fetch('/model/rig.json').then((r) => r.json() as Promise<RigDoc>),
-    fetch('/sfx/index.json').then((r) => (r.ok ? r.json() : []), () => []),
   ]);
-  clips = clipList as string[];
+  ktx2.dispose(); // frees the transcoder workers; the textures are on the GPU
 
-  const mats = new Map<string, THREE.Material>();
+  // The paint (baked PBR textures) comes with the GLB's materials - see look.ts.
   gltf.scene.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
     m.castShadow = true;
     m.receiveShadow = true;
-    const name = (m.material as THREE.Material).name;
-    if (!mats.has(name)) {
-      mats.set(name, new THREE.MeshPhysicalMaterial({ name, ...(PALETTE[name] ?? PALETTE.metal_grey) }));
-    }
-    m.material = mats.get(name)!;
   });
+  prepareDroidMaterials(gltf.scene, renderer);
   scene.add(gltf.scene);
 
   rig = new Rig(gltf.scene, doc);
-  rigDoc = doc;
   leds = new FaceLeds(rig);
-  setProfile(currentProfile);
-  performer = new Performer(rig, (joint, value) => actuation?.command(joint, value));
+  tameHighlights(gltf.scene);
+  chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
+  ghosts = new Ghosts(rig, PROFILE);
+  ghosts.apply(gwState?.stage.outputs ?? null);
+  centres = new Centres(rig, FULL_PROFILE.joints, $('centre-labels'));
+  centres.setVisible(centresOn);
   buildJointUi(rig);
-  loadShows();
+  buildJointTable();
   document.getElementById('loading')!.remove();
 }
 
@@ -174,231 +633,96 @@ load().catch((e) => {
     'Model not found. Build it first:<br><code>sim/model/build.sh</code>';
 });
 
-// ------------------------------------------------------------------ show scripts
-function randomClip() {
-  return clips.length ? `/sfx/${clips[Math.floor(Math.random() * clips.length)]}` : null;
-}
-
-/** One reply: SPEECH_GENERATION_STARTED -> amplitude stream -> SPEECH_GENERATION_COMPLETE. */
-async function speak(url: string) {
-  agc.reset();
-  await audio.play(url, () => {
-    speaking = true;
-    host.speechStarted();
-    setActivity('speaking');
-  });
-  speaking = false;
-  amplitude = 0;
-  host.speechEnded();
-  setActivity(host.mode === 'IDLE' ? 'idle' : 'engaged');
-}
-
-async function converse() {
-  if (busy) return;
-  busy = true;
-  try {
-    if (host.mode !== 'INTERACTIVE') {
-      host.setMode('INTERACTIVE');
-      setActivity('engaged');
-      await sleep(0.8);
-    }
-    host.listeningStarted();
-    setActivity('listening');
-    await sleep(2.4);
-    host.listeningStopped();
-    setActivity('thinking');
-    await sleep(0.9 + Math.random() * 0.8);
-    const url = randomClip();
-    if (url) await speak(url);
-    else await fakeSpeech(2.5);
-  } finally {
-    busy = false;
-  }
-}
-
-/** Without the kit's clips: a synthetic syllable envelope instead of audio. */
-async function fakeSpeech(seconds: number) {
-  host.speechStarted();
-  setActivity('speaking');
-  speaking = true;
-  const start = clock();
-  while (clock() - start < seconds) await sleep(0.05);
-  speaking = false;
-  amplitude = 0;
-  host.speechEnded();
-  setActivity('engaged');
-}
-
-// ------------------------------------------------------------------ live link
-// With CantinaOS running, SimBridgeService streams the real bus events here and they go
-// through the same host emulator -> firmware path as the demo, so the LEDs show what the
-// Arduino would. Motion follows the same events.
-let musicPlaying = false;
-let liveSpeaking = false;
-const capHeard = document.getElementById('cap-heard')!;
-const capSaid = document.getElementById('cap-said')!;
-const caption = document.getElementById('caption')!;
-
-function liveMode(raw: unknown): SystemMode {
-  const m = String(raw ?? '').toUpperCase();
-  return m === 'AMBIENT' || m === 'INTERACTIVE' ? m : 'IDLE';
-}
-
-function restingActivity(): Activity {
-  if (musicPlaying || djOn) return 'dj';
-  return host.mode === 'IDLE' ? 'idle' : 'engaged';
-}
-
-function onLiveEvent(ev: LiveEvent) {
-  const d = ev.data;
-  switch (ev.topic) {
-    case 'system.mode.change':
-      host.setMode(liveMode(d.new_mode));
-      if (!liveSpeaking) setActivity(restingActivity());
-      break;
-    case 'voice.listening.started':
-      host.listeningStarted();
-      setActivity('listening');
-      capHeard.textContent = '';
-      capSaid.textContent = '';
-      break;
-    case 'voice.listening.stopped':
-    case 'voice.processing.started':
-    case 'mouse.recording.stopped':
-      host.listeningStopped();
-      if (host.mode === 'INTERACTIVE') setActivity('thinking');
-      if (typeof d.transcript === 'string' && d.transcript) capHeard.textContent = d.transcript;
-      break;
-    case 'transcription.interim':
-      if (typeof d.text === 'string') capHeard.textContent = d.text;
-      break;
-    case 'llm.response.chunk':
-      host.llmChunk();
-      break;
-    case 'llm.response':
-      if (typeof d.text === 'string' && d.text) capSaid.textContent = d.text;
-      break;
-    case 'speech.generation.started':
-    case 'speech.synthesis.started':
-      if (!liveSpeaking) agc.reset();
-      liveSpeaking = true;
-      host.speechStarted();
-      setActivity('speaking');
-      break;
-    case 'speech.synthesis.amplitude':
-      amplitude = Number(d.amplitude) || 0;
-      host.amplitude(amplitude);
-      break;
-    case 'speech.generation.complete':
-    case 'speech.synthesis.ended':
-      if (!liveSpeaking) break;
-      liveSpeaking = false;
-      amplitude = 0;
-      host.speechEnded();
-      setActivity(restingActivity());
-      break;
-    case 'music.playback.started':
-      musicPlaying = true;
-      if (!liveSpeaking) setActivity('dj');
-      break;
-    case 'music.playback.stopped':
-      musicPlaying = false;
-      if (!liveSpeaking) setActivity(restingActivity());
-      break;
-  }
-  caption.hidden = !(capHeard.textContent || capSaid.textContent);
-}
-
-const liveEl = document.getElementById('st-live')!;
-const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765`, {
-  onHello(mode) {
-    host.setMode(liveMode(mode));
-    setActivity(restingActivity());
+// ------------------------------------------------------------------ devtools
+// __r3x.show.play('dj_intro', {intensity: 1.3}), __r3x.performer.command({cmd: 'eyes', pattern: 'happy'})
+Object.assign(window, { __r3x: {
+  get rig() { return rig; }, get performer() { return performer; }, get frames() { return view; },
+  get connected() { return connected; }, gw: panel.gw, camera, controls, post,
+  show: {
+    play: (id: string, p: { intensity?: number; speed?: number } = {}) => playShow(id, p.intensity ?? 1, p.speed ?? 1),
+    stop: () => stopShows(),
+    running: () => (connected ? gwState?.perf.runs ?? [] : performer?.running() ?? []),
+    freeze: (on = true) => setFreeze(on),
+    catalog: () => performer?.catalog(),
   },
-  onEvent: onLiveEvent,
-  onStatus(on) {
-    liveEl.textContent = on ? 'LIVE' : 'OFFLINE';
-    liveEl.classList.toggle('on', on);
-    if (!on) {
-      liveSpeaking = false;
-      musicPlaying = false;
-    }
+  puppet: {
+    set: (c: Record<string, number>) => Object.entries(c).forEach(([intent, value]) => perf({ cmd: 'puppet', intent, value })),
+    slot: (i: number) => emote(i),
+    mode: (m: 'idle' | 'engaged' | 'dj') => perf({ cmd: 'puppet_mode', mode: m }),
+    record: (on = true) => (on ? performer?.takeStart() : performer?.takeStop()),
+    take: () => performer?.takeJsonl(),
   },
-});
-// ?offline keeps a tab on the built-in demo even while CantinaOS is running.
-if (!new URLSearchParams(location.search).has('offline')) link.start();
-
-// Devtools: __r3x.fw.write('ST\n'), __r3x.actuation.command('head_pan', 40)
-Object.assign(window, { __r3x: { fw, host, log, get rig() { return rig; }, get actuation() { return actuation; } } });
+} });
 
 // ------------------------------------------------------------------ frame loop
 let last = clock();
-let logDirty = true;
+let prevJoints: Record<string, number> | null = null;
+let showUiDirty = true;
+let showUiTick = 0;
+let updateShowUi = () => {};
+const stMode = $('st-mode');
+
+/** Disabled light outputs (connected), dimmed: the real driver would stay dark. */
+function dim(px: RGB[], output: string): RGB[] {
+  if (gwState?.stage.outputs[output] !== false) return px;
+  return px.map((c) => c.map((v) => v * 0.15) as RGB);
+}
+
+let readoutAt = -1;
 function frame() {
-  requestAnimationFrame(frame);
+  post.pacer.next(frame);
+  sendViewportGaze(); // every animation frame, drawn or not (it rate-limits itself)
+  // Draw only as often as the picture can change (pacer.ts; rates from the Quality setting).
+  if (!post.pacer.due(performance.now(), view)) return;
   const t = clock();
-  const dt = Math.min(0.05, t - last);
+  const dt = Math.min(0.1, t - last);
   last = t;
 
-  // Speech amplitude, as ElevenLabsService computes it.
-  if (speaking || audio.micOn) {
-    if (audio.active) {
-      amplitude = agc.next(audio.rmsInt16());
-    } else if (speaking) {
-      const syl = Math.max(0, Math.sin(t * 9.5) * Math.sin(t * 2.3 + 1));
-      amplitude = agc.next(1200 + syl * 9000 + Math.random() * 800);
-    }
-    host.amplitude(amplitude);
-  }
-
-  // Firmware runs on its own simulated millis(); the host's 60 Hz loop rides on it.
-  host.tick();
-  fw.advanceTo((performance.now() - t0));
-  for (const line of fw.readLines()) pushLog('rx', line, fw.now);
-
-  if (rig && performer && leds && actuation) {
-    if (script) {
-      script.run(actuation.simTime * 1000);
-      if (!script.running) stopScript();
-    } else if (!manual) {
-      performer.update(t, dt, {
-        amplitude,
-        lookTarget: lookAtCamera ? camera.position : null,
-        bpm,
-      });
-    }
-    actuation.update(dt);
-    const values = actuation.jointValues();
-    for (const j of rig.joints.keys()) if (!values.has(j)) values.set(j, posed.get(j) ?? 0);
+  tickPerformer(t);
+  if (view && rig && leds && chestLights) {
+    const values = new Map(Object.entries(view.joints));
     rig.apply(values);
-    leds.update(fw);
-    updateJointReadout();
-    updateServoTable();
+    leds.update(dim(view.eyes, 'eyes'), dim(view.mouth, 'mouth'));
+    chestLights.update(dim(view.chest, 'chest'));
+    let speed = 0;
+    if (prevJoints && dt > 0) for (const [j, v] of values) speed += Math.abs(v - (prevJoints[j] ?? v)) / dt;
+    prevJoints = view.joints;
+    whine.update(speed, dt);
+    // Panel readouts (text, a 2D canvas) at 10 Hz: nobody reads numbers faster.
+    if (t - readoutAt >= 0.1) {
+      readoutAt = t;
+      updateJointReadout();
+      updateServoTable();
+      drawLeds();
+    }
   }
+  // The venue's light desk: the performer's stage output, or (look-dev pin) its own program.
+  // Not dimmed when the stage output is disabled: that gates the DMX driver, and the sim's
+  // desk also lights R3X, who must look the same in every mode.
+  if (view?.stage) {
+    set.lights?.setExternal(view.stage);
+  } else {
+    set.lights?.setExternal(null);
+  }
+  if (showUiDirty || ++showUiTick % 15 === 0) updateShowUi();
 
   controls.update();
-  composer.render();
-  drawLeds();
-  updateStatus();
+  if (!sceneLook || sceneLook.showingBooth) set.constrain(camera, controls.target);
+  post.render();
+  if (view) centres?.render(renderer, camera, view.joints);
+  if (++homeTick % 12 === 0) updateJointTable();
+  if (logDirty) drawLog();
 }
 requestAnimationFrame(frame);
 
-// ------------------------------------------------------------------ UI
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-let manual = false;
-let lookAtCamera = true;
-let bpm = 118;
-let djOn = false;
-
+// ------------------------------------------------------------------ offline demo UI
 $('btn-converse').onclick = () => void converse();
 $('btn-line').onclick = async () => {
   if (busy) return;
   busy = true;
   try {
-    if (host.mode === 'IDLE') host.setMode('INTERACTIVE');
-    const url = randomClip();
-    if (url) await speak(url);
-    else await fakeSpeech(2.5);
+    if (mode === 'IDLE') setMode('INTERACTIVE');
+    await sayLine();
   } finally {
     busy = false;
   }
@@ -408,68 +732,59 @@ $('btn-mic').onclick = async (e) => {
   if (audio.micOn) {
     audio.stop();
     speaking = false;
-    amplitude = 0;
-    host.speechEnded();
-    setActivity('engaged');
+    perf({ cmd: 'speech_ended' });
     btn.classList.remove('on');
     return;
   }
   try {
-    if (host.mode !== 'INTERACTIVE') host.setMode('INTERACTIVE');
+    if (mode !== 'INTERACTIVE') setMode('INTERACTIVE');
     agc.reset();
     await audio.startMic();
-    host.speechStarted();
-    setActivity('speaking');
+    perf({ cmd: 'speech_started' });
     btn.classList.add('on');
   } catch (err) {
     console.warn('mic unavailable', err);
   }
 };
-$('btn-dj').onclick = (e) => {
-  djOn = !djOn;
-  (e.currentTarget as HTMLElement).classList.toggle('on', djOn);
-  if (djOn) {
-    if (host.mode === 'IDLE') host.setMode('AMBIENT');
-    setActivity('dj');
-  } else {
-    setActivity(host.mode === 'IDLE' ? 'idle' : 'engaged');
-  }
-};
-$<HTMLInputElement>('bpm').oninput = (e) => {
-  bpm = Number((e.target as HTMLInputElement).value);
-  $('bpm-out').textContent = String(bpm);
-};
+function setDj(on: boolean) {
+  djOn = on;
+  $('btn-dj').classList.toggle('on', on);
+  if (on && mode === 'IDLE') mode = 'AMBIENT'; // the performer does the same
+  perf({ cmd: 'dj', on });
+}
+$('btn-dj').onclick = () => setDj(!djOn);
+/** The tempo: the slider, or the live track's analysed bpm. */
+function setBpm(n: number) {
+  bpm = n;
+  $<HTMLInputElement>('bpm').value = String(Math.round(n)); // the range input clamps its own display
+  $('bpm-out').textContent = String(Math.round(n * 10) / 10);
+  perf({ cmd: 'tempo', bpm: n });
+}
+$<HTMLInputElement>('bpm').oninput = (e) => setBpm(Number((e.target as HTMLInputElement).value));
 
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => {
-  b.onclick = () => {
-    const m = b.dataset.mode as SystemMode;
-    host.setMode(m);
-    if (!djOn) setActivity(m === 'IDLE' ? 'idle' : 'engaged');
-  };
+  b.onclick = () => setMode(b.dataset.mode as SystemMode);
 });
 document.querySelectorAll<HTMLButtonElement>('[data-ev]').forEach((b) => {
   b.onclick = () => {
     const ev = b.dataset.ev!;
-    if (ev === 'listen') { host.listeningStarted(); setActivity('listening'); }
-    if (ev === 'stop') { host.listeningStopped(); setActivity('thinking'); }
-    if (ev === 'speak') { host.speechStarted(); setActivity('speaking'); agc.reset(); speaking = true; }
-    if (ev === 'end') { speaking = false; amplitude = 0; host.speechEnded(); setActivity('engaged'); }
+    if (ev === 'listen') perf({ cmd: 'listening_started' });
+    if (ev === 'stop') perf({ cmd: 'listening_stopped' });
+    if (ev === 'speak') { agc.reset(); speaking = true; perf({ cmd: 'speech_started' }); }
+    if (ev === 'end') { speaking = false; perf({ cmd: 'speech_ended' }); }
   };
 });
 
-const serialIn = $<HTMLInputElement>('serial-in');
-const sendSerial = () => {
-  const v = serialIn.value.trim();
-  if (!v) return;
-  fw.write(v + '\n');
-  pushLog('tx', v, fw.now);
-  serialIn.value = '';
+$<HTMLInputElement>('manual').onchange = (e) => {
+  manual = (e.target as HTMLInputElement).checked;
+  if (manual) return;
+  if (connected) void send({ class: 'perf', type: 'release', channels: [...jointInputs.keys()] });
+  else perf({ cmd: 'jog_release' });
 };
-$('serial-send').onclick = sendSerial;
-serialIn.onkeydown = (e) => { if (e.key === 'Enter') sendSerial(); };
-
-$<HTMLInputElement>('manual').onchange = (e) => { manual = (e.target as HTMLInputElement).checked; };
-$<HTMLInputElement>('look').onchange = (e) => { lookAtCamera = (e.target as HTMLInputElement).checked; };
+$<HTMLInputElement>('look').onchange = (e) => {
+  lookAtCamera = (e.target as HTMLInputElement).checked;
+  if (!lookAtCamera) perf({ cmd: 'look', pan_tilt: null });
+};
 
 const pivots: THREE.Object3D[] = [];
 $<HTMLInputElement>('axes').onchange = (e) => {
@@ -487,11 +802,9 @@ $<HTMLInputElement>('axes').onchange = (e) => {
   pivots.forEach((p) => (p.visible = on));
 };
 
-const CAMS: Record<string, [THREE.Vector3, THREE.Vector3]> = {
-  full: [new THREE.Vector3(0.9, 0.85, 1.9), new THREE.Vector3(0, 0.5, 0)],
-  face: [new THREE.Vector3(0.16, 0.84, 0.9), new THREE.Vector3(0, 0.77, 0.08)],
-  arms: [new THREE.Vector3(0.1, 0.6, 1.2), new THREE.Vector3(0, 0.5, 0.1)],
-};
+// Presets come from the set (booth.ts): in the booth they frame the droid through the arch.
+// The chest preset looks at the logic panels on the droid's right-front quarter.
+const CAMS = set.cams;
 document.querySelectorAll<HTMLButtonElement>('[data-cam]').forEach((b) => {
   b.onclick = () => {
     const [p, tgt] = CAMS[b.dataset.cam!];
@@ -507,17 +820,30 @@ addEventListener('drop', async (e) => {
   e.preventDefault();
   stage.classList.remove('dragging');
   const f = e.dataTransfer?.files?.[0];
-  if (!f || !f.type.startsWith('audio') || busy) return;
+  if (!f || !f.type.startsWith('audio') || busy || connected) return;
   busy = true;
   try {
-    if (host.mode !== 'INTERACTIVE') host.setMode('INTERACTIVE');
+    if (mode !== 'INTERACTIVE') setMode('INTERACTIVE');
     await speak(URL.createObjectURL(f));
   } finally {
     busy = false;
   }
 });
 
-// ------------------------------------------------------------------ joint sliders
+// Machine status (chest windows): offline stand-ins for the service health CantinaOS reports.
+SUBSYSTEMS.forEach(([label, service], i) => {
+  const row = document.createElement('label');
+  row.className = 'inline sub';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = true;
+  cb.onchange = () => perf({ cmd: 'service_status', service, status: cb.checked ? 'running' : 'error', latched: true });
+  row.append(cb, label);
+  row.title = `Panel ${Math.floor(i / 3) + 1}, window ${(i % 3) + 1}: ${service}`;
+  $('subsystems').appendChild(row);
+});
+
+// ------------------------------------------------------------------ joint sliders (jog)
 const jointInputs = new Map<string, { input: HTMLInputElement; out: HTMLOutputElement }>();
 function buildJointUi(r: Rig) {
   const container = $('joints');
@@ -547,18 +873,15 @@ function buildJointUi(r: Rig) {
       out.textContent = '0';
       input.oninput = () => {
         const v = Number(input.value);
-        if (actuation?.byJoint.has(j.spec.name)) {
-          if (!manual) {
-            manual = true;
-            $<HTMLInputElement>('manual').checked = true;
-          }
-          actuation.command(j.spec.name, v);
-        } else {
-          posed.set(j.spec.name, v); // no servo: pose by hand, instantly
+        if (!manual) {
+          manual = true;
+          $<HTMLInputElement>('manual').checked = true;
         }
+        // A joint name in a perf puppet command jogs that joint directly (runtime).
+        if (connected) void send({ class: 'perf', type: 'puppet', channels: { [j.spec.name]: v } });
+        else perf({ cmd: 'jog', joint: j.spec.name, value: v });
       };
-      const tag = document.createElement('i');
-      row.append(name, input, out, tag);
+      row.append(name, input, out);
       container.appendChild(row);
       jointInputs.set(j.spec.name, { input, out });
     }
@@ -566,143 +889,38 @@ function buildJointUi(r: Rig) {
 }
 
 function updateJointReadout() {
-  if (!rig || !actuation) return;
+  if (!view) return;
   for (const [name, ui] of jointInputs) {
-    const j = rig.get(name);
-    ui.out.textContent = j.value.toFixed(0);
-    const ch = actuation.byJoint.get(name);
-    const row = ui.input.parentElement!;
-    row.classList.toggle('posable', !ch);
-    (row.lastElementChild as HTMLElement).textContent = ch ? `ch${ch.cfg.ch}` : 'pose';
-    if (ch && !manual && document.activeElement !== ui.input) ui.input.value = String(ch.follower.target);
+    const v = view.joints[name] ?? 0;
+    ui.out.textContent = v.toFixed(0);
+    if (!manual && document.activeElement !== ui.input) ui.input.value = String(v);
   }
 }
 
-// ------------------------------------------------------------------ actuation UI
-let currentProfile = DEFAULT_PROFILE;
-function setProfile(name: string) {
-  if (!rigDoc) return;
-  stopScript();
-  currentProfile = name;
-  actuation = new Actuation(rigDoc.joints, rigDoc.dynamics ?? {}, name);
-  actuation.plantEnabled = $<HTMLInputElement>('plant').checked;
-  buildServoTable();
-}
-
-const profileSel = $<HTMLSelectElement>('profile');
-for (const [k, label] of Object.entries(PROFILES)) profileSel.add(new Option(label, k, k === DEFAULT_PROFILE, k === DEFAULT_PROFILE));
-profileSel.onchange = () => setProfile(profileSel.value);
-$<HTMLInputElement>('plant').onchange = (e) => {
-  if (actuation) actuation.plantEnabled = (e.target as HTMLInputElement).checked;
-};
-
-const servoRows = new Map<number, HTMLTableRowElement>();
-function buildServoTable() {
-  const body = $('servo-body');
-  body.innerHTML = '';
-  servoRows.clear();
-  if (!actuation) return;
-  $('servo-summary').textContent =
-    `${actuation.channels.length} servos, ${{ custom: 'custom controller', maestro: 'Maestro', pca9685: 'PCA9685' }[actuation.controller.type]} ` +
-    `@ ${actuation.frequencyHz.toFixed(1)} Hz, ${actuation.usPerUnit} us resolution`;
-  const warnings: string[] = [];
-  for (const ch of actuation.channels) {
+// ------------------------------------------------------------------ servo readout
+const servoCells = new Map<number, HTMLElement>();
+{
+  $('servo-summary').textContent = `${PROFILE.actuators.length} actuators; pulses from the performer's controller frame (standalone).`;
+  for (const a of PROFILE.actuators) {
     const tr = document.createElement('tr');
-    const load = Math.round(ch.utilisation * 100);
-    tr.title = [ch.cfg.note, ch.cfg.calibration === 'assumed' ? 'Calibration assumed - set centreUs on the bench.' : '', ...ch.warnings]
-      .filter(Boolean).join('\n');
-    tr.innerHTML = `<td>${ch.cfg.ch}</td><td>${ch.cfg.name}</td><td>${ch.model.label}</td>` +
-      `<td class="us"></td><td class="${load > 50 ? 'bad' : load > 30 ? 'meh' : ''}">${load}%</td>`;
-    body.appendChild(tr);
-    servoRows.set(ch.cfg.ch, tr);
-    for (const w of ch.warnings) warnings.push(`ch${ch.cfg.ch} ${ch.cfg.name}: ${w}`);
+    tr.innerHTML = `<td>${a.channel}</td><td>${a.name}</td><td>${a.servo}</td><td class="us">-</td>`;
+    $('servo-body').appendChild(tr);
+    servoCells.set(a.channel, tr.querySelector('.us')!);
   }
-  const wEl = $('servo-warn');
-  wEl.hidden = !warnings.length;
-  wEl.textContent = warnings.join(' · ');
 }
-
 let servoTick = 0;
 function updateServoTable() {
-  if (!actuation || ++servoTick % 6) return; // ~10 Hz is plenty for a readout
-  for (const ch of actuation.channels) {
-    const cell = servoRows.get(ch.cfg.ch)?.querySelector('.us');
-    if (cell) cell.textContent = `${ch.us.toFixed(0)}${ch.directUs !== null ? '*' : ''}`;
-  }
+  if (++servoTick % 6) return; // ~10 Hz is plenty for a readout
+  for (const [ch, cell] of servoCells) cell.textContent = view?.servo ? String(view.servo[ch] ?? '-') : '-';
 }
-
-$('export-frames').onclick = () => {
-  if (!actuation) return;
-  const blob = new Blob([actuation.exportLog()], { type: 'application/x-ndjson' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `r3x-frames-${actuation.profileName}.jsonl`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-};
-
-// ------------------------------------------------------------------ Maestro show scripts
-const scriptText = $<HTMLTextAreaElement>('script-text');
-const scriptStatus = $('script-status');
-async function loadShows() {
-  try {
-    const names: string[] = await fetch('/shows/index.json').then((r) => (r.ok ? r.json() : []));
-    if (names.length && !scriptText.value) {
-      scriptText.value = await fetch(`/shows/${encodeURIComponent(names[0])}`).then((r) => r.text());
-      scriptStatus.textContent = `Loaded ${names[0]}`;
-    }
-  } catch {
-    /* no shows copied - paste one */
-  }
-}
-
-function startScript() {
-  if (!actuation) return;
-  const a = actuation;
-  try {
-    script = new MaestroScript(scriptText.value, {
-      setTarget: (ch, q) => a.setTarget(ch, q),
-      setSpeed: (ch, v) => a.setMaestroLimits(ch, v, undefined),
-      setAccel: (ch, v) => a.setMaestroLimits(ch, undefined, v),
-      getPosition: (ch) => a.byNumber.get(ch)?.target ?? 0,
-      anyMoving: () => a.channels.some((c) => c.directUs !== null && Math.abs(c.directUs - c.us) > 0.5),
-    });
-    scriptStatus.textContent = 'Running on the sim clock - channels marked * are script-driven.';
-    $('script-run').textContent = 'Stop';
-  } catch (e) {
-    scriptStatus.textContent = e instanceof MaestroScriptError ? e.message : String(e);
-    script = null;
-  }
-}
-
-function stopScript() {
-  script = null;
-  actuation?.releaseAll();
-  $('script-run').textContent = 'Run script';
-}
-$('script-run').onclick = () => (script ? stopScript() : startScript());
 
 // ------------------------------------------------------------------ status + LED view
-const stMode = $('st-mode');
-const stFw = $('st-fw');
-const warn = $('warn-reset');
 const logEl = $('serial-log');
-function updateStatus() {
-  stMode.textContent = host.mode;
-  stFw.textContent = fw.flashActive ? 'FLASH' : fw.currentState;
-  if (host.droppedMouthResets > 0) {
-    warn.hidden = false;
-    warn.textContent =
-      `${host.droppedMouthResets}x the end-of-speech M000 landed inside the adapter's 10 Hz throttle ` +
-      `window and was dropped, so the mouth kept its last amplitude in ENGAGED. Timing-dependent: ` +
-      `it only happens when an amplitude update went out <100 ms before speech ended.`;
-  }
-  if (logDirty) {
-    logDirty = false;
-    logEl.innerHTML = log.slice(-12).map((e) =>
-      `<li><span class="${e.dir}">${e.dir === 'tx' ? '→' : '←'}</span> ${(e.at / 1000).toFixed(2).padStart(7)}s  ${escapeHtml(e.line)}</li>`,
-    ).join('');
-  }
+function drawLog() {
+  logDirty = false;
+  logEl.innerHTML = log.slice(-12).map((e) =>
+    `<li><span class="tx">→</span> ${e.at.toFixed(2).padStart(7)}s  ${escapeHtml(e.line)}</li>`,
+  ).join('');
 }
 function escapeHtml(s: string) {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
@@ -710,17 +928,20 @@ function escapeHtml(s: string) {
 
 const ledCanvas = $<HTMLCanvasElement>('ledview');
 const lctx = ledCanvas.getContext('2d')!;
+const BLACK: RGB = [0, 0, 0];
 function drawLeds() {
   const W = ledCanvas.width;
   const H = ledCanvas.height;
   lctx.clearRect(0, 0, W, H);
+  if (!view) return;
+  const { eyes, mouth } = view;
   const k = (OUTPUT_BRIGHTNESS + 1) / 256;
-  const css = (c: RGB) => {
+  const css = (c: RGB = BLACK) => {
     // Show emitted light (after global brightness), boosted to read on screen.
     const b = (v: number) => Math.min(255, Math.round(v * k * 1.9));
     return `rgb(${b(c[0])},${b(c[1])},${b(c[2])})`;
   };
-  const dot = (x: number, y: number, c: RGB, r = 7) => {
+  const dot = (x: number, y: number, c: RGB | undefined, r = 7) => {
     lctx.beginPath();
     lctx.arc(x, y, r, 0, Math.PI * 2);
     lctx.fillStyle = css(c);
@@ -730,10 +951,10 @@ function drawLeds() {
   };
   // Viewer's perspective: droid's left eye (LEDs 0-6) on the right.
   const eye = (cx: number, start: number) => {
-    dot(cx, 44, fw.eyeLeds[start]);
+    dot(cx, 44, eyes[start]);
     for (let i = 1; i < 7; i++) {
       const a = ((i - 1) * Math.PI) / 3;
-      dot(cx + Math.sin(a) * 20, 44 - Math.cos(a) * 20, fw.eyeLeds[start + i]);
+      dot(cx + Math.sin(a) * 20, 44 - Math.cos(a) * 20, eyes[start + i]);
     }
   };
   eye(W * 0.8, 0);
@@ -742,11 +963,316 @@ function drawLeds() {
   for (let i = 0; i < 8; i++) {
     const arm = i < 4 ? i : 7 - i;
     const side = i < 4 ? -1 : 1;
-    dot(vx + side * (22 - arm * 6), 12 + arm * 22, fw.mouthLeds[i], 5);
+    dot(vx + side * (22 - arm * 6), 12 + arm * 22, mouth[i], 5);
   }
   lctx.fillStyle = '#5b6170';
   lctx.font = '10px ui-monospace, Menlo, monospace';
-  lctx.fillText('R eye 7-13', 8, 90);
-  lctx.fillText('mouth 0-7', vx - 24, 92);
-  lctx.fillText('L eye 0-6', W - 62, 90);
+  lctx.fillText('R eye 7-13', 8, H - 6);
+  lctx.fillText('mouth 0-7', vx - 24, H - 4);
+  lctx.fillText('L eye 0-6', W - 62, H - 6);
+}
+
+// ------------------------------------------------------------------ show system UI
+/** Play from the UI: through the gateway when connected, else the embedded performer. */
+function playShow(id: string, intensity: number, speed: number) {
+  if (connected) void send({ class: 'perf', type: 'play', id, intensity, speed });
+  else perf({ cmd: 'perform', id, source: 'ui', params: { intensity, speed } });
+}
+function stopShows() {
+  if (connected) void send({ class: 'perf', type: 'stop', target: 'all' });
+  else perf({ cmd: 'stop', all: true });
+}
+function setFreeze(on: boolean) {
+  if (connected) {
+    void send({ class: 'stage', type: 'freeze', on });
+    return;
+  }
+  frozen = on;
+  perf({ cmd: 'freeze', on });
+  $('sh-freeze').classList.toggle('on', on);
+  showUiDirty = true;
+}
+function emote(slot: number) {
+  if (connected) void send({ class: 'perf', type: 'emote', slot });
+  else perf({ cmd: 'emote', slot });
+}
+function puppetSet(intent: string, value: number) {
+  if (connected) void send({ class: 'perf', type: 'puppet', channels: { [intent]: value } });
+  else perf({ cmd: 'puppet', intent, value });
+}
+
+function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
+  const params = () => [Number($<HTMLInputElement>('sh-int').value), Number($<HTMLInputElement>('sh-speed').value)] as const;
+  for (const kind of ['sequence', 'cue', 'clip'] as const) {
+    const ul = $('sh-list-' + kind);
+    const list = items.filter((it) => it.kind === kind);
+    $('sh-n-' + kind).textContent = `(${list.length})`;
+    for (const it of list) {
+      const li = document.createElement('li');
+      li.dataset.id = it.id;
+      li.title = `${it.description}${it.requires ? ' [extended build]' : ''}${it.tags?.length ? `\ntags: ${it.tags.join(', ')}` : ''}`;
+      const b = document.createElement('button');
+      b.textContent = '▶';
+      b.setAttribute('aria-label', `Play ${it.id}`);
+      b.onclick = () => playShow(it.id, ...params());
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = it.id;
+      const sm = document.createElement('small');
+      sm.textContent = it.kind === 'sequence' ? `${it.clock === 'beat' ? 'beat' : 'time'}${it.loop ? ' loop' : ''}` : it.kind === 'clip' ? `${it.duration}s` : '';
+      nm.appendChild(sm);
+      const tier = document.createElement('i');
+      tier.className = it.tier;
+      tier.textContent = it.tier;
+      li.append(b, nm, tier);
+      ul.appendChild(li);
+    }
+  }
+  $('sh-idle-label').textContent = `Idle policy (after ${idleAfter ?? '-'} s quiet)`;
+  const loops = items.filter((q) => q.kind === 'sequence' && q.loop);
+  for (const [sel, activity] of [['sh-bg-idle', 'idle'], ['sh-bg-dj', 'dj']] as const) {
+    const el = $<HTMLSelectElement>(sel);
+    el.add(new Option('none', ''));
+    for (const q of loops) el.add(new Option(q.id, q.id));
+    el.onchange = () => perf({ cmd: 'background', activity, id: el.value || null });
+  }
+  SLOTS.forEach((id, i) => {
+    const b = document.createElement('button');
+    b.textContent = `${i + 1} ${id}`;
+    b.title = items.find((it) => it.id === id)?.description ?? id;
+    b.onclick = () => emote(i);
+    $('pp-slots').appendChild(b);
+  });
+}
+
+{
+  const out = (id: string, v: string) => ($(id).textContent = Number(v).toFixed(2));
+  $<HTMLInputElement>('sh-int').oninput = (e) => out('sh-int-out', (e.target as HTMLInputElement).value);
+  $<HTMLInputElement>('sh-speed').oninput = (e) => out('sh-speed-out', (e.target as HTMLInputElement).value);
+  $('sh-stop').onclick = () => stopShows();
+  $('sh-freeze').onclick = () => setFreeze(!frozen);
+  $<HTMLInputElement>('sh-idle').onchange = (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    if (connected) return void send({ class: 'stage', type: 'set_autonomy', enabled: on });
+    autonomy = on;
+    perf({ cmd: 'autonomy', on });
+  };
+
+  // Puppeteer: one slider per continuous intent, the modes, the emote slots.
+  const box = $('pp-intents');
+  const sliders = new Map<string, HTMLInputElement>();
+  for (const k of INTENTS) {
+    const name = document.createElement('span');
+    name.textContent = k;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '-1';
+    input.max = '1';
+    input.step = '0.01';
+    input.value = '0';
+    const o = document.createElement('output');
+    o.textContent = '0.00';
+    input.oninput = () => {
+      o.textContent = Number(input.value).toFixed(2);
+      puppetSet(k, Number(input.value));
+    };
+    box.append(name, input, o);
+    sliders.set(k, input);
+  }
+  $('pp-center').onclick = () => {
+    if (connected) void send({ class: 'perf', type: 'release', channels: [...INTENTS] });
+    else perf({ cmd: 'puppet_release' });
+    sliders.forEach((s) => {
+      s.value = '0';
+      s.nextElementSibling!.textContent = '0.00';
+    });
+  };
+  for (const m of PUPPET_MODES) {
+    const b = document.createElement('button');
+    b.textContent = m;
+    b.dataset.pmode = m;
+    b.onclick = () => {
+      perf({ cmd: 'puppet_mode', mode: m });
+      document.querySelectorAll<HTMLButtonElement>('[data-pmode]').forEach((x) => x.classList.toggle('on', x === b));
+    };
+    $('pp-modes').appendChild(b);
+  }
+  $('take-rec').onclick = () => {
+    if (!performer) return;
+    if (performer.takeInfo().recording) performer.takeStop();
+    else performer.takeStart();
+    const on = performer.takeInfo().recording;
+    $('take-rec').classList.toggle('on', on);
+    $('take-rec').textContent = on ? 'Stop take' : 'Record take';
+  };
+  $('take-dl').onclick = () => {
+    if (!performer) return;
+    const blob = new Blob([performer.takeJsonl()], { type: 'application/x-ndjson' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `r3x-take-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  $<HTMLInputElement>('whine').onchange = (e) => whine.setEnabled((e.target as HTMLInputElement).checked);
+
+  // Refreshed ~4x a second (and on every show event) from the frame loop.
+  updateShowUi = () => {
+    showUiDirty = false;
+    const running: { id: string; layer: string; source: string }[] = connected ? gwState?.perf.runs ?? [] : performer?.running() ?? [];
+    const ids = new Set(running.map((r) => r.id));
+    for (const layer of ['show', 'gesture', 'background'] satisfies RunLayer[]) {
+      const r = running.find((x) => x.layer === layer);
+      const el = $('sh-' + layer);
+      el.textContent = r ? `${r.id} (${r.source})` : '-';
+      el.classList.toggle('on', !!r);
+    }
+    document.querySelectorAll<HTMLLIElement>('.show-list li').forEach((li) => li.classList.toggle('running', ids.has(li.dataset.id!)));
+    // Frozen motion refuses every play: say so instead of offering buttons that bounce.
+    document.querySelectorAll<HTMLButtonElement>('.show-list button, #pp-slots button').forEach((b) => (b.disabled = frozen));
+    const take = performer?.takeInfo();
+    $('take-info').textContent = !take ? '' : take.recording ? `Recording: ${take.seconds.toFixed(1)} s, ${take.samples} samples @ 50 Hz` : take.samples ? `Last take: ${take.seconds.toFixed(1)} s` : '';
+    if (!connected) stMode.textContent = mode;
+  };
+}
+
+// ------------------------------------------------------------------ Home (Bench / Studio)
+let homeTick = 0;
+/** Where the Studio preview or the offline demo runs: the embedded performer. */
+const local = () => !connected || studioLocal;
+
+function home(joints: string[] = []) {
+  if (!local()) return void send({ class: 'perf', type: 'home', joints });
+  perf({ cmd: 'home', joints });
+  if (studioLocal) performer?.command({ cmd: 'home', joints }); // perf() stands down while connected
+}
+$('drive-home').onclick = () => home();
+$('scene-home').onclick = (e) => {
+  home();
+  (e.currentTarget as HTMLElement).blur();
+};
+
+function renderHome() {
+  const mode = gwState?.stage.mode ?? null;
+  const allowed = !connected || mode === 'bench' || mode === 'studio';
+  for (const id of ['drive-home', 'scene-home']) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = !allowed;
+    b.title = allowed ? b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '') : `${b.title.replace(/ \(Show: switch to Bench or Studio\)$/, '')} (Show: switch to Bench or Studio)`;
+  }
+  $('scene-home').hidden = !allowed || !(connected ? mode !== 'show' : true);
+}
+
+function renderHomeState() {
+  const el = $('home-state');
+  let text = '-';
+  let on = false;
+  if (connected && !studioLocal && gwState?.perf.at_home !== undefined) {
+    on = gwState.perf.at_home;
+    text = on ? 'at home' : gwState.perf.homing ? 'homing…' : 'off home';
+  } else if (view) {
+    on = atHome(view.joints, HOME, JOINTS, 1); // simulated servo output, not the follower
+    text = on ? 'at home' : 'off home';
+  }
+  el.textContent = text;
+  el.classList.toggle('on', on);
+}
+
+/** Drive -> Joints: current and home value per joint, a per-joint Home, hover = gizmo highlight. */
+const jointRows = new Map<string, HTMLElement>();
+function buildJointTable() {
+  const body = $('joint-rows');
+  body.innerHTML = FULL_PROFILE.joints.map((j) => `<tr data-joint="${j.name}" title="${j.name}">
+    <td>${shortName(j.name)}</td><td class="num">-</td>
+    <td class="home">${formatValue(HOME[j.name], j.unit)}</td>
+    <td><button data-home-joint="${j.name}" title="Ease ${j.name} to its home value (held until released)">home</button></td></tr>`).join('');
+  for (const tr of Array.from(body.querySelectorAll<HTMLElement>('tr'))) jointRows.set(tr.dataset.joint!, tr);
+  body.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-home-joint]');
+    if (b) home([b.dataset.homeJoint!]);
+  };
+  body.onmouseover = (e) => centres?.highlight([(e.target as HTMLElement).closest<HTMLElement>('tr')?.dataset.joint ?? ''].filter(Boolean));
+  body.onmouseleave = () => centres?.highlight(null);
+  // The Drive outputs are actuators: hover one to see the joints it drives.
+  $('drive-outputs').onmouseover = (e) => {
+    const out = (e.target as HTMLElement).closest<HTMLElement>('[data-output]')?.dataset.output;
+    const a = FULL_PROFILE.actuators.find((x) => x.name === out);
+    centres?.highlight(a ? Object.keys(a.joints) : null);
+  };
+  $('drive-outputs').onmouseleave = () => centres?.highlight(null);
+}
+
+function updateJointTable() {
+  renderHomeState();
+  if (!view) return;
+  for (const [j, tr] of jointRows) {
+    const v = view.joints[j] ?? 0;
+    const unit = FULL_PROFILE.joints.find((x) => x.name === j)!.unit;
+    tr.children[1].textContent = formatValue(v, unit);
+    // What the (simulated) servo reached, which settles inside its deadband: amber past 1.
+    tr.classList.toggle('off', Math.abs(v - HOME[j]) > 1);
+  }
+}
+
+// Hovering the droid highlights the joint under the pointer (Centres on only; ~10 Hz).
+{
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  let pending = false;
+  let last: PointerEvent | null = null;
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    last = e;
+    if (pending || !centres?.shown || !rig) return;
+    pending = true;
+    setTimeout(() => {
+      pending = false;
+      if (!last || !rig) return;
+      ndc.set((last.clientX / innerWidth) * 2 - 1, -(last.clientY / innerHeight) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      let o: THREE.Object3D | null = ray.intersectObject(rig.root, true)[0]?.object ?? null;
+      while (o && !o.name.startsWith('j_')) o = o.parent;
+      centres?.highlight(o ? [o.name.slice(2)] : null);
+    }, 100);
+  });
+  renderer.domElement.addEventListener('pointerleave', () => centres?.highlight(null));
+}
+
+// ------------------------------------------------------------------ gaze target (Show)
+const gazeSel = $<HTMLSelectElement>('gaze-src');
+let claimed = false;
+function renderGaze(s: RetainedState | null) {
+  // A runtime without gaze support (older build) leaves the selector hidden.
+  const g = s?.stage.gaze;
+  gazeSel.hidden = !g;
+  $('gaze-owner').hidden = !g || g !== 'viewport';
+  if (!s || !g) return;
+  if (document.activeElement !== gazeSel) gazeSel.value = g;
+  const owner = s.stage.gaze_owner ?? null;
+  $('gaze-owner').textContent = owner === PANEL_ID ? 'this panel' : owner ? `owned by ${owner}` : 'no owner';
+  gazeSel.title = `What R3X's head looks at in Show (Bench and Studio ignore it). This panel: ${PANEL_ID}`;
+  // Nobody owns the viewport: the first panel to see that claims it.
+  if (g === 'viewport' && !owner && !claimed) {
+    claimed = true;
+    void send({ class: 'stage', type: 'set_gaze', source: 'viewport', owner: PANEL_ID });
+  }
+}
+gazeSel.onchange = () => {
+  const source = gazeSel.value as GazeSource;
+  void send({ class: 'stage', type: 'set_gaze', source, ...(source === 'viewport' ? { owner: PANEL_ID } : {}) });
+  gazeSel.blur();
+};
+
+/** The owning panel's camera as the gaze target: ~15 Hz while it moves, 2 Hz keepalive. */
+let lookSent = { pan: NaN, tilt: NaN, at: 0 };
+function sendViewportGaze() {
+  const st = gwState?.stage;
+  if (!connected || !st || st.mode !== 'show' || st.gaze !== 'viewport' || (st.gaze_owner && st.gaze_owner !== PANEL_ID)) return;
+  const now = performance.now();
+  if (now - lookSent.at < 66) return;
+  const pt = aimAt(camera.position);
+  if (!pt) return;
+  const moved = Math.abs(pt[0] - lookSent.pan) > 0.3 || Math.abs(pt[1] - lookSent.tilt) > 0.3;
+  if (!moved && now - lookSent.at < 500) return;
+  lookSent = { pan: pt[0], tilt: pt[1], at: now };
+  void panel.gw.send({ class: 'perf', type: 'look', pan: pt[0], tilt: pt[1], owner: PANEL_ID });
 }

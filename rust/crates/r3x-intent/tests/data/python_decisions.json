@@ -1,0 +1,188 @@
+[
+ {
+  "corpus": "smoke-voice",
+  "key": "409a0b32ac07cdad",
+  "utterance": "hey Rex play some music",
+  "threshold": 0.85,
+  "intent": "play_music",
+  "parameters": {
+   "track": null
+  },
+  "tier": "cheap",
+  "confidence": 0.97,
+  "choice": "play_music"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "409a0b32ac07cdad",
+  "utterance": "hey Rex play some music",
+  "threshold": 0.95,
+  "intent": "play_music",
+  "parameters": {
+   "track": null
+  },
+  "tier": "cheap",
+  "confidence": 0.97,
+  "choice": "play_music"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "744ced6d1dbd7504",
+  "utterance": "play the next track",
+  "threshold": 0.85,
+  "intent": "next_track",
+  "parameters": {},
+  "tier": "free",
+  "confidence": 0.95,
+  "choice": "next_track"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "744ced6d1dbd7504",
+  "utterance": "play the next track",
+  "threshold": 0.95,
+  "intent": "next_track",
+  "parameters": {},
+  "tier": "free",
+  "confidence": 0.95,
+  "choice": "next_track"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "debcb3f9d0e7c6c9",
+  "utterance": "stop the music",
+  "threshold": 0.85,
+  "intent": "stop_music",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.98,
+  "choice": "stop_music"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "debcb3f9d0e7c6c9",
+  "utterance": "stop the music",
+  "threshold": 0.95,
+  "intent": "stop_music",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.98,
+  "choice": "stop_music"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "7f89002f4ce2b095",
+  "utterance": "start dj mode",
+  "threshold": 0.85,
+  "intent": "dj_mode_on",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.99,
+  "choice": "dj_mode_on"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "7f89002f4ce2b095",
+  "utterance": "start dj mode",
+  "threshold": 0.95,
+  "intent": "dj_mode_on",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.99,
+  "choice": "dj_mode_on"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "3a79607dd86f5e89",
+  "utterance": "stop dj mode",
+  "threshold": 0.85,
+  "intent": "dj_mode_off",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.98,
+  "choice": "dj_mode_off"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "3a79607dd86f5e89",
+  "utterance": "stop dj mode",
+  "threshold": 0.95,
+  "intent": "dj_mode_off",
+  "parameters": {},
+  "tier": "cheap",
+  "confidence": 0.98,
+  "choice": "dj_mode_off"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "fe4961a88936fe7b",
+  "utterance": "make your eyes red",
+  "threshold": 0.85,
+  "intent": "set_eye_animation",
+  "parameters": {
+   "color": "red",
+   "pattern": "solid"
+  },
+  "tier": "free",
+  "confidence": 0.99,
+  "choice": "set_eye_animation"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "fe4961a88936fe7b",
+  "utterance": "make your eyes red",
+  "threshold": 0.95,
+  "intent": "set_eye_animation",
+  "parameters": {
+   "color": "red",
+   "pattern": "solid"
+  },
+  "tier": "free",
+  "confidence": 0.99,
+  "choice": "set_eye_animation"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "2eb98d64c04ae5b7",
+  "utterance": "what is your favourite cantina band",
+  "threshold": 0.85,
+  "intent": null,
+  "parameters": null,
+  "tier": "",
+  "confidence": 1.0,
+  "choice": "general_chat"
+ },
+ {
+  "corpus": "smoke-voice",
+  "key": "2eb98d64c04ae5b7",
+  "utterance": "what is your favourite cantina band",
+  "threshold": 0.95,
+  "intent": null,
+  "parameters": null,
+  "tier": "",
+  "confidence": 1.0,
+  "choice": "general_chat"
+ },
+ {
+  "corpus": "smoke-show",
+  "key": "c90ee148a21e14ba",
+  "utterance": "say hi to everyone and get hyped",
+  "threshold": 0.85,
+  "intent": null,
+  "parameters": null,
+  "tier": "",
+  "confidence": 0.66,
+  "choice": "general_chat"
+ },
+ {
+  "corpus": "smoke-show",
+  "key": "c90ee148a21e14ba",
+  "utterance": "say hi to everyone and get hyped",
+  "threshold": 0.95,
+  "intent": null,
+  "parameters": null,
+  "tier": "",
+  "confidence": 0.66,
+  "choice": "general_chat"
+ }
+]

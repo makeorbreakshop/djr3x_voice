@@ -1,0 +1,17 @@
+[package]
+name = "r3x-ops"
+description = "Health aggregation, log fan-out and debug/trace controls"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

@@ -16,6 +16,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from pyee.asyncio import AsyncIOEventEmitter
+from .tap import fixtures as tap_fixtures
+from .tap.bus_tap import TappedEmitter, default_session_log, session_id
+from .tap.server import TapServer
 
 from .base_service import BaseService
 from .core.event_topics import EventTopics
@@ -59,6 +62,7 @@ from .services.latency_tracker_service import LatencyTrackerService
 # Import the textual dashboard service
 from .services.textual_dashboard_service import TextualDashboardService
 from .services.sim_bridge_service import SimBridgeService  # 3D sim live link (sim/web)
+from .services.chest_light_controller_service import ChestLightControllerService  # chest logic-panel lights (2nd Arduino)
 
 # Import the CLI formatter for enhanced output (using minimal version)
 from .utils.cli_formatter_minimal import setup_minimal_logging_formatter, cli_formatter
@@ -163,11 +167,19 @@ class CantinaOS:
     
     def __init__(self, config: Dict[str, Any] = None):
         """Initialize the CantinaOS system."""
-        self._event_bus = AsyncIOEventEmitter()
+        # The bus is tapped (Phase 0): every emit goes to the JSONL session log and, once
+        # services start, the tap websocket. See cantina_os/tap/.
+        self._event_bus = TappedEmitter()
         self._services: Dict[str, BaseService] = {}
         self._shutdown_event = asyncio.Event()
         self._logger = logging.getLogger("cantina_os.main")
         self._load_config()  # Load values from .env file
+        self._session = session_id()
+        fixture_store = tap_fixtures.configure(session=self._session)
+        self._session_log = default_session_log(self._session, fixture_store.dir if fixture_store else None)
+        if self._session_log is not None:
+            self._event_bus.add_sink(self._session_log)
+        self._tap_server = None
         
         # Merge provided config with loaded values instead of replacing them
         if config:
@@ -213,6 +225,7 @@ class CantinaOS:
             "CLAUDE_MODEL": os.getenv("CLAUDE_MODEL", "claude-sonnet-5"),
             "ELEVENLABS_API_KEY": os.getenv("ELEVENLABS_API_KEY", ""),
             "ELEVENLABS_VOICE_ID": os.getenv("ELEVENLABS_VOICE_ID", ""),
+            "ELEVENLABS_MODEL_ID": os.getenv("ELEVENLABS_MODEL_ID", ""),  # empty = eleven_v4_turbo
             "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o"),
             # Fast-router tuning. Thresholds are configuration, not constants inferred by
             # the runtime, so preserve them in the final config dictionary.
@@ -246,6 +259,8 @@ class CantinaOS:
             "SEMANTIC_MUSIC_NEGATIVE_WEIGHT": float(
                 os.getenv("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", "0.5")
             ),
+            "ENABLE_BEAT_ANALYSIS": os.getenv("ENABLE_BEAT_ANALYSIS", "true"),
+            "BEAT_CACHE_DIR": os.getenv("BEAT_CACHE_DIR", ""),
         }
         
         # Log only credential presence. Even masked fragments do not belong in terminal or
@@ -344,6 +359,13 @@ class CantinaOS:
             if cmd not in dispatcher.get_registered_commands():
                 dispatcher.register_command(cmd, "latency_tracker", EventTopics.LATENCY_COMMAND)
 
+        # Show system (show/SPEC.md): basic commands only. The timeline parses the rest of
+        # raw_input itself - "show list", "show stop", "show <id> [intensity] [speed]" - because
+        # compound registration matches by string prefix and carries arg limits (CLAUDE.md 3b).
+        for cmd in ["show", "freeze", "unfreeze"]:
+            if cmd not in dispatcher.get_registered_commands():
+                dispatcher.register_command(cmd, "timeline_executor_service", EventTopics.SHOW_COMMAND)
+
         # Note: Camera commands are auto-registered by VisionService decorators
         # (camera list, camera select, camera status)
 
@@ -358,6 +380,10 @@ class CantinaOS:
     async def _initialize_services(self) -> None:
         """Initialize all services."""
         self.logger.info("Initializing services")
+        if self._tap_server is None and os.environ.get("R3X_TAP_ENABLED", "1").lower() not in ("0", "false", "no", "off"):
+            self._tap_server = TapServer(self._event_bus, self._session)
+            if not await self._tap_server.start():
+                self._tap_server = None
         
         # Define the service initialization order
         service_order = [
@@ -382,12 +408,31 @@ class CantinaOS:
             "mode_change_sound",
             "music_controller",
             "eye_light_controller",  # Add eye light controller service for LED control
+            "chest_light_controller",  # Chest logic-panel lights (2nd Arduino); after the face so it can skip that port
             "sim_bridge",  # Streams face/body events to the 3D sim (sim/web); fail-open
             "debug",  # Add debug service for LLM response logging
             "textual_dashboard",  # Add textual dashboard service for TUI monitoring (before CLI)
             "cli"
         ]
-        
+        # Phase 2 (docs/plans/r3x-platform-architecture.md): r3x owns mic, STT and TTS and
+        # speaks CantinaOS's voice/speech topics over the tap. These three must not run too.
+        if os.environ.get("R3X_EXTERNAL_VOICE", "").lower() in ("1", "true", "yes", "on"):
+            external = ("mouse_input", "deepgram_direct_mic", "elevenlabs")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_VOICE: voice I/O is r3x's; not starting {', '.join(external)}")
+        # Phase 3: r3x-drivers own the face and chest LED boards; two owners of one serial
+        # port would fight, so CantinaOS's LED services stay down.
+        if os.environ.get("R3X_EXTERNAL_BODY", "").lower() in ("1", "true", "yes", "on"):
+            external = ("eye_light_controller", "chest_light_controller")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_BODY: LED boards are r3x's; not starting {', '.join(external)}")
+        # Phase 4: r3x plays music and sfx (`r3x-runtime --bridge --music rust`) and answers
+        # MusicController's topics over the tap; two players would double every track.
+        if os.environ.get("R3X_EXTERNAL_MUSIC", "").lower() in ("1", "true", "yes", "on"):
+            external = ("music_controller", "mode_change_sound")
+            service_order = [s for s in service_order if s not in external]
+            self.logger.info(f"R3X_EXTERNAL_MUSIC: music is r3x's; not starting {', '.join(external)}")
+
         try:
             # Initialize mode manager first - it's required by most services
             self.logger.info("Starting yoda_mode_manager service")
@@ -433,6 +478,12 @@ class CantinaOS:
                 self.logger.info(f"Stopped service: {service_name}")
             except Exception as e:
                 self.logger.error(f"Error stopping service {service_name}: {e}")
+
+        if self._tap_server is not None:
+            await self._tap_server.stop()
+            self._tap_server = None
+        if self._session_log is not None:
+            self._session_log.close()
 
         # Final log message before stopping the listener
         self.logger.info("DJ R3X Voice has been shut down.")
@@ -587,6 +638,7 @@ class CantinaOS:
             "vision": VisionService,
             "textual_dashboard": TextualDashboardService,
             "sim_bridge": SimBridgeService,
+            "chest_light_controller": ChestLightControllerService,
         }
         
         # Early return if service doesn't exist in map
@@ -655,6 +707,8 @@ class CantinaOS:
                 service_config["ELEVENLABS_API_KEY"] = self._config.get("ELEVENLABS_API_KEY", "")
             if "VOICE_ID" not in service_config:
                 service_config["VOICE_ID"] = self._config.get("ELEVENLABS_VOICE_ID", "")
+            if "MODEL_ID" not in service_config and self._config.get("ELEVENLABS_MODEL_ID"):
+                service_config["MODEL_ID"] = self._config["ELEVENLABS_MODEL_ID"]
                 
         elif service_name == "deepgram_direct_mic":
             # Ensure Deepgram service has API key and audio configuration
@@ -719,6 +773,10 @@ class CantinaOS:
             service_config["semantic_negative_weight"] = float(
                 self._config.get("SEMANTIC_MUSIC_NEGATIVE_WEIGHT", 0.5)
             )
+            # Offline tempo analysis (beat_analysis.py): a background process, cached per file.
+            beats_enabled = self._config.get("ENABLE_BEAT_ANALYSIS", "true")
+            service_config["enable_beat_analysis"] = str(beats_enabled).lower() == "true"
+            service_config["beat_cache_dir"] = self._config.get("BEAT_CACHE_DIR") or None
 
         elif service_name == "textual_dashboard":
             # Configure textual dashboard
@@ -771,10 +829,18 @@ class CantinaOS:
                     return None
                 service = service_class(self._event_bus, mode_manager, service_config)
                 return service
-            elif service_name == "sim_bridge":
-                # Read-only mode query so a sim that connects late learns the current mode
+            elif service_name == "chest_light_controller":
+                # Read-only query of the face board's port so the chest never probes it
                 service = service_class(self._event_bus, service_config,
-                                        self._services.get("yoda_mode_manager"))
+                                        self._services.get("eye_light_controller"))
+                return service
+            elif service_name == "sim_bridge":
+                # Read-only state queries so a panel that connects late learns the current
+                # mode, the music library and whether DJ mode is on (CLAUDE.md Pattern 2).
+                service = service_class(self._event_bus, service_config,
+                                        self._services.get("yoda_mode_manager"),
+                                        self._services.get("music_controller"),
+                                        self._services.get("brain_service"))
                 return service
             elif service_name == "claude":
                 # ClaudeService needs a reference to MemoryService for person profiles

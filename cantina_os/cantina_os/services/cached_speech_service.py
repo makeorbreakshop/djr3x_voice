@@ -28,6 +28,7 @@ import numpy as np
 from pydantic import BaseModel, Field, ValidationError
 
 from ..base_service import BaseService
+from .elevenlabs_service import DEFAULT_TTS_MODEL
 from cantina_os.core.event_topics import EventTopics
 from ..event_payloads import (
     ServiceStatus,
@@ -512,7 +513,7 @@ class CachedSpeechService(BaseService):
                 {
                     "text": text,
                     "request_id": request_id,
-                    "model_id": "eleven_v3",  # Use V3 for background DJ commentary (higher quality, 1.7-3.6s acceptable)
+                    "model_id": DEFAULT_TTS_MODEL,  # same voice model as live replies
                     "stability": 0.5,         # V3 requires discrete values: 0.0 (creative), 0.5 (natural), 1.0 (robust)
                     "non_streaming": True,    # We need the whole audio data for caching
                     "volume": 0.85,           # V3 generates hotter audio - reduce by 15% for level matching with V2.5

@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Start the whole DJ R3X: the Rust runtime (voice, brain, music, vision, performer, LED/servo
+# drivers - no CantinaOS) in the background, the control panel (3D R3X, push-to-talk, logs,
+# controls) in the browser, and the r3x CLI in this terminal (engage, record, help, ...).
+# `quit` or Ctrl-C stops everything.
+#
+#   ./r3x                 runtime + panel + CLI, opens the browser (runtime log: logs/r3x-runtime.log)
+#   ./r3x --logs          follow the runtime log here instead of the CLI
+#   ./r3x --click-anywhere  also a global left click toggles push-to-talk (Accessibility permission;
+#                         clicks on the panel's talk button stay the panel's)
+#   ./r3x --no-open       don't open a browser tab
+#   ./r3x --panel-only    just the panel (it runs its own demo until a backend connects)
+#   ./r3x --legacy        CantinaOS instead of the Rust runtime (its own CLI in this terminal)
+#   ./r3x -- ARGS         extra r3x-runtime arguments, e.g. -- --no-vision, -- --audio null
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="$ROOT/venv/bin/python"
+WEB="$ROOT/sim/web"
+PANEL_PORT="${R3X_PANEL_PORT:-5391}"
+BRIDGE_PORT="${SIM_BRIDGE_PORT:-8765}"
+GATEWAY_PORT="${R3X_GATEWAY_PORT:-8780}"
+PANEL_URL="http://localhost:$PANEL_PORT/"
+OPEN=1
+BACKEND=1
+LEGACY=0
+LOGS=0
+CLICK_ANYWHERE=0
+RUNTIME_ARGS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-open) OPEN=0 ;;
+    --panel-only) BACKEND=0 ;;
+    --legacy) LEGACY=1 ;;
+    --logs) LOGS=1 ;;
+    --click-anywhere) CLICK_ANYWHERE=1 ;;
+    --) shift; RUNTIME_ARGS=("$@"); break ;;
+    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+say() { printf '\033[38;5;208m[r3x]\033[0m %s\n' "$*"; }
+die() { printf '\033[31m[r3x]\033[0m %s\n' "$*" >&2; exit 1; }
+port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------- preflight
+command -v npm >/dev/null || die "npm not found - install Node.js first"
+if [ "$BACKEND" = 1 ] && [ "$LEGACY" = 1 ]; then
+  [ -x "$PY" ] || die "no virtualenv at $ROOT/venv - create it and pip install -r requirements.txt"
+  [ -f "$ROOT/.env" ] || die "no .env at $ROOT/.env (API keys)"
+  if port_busy "$BRIDGE_PORT"; then
+    die "port $BRIDGE_PORT is taken - is CantinaOS already running? (lsof -iTCP:$BRIDGE_PORT)"
+  fi
+elif [ "$BACKEND" = 1 ]; then
+  command -v cargo >/dev/null || die "cargo not found - install Rust (rustup.rs) first"
+  [ -f "$ROOT/.env" ] || say "no .env at $ROOT/.env - voice needs DEEPGRAM/ELEVENLABS keys, the brain ANTHROPIC or OPENROUTER"
+  if port_busy "$GATEWAY_PORT"; then
+    die "port $GATEWAY_PORT is taken - is r3x-runtime already running? (lsof -iTCP:$GATEWAY_PORT)"
+  fi
+fi
+if [ ! -d "$WEB/node_modules" ]; then
+  say "installing panel dependencies (first run)"
+  npm --prefix "$WEB" install --silent
+fi
+WASM="$WEB/src/wasm/r3x_performer_bg.wasm"
+if [ ! -f "$WASM" ] || [ -n "$(find "$ROOT/rust/crates/r3x-performer-core" "$ROOT/rust/crates/r3x-performer-wasm" "$ROOT/rust/crates/r3x-motion" -newer "$WASM" -name '*.rs' -print -quit 2>/dev/null)" ]; then
+  command -v wasm-pack >/dev/null || die "wasm-pack not found - cargo install wasm-pack"
+  say "building the panel's WASM performer"
+  npm --prefix "$WEB" run -s build:wasm >/dev/null 2>&1 || die "WASM build failed - run: npm --prefix sim/web run build:wasm"
+fi
+[ -f "$WEB/public/model/r3x.glb" ] || say "no 3D model yet - the panel works, but build R3X with sim/model/build.sh to see him"
+mkdir -p "$ROOT/logs"
+
+# ---------------------------------------------------------------- panel
+PANEL_PID=""
+RUNTIME_PID=""
+cleanup() {
+  trap - EXIT INT TERM
+  if [ -n "$RUNTIME_PID" ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
+    say "stopping r3x-runtime"
+    kill -INT "$RUNTIME_PID" 2>/dev/null || true
+    for _ in $(seq 1 20); do kill -0 "$RUNTIME_PID" 2>/dev/null || break; sleep 0.25; done
+    kill -TERM "$RUNTIME_PID" 2>/dev/null || true
+  fi
+  # The runtime leads its own process group: whatever it left behind (the camera's ffmpeg if
+  # it died hard) goes with it.
+  if [ -n "$RUNTIME_PID" ]; then
+    kill -TERM -- "-$RUNTIME_PID" 2>/dev/null || true
+  fi
+  if [ -n "$PANEL_PID" ]; then
+    pkill -P "$PANEL_PID" 2>/dev/null || true
+    kill "$PANEL_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
+if port_busy "$PANEL_PORT"; then
+  say "panel already running on $PANEL_URL - reusing it"
+else
+  npm --prefix "$WEB" run dev -- --port "$PANEL_PORT" --strictPort >"$ROOT/logs/panel.log" 2>&1 &
+  PANEL_PID=$!
+  for _ in $(seq 1 60); do
+    port_busy "$PANEL_PORT" && break
+    kill -0 "$PANEL_PID" 2>/dev/null || die "panel failed to start - see logs/panel.log"
+    sleep 0.25
+  done
+  port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
+fi
+# The backend's websockets need a token and an allowed Origin. One local token for both
+# backends (~/.config/dj-r3x/tap_token, 0600, as r3x-runtime and cantina_os/tap/auth.py make
+# it). The panel gets it in the URL fragment (never sent to a server) and keeps it.
+TOKEN_FILE="${R3X_TOKEN_FILE:-$HOME/.config/dj-r3x/tap_token}"
+if [ -n "${R3X_TAP_TOKEN:-}" ]; then
+  R3X_TOKEN="$R3X_TAP_TOKEN"
+else
+  if [ ! -s "$TOKEN_FILE" ]; then
+    mkdir -p "$(dirname "$TOKEN_FILE")"
+    (umask 077 && head -c 32 /dev/urandom | xxd -p -c 64 > "$TOKEN_FILE") || die "could not create $TOKEN_FILE"
+  fi
+  R3X_TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
+fi
+[ -n "$R3X_TOKEN" ] || die "empty access token in $TOKEN_FILE"
+export R3X_TAP_TOKEN="$R3X_TOKEN"
+export R3X_ALLOWED_ORIGINS="${R3X_ALLOWED_ORIGINS:+$R3X_ALLOWED_ORIGINS,}http://localhost:$PANEL_PORT,http://127.0.0.1:$PANEL_PORT"
+# ?legacy: the panel also shows CantinaOS's SimBridge feed (it doesn't exist standalone).
+PANEL_QUERY=""
+[ "$LEGACY" = 1 ] && PANEL_QUERY="?legacy"
+PANEL_LINK="$PANEL_URL$PANEL_QUERY#token=$R3X_TOKEN"
+if [ "$OPEN" = 1 ]; then
+  say "panel: $PANEL_URL (opening it with the access token)"
+  open "$PANEL_LINK"
+else
+  say "panel: $PANEL_LINK"
+fi
+
+# ---------------------------------------------------------------- backend
+if [ "$BACKEND" = 0 ]; then
+  if [ -z "$PANEL_PID" ]; then
+    exit 0  # an already-running panel belongs to whoever started it
+  fi
+  say "panel only - Ctrl-C to stop"
+  wait "$PANEL_PID"
+  exit 0
+fi
+
+if [ "$LEGACY" = 0 ]; then
+  # Build (incrementally) and run the Rust runtime. Push-to-talk is the panel's button (click
+  # to talk, click to send) or Space held down. `--click-anywhere` adds the global left click
+  # (feature `mouse`; needs Accessibility for Terminal.app, without it the click is simply off).
+  MOUSE_ARGS=()
+  [ "$CLICK_ANYWHERE" = 1 ] && MOUSE_ARGS=(--mouse)
+  # Cargo only recompiles what changed; say so only when that takes a noticeable while.
+  ( sleep 2; say "compiling changed code (only after an update; the very first build takes a few minutes)" ) &
+  BUILD_NOTE=$!
+  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime -p r3x-cli --features r3x-runtime/mouse -q \
+    || { kill "$BUILD_NOTE" 2>/dev/null; die "r3x-runtime did not build"; }
+  kill "$BUILD_NOTE" 2>/dev/null; wait "$BUILD_NOTE" 2>/dev/null || true
+  LOG="$ROOT/logs/r3x-runtime.log"
+  set -m  # own process group (pgid = its pid), so cleanup can stop its children too
+  "$ROOT/rust/target/release/r3x-runtime" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
+    ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} >"$LOG" 2>&1 </dev/null &
+  RUNTIME_PID=$!
+  set +m
+  say "r3x-runtime starting on :$GATEWAY_PORT - log: logs/r3x-runtime.log (tail -f it, or ./r3x --logs)"
+  for _ in $(seq 1 240); do
+    port_busy "$GATEWAY_PORT" && break
+    kill -0 "$RUNTIME_PID" 2>/dev/null || { tail -20 "$LOG" >&2; RUNTIME_PID=""; die "r3x-runtime exited during startup (above: the end of $LOG)"; }
+    sleep 0.25
+  done
+  port_busy "$GATEWAY_PORT" || die "r3x-runtime did not open :$GATEWAY_PORT - see $LOG"
+  if [ "$LOGS" = 1 ]; then
+    say "following the runtime log - Ctrl-C stops everything"
+    tail -n +1 -f "$LOG" &
+    TAIL_PID=$!
+    wait "$RUNTIME_PID" || true
+    kill "$TAIL_PID" 2>/dev/null || true
+  else
+    set +e
+    "$ROOT/rust/target/release/r3x-cli" --url "ws://127.0.0.1:$GATEWAY_PORT/"
+    set -e
+  fi
+  exit 0
+fi
+
+cd "$ROOT/cantina_os"
+
+# Reinstall Python deps only when cantina_os/requirements.txt changes (checksum stamp). A
+# sentinel that never expired is how `anthropic` once sat months behind requirements.txt.
+REQ_STAMP=".requirements_installed"
+REQ_HASH="$(shasum -a 256 requirements.txt | awk '{print $1}')"
+if [ "$(cat "$REQ_STAMP" 2>/dev/null)" != "$REQ_HASH" ]; then
+  say "installing CantinaOS dependencies (requirements.txt changed)"
+  if "$ROOT/venv/bin/pip" install -q -r requirements.txt; then
+    echo "$REQ_HASH" > "$REQ_STAMP"
+  else
+    say "dependency install failed - continuing with the existing venv"  # unstamped: retried next run
+  fi
+fi
+
+# python-vlc loads libvlc from VLC.app; without these MusicControllerService can't find it.
+if [ -d /Applications/VLC.app ]; then
+  export VLC_PLUGIN_PATH="/Applications/VLC.app/Contents/MacOS/plugins"
+  export DYLD_LIBRARY_PATH="/Applications/VLC.app/Contents/MacOS/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+fi
+
+say "starting CantinaOS (full log: logs/dj_r3x_*.log) - Ctrl-C stops everything"
+set +e
+"$PY" -m cantina_os.main
+status=$?
+set -e
+say "CantinaOS exited ($status)"
+exit "$status"

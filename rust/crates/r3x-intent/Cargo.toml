@@ -1,0 +1,19 @@
+[package]
+name = "r3x-intent"
+description = "Jev fast intent router: client, question catalogue, three-read decision rule, speculation, dedup gate"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-llm = { path = "../r3x-llm" }
+tokio.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+tracing.workspace = true
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
+regex = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

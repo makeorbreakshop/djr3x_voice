@@ -20,6 +20,7 @@ from typing import Dict, Any, Optional, List
 
 from ..base_service import BaseService
 from ..core.event_topics import EventTopics
+from ..core.event_payloads import ShowPerformPayload
 from ..core.fast_router_gate import GATE
 from ..core.music_search import parse_semantic_request
 from ..core.track_request import naming_phrase
@@ -66,6 +67,8 @@ class IntentRouterService(BaseService):
             "dj_mode_off": self._handle_dj_mode_off_intent,
             # Alias: the fast router's name for the same action as set_eye_color.
             "set_eye_animation": self._handle_set_eye_color_intent,
+            # Claude's perform_show tool: hand the routine to the r3x performer.
+            "perform_show": self._handle_perform_show_intent,
         }
         #: Set by MUSIC_PLAYBACK_STARTED, cleared before each play dispatch. This is how the
         #: execution result learns the track that *actually* started, which is rarely the one
@@ -601,6 +604,19 @@ class IntentRouterService(BaseService):
                 "success": False,
                 "error": f"Failed to set eye color: {str(e)}"
             }
+
+    async def _handle_perform_show_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
+        """Handle Claude's perform_show tool: emit show.perform with source "claude".
+
+        The timeline enforces tiers and reports on show.started / show.ended. The tool call's
+        own spoken reply is Claude's main turn, so ClaudeService skips verbal feedback for it.
+        """
+        item_id = str(parameters.get("id") or "").strip()
+        if not item_id:
+            return {"success": False, "message": "No routine id"}
+        payload = ShowPerformPayload(id=item_id, source="claude", conversation_id=conversation_id)
+        await self.emit(EventTopics.SHOW_PERFORM, payload.model_dump())
+        return {"success": True, "id": item_id, "message": f"Performing {item_id}"}
 
     async def _handle_analyze_scene_intent(self, parameters: Dict[str, Any], conversation_id: Optional[str]) -> Dict[str, Any]:
         """

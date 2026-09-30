@@ -1,0 +1,19 @@
+[package]
+name = "r3x-drivers"
+description = "Hardware drivers fed by the performer: face/chest LED serial boards (named_v1), virtual frames, r3x_servo controller, Maestro/PCA9685 dumb sinks."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+r3x-performer-core = { path = "../r3x-performer-core" }
+r3x-motion = { path = "../r3x-motion" }
+serde_json.workspace = true
+tracing.workspace = true
+serialport = { version = "4", default-features = false }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

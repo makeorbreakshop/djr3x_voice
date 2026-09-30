@@ -217,6 +217,22 @@ class SpeechGenerationCompletePayload(BaseEventPayload):
     )
 
 
+class SpeechAlignmentPayload(BaseEventPayload):
+    """Per-character timing for one chunk of a spoken reply.
+
+    Times are milliseconds from the start of the reply's audio. ``audio_t0`` is the wall
+    clock (epoch seconds) when that audio started playing, so ``audio_t0 + start/1000`` is
+    when a character is heard, give or take the output device's latency.
+    """
+
+    text: str = Field(..., description="The full reply being spoken")
+    chars: List[str] = Field(default_factory=list, description="Characters covered by this chunk")
+    char_start_ms: List[float] = Field(default_factory=list, description="Start of each char, ms from audio start")
+    char_duration_ms: List[float] = Field(default_factory=list, description="Duration of each char, ms")
+    audio_t0: float = Field(..., description="Epoch seconds when the reply's first audio was written")
+    clip_id: Optional[str] = Field(None, description="Clip ID, when the line came from a plan")
+
+
 class SpeechAmplitudePayload(BaseEventPayload):
     """Payload for speech amplitude events during synthesis."""
 

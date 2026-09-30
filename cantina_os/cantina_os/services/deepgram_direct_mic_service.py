@@ -24,6 +24,7 @@ from deepgram.extensions.types.sockets import ListenV1ControlMessage
 from cantina_os.base_service import BaseService
 from cantina_os.core.event_bus import EventBus
 from cantina_os.core.event_topics import EventTopics
+from cantina_os.tap import fixtures as tap_fixtures
 from cantina_os.event_payloads import (
     TranscriptionTextPayload,
     ServiceStatusPayload,
@@ -474,6 +475,9 @@ class DeepgramDirectMicService(BaseService):
                 words=processed_words or None,
                 conversation_id=self._current_conversation_id
             ).model_dump()
+            fx = tap_fixtures.get()  # Phase 0: record transcripts when R3X_FIXTURES=record
+            if fx is not None:
+                fx.transcript(payload)
 
             self._event_loop.call_soon_threadsafe(
                 lambda data=payload, topic=event_topic: asyncio.create_task(

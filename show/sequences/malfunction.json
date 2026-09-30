@@ -1,0 +1,24 @@
+{
+  "id": "malfunction",
+  "kind": "sequence",
+  "title": "Malfunction",
+  "description": "Signature breakdown: glitch cascade, power-down slump, then a stuttering reboot",
+  "tags": ["malfunction", "glitch", "breakdown", "bzzt"],
+  "tier": "show",
+  "clock": "time",
+  "layer": "show",
+  "owns": ["head_pan", "head_tilt", "head_lift", "visor", "hero_shoulder", "hero_wrist", "torso_top"],
+  "track": [
+    {"at": 0, "cue": "glitch_small"},
+    {"at": 0.9, "clip": "glitch_twitch", "intensity": 1.3},
+    {"at": 1.0, "do": "eyes", "pattern": "thinking", "duration": 1.2},
+    {"at": 1.3, "do": "speak", "text": "Whoa, whoa... bzzt... loose wire!"},
+    {"at": 2.0, "cue": "glitch_small"},
+    {"at": 2.8, "clip": "power_down_slump"},
+    {"at": 2.8, "do": "chest", "command": "X3", "hold": 2.2},
+    {"at": 2.8, "do": "lights", "cue": "blackout", "fade": 1.5, "hold": 3.4},
+    {"at": 3.2, "do": "eyes", "pattern": "idle"},
+    {"at": 5.0, "do": "chest", "command": "X2", "hold": 1.3},
+    {"at": 6.3, "cue": "power_on"}
+  ]
+}

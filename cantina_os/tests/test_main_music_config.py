@@ -20,6 +20,26 @@ def test_semantic_music_environment_reaches_the_controller(monkeypatch) -> None:
     assert service.config["semantic_negative_weight"] == 0.75
 
 
+def test_beat_analysis_environment_reaches_the_controller(monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_BEAT_ANALYSIS", "false")
+    monkeypatch.setenv("BEAT_CACHE_DIR", "/tmp/r3x-beats")
+    monkeypatch.setattr(main_module, "MusicControllerService", CapturingMusicController)
+
+    service = main_module.CantinaOS()._create_service("music_controller")
+
+    assert service.config["enable_beat_analysis"] is False
+    assert service.config["beat_cache_dir"] == "/tmp/r3x-beats"
+
+
+def test_beat_analysis_is_on_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("ENABLE_BEAT_ANALYSIS", raising=False)
+    monkeypatch.setattr(main_module, "MusicControllerService", CapturingMusicController)
+
+    service = main_module.CantinaOS()._create_service("music_controller")
+
+    assert service.config["enable_beat_analysis"] is True
+
+
 def test_jev_environment_survives_final_config_assembly(monkeypatch) -> None:
     monkeypatch.setenv("TYPESAFE_API_KEY", "jev-secret")
     monkeypatch.setenv("JEV_CONFIDENCE_THRESHOLD", "0.91")

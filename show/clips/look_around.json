@@ -1,0 +1,15 @@
+{
+  "id": "look_around",
+  "kind": "clip",
+  "title": "Look around",
+  "description": "Looks around the room, left then right, body following",
+  "tags": ["look around", "scan", "idle"],
+  "tier": "free",
+  "duration": 5.2,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.9, -35], [1.9, -35], [3.0, 30], [4.0, 30], [5.0, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.9, -4], [1.9, -4], [3.0, 2], [4.0, 2], [5.0, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.2, -8], [2.0, -8], [3.3, 7], [4.2, 7], [5.2, 0]]}
+  }
+}

@@ -1,0 +1,46 @@
+[package]
+name = "r3x-runtime"
+description = "The r3x binary: bus, gateway, ops, stage manager; --bridge to a running CantinaOS"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "r3x-runtime"
+path = "src/main.rs"
+
+[features]
+# Global left-click push-to-talk (`--mouse`; macOS Accessibility permission).
+mouse = ["r3x-voice/mouse"]
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+r3x-ops.workspace = true
+r3x-stage.workspace = true
+r3x-gateway.workspace = true
+r3x-performer-core = { path = "../r3x-performer-core" }
+r3x-drivers = { path = "../r3x-drivers" }
+r3x-voice = { path = "../r3x-voice" }
+r3x-audio = { path = "../r3x-audio" }
+r3x-music = { path = "../r3x-music" }
+r3x-brain = { path = "../r3x-brain" }
+r3x-llm = { path = "../r3x-llm" }
+r3x-intent = { path = "../r3x-intent" }
+r3x-memory = { path = "../r3x-memory" }
+r3x-vision = { path = "../r3x-vision" }
+tokio = { workspace = true, features = ["signal"] }
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+axum.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+base64 = "0.23"
+regex = "1"

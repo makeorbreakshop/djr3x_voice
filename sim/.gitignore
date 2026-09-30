@@ -8,3 +8,14 @@ web/dist/
 web/public/draco/
 web/public/basis/
 web/public/shows/
+
+# Model build intermediates (raw GLB, baked PNGs, KTX2 cache) and the KTX2 transcoder.
+model/.work/
+web/public/basis/
+
+# Render regression harness (scripts/render-harness.mjs): renders of the kit-derived model.
+web/.render-out/
+web/.render-baselines/
+
+# wasm-pack output of rust/crates/r3x-performer-wasm (npm run build:wasm).
+web/src/wasm/

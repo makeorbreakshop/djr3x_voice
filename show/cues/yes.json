@@ -1,0 +1,9 @@
+{
+  "id": "yes",
+  "kind": "cue",
+  "title": "Yes",
+  "description": "Nods yes with a green flash",
+  "tags": ["yes", "agree", "ok"],
+  "tier": "free",
+  "actions": [{"at": 0, "do": "clip", "id": "nod"}, {"at": 0.1, "do": "eyes", "pattern": "flash", "duration": 0.6}, {"at": 0.1, "do": "chest", "command": "SF"}]
+}

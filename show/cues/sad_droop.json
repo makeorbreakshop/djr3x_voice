@@ -1,0 +1,13 @@
+{
+  "id": "sad_droop",
+  "kind": "cue",
+  "title": "Sad droop",
+  "description": "Droops sadly: sinks, visor half shut, chest dims",
+  "tags": ["sad", "sorry", "aww"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "droop"},
+    {"at": 0, "do": "eyes", "pattern": "idle", "duration": 3.5},
+    {"at": 0, "do": "chest", "command": "X2", "hold": 3.5}
+  ]
+}

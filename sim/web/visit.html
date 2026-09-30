@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meet DJ R3X</title>
+    <style>
+      :root { color-scheme: dark; --bg: #030203; --fg: #e8e6df; --dim: #8a8f99; --accent: #f0a030; --live: #e0483a; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+      #stage { position: fixed; inset: 0; }
+      #stage canvas { display: block; }
+      #hud { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+        display: grid; gap: 10px; justify-items: center; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7) 40%); }
+      #caption { max-width: 640px; text-align: center; min-height: 1.4em; text-shadow: 0 1px 3px #000; }
+      #caption .you { color: var(--dim); display: block; font-size: 13px; }
+      .row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; max-width: 640px; }
+      button, input { font: inherit; color: var(--fg); background: rgba(20, 20, 24, 0.8); border: 1px solid #444; border-radius: 8px; padding: 6px 10px; }
+      button { cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: default; }
+      #talk { padding: 12px 22px; border: 2px solid var(--accent); border-radius: 999px; touch-action: none; user-select: none; }
+      #talk[data-state='listening'] { background: var(--live); border-color: var(--live); }
+      #say { display: flex; gap: 6px; width: min(420px, 100%); }
+      #say input { flex: 1; min-width: 0; }
+      #status { color: var(--dim); font-size: 12px; }
+      [hidden] { display: none !important; }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--dim); }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="loading">Waking R3X up…</div>
+    <div id="hud">
+      <div id="caption" aria-live="polite"></div>
+      <div id="emotes" class="row" aria-label="Emotes"></div>
+      <div id="voice" class="row" hidden>
+        <button id="talk">Hold to talk</button>
+        <form id="say"><input id="say-text" maxlength="300" placeholder="…or type to R3X" autocomplete="off" /><button>Say</button></form>
+      </div>
+      <div id="status"></div>
+    </div>
+    <script type="module" src="/src/visit/page.ts"></script>
+  </body>
+</html>

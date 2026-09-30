@@ -19,6 +19,10 @@ class MusicTrack(BaseModel):
     artist: Optional[str] = Field(default=None, description="Artist name if available")
     album: Optional[str] = Field(default=None, description="Album name if available")
     genre: Optional[str] = Field(default=None, description="Genre of the track if available")
+    # Offline beat analysis (music_controller_service/beat_analysis.py). None = not analysed
+    # yet, or no tempo found; every consumer falls back to its own default.
+    bpm: Optional[float] = Field(default=None, description="Tempo in beats per minute, if analysed")
+    first_beat_s: Optional[float] = Field(default=None, description="Beat-grid phase: seconds to beat 0, if analysed")
     
     def __str__(self) -> str:
         """String representation of the track."""

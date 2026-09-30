@@ -1,0 +1,14 @@
+{
+  "id": "power_on",
+  "kind": "cue",
+  "title": "Power on",
+  "description": "Boot-up: stutters upright, chest boot sweep, synth, eyes flash",
+  "tags": ["boot", "power on", "wake up"],
+  "tier": "cheap",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "power_up"},
+    {"at": 0, "do": "chest", "command": "X1", "hold": 2.4},
+    {"at": 0.3, "do": "sfx", "id": "synth"},
+    {"at": 1.9, "do": "eyes", "pattern": "flash", "duration": 0.8}
+  ]
+}

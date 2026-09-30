@@ -1,0 +1,26 @@
+{
+  "_doc": "Joint limits from the generated (gitignored) public/model/rig.json, committed so the show linter runs without the model. test/show.test.ts asserts they still match rig.json whenever it exists; rebuild the model and update this table together.",
+  "joints": {
+    "torso_lower": { "min": -35, "max": 35, "type": "revolute" },
+    "poker_shoulder": { "min": -45, "max": 35, "type": "revolute" },
+    "poker_wrist": { "min": -40, "max": 40, "type": "revolute" },
+    "poker_claw_upper": { "min": -5, "max": 30, "type": "revolute" },
+    "poker_claw_lower": { "min": -5, "max": 30, "type": "revolute" },
+    "torso_middle": { "min": -60, "max": 60, "type": "revolute" },
+    "throttle_shoulder": { "min": -50, "max": 50, "type": "revolute" },
+    "throttle_elbow": { "min": -60, "max": 45, "type": "revolute" },
+    "throttle_wrist": { "min": -60, "max": 60, "type": "revolute" },
+    "throttle_claw_a": { "min": -5, "max": 30, "type": "revolute" },
+    "throttle_claw_b": { "min": -5, "max": 30, "type": "revolute" },
+    "torso_top": { "min": -30, "max": 30, "type": "revolute" },
+    "hero_shoulder": { "min": -35, "max": 45, "type": "revolute" },
+    "hero_wrist": { "min": -90, "max": 90, "type": "revolute" },
+    "hero_claw_l": { "min": -5, "max": 30, "type": "revolute" },
+    "hero_claw_r": { "min": -5, "max": 30, "type": "revolute" },
+    "hero_claw_t": { "min": -5, "max": 30, "type": "revolute" },
+    "head_lift": { "min": -20, "max": 20, "type": "prismatic" },
+    "head_pan": { "min": -70, "max": 70, "type": "revolute" },
+    "head_tilt": { "min": -20, "max": 25, "type": "revolute" },
+    "visor": { "min": -15, "max": 30, "type": "revolute" }
+  }
+}

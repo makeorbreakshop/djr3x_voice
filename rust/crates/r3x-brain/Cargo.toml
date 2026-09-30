@@ -1,0 +1,25 @@
+[package]
+name = "r3x-brain"
+description = "Turns (router + Claude + dedup), tool dispatch, show-tag parser/scheduler, plan executor (layers), DJ planner and commentary cache"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-contracts.workspace = true
+r3x-bus.workspace = true
+r3x-ops.workspace = true
+r3x-llm = { path = "../r3x-llm" }
+r3x-intent = { path = "../r3x-intent" }
+r3x-memory = { path = "../r3x-memory" }
+r3x-performer-core = { path = "../r3x-performer-core" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+regex = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

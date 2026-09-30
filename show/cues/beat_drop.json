@@ -1,0 +1,18 @@
+{
+  "id": "beat_drop",
+  "kind": "cue",
+  "title": "Beat drop",
+  "description": "Half a second of dark stillness, then everything hits at once",
+  "tags": ["drop", "beat drop", "hit"],
+  "tier": "cheap",
+  "actions": [
+    {"at": 0, "do": "lights", "cue": "blackout", "fade": 0.05, "hold": 0.5},
+    {"at": 0, "do": "chest", "command": "X2", "hold": 0.5},
+    {"at": 0.4, "do": "sfx", "id": "scratch"},
+    {"at": 0.5, "do": "clip", "id": "visor_flip"},
+    {"at": 0.5, "do": "clip", "id": "beat_headbang"},
+    {"at": 0.5, "do": "lights", "cue": "red_flash", "fade": 0, "hold": 1.5},
+    {"at": 0.5, "do": "chest", "command": "B200", "hold": 1.5},
+    {"at": 0.5, "do": "eyes", "pattern": "flash", "duration": 0.6}
+  ]
+}

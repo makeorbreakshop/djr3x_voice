@@ -50,14 +50,20 @@ The new architecture implements strict service decoupling with event-only inter-
 - `ClaudeService`: Transcription → Claude Haiku/Sonnet → Intent routing (replaces GPTService)
 - `GPTService`: Legacy OpenAI LLM (deprecated, ClaudeService preferred)
 - `ElevenLabsService`: LLM response → TTS synthesis with streaming playback
-- `EyeLightControllerService`: Arduino LED control via serial
+- `EyeLightControllerService`: Arduino LED control via serial (face: eyes + mouth)
+- `ChestLightControllerService`: second Arduino (`cantina_os/arduino/rex_chest_v1`) for the
+  chest logic panels - mirrors the eye states, speech amplitude, music tempo, and shows
+  machine status (boot sweep, per-subsystem health windows, fault alarm). Every command is
+  also emitted on `CHEST_COMMAND`. Fail-open to mock mode.
+- `SimBridgeService`: read-only websocket (127.0.0.1:8765) feeding the 3D digital twin in
+  `sim/` (see `sim/README.md`). Fail-open.
 - `MusicControllerService`: Music playback with mode-aware behavior and ducking
 - `YodaModeManagerService`: System mode transitions (IDLE, AMBIENT, INTERACTIVE)
 - `BrainService`: High-level orchestration for DJ mode planning
 - `NervousSystemService`: Real-time operational state (sensor readings, runtime context)
 - `MemoryService`: Long-term memory (person profiles, event timeline)
 - `VisionService`: Scene understanding and continuous face recognition
-- `TimelineExecutorService`: Layered timeline execution for coordinated audio sequences
+- `TimelineExecutorService`: Layered timeline execution for coordinated audio sequences; also hosts the show player (section 3c)
 - `CachedSpeechService`: Pre-rendered speech caching for DJ commentary
 - `CLIService`: Command-line interface
 - `CommandDispatcherService`: Command routing from CLI/voice
@@ -326,6 +332,79 @@ partial transcript matches - the common case for short commands.
    - `next_track` still dispatches correctly and still does nothing outside DJ mode:
      `dj next` is the only skip capability and BrainService refuses it, because
      MusicControllerService understands only "play" and "stop". Open gap.
+
+---
+
+## 3c. The Show System (gestures, cues, sequences)
+
+**Contract: `show/SPEC.md`** (shared with the sim). Content lives in the repo-root `show/`:
+`clips/` (motion only), `cues/` (one moment across departments), `sequences/` (a timeline of
+cues/clips/actions on a `time` or `beat` clock), `idle.json`. `SHOW_DIR` overrides the folder.
+`show/tests/golden/*.json` are **hand-written** parity expectations - never regenerate them.
+
+| Where | What |
+|---|---|
+| `cantina_os/show/` | models, tolerant loader (missing/empty folder is fine), validation incl. tier rules, `expand()` (golden parity), Claude catalogue, tag parser/scheduler |
+| `rust/` r3x performer (`cargo run -p r3x-runtime -- --bridge`) | **the only player since Phase 3.** The Python `show_player.py` is deleted; CantinaOS emits `show.perform`/`show.stop`/`motion.freeze` and the bridge, attached to the bus tap, emits `show.started`/`ended`, `show.sfx`, `stage.lights`, the show's `tts.generate.request` (`clip_id` `show-…`), ducking and - only while CantinaOS owns the boards - `eye.command`/`chest.override` back onto the bus (source `tap:r3x`). No runtime = no shows. `R3X_EXTERNAL_BODY=1` stops `eye_light_controller`/`chest_light_controller` so r3x-drivers own the serial ports |
+
+**Topics** (Pydantic payloads in `core/event_payloads.py`, all forwarded by SimBridge):
+`show.perform {id, params?, source, conversation_id?}`, `show.stop {id?|layer?|all?}`,
+`show.started` / `show.ended {id, kind, source, run_id, reason: done|interrupted|rejected}`,
+`show.motion`, `show.sfx`, `stage.lights`, `chest.override {command, hold}` (the chest service
+sends it, then returns to status after `hold`), `motion.freeze {on}` (stops every run and
+refuses new ones; the chest holds its state). Cue `eyes` use the existing `EYE_COMMAND`, `speak`
+uses `TTS_GENERATE_REQUEST`, `duck`/`unduck` the existing ducking events.
+
+**Clock** (now the performer's; kept as the behaviour contract). Every item is scheduled against a monotonic clock anchored at the start - never by
+accumulated sleeps. `beat` clocks chase the live tempo (`MUSIC_PLAYBACK_STARTED` `track.bpm`,
+when a track has one; else the sequence's `bpm`). `wait for speech_end` pauses every clock in
+the run, so everything later slides. A run's own `speak` line queued behind Claude's reply
+(ElevenLabs is one FIFO) holds the wait until *that line* ends; if nothing is speaking and the
+line never starts, the wait gives up after 1.5 s (`NO_SPEECH_GRACE_S`, = the sim's
+`waitGraceS`); a hard ceiling (30 s + line budgets) rules out a deadlock. Nesting <= 3 levels below the root. A new run on the same
+layer (`show`, `gesture`; lone clips/cues run on `gesture`) ends the current one, queued while
+a clip is inside its `interruptible_after`.
+
+**Live BPM source.** `music_controller_service/beat_analysis.py`: librosa `beat_track` tempo and
+beat-grid phase per local file, cached as JSON in `~/.cache/dj-r3x/beats/` keyed by path + mtime
++ size + analyser version. It runs in a separate, niced *process* over files the cache does
+not know (never on the playback path; ~16 s for the 22-track library, once), fails open to no
+bpm, and lands on `MusicTrack.bpm`/`first_beat_s` -> `TrackDataPayload` ->
+`MUSIC_PLAYBACK_STARTED` (a crossfade now announces its new track too). Followers: the show
+player's beat clock, the chest (`CHEST_DEFAULT_BPM` only when unknown) and the sim's light
+desk/bop loops. Env: `ENABLE_BEAT_ANALYSIS` (true), `BEAT_CACHE_DIR`. Known limit: octave
+ambiguity (e.g. a 92 vs 184 bpm reading). Upgrade path, deliberately not added yet (torch-scale
+deps): **Beat This!** (CPJKU, ISMIR 2024) or **All-In-One** (`allin1`, also gives sections for
+phrase-aligned transitions) behind `analyze_file` with an `ANALYZER_VERSION` bump.
+
+**Tiers by `source`**: `jev` <= cheap, `idle` = free, `claude`/`timeline`/`ui`/`cli` <= show.
+A violation emits only `show.ended reason=rejected`. Validation also forbids an item including
+a higher-tier item.
+
+**Claude.** A sorted catalogue of valid free/cheap clips and cues (+ cheap/show routines) is
+appended to the *cached* system prompt once at startup - new files reach Claude on restart,
+the timeline and CLI immediately. Claude may write `{cue:<id>}` / `{clip:<id>}` inline (max two
+per reply). `ClaudeService` strips them from the stream (an unclosed `{` is held across chunks),
+so the bus, CLI and TTS only ever see clean text; `SessionMemory` keeps the tagged text. On
+`SPEECH_GENERATION_STARTED` for that conversation, each tag fires `show.perform
+{source: "claude"}` at `char_offset / SHOW_TAG_CHARS_PER_SEC` (19, measured from real R3X speech). `show/tags.py
+timer_for_speech()` is the seam for ElevenLabs character timestamps. Routines use the
+`perform_show` tool (registered only when routines exist; no verbal-feedback turn). Under the
+Jev dedup (`tool_choice: none`) tags still work; the tool does not.
+
+**Plans**: step types `perform {id}` and `sequence {id}` (never fail a plan - BrainService
+treats a failed plan as a failed DJ transition). The timeline validates the id locally, emits
+`show.perform {source: timeline}` and, with `wait_for_completion`, awaits that id's
+`show.ended` from source `timeline` (60 s cap). DJ start emits `sequence dj_intro`
+(`optional`) on the `show` plan layer.
+
+**CLI**: `show [list]`, `show <id> [intensity] [speed]`, `show stop [id|show|gesture|all]`,
+`show reload`, `freeze`, `unfreeze`. Registered as basic commands; the timeline parses
+`raw_input` itself (compound registration prefix-matches and carries `max_args`, see 3b).
+`show list` shows runs from `show.started`/`ended`; a cli-sourced `rejected` is replied as a refusal.
+
+**Smoke**: `env -u ANTHROPIC_BASE_URL ../venv/bin/python scripts/system_smoke_run.py --show`
+(writes a temp show set when `show/` is empty; `--with-tts` for real ElevenLabs).
 
 ---
 
@@ -677,6 +756,13 @@ seven call sites pass it. That pin is unrelated to the provider choice.
      `JEV_COMMAND_THRESHOLD` (0.5), `JEV_TIMEOUT_S` (0.8), `JEV_SPECULATE`,
      `FAST_ROUTER_WAIT_S` (1.2)
    - Hardware: `ARDUINO_SERIAL_PORT`, `ARDUINO_BAUD_RATE`, `FORCE_MOCK_LED_CONTROLLER`
+   - Chest board: `CHEST_SERIAL_PORT` (set it, and `ARDUINO_SERIAL_PORT`, whenever both
+     Arduinos are plugged in - the face auto-detect takes the first Arduino it sees),
+     `CHEST_ENABLED`, `FORCE_MOCK_CHEST`, `CHEST_DEFAULT_BPM` (120), `CHEST_FAULT_HOLD_S` (60)
+   - 3D sim link: `SIM_BRIDGE_ENABLED`, `SIM_BRIDGE_HOST`, `SIM_BRIDGE_PORT`
+   - Launching CantinaOS from a Claude Code shell: that shell exports `ANTHROPIC_BASE_URL`,
+     which the provider honours - with an OpenRouter key it then 401s. `unset ANTHROPIC_BASE_URL`
+     first (this is why `system_smoke_run.py`'s pure-chat turn fails when run from an agent).
    - Music: `MUSIC_DEFAULT_SOURCE`, `ENABLE_SPOTIFY`, `SPOTIFY_CLIENT_ID`,
      `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`
 

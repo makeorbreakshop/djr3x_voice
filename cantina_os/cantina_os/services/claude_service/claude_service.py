@@ -15,6 +15,7 @@ Key differences from GPTService:
 
 import asyncio
 import logging
+import os
 import time
 import json
 import uuid
@@ -33,10 +34,26 @@ from ...event_payloads import (
     ServiceStatus,
     LogLevel
 )
-from ...llm.command_functions import get_all_function_definitions, function_name_to_model_map
+from ...llm.command_functions import (
+    create_perform_show_function,
+    function_name_to_model_map,
+    get_all_function_definitions,
+)
+from ...core.event_payloads import ShowPerformPayload
+from ...show.catalog import ShowCatalog, build_catalog
+from ...show.loader import load_library
+from ...show.tags import SpeechTagScheduler, TagParser, extract_tags
+from ...tap import fixtures as tap_fixtures
 from ...llm.anthropic_provider import client_kwargs, map_model, resolve_provider
 from ...core.fast_router_gate import GATE as FAST_ROUTER_GATE, ActionTaken
 from pydantic import BaseModel, ValidationError
+
+
+# Models that reject a non-default temperature/top_p/top_k (400 on the direct API; OpenRouter
+# drops it silently) and think at `high` effort unless told otherwise. Every R3X call is a
+# short spoken line, so these get no up-front thinking ("between_tools" - "disabled" is a 400
+# on these models) and SPOKEN_EFFORT instead of a temperature.
+BETWEEN_TOOLS_MODELS = {"claude-sonnet-5-5"}
 
 
 class Message(BaseModel):
@@ -125,6 +142,22 @@ def _response_text(response: Any) -> str:
     )
 
 
+#: Model families that still accept a non-default ``temperature``. Everything newer
+#: (Sonnet 5/5.5, Opus 4.7+, Fable) returns 400 "`temperature` is deprecated for this model"
+#: on the direct API. OpenRouter silently drops the field instead, which is how every call
+#: site below survived the move to Sonnet 5.5 unnoticed. Matched on the Anthropic id and on
+#: OpenRouter's namespaced/dotted form alike.
+_TEMPERATURE_MODEL_PREFIXES = (
+    "claude-haiku-", "claude-sonnet-4", "claude-opus-4-5", "claude-opus-4-6", "claude-3",
+)
+
+
+def _temperature_kwargs(model: str, temperature: float) -> Dict[str, Any]:
+    """``{"temperature": t}`` when ``model`` accepts it, otherwise ``{}``."""
+    bare = model.split("/")[-1].replace(".", "-")
+    return {"temperature": temperature} if bare.startswith(_TEMPERATURE_MODEL_PREFIXES) else {}
+
+
 class ClaudeService(BaseService):
     """
     Service for natural language processing using Claude 3.5 Sonnet 4.5.
@@ -161,6 +194,8 @@ class ClaudeService(BaseService):
         self._client: Optional[Anthropic] = None
         # Which backend the client ended up pointed at; set in _initialize.
         self._provider = None
+        # The Anthropic model id, before map_model() rewrites _config["MODEL"] for the host.
+        self._requested_model: str = self._config["MODEL"]
 
         # Request tracking
         self._request_timestamps: List[float] = []
@@ -194,6 +229,15 @@ class ClaudeService(BaseService):
 
         # Cached conversation history (loaded once when person detected)
         self._loaded_conversation_history: Optional[str] = None
+
+        # Show system: catalogue in the cached system prompt, inline {cue:id}/{clip:id} tags
+        # stripped from the stream and fired as show.perform when the speech reaches them.
+        self._show_catalog: ShowCatalog = ShowCatalog()
+        self._show_tags = SpeechTagScheduler(
+            self._perform_show_tag,
+            chars_per_sec=float(self._config["SHOW_TAG_CHARS_PER_SEC"]),
+            log=self.logger,
+        )
 
 
     def _load_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -242,6 +286,9 @@ class ClaudeService(BaseService):
             "MAX_TOKENS": config.get("MAX_TOKENS", 40000),  # Increased from 4000 to utilize Claude's 200K window
             "MAX_MESSAGES": config.get("MAX_MESSAGES", 50),  # Increased from 20 for better context
             "TEMPERATURE": config.get("TEMPERATURE", 0.4),  # Lowered from 0.7 for faster, more predictable responses
+            # Effort for BETWEEN_TOOLS_MODELS, which take no temperature. "between_tools" only
+            # accepts low/medium/high; low keeps spoken turns fast.
+            "SPOKEN_EFFORT": config.get("SPOKEN_EFFORT", "low"),
             "SYSTEM_PROMPT": system_prompt,
             "TIMEOUT": config.get("TIMEOUT", 30),
             "RATE_LIMIT_REQUESTS": config.get("RATE_LIMIT_REQUESTS", 100),
@@ -260,7 +307,15 @@ class ClaudeService(BaseService):
             # How long to wait, after a verdict, for the execution side to report what the
             # action actually did (for play_music: which track really started). Kept above
             # IntentRouterService's own 0.8 s playback wait so the amended record is there.
-            "FAST_ROUTER_OUTCOME_WAIT_S": config.get("FAST_ROUTER_OUTCOME_WAIT_S", 1.2)
+            "FAST_ROUTER_OUTCOME_WAIT_S": config.get("FAST_ROUTER_OUTCOME_WAIT_S", 1.2),
+            # Show system. SHOW_DIR: root of clips/cues/sequences (None = SHOW_DIR env, else
+            # the repo's show/). Tag timing: char offset / this = seconds after speech start.
+            "SHOW_DIR": config.get("SHOW_DIR"),
+            "SHOW_TAG_CHARS_PER_SEC": config.get(
+                # Fallback pace when no alignment arrives. v4 Turbo measured ~12-14 chars/s on
+                # R3X's voice 2026-09-29 (Flash at 1.1x was ~19); alignment corrects it anyway.
+                "SHOW_TAG_CHARS_PER_SEC", os.environ.get("SHOW_TAG_CHARS_PER_SEC", 13.0)
+            ),
         }
 
     async def _initialize(self) -> None:
@@ -279,16 +334,17 @@ class ClaudeService(BaseService):
             # Model ids differ between the two hosts. Resolve once here and write the
             # effective id back into config so all seven call sites stay unchanged.
             requested_model = self._config["MODEL"]
+            self._requested_model = requested_model
             self._config["MODEL"] = map_model(requested_model, provider.provider)
             self._provider = provider
 
             # Initialize Anthropic client with prompt caching enabled
-            self._client = Anthropic(
+            self._client = tap_fixtures.wrap_anthropic(Anthropic(
                 **client_kwargs(provider),
                 default_headers={
                     "anthropic-beta": "prompt-caching-2024-07-31"  # Enable prompt caching
                 }
-            )
+            ), "claude")  # fixture record/replay hook (Phase 0); a no-op normally
 
             # Verify client was initialized with key
             if not self._client:
@@ -301,6 +357,9 @@ class ClaudeService(BaseService):
             # Register command functions
             self._register_command_functions()
             self.logger.info("Registered command functions for intent detection")
+
+            # Show catalogue -> cached system prompt (+ perform_show tool when routines exist)
+            self._load_show_catalog()
 
             # Pre-load personas to avoid disk I/O during API calls (OPTIMIZATION)
             self._load_personas()
@@ -405,6 +464,17 @@ class ClaudeService(BaseService):
             self._handle_dj_commentary_request
         ))
         self.logger.info("ClaudeService: Subscribed to DJ_COMMENTARY_REQUEST.")
+
+        # Show tags fire relative to the start of the reply's speech.
+        asyncio.create_task(self.subscribe(
+            EventTopics.SPEECH_GENERATION_STARTED,
+            self._handle_speech_started_for_show_tags
+        ))
+        # ...and land on their word once ElevenLabs' character timing arrives.
+        asyncio.create_task(self.subscribe(
+            EventTopics.SPEECH_ALIGNMENT,
+            self._handle_speech_alignment_for_show_tags
+        ))
 
 
         # Subscribe to ENGAGE command for early connection pre-warming
@@ -680,8 +750,8 @@ class ClaudeService(BaseService):
                 max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
-                temperature=self._config["TEMPERATURE"],
-                tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
+                tools=self._get_tool_schemas_with_cache(),  # Tools with cache_control on last tool
+                **self._generation_kwargs(self._config["TEMPERATURE"]),
             )
             if suppress_tools:
                 # The fast router already executed this turn's action. Keep the tool block in
@@ -784,8 +854,8 @@ class ClaudeService(BaseService):
                 max_tokens=self._config["SPOKEN_REPLY_MAX_TOKENS"],
                 system=system_prompt_with_cache,  # Use cached static system prompt
                 messages=messages,
-                temperature=self._config["TEMPERATURE"],
-                tools=self._get_tool_schemas_with_cache()  # Tools with cache_control on last tool
+                tools=self._get_tool_schemas_with_cache(),  # Tools with cache_control on last tool
+                **self._generation_kwargs(self._config["TEMPERATURE"]),
             )
             if suppress_tools:
                 # The fast router already executed this turn's action. Keep the tool block in
@@ -803,16 +873,29 @@ class ClaudeService(BaseService):
                 )
 
             def _blocking_stream() -> Tuple[str, int, Any]:
-                """Runs on a worker thread. Reads the sync stream to completion."""
+                """Runs on a worker thread. Reads the sync stream to completion.
+
+                Show tags are stripped here, before any chunk leaves the service: the parser
+                holds back an unclosed "{" across chunks, so no listener (CLI, eyes, TTS)
+                ever sees tag text. ``content`` keeps the tags - it goes to SessionMemory
+                so Claude keeps seeing its own convention; _emit_llm_response strips it.
+                """
                 content = ""
                 count = 0
+                tag_parser = TagParser(valid=self._show_catalog.taggable)
                 assert self._client is not None
                 with self._client.messages.stream(**request_kwargs) as stream:
                     for text in stream.text_stream:
                         if text:
                             content += text
-                            count += 1
-                            _emit_chunk_from_thread(text)
+                            clean = tag_parser.feed(text)
+                            if clean:
+                                count += 1
+                                _emit_chunk_from_thread(clean)
+                    tail = tag_parser.flush()
+                    if tail:
+                        count += 1
+                        _emit_chunk_from_thread(tail)
                     return content, count, stream.get_final_message()
 
             full_content, chunk_count, final_message = await asyncio.to_thread(_blocking_stream)
@@ -1141,7 +1224,12 @@ class ClaudeService(BaseService):
         response_text: str,
         tool_calls: Optional[List[Dict[str, Any]]] = None
     ) -> None:
-        """Emit a complete LLM response event."""
+        """Emit a complete LLM response event.
+
+        Every complete reply passes through here, so this is where show tags are stripped
+        for good and registered for timing: the text on the bus is always clean.
+        """
+        response_text = self._take_show_tags(response_text or "")
         # Create response payload
         payload = LLMResponsePayload(
             text=response_text,
@@ -1204,7 +1292,7 @@ class ClaudeService(BaseService):
                 max_tokens=150,  # Limit draft responses to be brief
                 system=self._config["SYSTEM_PROMPT"],
                 messages=messages,
-                temperature=self._config["TEMPERATURE"]
+                **self._generation_kwargs(self._config["TEMPERATURE"])
             )
 
             return _response_text(response)
@@ -1226,7 +1314,7 @@ class ClaudeService(BaseService):
                 max_tokens=150,  # Limit draft responses to be brief
                 system=self._config["SYSTEM_PROMPT"],
                 messages=messages,
-                temperature=self._config["TEMPERATURE"]
+                **self._generation_kwargs(self._config["TEMPERATURE"])
             ) as stream:
                 for text in stream.text_stream:
                     if text:
@@ -1268,6 +1356,15 @@ class ClaudeService(BaseService):
         self._tools[tool_name] = claude_tool
         self._tool_schemas = list(self._tools.values())
         self.logger.info(f"Registered tool: {tool_name}")
+
+    def _generation_kwargs(self, temperature: float) -> Dict[str, Any]:
+        """Sampling/thinking kwargs for one request, per what the model accepts."""
+        if self._requested_model in BETWEEN_TOOLS_MODELS:
+            return {
+                "thinking": {"type": "between_tools"},
+                "output_config": {"effort": self._config["SPOKEN_EFFORT"]},
+            }
+        return _temperature_kwargs(self._config["MODEL"], temperature)
 
     def _get_tool_schemas_with_cache(self) -> Optional[List[Dict[str, Any]]]:
         """Get tool schemas with cache_control on the last tool for prompt caching.
@@ -1339,6 +1436,66 @@ class ClaudeService(BaseService):
                 pass
 
         self.logger.info(f"Persona pre-loading complete: main={bool(self._main_persona)}, feedback={bool(self._verbal_feedback_persona)}")
+
+    # ------------------------------------------------------------------ show system
+    def _load_show_catalog(self) -> None:
+        """Append the show catalogue to the system prompt, once, at startup.
+
+        The system prompt is a cached prefix: the catalogue is sorted and never rebuilt while
+        running, so it cannot churn the cache. New show files reach Claude on restart.
+        """
+        try:
+            self._show_catalog = build_catalog(load_library(self._config.get("SHOW_DIR")))
+        except Exception as e:  # the show library must never stop Claude starting
+            self.logger.warning(f"Show catalogue unavailable: {e}")
+            self._show_catalog = ShowCatalog()
+            return
+        if self._show_catalog.empty:
+            self.logger.info("Show catalogue empty; no performance tags or perform_show tool")
+            return
+        marker = "<performance>"
+        if marker not in self._config["SYSTEM_PROMPT"]:
+            self._config["SYSTEM_PROMPT"] = (
+                self._config["SYSTEM_PROMPT"].rstrip() + "\n\n" + self._show_catalog.prompt_block
+            )
+            self._memory.set_system_prompt(self._config["SYSTEM_PROMPT"])
+        if self._show_catalog.tool_ids:
+            self.register_tool(create_perform_show_function(list(self._show_catalog.tool_ids)))
+        self.logger.info(
+            f"Show catalogue: {len(self._show_catalog.taggable)} taggable, "
+            f"{len(self._show_catalog.tool_ids)} routine(s)"
+        )
+
+    def _take_show_tags(self, text: str) -> str:
+        """Strip show tags from a complete reply and schedule them; returns the clean text."""
+        if "{" not in text:
+            return text
+        clean, tags, dropped = extract_tags(text, valid=self._show_catalog.taggable)
+        for d in dropped:
+            self.logger.warning(f"Dropped show tag {d!r} (unknown id, not taggable, or over the limit)")
+        if tags:
+            self._show_tags.register(self._current_conversation_id, clean, tags)
+            self.logger.info(
+                "Show tags: " + ", ".join(f"{t.kind}:{t.id}@{t.offset}" for t in tags)
+            )
+        return clean
+
+    async def _handle_speech_started_for_show_tags(self, payload: Dict[str, Any]) -> None:
+        try:
+            self._show_tags.on_speech_started(payload or {})
+        except Exception as e:
+            self.logger.warning(f"Could not schedule show tags: {e}")
+
+    async def _handle_speech_alignment_for_show_tags(self, payload: Dict[str, Any]) -> None:
+        try:
+            self._show_tags.on_alignment(payload or {})
+        except Exception as e:
+            self.logger.warning(f"Could not refine show tag timing: {e}")
+
+    def _perform_show_tag(self, item_id: str, conversation_id: Optional[str]) -> None:
+        """Fired by the tag scheduler at the tag's moment in the speech."""
+        payload = ShowPerformPayload(id=item_id, source="claude", conversation_id=conversation_id)
+        self._event_bus.emit(EventTopics.SHOW_PERFORM.value, payload.model_dump())
 
     def _register_command_functions(self) -> None:
         """Register all command functions for intent detection."""
@@ -1445,7 +1602,9 @@ class ClaudeService(BaseService):
                 response_content = f"{intent_name} completed."
 
             # Visual-only tools that shouldn't be part of conversation
-            visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern", "set_eye_animation"}
+            # perform_show is here too: the routine runs alongside Claude's main-turn reply,
+            # and a second spoken "verbal feedback" line would talk over it.
+            visual_only_tools = {"set_eye_color", "set_eye_pattern", "eye_pattern", "set_eye_animation", "perform_show"}
 
             # Vision tools that handle their own response generation
             # (analyze_scene adds vision result to conversation and re-runs Claude)
@@ -1550,7 +1709,7 @@ class ClaudeService(BaseService):
                 max_tokens=200,
                 system=verbal_feedback_persona,
                 messages=messages,
-                temperature=0.7
+                **self._generation_kwargs(0.7)
             )
 
             verbal_response = _response_text(response) or "Action completed successfully."
@@ -1742,7 +1901,7 @@ Keep it energetic!
                 max_tokens=150,
                 system=persona,
                 messages=[{"role": "user", "content": user_prompt}],
-                temperature=0.8
+                **self._generation_kwargs(0.8)
             )
 
             commentary_text = _response_text(response)
@@ -1824,7 +1983,7 @@ Keep it energetic!
                         "content": "hi"
                     }
                 ],
-                temperature=0.1,
+                **self._generation_kwargs(0.1),
                 timeout=5  # Short timeout for warmup
             )
 

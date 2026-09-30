@@ -1,0 +1,26 @@
+{
+  "_doc": "File stems of the kit's audio in the gitignored public/sfx/ (names only, no content), so the linter can resolve sfx ids without the kit. An sfx id matches a stem ignoring case, spaces and underscores (\"air_horn\"/\"airhorn\" -> \"Air Horn.mp3\"). test/show.test.ts asserts this list matches public/sfx/index.json whenever it exists.",
+  "stems": [
+    "Air Horn",
+    "Astromech Joke",
+    "Bad Feeling",
+    "Brought to you by",
+    "DJ Pilot",
+    "Dream",
+    "Endor Travel",
+    "Events",
+    "Having Fun",
+    "Hi There",
+    "Loose Wire",
+    "On the Decks",
+    "Once Again",
+    "Outer Rim",
+    "Request Line Open",
+    "Roger Control",
+    "Scratch",
+    "Synth",
+    "This is your cap",
+    "Travelers",
+    "Yahoo"
+  ]
+}

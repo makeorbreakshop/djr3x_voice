@@ -1,0 +1,546 @@
+{
+  "$defs": {
+    "Actuator": {
+      "description": "A physical actuator driving one or more joints (coupling factor per joint).",
+      "properties": {
+        "calibration": {
+          "$ref": "#/$defs/Calibration"
+        },
+        "channel": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "driver": {
+          "$ref": "#/$defs/DriverKind"
+        },
+        "extended": {
+          "default": false,
+          "type": "boolean"
+        },
+        "joints": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "servo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "joints",
+        "driver",
+        "channel",
+        "calibration"
+      ],
+      "type": "object"
+    },
+    "AudioConfig": {
+      "properties": {
+        "ducking": {
+          "$ref": "#/$defs/Ducking",
+          "default": {
+            "level": 0.5,
+            "ramp_ms": 80.0
+          }
+        },
+        "mouth_hz": {
+          "default": 30.0,
+          "description": "Mouth amplitude rate (plan §7b: one rate, here).",
+          "format": "double",
+          "type": "number"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AudioOutput"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "AudioOutput": {
+      "properties": {
+        "device": {
+          "default": null,
+          "description": "Device name; `None` = system default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Calibration": {
+      "properties": {
+        "center_us": {
+          "description": "Pulse at which the joint sits at `center_value`.",
+          "format": "double",
+          "type": "number"
+        },
+        "center_value": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "gear": {
+          "description": "Servo degrees per joint degree (revolute).",
+          "format": "double",
+          "type": "number"
+        },
+        "invert": {
+          "default": false,
+          "type": "boolean"
+        },
+        "mm_per_deg": {
+          "description": "Prismatic joints: mm of travel per servo degree.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pulse_max_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "pulse_min_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "range_deg": {
+          "description": "Servo travel over the full pulse range.",
+          "format": "double",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/CalibrationStatus",
+          "default": "assumed"
+        },
+        "trim_us": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "center_us",
+        "gear",
+        "pulse_min_us",
+        "pulse_max_us",
+        "range_deg"
+      ],
+      "type": "object"
+    },
+    "CalibrationStatus": {
+      "enum": [
+        "assumed",
+        "measured"
+      ],
+      "type": "string"
+    },
+    "DriverKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "virtual",
+            "r3x_servo",
+            "pca9685",
+            "maestro"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "feetech_sts",
+          "description": "Stub.",
+          "type": "string"
+        },
+        {
+          "const": "dynamixel",
+          "description": "Stub.",
+          "type": "string"
+        }
+      ]
+    },
+    "Ducking": {
+      "properties": {
+        "level": {
+          "description": "Music gain while ducked, 0..1.",
+          "format": "double",
+          "type": "number"
+        },
+        "ramp_ms": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "level",
+        "ramp_ms"
+      ],
+      "type": "object"
+    },
+    "Joint": {
+      "description": "A joint. Ranges nest: `hard ⊇ soft ⊇ animation` (motion-control.md §3).",
+      "properties": {
+        "a_max": {
+          "format": "double",
+          "type": "number"
+        },
+        "animation": {
+          "$ref": "#/$defs/Range",
+          "description": "What authored motion may use."
+        },
+        "extended": {
+          "default": false,
+          "description": "Only present on the extended build.",
+          "type": "boolean"
+        },
+        "hard": {
+          "$ref": "#/$defs/Range",
+          "description": "Mechanical stop."
+        },
+        "j_max": {
+          "format": "double",
+          "type": "number"
+        },
+        "kind": {
+          "$ref": "#/$defs/JointKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "soft": {
+          "$ref": "#/$defs/Range",
+          "description": "Where the follower brakes."
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        },
+        "v_max": {
+          "description": "Per-second limits in the joint's unit.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "unit",
+        "hard",
+        "soft",
+        "animation",
+        "v_max",
+        "a_max",
+        "j_max"
+      ],
+      "type": "object"
+    },
+    "JointKind": {
+      "enum": [
+        "revolute",
+        "prismatic"
+      ],
+      "type": "string"
+    },
+    "LedProtocol": {
+      "oneOf": [
+        {
+          "const": "named_v1",
+          "description": "Existing firmware named commands (`SI SE ...`, `Mnnn`, `Bnnn`, `Xn`, `Hxxx`).",
+          "type": "string"
+        }
+      ]
+    },
+    "LightDriver": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "virtual",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "board": {
+              "description": "Which board (`face`, `chest`); the identity check expects it.",
+              "type": "string"
+            },
+            "port_hint": {
+              "description": "Env var or path hint for the serial port.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "protocol": {
+              "$ref": "#/$defs/LedProtocol"
+            },
+            "type": {
+              "const": "serial_led",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "board",
+            "protocol"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LightGroup": {
+      "properties": {
+        "channels": {
+          "default": [],
+          "description": "Named channels (stage fixtures). Length must equal `pixels` when present.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "driver": {
+          "$ref": "#/$defs/LightDriver"
+        },
+        "layout": {
+          "default": [],
+          "description": "Per-pixel placement, when known. Length must equal `pixels`.",
+          "items": {
+            "$ref": "#/$defs/LightPixel"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pixels": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "pixels",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "LightPixel": {
+      "properties": {
+        "h": {
+          "format": "double",
+          "type": "number"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "normal": {
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "pos": {
+          "description": "Model space, metres, Y-up, front = +Z.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "w": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "pos",
+        "normal",
+        "w",
+        "h"
+      ],
+      "type": "object"
+    },
+    "Range": {
+      "properties": {
+        "max": {
+          "format": "double",
+          "type": "number"
+        },
+        "min": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "type": "object"
+    },
+    "ServoController": {
+      "properties": {
+        "channels": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "frame_hz": {
+          "format": "double",
+          "type": "number"
+        },
+        "resolution_us": {
+          "format": "double",
+          "type": "number"
+        },
+        "supply_volts": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "channels",
+        "frame_hz",
+        "resolution_us",
+        "supply_volts"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "enum": [
+        "deg",
+        "mm"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "actuators": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Actuator"
+      },
+      "type": "array"
+    },
+    "alive": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "default": {},
+      "description": "Procedural alive layer -> enabled by default.",
+      "type": "object"
+    },
+    "audio": {
+      "$ref": "#/$defs/AudioConfig",
+      "default": {
+        "ducking": {
+          "level": 0.5,
+          "ramp_ms": 80.0
+        },
+        "mouth_hz": 30.0,
+        "outputs": []
+      }
+    },
+    "emotes": {
+      "default": [],
+      "description": "Emote slot index -> cue id.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "home": {
+      "additionalProperties": {
+        "format": "double",
+        "type": "number"
+      },
+      "default": {},
+      "description": "The home (park) pose Bench's Home eases to: joint -> value in its unit. A joint not\nlisted homes to 0 (its centre).",
+      "type": "object"
+    },
+    "joints": {
+      "items": {
+        "$ref": "#/$defs/Joint"
+      },
+      "type": "array"
+    },
+    "label": {
+      "default": "",
+      "type": "string"
+    },
+    "lights": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/LightGroup"
+      },
+      "type": "array"
+    },
+    "name": {
+      "type": "string"
+    },
+    "servo_controller": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ServoController"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "joints"
+  ],
+  "title": "RobotProfile",
+  "type": "object"
+}

@@ -1,0 +1,8 @@
+[
+  {"t": 0.0, "do": "clip", "id": "fx_nod", "intensity": 1.0, "speed": 1.0},
+  {"t": 0.05, "do": "sfx", "id": "airhorn"},
+  {"t": 2.4, "do": "clip", "id": "fx_nod", "intensity": 0.5, "speed": 1.5},
+  {"t": 3.6, "do": "speak", "text": "Time to boogie!"},
+  {"t": 4.5, "do": "unduck"},
+  {"t": 4.75, "do": "lights", "mode": "dj", "fade": 0.0, "hold": 0.0}
+]

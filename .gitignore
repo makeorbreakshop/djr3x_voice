@@ -12,6 +12,7 @@ env/
 build/
 develop-eggs/
 dist/
+dist-visit/
 downloads/
 eggs/
 .eggs/
@@ -122,3 +123,12 @@ venv.old-*/
 
 # Runtime conversation memory (contains personal data; never commit)
 /cantina_os/memory_data/
+
+# ./r3x dependency-install checksum stamp
+cantina_os/.requirements_installed
+
+# Phase 0 bus-tap session logs (large, per run)
+logs/session-*.jsonl
+
+# Rust crate test data is committed
+!rust/crates/*/tests/data/

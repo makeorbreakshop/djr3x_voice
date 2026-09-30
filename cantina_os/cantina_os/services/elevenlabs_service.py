@@ -7,6 +7,7 @@ import queue
 from enum import Enum
 from typing import Dict, Optional, Union, List, Any
 import uuid
+import itertools
 
 import httpx
 from pydantic import BaseModel, ValidationError, Field
@@ -22,11 +23,14 @@ from cantina_os.event_payloads import (
     SpeechGenerationRequestPayload,
     SpeechGenerationCompletePayload,
     SpeechAmplitudePayload,
+    SpeechAlignmentPayload,
     ServiceStatus,
     LogLevel,
     LLMResponsePayload
 )
 from cantina_os.core.event_topics import EventTopics
+from ..tap import fixtures as tap_fixtures
+from .elevenlabs_dialogue_socket import DialogueSocket, supports_model, to_absolute, BYTES_PER_SECOND
 
 
 class SpeechPlaybackMethod(str, Enum):
@@ -36,17 +40,33 @@ class SpeechPlaybackMethod(str, Enum):
     STREAMING = "streaming"  # Add new streaming option
 
 
+#: Every spoken line - live replies and cached DJ commentary - uses this model unless a
+#: request names another. Measured 2026-09-29 on R3X's voice: first audio ~220 ms (Flash v2.5
+#: ~170, Turbo v2.5 ~225, plain v4 ~1150, far too slow for replies). ELEVENLABS_MODEL_ID overrides.
+DEFAULT_TTS_MODEL = "eleven_v4_turbo"
+
+
+def _takes_speed_and_style(model_id: str) -> bool:
+    """v3 and the v4 family don't take `speed` or `style` in voice_settings (ElevenLabs docs).
+
+    The API accepts them without error and ignores them, so this keeps requests honest
+    rather than preventing a 400.
+    """
+    return not (model_id == "eleven_v3" or model_id.startswith("eleven_v4"))
+
+
 class ElevenLabsConfig(BaseModel):
     """Configuration model for ElevenLabs service.
 
     Supports multiple models:
+    - eleven_v4_turbo: default. Low latency, most emotive; no speed/style settings
     - eleven_turbo_v2_5: High-quality, ~300ms TTFB, continuous stability 0.0-1.0
     - eleven_flash_v2_5: Real-time, ~75ms TTFB, continuous stability 0.0-1.0
     - eleven_v3: Expressive, 1.7-3.6s, discrete stability [0.0, 0.5, 1.0]
     """
     api_key: str = Field(..., description="ElevenLabs API key")
     voice_id: str = Field("P9l1opNa5pWou2X5MwfB", description="Voice ID for DJ R3X (quick voice clone)")
-    model_id: str = Field("eleven_turbo_v2_5", description="Model ID - Turbo v2.5 (balanced quality/speed), Flash v2.5 (real-time), or v3 (background)")
+    model_id: str = Field(DEFAULT_TTS_MODEL, description="Model ID - v4 Turbo (default), Turbo/Flash v2.5, or v3")
     stability: float = Field(0.60, description="Voice stability - v2.5: 0.0-1.0 (continuous), v3: [0.0, 0.5, 1.0] (discrete)")
     similarity_boost: float = Field(0.85, description="Voice similarity boost (0.0-1.0)")
     speed: float = Field(1.1, description="Speech speed multiplier (0.7-1.2) - NOT supported in v3")
@@ -126,7 +146,7 @@ class ElevenLabsService(BaseService):
         self.logger.info(f"Using streaming playback method for ElevenLabs: {playback_method}")
         
         # Get model_id and validate compatibility
-        model_id = config_dict.get("MODEL_ID", "eleven_flash_v2_5")
+        model_id = config_dict.get("MODEL_ID") or DEFAULT_TTS_MODEL
         stability = config_dict.get("STABILITY", 0.60)
 
         # Validate and adjust parameters for selected model
@@ -155,6 +175,9 @@ class ElevenLabsService(BaseService):
 
         # Store original and adjusted values for logging
         self._model_id = model_id
+        # ELEVENLABS_DIALOGUE_SOCKET=false forces every line onto the HTTP stream.
+        self._use_dialogue_socket = str(config_dict.get(
+            "DIALOGUE_SOCKET", os.getenv("ELEVENLABS_DIALOGUE_SOCKET", "true"))).lower() in ("1", "true", "yes", "on")
         self._original_stability = stability
         self._adjusted_stability = adjusted_stability
         
@@ -167,9 +190,15 @@ class ElevenLabsService(BaseService):
         
         # New streaming-related variables
         self._speech_request_queue = queue.Queue()
+        #: Warm v4 dialogue socket (whole replies + per-char timing); None when the model
+        #: isn't v4 or it's disabled. The HTTP stream is always the fallback.
+        self._dialogue_socket: Optional[DialogueSocket] = None
         self._audio_thread = None
         self._stop_event = threading.Event()
         self._event_loop = None
+        #: False from the moment shutdown begins. The worker thread checks it before posting
+        #: anything to the loop, so nothing is scheduled onto a loop that is about to close.
+        self._accepting_posts = False
 
         # Buffer for accumulating LLM responses before sending to TTS
         self._llm_response_buffer: str = ""
@@ -228,6 +257,7 @@ class ElevenLabsService(BaseService):
             
             # Store event loop reference for thread communication
             self._event_loop = asyncio.get_running_loop()
+            self._accepting_posts = True
             
             # Start audio streaming thread if using streaming playback
             if self._config.playback_method == SpeechPlaybackMethod.STREAMING:
@@ -250,6 +280,17 @@ class ElevenLabsService(BaseService):
                     )
                     self._audio_thread.start()
                     self.logger.info("Started audio streaming worker thread")
+
+                    if self._use_dialogue_socket and supports_model(self._config.model_id) and not tap_fixtures.replaying():
+                        self._dialogue_socket = DialogueSocket(
+                            api_key=self._config.api_key,
+                            voice_id=self._config.voice_id,
+                            model_id=self._config.model_id,
+                            stability=self._config.stability,
+                            logger=self.logger,
+                        )
+                        # Connect off the loop; a failure here only means the first reply connects.
+                        await asyncio.to_thread(self._dialogue_socket.start)
             
             # Log final playback method
             self.logger.info(f"ElevenLabsService final playback method: {self._config.playback_method}")
@@ -265,8 +306,8 @@ class ElevenLabsService(BaseService):
                 if self._original_stability != self._adjusted_stability:
                     self.logger.info(f"  - Note: Stability adjusted from {self._original_stability} to {self._adjusted_stability} for V3 compatibility")
             else:
-                self.logger.info(f"ElevenLabs V2.5 Flash Configuration (Real-time, Low Latency):")
-                self.logger.info(f"  - Model: {self._config.model_id} (Flash v2.5 = 75ms TTFB)")
+                self.logger.info(f"ElevenLabs streaming configuration:")
+                self.logger.info(f"  - Model: {self._config.model_id}")
                 self.logger.info(f"  - Latency optimization level: {self._config.latency_optimization}/4 (~75% improvement)")
                 self.logger.info(f"  - Stability: {self._config.stability} (continuous range 0.0-1.0)")
                 self.logger.info(f"  - Speed: {self._config.speed}x (1.2 = faster speech, within limits)")
@@ -322,16 +363,36 @@ class ElevenLabsService(BaseService):
 
         self.logger.info("ElevenLabsService event subscriptions complete")
     
+    async def _stop(self) -> None:
+        """BaseService.stop() calls this. Until 2026-09-29 ElevenLabsService only defined
+        ``_cleanup()``, which nothing called: the audio worker thread was never stopped, so at
+        interpreter shutdown it posted coroutines onto a closed loop (``RuntimeError: Event
+        loop is closed`` from ``run_coroutine_threadsafe`` plus "coroutine ... was never
+        awaited"), and the HTTP client and temp dir leaked."""
+        await self._cleanup()
+
     async def _cleanup(self) -> None:
         """Stop the service and clean up resources."""
         self.logger.info("Stopping ElevenLabsService")
         
-        # Signal audio thread to stop
+        # Signal audio thread to stop. It aborts any in-flight stream at the next chunk. The
+        # join runs in a worker thread so this loop keeps running and can still deliver the
+        # thread's last events (e.g. an aborted line's completion) while we wait.
+        self._stop_event.set()
         if self._audio_thread and self._audio_thread.is_alive():
-            self._stop_event.set()
             self._speech_request_queue.put(None)  # Sentinel to unblock queue
-            self._audio_thread.join(timeout=5.0)
-            self.logger.info("Audio worker thread stopped")
+            await asyncio.to_thread(self._audio_thread.join, 5.0)
+            if self._audio_thread.is_alive():
+                self.logger.warning("Audio worker thread did not stop within 5 s; detaching it")
+            else:
+                self.logger.info("Audio worker thread stopped")
+        # From here on the thread (even a stuck one) must not touch the loop.
+        self._accepting_posts = False
+        self._audio_thread = None
+
+        if self._dialogue_socket is not None:
+            await asyncio.to_thread(self._dialogue_socket.close)
+            self._dialogue_socket = None
         
         # Cancel any ongoing playback
         if self._current_playback_task and not self._current_playback_task.done():
@@ -363,6 +424,32 @@ class ElevenLabsService(BaseService):
         
         await self._emit_status(ServiceStatus.STOPPED, "Service stopped successfully")
     
+    def _post_to_loop(self, coro_fn) -> bool:
+        """Run ``coro_fn()`` on the service's event loop from the audio thread, if it is safe.
+
+        Takes the coroutine *function*, not a coroutine, so when the loop is closed, closing
+        or not running nothing is created - which is what produced the "coroutine ... was never
+        awaited" warnings at shutdown. Returns whether it was scheduled.
+        """
+        loop = self._event_loop
+        if not self._accepting_posts or loop is None or loop.is_closed() or not loop.is_running():
+            return False
+        coro = coro_fn()
+        try:
+            asyncio.run_coroutine_threadsafe(coro, loop)
+            return True
+        except RuntimeError:  # the loop closed between the check and the call
+            coro.close()
+            return False
+
+    def _post_emit(self, topic, payload: Dict[str, Any]) -> bool:
+        """Emit ``payload`` on the loop from the audio thread. The payload is built *now*, in
+        the thread, and bound as an argument - never read later from the worker loop's
+        variables. (Until 2026-09-29 the ``emit_*`` closures read ``clip_id`` etc. when they
+        ran on the loop, by which time the thread had dequeued the next request: a show line
+        queued behind Claude's reply completed carrying the *reply's* clip_id.)"""
+        return self._post_to_loop(lambda: self.emit(topic, payload))
+
     def _audio_worker_loop(self):
         """Dedicated thread for streaming audio from ElevenLabs and playing it."""
         self.logger.info("Audio worker thread started")
@@ -407,59 +494,47 @@ class ElevenLabsService(BaseService):
                         self.logger.warning("Received empty text for TTS. Skipping synthesis.")
                         
                         # Emit completion event for empty text
-                        async def emit_empty_complete():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,
-                                success=True,
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_empty_complete(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,
+                            success=True,
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                         # Mark task as done
                         self._speech_request_queue.task_done()
                         continue
                     
-                    # Emit event that we're starting audio generation
-                    async def emit_started():
-                        await self.emit(EventTopics.SPEECH_GENERATION_STARTED, {
-                            "conversation_id": conversation_id,
-                            "text": text,
-                        })
-                    asyncio.run_coroutine_threadsafe(emit_started(), self._event_loop)
-                    
+                    # SPEECH_GENERATION_STARTED is emitted below, at the first audio write:
+                    # every listener (eyes, mic lock-out, show tags, latency) means "R3X is
+                    # audibly speaking now", and the ElevenLabs round trip used to sit between
+                    # this point and the first sound - cues fired ~0.3 s before the words.
+
                     # Get audio stream from ElevenLabs
                     # Build voice settings - v3 doesn't support speed parameter
                     voice_settings = {
                         "stability": stability,
                         "similarity_boost": similarity_boost,
-                        "style": 0.25,
                         "use_speaker_boost": True,
                     }
 
-                    # Only add speed for v2.5 and other models (v3 doesn't support it)
-                    if model_id != "eleven_v3":
+                    # style and speed only exist on the v2.5-era models
+                    if _takes_speed_and_style(model_id):
+                        voice_settings["style"] = 0.25
                         voice_settings["speed"] = speed
-                    elif speed != 1.0:
-                        self.logger.debug(f"V3 model: speed parameter ignored (requested {speed}x, v3 uses fixed rate)")
                     
                     try:
                         # Get a streaming response from ElevenLabs
                         self.logger.info(f"Starting streaming TTS with elevenlabs SDK for text: {text[:50]}...")
                         self.logger.info(f"Request details - Model: {model_id}, Voice: {voice_id}, Speed: {speed}")
 
-                        # Use PCM format for zero-latency streaming (no MP3 decoding overhead)
-                        audio_stream = eleven_client.text_to_speech.stream(
-                            text=text,
-                            voice_id=voice_id,
-                            model_id=model_id,
-                            voice_settings=voice_settings,
-                            output_format="pcm_24000"  # ✅ 24kHz PCM - raw audio, no decoding needed
-                        )
+                        # PCM chunks, each paired with its character timing when the dialogue
+                        # socket served it (None from the HTTP stream).
+                        audio_stream = self._open_audio_stream(
+                            eleven_client, text, voice_id, model_id, voice_settings)
 
                         self.logger.info("🔊 Streaming PCM audio with real-time amplitude calculation")
 
@@ -479,6 +554,8 @@ class ElevenLabsService(BaseService):
 
                             chunk_count = 0
                             start_time = time.time()
+                            audio_t0: Optional[float] = None  # wall clock of the first write
+                            bytes_before = 0  # audio already written, for rebasing alignment
 
                             # AGC (Automatic Gain Control) for dynamic range adaptation
                             recent_rms_values = []  # Track recent RMS values for AGC
@@ -486,7 +563,10 @@ class ElevenLabsService(BaseService):
                             min_dynamic_range_db = 12  # Minimum dB range to maintain visibility
 
                             # Process and play each PCM chunk immediately (true streaming)
-                            for chunk in audio_stream:
+                            for chunk, alignment in audio_stream:
+                                if self._stop_event.is_set():
+                                    self.logger.info("Shutdown during speech: aborting the stream")
+                                    break
                                 # Only process bytes (filter out metadata)
                                 if isinstance(chunk, bytes):
                                     chunk_count += 1
@@ -538,13 +618,33 @@ class ElevenLabsService(BaseService):
                                         "event_id": f"amp_{datetime.now().timestamp()}"
                                     }
 
-                                    async def emit_amplitude():
-                                        await self.emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
-
-                                    asyncio.run_coroutine_threadsafe(emit_amplitude(), self._event_loop)
+                                    self._post_emit(EventTopics.SPEECH_SYNTHESIS_AMPLITUDE, payload_dict)
 
                                     # Play chunk immediately (true streaming, no accumulation!)
+                                    if audio_t0 is None:
+                                        audio_t0 = time.time()
+                                        self._post_emit(EventTopics.SPEECH_GENERATION_STARTED, {
+                                            "conversation_id": conversation_id,
+                                            "text": text,
+                                            # How the r3x performer knows its own `speak` line started.
+                                            "clip_id": clip_id,
+                                            # Wall clock of the first sample; show tags anchor here.
+                                            "audio_t0": audio_t0,
+                                        })
                                     stream.write(samples)
+
+                                    if alignment:
+                                        timing = to_absolute(alignment, bytes_before * 1000.0 / BYTES_PER_SECOND)
+                                        self._post_emit(EventTopics.SPEECH_ALIGNMENT, SpeechAlignmentPayload(
+                                            conversation_id=conversation_id,
+                                            text=text,
+                                            chars=timing["chars"],
+                                            char_start_ms=timing["char_start_ms"],
+                                            char_duration_ms=timing["char_duration_ms"],
+                                            audio_t0=audio_t0,
+                                            clip_id=clip_id,
+                                        ).model_dump())
+                                    bytes_before += len(chunk)
 
                                     self.logger.debug(f"🎵 Chunk {chunk_count}: {len(samples)} samples, RMS: {normalized_amplitude:.3f}")
 
@@ -560,35 +660,29 @@ class ElevenLabsService(BaseService):
                             raise
                         
                         # Emit completion event
-                        async def emit_complete():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,  # Hard to calculate exact length
-                                success=True,
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_complete(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,  # Hard to calculate exact length
+                            success=True,
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                     except Exception as e:
                         self.logger.error(f"Error in audio thread streaming: {e}")
                         # Emit error event
-                        async def emit_error():
-                            payload = SpeechGenerationCompletePayload(
-                                conversation_id=conversation_id,
-                                text=text,
-                                audio_length_seconds=0.0,
-                                success=False,
-                                error=str(e),
-                                clip_id=clip_id,
-                                step_id=step_id,
-                                plan_id=plan_id
-                            )
-                            await self.emit(EventTopics.SPEECH_GENERATION_COMPLETE, payload.model_dump())
-                        asyncio.run_coroutine_threadsafe(emit_error(), self._event_loop)
+                        self._post_emit(EventTopics.SPEECH_GENERATION_COMPLETE, SpeechGenerationCompletePayload(
+                            conversation_id=conversation_id,
+                            text=text,
+                            audio_length_seconds=0.0,
+                            success=False,
+                            error=str(e),
+                            clip_id=clip_id,
+                            step_id=step_id,
+                            plan_id=plan_id
+                        ).model_dump())
                         
                     # Mark task as done
                     self._speech_request_queue.task_done()
@@ -601,16 +695,47 @@ class ElevenLabsService(BaseService):
             # Log any unexpected errors
             self.logger.error(f"Unexpected error in audio worker thread: {e}")
             # Notify main thread of critical error
-            async def notify_critical_error():
-                await self._emit_status(
-                    ServiceStatus.ERROR,
-                    f"Critical error in audio thread: {e}",
-                    severity=LogLevel.ERROR
-                )
-            asyncio.run_coroutine_threadsafe(notify_critical_error(), self._event_loop)
+            message = f"Critical error in audio thread: {e}"
+            self._post_to_loop(lambda: self._emit_status(
+                ServiceStatus.ERROR, message, severity=LogLevel.ERROR
+            ))
         
         self.logger.info("Audio worker thread exiting")
     
+    def _open_audio_stream(self, eleven_client, text, voice_id, model_id, voice_settings):
+        """The live stream below, or its fixture recording/replay (Phase 0, cantina_os/tap)."""
+        live = lambda: self._open_live_audio_stream(eleven_client, text, voice_id, model_id, voice_settings)
+        fx = tap_fixtures.get()
+        return live() if fx is None else fx.tts(text, model_id, live)
+
+    def _open_live_audio_stream(self, eleven_client, text, voice_id, model_id, voice_settings):
+        """Iterator of (pcm bytes, alignment or None) for one line. Runs on the audio thread.
+
+        v4 lines go over the warm dialogue socket, whole, which also returns character
+        timing. If the socket fails before producing any audio the line falls back to the
+        HTTP stream; a failure after audio has started is raised, since replaying from the
+        start would repeat what was already heard.
+        """
+        sock = self._dialogue_socket
+        if sock is not None and sock.handles(model_id, voice_id):
+            chunks = sock.synthesize(text, should_stop=self._stop_event.is_set)
+            try:
+                first = next(chunks)
+            except StopIteration:
+                return iter(())
+            except Exception as e:
+                self.logger.warning(f"Dialogue socket failed before any audio ({e}); using the HTTP stream")
+            else:
+                return itertools.chain([first], chunks)
+        http_stream = eleven_client.text_to_speech.stream(
+            text=text,
+            voice_id=voice_id,
+            model_id=model_id,
+            voice_settings=voice_settings,
+            output_format="pcm_24000",  # raw 24 kHz PCM, no decoding
+        )
+        return ((chunk, None) for chunk in http_stream if isinstance(chunk, bytes))
+
     async def _handle_speech_generation_request(self, event_payload: Union[Dict[str, Any], BaseEventPayload]) -> None:
         """
         Handle a request to generate and play speech.
@@ -913,12 +1038,12 @@ class ElevenLabsService(BaseService):
                     "stability": stability,
                     "similarity_boost": similarity_boost,
                     "use_speaker_boost": True,  # Ensure consistent energy levels
-                    "style": 0.25,  # Add slight style emphasis for DJ personality
                 }
             }
 
-            # Only add speed for non-v3 models
-            if model_id != "eleven_v3":
+            # style and speed only exist on the v2.5-era models
+            if _takes_speed_and_style(model_id):
+                payload["voice_settings"]["style"] = 0.25  # slight emphasis for DJ personality
                 payload["voice_settings"]["speed"] = speed  # Control speech rate
 
             # Add latency optimization parameter (new in 2025 API)
@@ -1148,25 +1273,27 @@ class ElevenLabsService(BaseService):
                     voice_settings = {
                         "stability": adjusted_stability,  # Use adjusted stability for model compatibility
                         "similarity_boost": self._config.similarity_boost,
-                        "style": 0.25,
                         "use_speaker_boost": True,
                     }
 
-                    # Only add speed for non-v3 models
-                    if model_id != "eleven_v3" and adjusted_speed is not None:
-                        voice_settings["speed"] = adjusted_speed
+                    # style and speed only exist on the v2.5-era models
+                    if _takes_speed_and_style(model_id):
+                        voice_settings["style"] = 0.25
+                        if adjusted_speed is not None:
+                            voice_settings["speed"] = adjusted_speed
                     
                     # Use modern convert method instead of old generate()
-                    audio_generator = eleven_client.text_to_speech.convert(
-                        text=text,
-                        voice_id=voice_id,
-                        model_id=model_id,
-                        voice_settings=voice_settings,
-                        output_format="mp3_44100_128"
-                    )
-                    
-                    # Convert generator to bytes
-                    audio_bytes = b''.join(audio_generator)
+                    def _convert() -> bytes:
+                        return b''.join(eleven_client.text_to_speech.convert(
+                            text=text,
+                            voice_id=voice_id,
+                            model_id=model_id,
+                            voice_settings=voice_settings,
+                            output_format="mp3_44100_128"
+                        ))
+
+                    fx = tap_fixtures.get()  # Phase 0 fixture record/replay
+                    audio_bytes = _convert() if fx is None else fx.tts_bytes(text, model_id, _convert)
 
                     self.logger.info(f"Successfully generated speech, received {len(audio_bytes)} bytes")
 

@@ -1,0 +1,13 @@
+{
+  "id": "thinking",
+  "kind": "cue",
+  "title": "Thinking",
+  "description": "Looks up and away pondering, thinking eyes and chest",
+  "tags": ["think", "hmm", "let me think"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "look_up_think"},
+    {"at": 0, "do": "eyes", "pattern": "thinking", "duration": 3.0},
+    {"at": 0, "do": "chest", "command": "ST", "hold": 3.0}
+  ]
+}

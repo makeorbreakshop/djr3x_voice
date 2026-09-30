@@ -1,8 +1,8 @@
 """Event payload models for CantinaOS."""
 
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, List, Literal
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 class ServiceStatus(str, Enum):
@@ -171,3 +171,99 @@ class SpeechAmplitudePayload(BaseModel):
     timestamp_offset: float = Field(..., description="Offset from speech start in seconds")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     event_id: str = Field(default_factory=lambda: f"amp_{datetime.now().timestamp()}")
+
+
+class ChestCommandPayload(BaseModel):
+    """A command written (or, in mock mode, that would be written) to the chest-lights board."""
+    command: str = Field(..., description="Serial command without newline, e.g. 'SS', 'M128', 'H1FF'")
+    connected: bool = Field(..., description="True if it actually went to hardware")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+# ---------------------------------------------------------------------------
+# Show system payloads (show/SPEC.md "Live bus contract"). Field names are the contract
+# with the sim (TypeScript); keep them exactly as the spec writes them.
+# ---------------------------------------------------------------------------
+
+ShowSource = Literal["jev", "claude", "timeline", "idle", "ui", "cli"]
+
+
+class ShowParams(BaseModel):
+    """Trigger-time params: intensity 0-1.5 scales motion, speed 0.5-2 scales clip time.
+
+    Out-of-range values are clamped, not rejected: a slightly-off request should still move.
+    """
+    intensity: float = 1.0
+    speed: float = 1.0
+
+    @field_validator("intensity")
+    @classmethod
+    def _clamp_intensity(cls, v: float) -> float:
+        return min(1.5, max(0.0, float(v)))
+
+    @field_validator("speed")
+    @classmethod
+    def _clamp_speed(cls, v: float) -> float:
+        return min(2.0, max(0.5, float(v)))
+
+
+class ShowPerformPayload(BaseModel):
+    """show.perform - anyone asks the r3x performer (via the bus tap) to perform a clip, cue or sequence."""
+    id: str
+    params: Optional[ShowParams] = None
+    source: ShowSource
+    conversation_id: Optional[str] = None
+
+
+class ShowStopPayload(BaseModel):
+    """show.stop - end runs by id, by layer, or all of them (clips blend out, never cut)."""
+    id: Optional[str] = None
+    layer: Optional[str] = None
+    all: Optional[bool] = None
+
+
+class ShowRunPayload(BaseModel):
+    """show.started / show.ended."""
+    id: str
+    kind: str
+    source: str
+    run_id: str
+    reason: Optional[Literal["done", "interrupted", "rejected"]] = None
+    # Not in the spec's table; carried so a show triggered by a voice turn stays traceable.
+    conversation_id: Optional[str] = None
+
+
+class ShowMotionPayload(BaseModel):
+    """show.motion - the body compositor starts ``clip`` at ``start_at`` (epoch seconds)."""
+    run_id: str
+    clip: str
+    intensity: float
+    speed: float
+    start_at: float
+    layer: str
+    owns: Optional[List[str]] = None
+
+
+class StageLightsPayload(BaseModel):
+    """stage.lights - a lights cue and/or mode; ``hold`` > 0 returns to the desk's program."""
+    cue: Optional[str] = None
+    mode: Optional[str] = None
+    fade: float = 0.0
+    hold: float = 0.0
+    rig: Optional[str] = None
+
+
+class ChestOverridePayload(BaseModel):
+    """chest.override - send ``command`` to the chest board, resume status after ``hold`` s (0 = keep)."""
+    command: str
+    hold: float = 0.0
+
+
+class ShowSfxPayload(BaseModel):
+    """show.sfx - play a sound effect by file stem."""
+    id: str
+
+
+class MotionFreezePayload(BaseModel):
+    """motion.freeze - the "motion stop". on: stop every show and gesture and hold; off: resume."""
+    on: bool

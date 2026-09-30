@@ -6,16 +6,29 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:visit": "tsc --noEmit && vite build --mode visit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "postinstall": "node scripts/copy-draco.mjs",
-    "predev": "node scripts/copy-draco.mjs"
+    "predev": "node scripts/copy-draco.mjs",
+    "render:check": "node scripts/render-harness.mjs",
+    "render:update": "node scripts/render-harness.mjs --update",
+    "render:perf": "node scripts/render-harness.mjs --perf",
+    "build:wasm": "wasm-pack build ../../rust/crates/r3x-performer-wasm --target web --release --out-dir ../../../sim/web/src/wasm --out-name r3x_performer --no-pack"
   },
   "dependencies": {
+    "n8ao": "^2.0.1",
+    "postprocessing": "^6.39.5",
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@types/three": "^0.186.0",
+    "draco3dgltf": "^1.5.7",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"

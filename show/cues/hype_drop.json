@@ -1,0 +1,15 @@
+{
+  "id": "hype_drop",
+  "kind": "cue",
+  "title": "Hype drop",
+  "description": "Arm throw on the drop: red flash, chest chase, airhorn",
+  "tags": ["drop", "hype", "airhorn"],
+  "tier": "cheap",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "arm_throw"},
+    {"at": 0, "do": "eyes", "pattern": "flash", "duration": 1.0},
+    {"at": 0, "do": "chest", "command": "B200", "hold": 2.0},
+    {"at": 0, "do": "lights", "cue": "red_flash", "fade": 0.1, "hold": 2.0},
+    {"at": 0.05, "do": "sfx", "id": "airhorn"}
+  ]
+}
