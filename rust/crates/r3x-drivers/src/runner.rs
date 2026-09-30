@@ -15,6 +15,7 @@ use r3x_performer_core::Frames;
 
 use crate::chest::{ChestConfig, ChestDriver};
 use crate::face::{FaceConfig, FaceDriver};
+use crate::grnwave::{GrnwaveConfig, GrnwaveDriver};
 use crate::link::{Opener, SerialOpener};
 use crate::servo::maestro::{MaestroConfig, MaestroDriver};
 use crate::servo::r3x::{R3xServoConfig, R3xServoDriver};
@@ -142,6 +143,10 @@ impl DriverSet {
             // chest must not grab its port: without explicit ports, set both env vars.
             drivers.push(Box::new(ChestDriver::new(chest_cfg, opener.clone())));
         }
+        if board("grnwave") {
+            // The grnwave LED set (profiles/electronics/grnwave_full_led): one Nano, both streams.
+            drivers.push(Box::new(GrnwaveDriver::new(GrnwaveConfig::from_env(profile), opener.clone())));
+        }
         if kinds.contains(&DriverKind::R3xServo) {
             drivers.push(Box::new(R3xServoDriver::new(R3xServoConfig::from_profile(profile), opener.clone())));
         }
@@ -188,8 +193,8 @@ impl DriverSet {
 
 fn routes_to(o: &Out, driver: &str) -> bool {
     match o {
-        Out::FaceLine { .. } => driver == "driver.face",
-        Out::ChestLine { .. } | Out::Freeze { .. } => driver == "driver.chest",
+        Out::FaceLine { .. } => driver == "driver.face" || driver == "driver.grnwave",
+        Out::ChestLine { .. } | Out::Freeze { .. } => driver == "driver.chest" || driver == "driver.grnwave",
         Out::ServoGoal { .. } | Out::ServoPulse { .. } => driver == "driver.servo",
         _ => false,
     }
@@ -218,5 +223,20 @@ mod tests {
             &env.body,
             Body::Event(Event::Ops(OpsEvent::ServiceStatus { status: ServiceStatus::Running, service, .. })) if service == "driver.virtual"
         ));
+    }
+
+    #[test]
+    fn the_grnwave_package_gets_one_led_driver_fed_both_streams() {
+        let raw = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.json")).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        v["electronics"] = "grnwave_full_led".into();
+        let profile = RobotProfile::from_json(&v.to_string()).unwrap();
+        let set = DriverSet::with_opener(&profile, &Bus::default(), 1.0, true, Arc::new(crate::link::fake::FakeOpener::default()));
+        let names: Vec<&str> = set.drivers.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"driver.grnwave"), "{names:?}");
+        assert!(!names.contains(&"driver.face") && !names.contains(&"driver.chest"), "{names:?}");
+        for o in [Out::FaceLine { line: "SS".into() }, Out::ChestLine { line: "B120".into() }, Out::Freeze { on: true }] {
+            assert!(routes_to(&o, "driver.grnwave"));
+        }
     }
 }

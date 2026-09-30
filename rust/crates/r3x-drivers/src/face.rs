@@ -75,8 +75,9 @@ enum Identity {
     Silent,
 }
 
+/// Another board's greeting: the chest's, or the grnwave sketch's (back off from both).
 fn is_chest_line(l: &str) -> bool {
-    l.starts_with("CHEST READY") || l.starts_with("Chest:")
+    l.starts_with("CHEST READY") || l.starts_with("Chest:") || crate::grnwave::is_grnwave_line(l)
 }
 
 fn handshake(link: &mut dyn Link, t: &HandshakeTiming) -> std::io::Result<Identity> {
@@ -370,6 +371,14 @@ mod tests {
         let (d, o) = driver(o, None);
         assert_eq!(o.open_count("/dev/cu.usbmodemA"), 1, "no retries against the chest");
         assert_eq!(d.led.port.as_deref(), Some("/dev/cu.usbmodemB"));
+    }
+
+    #[test]
+    fn backs_off_from_the_grnwave_board_without_retrying() {
+        let o = FakeOpener::default().board("/dev/x", || FakeLink::new("GRNWAVE READY\n", silent()));
+        let (d, o) = driver(o, Some("/dev/x"));
+        assert_eq!(o.open_count("/dev/x"), 1);
+        assert_eq!(d.health().status, ServiceStatus::Degraded);
     }
 
     #[test]

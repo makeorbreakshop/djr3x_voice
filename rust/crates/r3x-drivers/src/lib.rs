@@ -9,6 +9,7 @@
 //! |---|---|---|
 //! | [`face::FaceDriver`] | `Out::FaceLine` | named_v1 (`SI SE SL ST SS SF`, `Mnnn`) |
 //! | [`chest::ChestDriver`] | `Out::ChestLine`, `Out::Freeze` | named_v1 (+ `Bnnn Xn Hxxx`), 20 Hz send-on-change |
+//! | [`grnwave::GrnwaveDriver`] | `Out::FaceLine` + `Out::ChestLine` (`B X H`), `Out::Freeze` | named_v1, both boards' words on one Nano, mouth-rate send-on-change |
 //! | [`virtual_driver::VirtualDriver`] | frames | bus frames channel, 50 Hz |
 //! | [`servo::r3x::R3xServoDriver`] | `Out::ServoGoal`, `Out::ServoPulse` | framed binary, see `PROTOCOL.md` |
 //! | [`servo::maestro::MaestroDriver`] | frames (host follower) | Pololu compact/Pololu protocol |
@@ -19,6 +20,7 @@
 
 pub mod chest;
 pub mod face;
+pub mod grnwave;
 pub mod link;
 pub mod runner;
 pub mod servo;

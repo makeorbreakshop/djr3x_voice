@@ -14,6 +14,7 @@ use crate::actuation::pipeline::{profile_joints, Actuation, Frame, JointDynamics
 use crate::behavior::{Activity, AliveLayers, PerformContext, Procedural};
 use crate::leds::chest::{ChestFirmware, ChestHost, ChestLightKind, ChestLightSpec};
 use crate::leds::firmware::{FirmwareOptions, RexFaceFirmware, Rgb, NUM_EYE_LEDS, NUM_MOUTH_LEDS};
+use crate::leds::grnwave::{self, GrnwaveFirmware};
 use crate::leds::host::{CantinaHostEmulator, DualHost, SerialDir, SystemMode};
 use crate::rng::Rng;
 use crate::show::body::{get, BodyCompositor, PlayRequest, Pose};
@@ -29,6 +30,7 @@ use crate::show::validate::validate_item;
 use crate::stagelights::{LightMode, Output, StageLights, GROUPS};
 use indexmap::IndexMap;
 use r3x_contracts::messages::{PerfCommand, PerfLayer, StopTarget};
+use r3x_contracts::electronics::LedEmulator;
 use r3x_contracts::RobotProfile;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -299,6 +301,9 @@ pub struct Frames {
     pub stage: Output,
     /// The last controller frame (pulses per channel).
     pub servo: Frame,
+    /// Light groups of the selected electronics package when it has its own emulator
+    /// (grnwave: `body`, `eyes`, `mouth`); empty for the native face + chest boards.
+    pub package: IndexMap<String, Vec<Rgb>>,
 }
 
 impl Frames {
@@ -311,15 +316,23 @@ impl Frames {
         r3x_contracts::Frames {
             t_mono: self.t,
             joints: self.joints.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            lights: [
-                ("eyes", self.eyes.to_vec()),
-                ("mouth", self.mouth.to_vec()),
-                ("chest", self.chest.clone()),
-                ("stage", stage),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
+            lights: if self.package.is_empty() {
+                [
+                    ("eyes", self.eyes.to_vec()),
+                    ("mouth", self.mouth.to_vec()),
+                    ("chest", self.chest.clone()),
+                    ("stage", stage),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect()
+            } else {
+                self.package
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .chain([("stage".to_string(), stage)])
+                    .collect()
+            },
         }
     }
 }
@@ -372,6 +385,9 @@ pub struct Performer {
     pub actuation: Actuation,
     pub host: DualHost,
     pub chest_fw: ChestFirmware,
+    /// The grnwave board emulator, when the profile's electronics package is grnwave. Fed the
+    /// same face + chest named commands the real boards get.
+    pub grnwave: Option<GrnwaveFirmware>,
     pub lights: StageLights,
     pub take: TakeRecorder,
     pub enables: Enables,
@@ -429,6 +445,19 @@ impl Performer {
         host.chest.boot(0.0); // the boot sweep, as when CantinaOS starts
         let mut procedural = Procedural::default();
         procedural.layers = AliveLayers::from_map(&profile.alive);
+        let grnwave = match profile.package.as_ref().map(|p| p.emulator) {
+            Some(LedEmulator::Grnwave) => {
+                let n = |g: &str| profile.lights.iter().find(|l| l.name == g).map(|l| l.pixels as usize);
+                let want = [("body", grnwave::BODY_LEDS), ("eyes", grnwave::EYE_LEDS), ("mouth", grnwave::MOUTH_LEDS)];
+                for (g, count) in want {
+                    if n(g) != Some(count) {
+                        return Err(format!("grnwave emulator: light group {g} must have {count} pixels, not {:?}", n(g)));
+                    }
+                }
+                Some(GrnwaveFirmware::new(derive(cfg.seed, 6)))
+            }
+            _ => None,
+        };
         Ok(Performer {
             player: ShowPlayer::new(catalog.clone(), cfg.player),
             body: BodyCompositor::new(),
@@ -438,6 +467,7 @@ impl Performer {
             actuation,
             host,
             chest_fw: ChestFirmware::new(chest_layout(profile), derive(cfg.seed, 3)),
+            grnwave,
             lights: StageLights::new(cfg.light_rig.as_deref(), None, None),
             take: TakeRecorder::default(),
             enables: Enables::default(),
@@ -1086,12 +1116,21 @@ impl Performer {
         self.host.tick(fw_now);
         for line in self.host.chest.take_sent() {
             self.chest_fw.write(&format!("{line}\n"));
+            if let Some(g) = self.grnwave.as_mut().filter(|_| grnwave::from_chest_stream(&line)) {
+                g.write(&format!("{line}\n"));
+            }
             if self.enables.chest {
                 self.out.push(Out::ChestLine { line });
             }
         }
         for l in self.host.face.take_tapped() {
-            if l.dir == SerialDir::Tx && self.enables.face {
+            if l.dir != SerialDir::Tx {
+                continue;
+            }
+            if let Some(g) = self.grnwave.as_mut() {
+                g.write(&format!("{}\n", l.line));
+            }
+            if self.enables.face {
                 self.out.push(Out::FaceLine { line: l.line });
             }
         }
@@ -1122,6 +1161,10 @@ impl Performer {
         }
         self.actuation.update(dt);
         self.chest_fw.update(self.host.face.fw.now);
+        if let Some(g) = self.grnwave.as_mut() {
+            g.update(self.host.face.fw.now);
+            g.read_lines(); // acks: nobody reads them offline
+        }
 
         // ---- show system
         self.puppet.update(dt, self.pad.as_ref());
@@ -1202,6 +1245,13 @@ impl Performer {
             chest: self.chest_fw.pixels.clone(),
             stage: self.lights.out,
             servo: self.actuation.last_frame.clone(),
+            package: self.grnwave.as_ref().map_or_else(IndexMap::new, |g| {
+                IndexMap::from([
+                    ("body".to_string(), g.body().to_vec()),
+                    ("eyes".to_string(), g.eyes().to_vec()),
+                    ("mouth".to_string(), g.mouth.to_vec()),
+                ])
+            }),
         }
     }
 
