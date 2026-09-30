@@ -32,6 +32,9 @@ pub struct StageState {
     pub autonomy: bool,
     /// Every run stopped, new ones refused; the chest holds its state.
     pub frozen: bool,
+    /// Which robot profile the performer, lint and limits use (the rig animation runs on).
+    #[serde(default)]
+    pub rig: Rig,
     /// Where the head looks in Show (Bench and Studio ignore it).
     #[serde(default)]
     pub gaze: GazeSource,
@@ -45,6 +48,18 @@ pub struct StageState {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub pad_owner: Option<String>,
+}
+
+/// The rig animation runs on: the robot profile the performer, Studio lint and the limits use.
+/// Switching stops every run, homes, then reloads the performer with that profile.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Rig {
+    /// `robot.json` (or `R3X_PROFILE`): the limits and kinematics the show was authored on.
+    #[default]
+    Original,
+    /// `robot.generated.json` next to it: generated from the mech model (`mech/rigsync`).
+    Physical,
 }
 
 /// The look target the head attends to in Show.

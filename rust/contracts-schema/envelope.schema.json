@@ -2746,6 +2746,21 @@
       ],
       "type": "object"
     },
+    "Rig": {
+      "description": "The rig animation runs on: the robot profile the performer, Studio lint and the limits use.\nSwitching stops every run, homes, then reloads the performer with that profile.",
+      "oneOf": [
+        {
+          "const": "original",
+          "description": "`robot.json` (or `R3X_PROFILE`): the limits and kinematics the show was authored on.",
+          "type": "string"
+        },
+        {
+          "const": "physical",
+          "description": "`robot.generated.json` next to it: generated from the mech model (`mech/rigsync`).",
+          "type": "string"
+        }
+      ]
+    },
     "RobotProfile": {
       "properties": {
         "actuators": {
@@ -3009,6 +3024,23 @@
     "StageCommand": {
       "description": "Stage manager: operating mode, output and layer switches.",
       "oneOf": [
+        {
+          "description": "Choose the rig (`state.stage.rig`). Refused in Show while a show-layer run is playing.",
+          "properties": {
+            "rig": {
+              "$ref": "#/$defs/Rig"
+            },
+            "type": {
+              "const": "set_rig",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "rig"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "mode": {
@@ -3283,6 +3315,11 @@
             "string",
             "null"
           ]
+        },
+        "rig": {
+          "$ref": "#/$defs/Rig",
+          "default": "original",
+          "description": "Which robot profile the performer, lint and limits use (the rig animation runs on)."
         }
       },
       "required": [

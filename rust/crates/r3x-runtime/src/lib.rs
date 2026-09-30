@@ -232,7 +232,8 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         }
         None => None,
     };
-    let stage_cfg = cfg.profile.as_deref().map(r3x_stage::StageConfig::from_profile).unwrap_or_default();
+    let mut stage_cfg = cfg.profile.as_deref().map(r3x_stage::StageConfig::from_profile).unwrap_or_default();
+    stage_cfg.physical_profile = Some(rig_profile_path(r3x_contracts::Rig::Physical));
     r3x_stage::spawn(&bus, stage_cfg, backend).ok_or_else(|| anyhow::anyhow!("stage class taken"))?;
 
     let gateway = GatewayConfig {
@@ -244,6 +245,15 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         filter: None,
     };
     Ok(Runtime { bus, voice, music, brain, vision, pad, gateway, bridged: cfg.bridge.is_some() })
+}
+
+/// The profile a rig runs: Original = [`default_profile_path`]; Physical = `robot.generated.json`
+/// beside it (written by `mech/.venv/bin/python -m rigsync`).
+pub fn rig_profile_path(rig: r3x_contracts::Rig) -> PathBuf {
+    match rig {
+        r3x_contracts::Rig::Original => default_profile_path(),
+        r3x_contracts::Rig::Physical => default_profile_path().with_file_name("robot.generated.json"),
+    }
 }
 
 /// `R3X_PROFILE`, else `profiles/r3x/robot.json` in the repo this binary was built from.

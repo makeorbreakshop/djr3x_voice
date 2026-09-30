@@ -18,6 +18,7 @@
 import './studio.css';
 import { lintShow } from '../wasm/r3x_performer';
 import { torqueMarks } from '../mechrig/lint';
+import { ACTIVE_RIG, RIG_LABEL, type Rig } from '../rigchoice';
 import { PROFILE_JSON, type Performer, type PerfFrames } from '../performer';
 import { SHOW_FILES } from '../show/loader';
 import type { Ack } from '../generated/Ack';
@@ -544,7 +545,9 @@ export class Studio {
     });
     this.rows();
     this.fit();
-    this.say(text ? `Opened show/clips/${id}.json` : 'New clip: double-click a track to key it, or ● to record the sliders');
+    const on = this.clip.extra?.rig as Rig | undefined;
+    const rigNote = ` Rig: authored on ${on ? RIG_LABEL[on] : 'Original (no rig recorded)'}; linting against ${RIG_LABEL[ACTIVE_RIG]}.`;
+    this.say(text ? `Opened show/clips/${id}.json.${rigNote}` : 'New clip: double-click a track to key it, or ● to record the sliders');
   }
 
   private freeId() {
@@ -797,7 +800,7 @@ export class Studio {
   // ------------------------------------------------------------------ save
 
   private async saveClip() {
-    const doc = this.doc;
+    const doc = { ...this.doc, rig: ACTIVE_RIG }; // which rig it was authored on (rigchoice.ts)
     if (!this.host.connected()) {
       await navigator.clipboard?.writeText(JSON.stringify(doc, null, 2)).catch(() => {});
       return this.say('Saving needs the runtime (r3x-runtime); the clip JSON is on the clipboard.', true);

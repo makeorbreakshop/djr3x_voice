@@ -56,6 +56,12 @@ export class Joint {
   value = 0; // deg, or mm when prismatic
   readonly axis: THREE.Vector3;
   private readonly rest: THREE.Vector3;
+  /** Local rotation at value 0, and the axis it turns about in that rest frame. */
+  private readonly restQuat: THREE.Quaternion;
+  private spin: THREE.Vector3;
+  /** Prismatic: the slide direction in the parent's frame. */
+  private slide: THREE.Vector3;
+  private readonly q = new THREE.Quaternion();
 
   constructor(
     readonly spec: JointSpec,
@@ -65,6 +71,9 @@ export class Joint {
   ) {
     this.axis = new THREE.Vector3(...spec.axis).normalize();
     this.rest = node.position.clone();
+    this.restQuat = new THREE.Quaternion().setFromAxisAngle(this.axis, THREE.MathUtils.degToRad(zeroOffset));
+    this.spin = this.axis.clone();
+    this.slide = this.axis.clone();
   }
 
   get prismatic() {
@@ -73,8 +82,23 @@ export class Joint {
 
   set(v: number) {
     this.value = v;
-    if (this.prismatic) this.node.position.copy(this.rest).addScaledVector(this.axis, v / 1000);
-    else this.node.quaternion.setFromAxisAngle(this.axis, THREE.MathUtils.degToRad(v + this.zeroOffset));
+    if (this.prismatic) this.node.position.copy(this.rest).addScaledVector(this.slide, v / 1000);
+    else this.node.quaternion.copy(this.restQuat).multiply(this.q.setFromAxisAngle(this.spin, THREE.MathUtils.degToRad(v)));
+  }
+
+  /**
+   * Hang the joint's node from another parent, keeping where it is and the world axis it moves
+   * about (call at the rest pose, world matrices current). Used when the rig's joint tree
+   * differs from the model's (the Physical rig stands the head on the base, not the rings).
+   */
+  rehang(parent: THREE.Object3D) {
+    const wq = new THREE.Quaternion();
+    const world = this.slide.clone().applyQuaternion(this.node.parent!.getWorldQuaternion(wq)).normalize();
+    parent.attach(this.node);
+    this.rest.copy(this.node.position);
+    this.restQuat.copy(this.node.quaternion);
+    this.spin = world.clone().applyQuaternion(this.node.getWorldQuaternion(wq).invert());
+    this.slide = world.clone().applyQuaternion(parent.getWorldQuaternion(wq).invert());
   }
 }
 
@@ -116,7 +140,17 @@ export class Rig {
   private readonly tmpA = new THREE.Vector3();
   private readonly tmpB = new THREE.Vector3();
 
-  constructor(readonly root: THREE.Object3D, readonly doc: RigDoc, readonly restPose: RestPose = CANONICAL_REST) {
+  /**
+   * `parents`: the active profile's joint tree (joint -> parent joint, null = the body). Where it
+   * differs from the model's, the joint's node is re-hung at the rest pose, so the textured
+   * model moves like the rig the performer runs.
+   */
+  constructor(
+    readonly root: THREE.Object3D,
+    readonly doc: RigDoc,
+    readonly restPose: RestPose = CANONICAL_REST,
+    parents?: Record<string, string | null>,
+  ) {
     (root.getObjectByName('r3x_root') ?? root).rotation.y = THREE.MathUtils.degToRad(restPose.bodyYaw);
     ensureHeadRoll(root, doc);
     for (const spec of doc.joints) {
@@ -132,7 +166,47 @@ export class Rig {
     // Start at the rest pose (every joint 0), which is what Centres measures its zeros on.
     this.apply(new Map(doc.joints.map((j) => [j.name, 0])));
     root.updateMatrixWorld(true);
+    if (parents) this.rehangTo(parents);
   }
+
+  /** Re-hang joints whose parent in `parents` differs from the model's (rest pose). */
+  private rehangTo(parents: Record<string, string | null>) {
+    const base = this.doc.joints.find((j) => !j.parent);
+    const body = base ? this.joints.get(base.name)!.node.parent : null;
+    if (!body) return;
+    const order: string[] = [];
+    const seen = new Set<string>();
+    const visit = (n: string) => {
+      if (seen.has(n) || !(n in parents) || !this.joints.has(n)) return;
+      seen.add(n);
+      const p = parents[n];
+      if (p) visit(p);
+      order.push(n);
+    };
+    Object.keys(parents).forEach(visit);
+    const moved: string[] = [];
+    for (const n of order) {
+      const spec = this.joints.get(n)!.spec;
+      const want = parents[n] ?? null;
+      if ((spec.parent ?? null) === want) continue;
+      const target = want ? this.joints.get(want)?.node : body;
+      if (!target) continue;
+      const node = this.joints.get(n)!.node;
+      let up: THREE.Object3D | null = target;
+      while (up && up !== node) up = up.parent; // never hang a node under its own descendant
+      if (up === node) continue;
+      this.joints.get(n)!.rehang(target);
+      spec.parent = want;
+      moved.push(n);
+    }
+    if (moved.length) {
+      this.root.updateMatrixWorld(true);
+      this.rehung = moved;
+    }
+  }
+
+  /** Joints re-hung to follow the active profile's tree (empty: the model's own). */
+  rehung: string[] = [];
 
   get(name: string) {
     const j = this.joints.get(name);

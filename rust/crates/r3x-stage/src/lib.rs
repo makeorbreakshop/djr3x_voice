@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 
 use r3x_bus::Bus;
 use r3x_contracts::{
-    Ack, Command, Engagement, EngagementState, Event, GazeSource, MessageClass, OperatingMode, RobotProfile,
-    Source, StageCommand, StageEvent, StageState,
+    Ack, Command, Engagement, EngagementState, Event, GazeSource, MessageClass, OperatingMode, PerfLayer, PerfState,
+    Rig, RobotProfile, Source, StageCommand, StageEvent, StageState,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -33,12 +33,14 @@ pub struct StageConfig {
     pub outputs: Vec<String>,
     /// Alive layers and their Show-mode defaults.
     pub alive: BTreeMap<String, bool>,
+    /// The Physical rig's profile (`None` = only Original is available).
+    pub physical_profile: Option<std::path::PathBuf>,
 }
 
 impl StageConfig {
     pub fn from_profile(p: &RobotProfile) -> Self {
         let outputs = p.actuators.iter().map(|a| a.name.clone()).chain(p.lights.iter().map(|l| l.name.clone()));
-        Self { outputs: outputs.collect(), alive: p.alive.clone() }
+        Self { outputs: outputs.collect(), alive: p.alive.clone(), physical_profile: None }
     }
 
     /// The §4 defaults for `mode`, keeping `frozen`.
@@ -93,7 +95,7 @@ fn apply(bus: &Bus, cfg: &StageConfig, cmd: StageCommand) -> Ack {
     match cmd {
         StageCommand::SetMode { mode } => {
             if mode != cur.mode {
-                next = StageState { gaze: cur.gaze, gaze_owner: cur.gaze_owner.clone(), ..cfg.defaults(mode, cur.frozen) };
+                next = StageState { gaze: cur.gaze, gaze_owner: cur.gaze_owner.clone(), rig: cur.rig, ..cfg.defaults(mode, cur.frozen) };
             }
         }
         StageCommand::SetOutput { output, enabled } => match next.outputs.get_mut(&output) {
@@ -111,6 +113,24 @@ fn apply(bus: &Bus, cfg: &StageConfig, cmd: StageCommand) -> Ack {
             next.layers.values_mut().for_each(|on| *on = false);
         }
         StageCommand::Freeze { on } => next.frozen = on,
+        StageCommand::SetRig { rig } => {
+            if rig != cur.rig {
+                let show_running = bus.get::<PerfState>().runs.iter().any(|r| r.layer == PerfLayer::Show);
+                if cur.mode == OperatingMode::Show && show_running {
+                    return Ack::rejected("a show is running: stop it before switching the rig");
+                }
+                if rig == Rig::Physical {
+                    let Some(path) = &cfg.physical_profile else {
+                        return Ack::rejected("no Physical rig profile configured");
+                    };
+                    if let Err(e) = RobotProfile::load(path) {
+                        return Ack::rejected(format!("{}: {e} (run `mech/.venv/bin/python -m rigsync`)", path.display()));
+                    }
+                }
+                tracing::info!(from = ?cur.rig, to = ?rig, "rig");
+            }
+            next.rig = rig;
+        }
         StageCommand::ClaimPad { owner } => next.pad_owner = owner,
         StageCommand::SetGaze { source: GazeSource::Audio, .. } => {
             return Ack::rejected("sound-source gaze is not implemented yet")
@@ -170,7 +190,35 @@ mod tests {
         StageConfig {
             outputs: vec!["neck".into(), "eyes".into()],
             alive: [("breathing".to_string(), true), ("saccades".to_string(), false)].into(),
+            physical_profile: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json").into()),
         }
+    }
+
+    #[tokio::test]
+    async fn rig_survives_modes_and_waits_for_the_show() {
+        let bus = Bus::default();
+        spawn(&bus, cfg(), None).unwrap();
+        let rig = |rig| stage(StageCommand::SetRig { rig });
+        assert!(bus.command(Source::Ui, None, rig(Rig::Physical)).await.is_accepted());
+        let bench = stage(StageCommand::SetMode { mode: OperatingMode::Bench });
+        assert!(bus.command(Source::Ui, None, bench).await.is_accepted());
+        assert_eq!(bus.get::<StageState>().rig, Rig::Physical, "the rig survives a mode change");
+        let show = stage(StageCommand::SetMode { mode: OperatingMode::Show });
+        assert!(bus.command(Source::Ui, None, show).await.is_accepted());
+        bus.update(Source::System, |s: &mut PerfState| {
+            s.runs = vec![r3x_contracts::RunInfo {
+                run_id: 1, id: "dj_intro".into(), kind: r3x_contracts::RunKind::Sequence, layer: PerfLayer::Show, source: Source::Ui,
+            }]
+        });
+        let refused = bus.command(Source::Ui, None, rig(Rig::Original)).await;
+        assert!(!refused.is_accepted(), "no rig switch under a running show");
+        bus.update(Source::System, |s: &mut PerfState| s.runs.clear());
+        assert!(bus.command(Source::Ui, None, rig(Rig::Original)).await.is_accepted());
+        let mut none = cfg();
+        none.physical_profile = None;
+        let bus2 = Bus::default();
+        spawn(&bus2, none, None).unwrap();
+        assert!(!bus2.command(Source::Ui, None, rig(Rig::Physical)).await.is_accepted());
     }
 
     fn stage(c: StageCommand) -> Command {

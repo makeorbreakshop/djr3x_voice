@@ -37,6 +37,7 @@ import { injectBuildDom, mountBuildPanel } from './workbench/buildpanel';
 import { mountPanels } from './layout';
 import { PadOverlay } from './padoverlay';
 import { MechRig } from './mechrig';
+import { followRemote, mountRigSelector } from './rigchoice';
 import type { PadFrame } from './generated/PadFrame';
 import { BodyRegions } from './regions';
 import type { RobotProfile } from './generated/RobotProfile';
@@ -574,6 +575,7 @@ function onGatewayEvent(e: R3xEvent) {
 
 function onGatewayState(s: RetainedState) {
   gwState = s;
+  followRemote(s.stage.rig); // the runtime's rig: a different one reloads this page onto it
   syncPadClaim();
   frozen = s.stage.frozen;
   $('sh-freeze').classList.toggle('on', frozen);
@@ -693,6 +695,22 @@ mountBuildPanel(workbench);
 renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too
 // One rig from the mech model (src/mechrig/): Scene > Model, servo load meters, Build pad jog.
 const mechRig = new MechRig({ scene, workbench, droid: () => droid, interact: () => post.pacer.interact() });
+// Rig: Original | Physical (the profile animation runs on), in the R3X panel.
+mountRigSelector({
+  connected: () => connected,
+  setRemote: (rig) => panel.gw.send({ class: 'stage', type: 'set_rig', rig }),
+  showRunning: () => (performer?.running() ?? []).some((r) => r.layer === 'show'),
+  stopAndHome: () => {
+    stopShows();
+    home();
+  },
+  say: (msg) => {
+    const el = $('toast');
+    el.textContent = msg;
+    el.hidden = false;
+    setTimeout(() => (el.hidden = true), 5000);
+  },
+});
 /** In Build this panel holds the gamepad (its own jog layer), so the runtime's pad operator
  * layer stands down (stage `claim_pad`); leaving Build hands it back. Checked on every state
  * update, so a reconnect re-claims and a claim this tab left behind is returned. */
@@ -740,7 +758,8 @@ async function load() {
   droid = gltf.scene;
   droid.visible = !workbench.active;
 
-  rig = new Rig(gltf.scene, doc, restFromUrl());
+  // The active rig's joint tree (rigchoice.ts): Physical re-hangs the head on the base.
+  rig = new Rig(gltf.scene, doc, restFromUrl(), Object.fromEntries(FULL_PROFILE.joints.map((j) => [j.name, j.parent ?? null])));
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
   chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);

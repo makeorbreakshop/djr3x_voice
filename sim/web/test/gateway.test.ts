@@ -27,7 +27,7 @@ class FakeSocket {
 }
 
 const state = {
-  stage: { mode: 'show', outputs: { neck: true }, layers: {}, brain: true, autonomy: true, frozen: false, gaze: 'viewport', gaze_owner: null },
+  stage: { mode: 'show', outputs: { neck: true }, layers: {}, brain: true, autonomy: true, frozen: false, rig: 'original', gaze: 'viewport', gaze_owner: null },
   conversation: { phase: 'idle', conversation_id: null, ptt_owner: null },
   engagement: { engagement: 'idle' },
   music: { playing: false, track: null, volume: 1, ducked: false, library: [], position_s: 0, position_t: 0, paused: false },

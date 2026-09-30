@@ -4,7 +4,7 @@ import { CANONICAL_REST, KIT_POSE, Rig, type RigDoc } from '../src/rig';
 import limits from '../src/show/rig_limits.json';
 
 /** A bare kit-shaped node tree: r3x_root > torso_lower > torso_middle > torso_top > head_lift > head_pan > head_tilt (> visor, a shell mesh). */
-function kitRig(rest = CANONICAL_REST, withRoll = false) {
+function kitRig(rest = CANONICAL_REST, withRoll = false, parents?: Record<string, string | null>) {
   const root = new THREE.Group();
   const r3x = new THREE.Group();
   r3x.name = 'r3x_root';
@@ -41,7 +41,7 @@ function kitRig(rest = CANONICAL_REST, withRoll = false) {
     anchors: {},
     triangles: 0,
   };
-  return new Rig(root, doc, rest);
+  return new Rig(root, doc, rest, parents);
 }
 
 /** World yaw (deg, atan2(x, z) of the node's +Z). */
@@ -111,4 +111,38 @@ describe('head roll (Hunter head mech)', () => {
       expect(lean(rig.get('visor').node)).toBeCloseTo(lean(shell), 9);
     });
   }
+});
+
+describe('rig choice: the Physical joint tree on the textured model', () => {
+  // robot.generated.json: the head column stands on the base; the rings each turn on the core.
+  const PHYSICAL = { torso_lower: null, torso_middle: null, torso_top: 'torso_middle', head_pan: null, head_lift: 'head_pan', head_tilt: 'head_lift', head_roll: 'head_tilt', visor: 'head_roll' };
+  const at = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
+
+  it('re-hangs only where the trees differ, without moving anything at rest', () => {
+    const orig = kitRig();
+    const phys = kitRig(CANONICAL_REST, false, PHYSICAL);
+    expect(orig.rehung).toEqual([]);
+    expect(phys.rehung.sort()).toEqual(['head_lift', 'head_pan', 'head_tilt', 'torso_middle']);
+    for (const j of ['torso_top', 'head_pan', 'head_tilt', 'visor']) {
+      expect(at(phys.get(j).node).distanceTo(at(orig.get(j).node))).toBeLessThan(1e-9);
+      expect(yaw(phys.get(j).node)).toBeCloseTo(yaw(orig.get(j).node), 9);
+    }
+  });
+
+  it('turning the rings no longer turns the head; the neck still does', () => {
+    const phys = kitRig(CANONICAL_REST, false, PHYSICAL);
+    phys.apply(new Map([['torso_top', 20], ['torso_lower', 15]]));
+    phys.root.updateMatrixWorld(true);
+    expect(yaw(phys.get('head_pan').node)).toBeCloseTo(0, 9);
+    expect(yaw(phys.get('torso_middle').node)).toBeCloseTo(yaw(kitRig().get('torso_middle').node), 9);
+    phys.apply(new Map([['torso_top', 0], ['torso_lower', 0], ['head_pan', 25], ['head_lift', 10]]));
+    phys.root.updateMatrixWorld(true);
+    expect(yaw(phys.get('head_tilt').node)).toBeCloseTo(25, 9);
+    expect(at(phys.get('head_tilt').node).y).toBeCloseTo(0.74 + 0.01, 9);
+    // with the Original tree the top ring carries the head
+    const orig = kitRig();
+    orig.apply(new Map([['torso_top', 20]]));
+    orig.root.updateMatrixWorld(true);
+    expect(yaw(orig.get('head_pan').node)).toBeCloseTo(20, 6);
+  });
 });

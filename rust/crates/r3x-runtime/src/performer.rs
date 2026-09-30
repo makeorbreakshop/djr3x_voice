@@ -17,7 +17,7 @@ use r3x_bus::{Bus, CommandRequest, Received};
 use r3x_contracts::{
     Ack, Body, Command, ConversationEvent, DjEvent, Domain, EndReason, Engagement, EngagementState,
     Event, LightsState, MessageClass, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer,
-    GazeSource, OperatingMode, PerfState, VisionEvent, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState, HOME_TOLERANCE,
+    GazeSource, OperatingMode, PerfState, Rig, VisionEvent, RobotProfile, RunInfo, RunKind, Source, StageCommand, StageState, HOME_TOLERANCE,
 };
 use r3x_drivers::DriverSet;
 use r3x_performer_core::behavior::AliveLayers;
@@ -25,7 +25,7 @@ use r3x_performer_core::leds::host::SystemMode;
 use r3x_performer_core::performer::{Command as PCmd, Enables, Out, PerformerConfig};
 use r3x_performer_core::show::catalog::Catalog;
 use r3x_performer_core::show::puppeteer::PadState;
-use r3x_performer_core::show::player::{EndReason as PEnd, RunInfo as PRun, RunLayer};
+use r3x_performer_core::show::player::{EndReason as PEnd, RunInfo as PRun, RunLayer, StopSel};
 use r3x_performer_core::show::types::{Action, Kind, Source as PSource};
 use r3x_performer_core::Performer;
 use tokio::task::JoinHandle;
@@ -210,6 +210,10 @@ struct Host {
     pad_input: Option<PadInput>,
     /// A freeze the pad toggled, sent to the stage and not yet reflected in its state.
     freeze_sent: Option<bool>,
+    /// The rig the loaded profile belongs to, and a switch in progress (target, give-up time).
+    rig: Rig,
+    rig_pending: Option<(Rig, f64)>,
+    driver_opts: Option<DriverOptions>,
 }
 
 impl Host {
@@ -218,6 +222,9 @@ impl Host {
     }
 
     fn apply_stage(&mut self, s: StageState, first: bool) {
+        if s.rig != self.rig && self.rig_pending.map(|(r, _)| r) != Some(s.rig) {
+            self.begin_rig(s.rig);
+        }
         if s.frozen != self.p.frozen() {
             self.p.freeze(s.frozen);
         }
@@ -234,6 +241,49 @@ impl Host {
             }
         }
         self.stage = s;
+    }
+
+    /// A rig switch: stop every run and Home; `swap_rig` reloads once home (or after 4 s).
+    fn begin_rig(&mut self, rig: Rig) {
+        tracing::info!(from = ?self.rig, to = ?rig, "rig switch: stopping runs and homing");
+        self.p.command(PCmd::Stop(StopSel::all()));
+        self.p.command(PCmd::Home { joints: vec![] });
+        self.rig_pending = Some((rig, self.now() + 4.0));
+    }
+
+    /// Reload the performer (and hardware drivers) with the pending rig's profile.
+    fn swap_rig(&mut self) {
+        let Some((rig, give_up)) = self.rig_pending else { return };
+        if !(self.p.at_home(HOME_TOLERANCE) || self.p.frozen() || self.now() > give_up) {
+            return;
+        }
+        self.rig_pending = None;
+        let path = crate::rig_profile_path(rig);
+        let profile = match RobotProfile::load(&path) {
+            Ok(p) => Arc::new(p),
+            Err(e) => {
+                tracing::error!(path = %path.display(), "rig switch failed, keeping {:?}: {e}", self.rig);
+                return;
+            }
+        };
+        let cfg = PerformerConfig { mouth_hz: Some(profile.audio.mouth_hz), ..Default::default() };
+        let p = match Performer::new(self.p.catalog.clone(), &profile, cfg) {
+            Ok(p) => p,
+            Err(e) => return tracing::error!("rig switch failed, keeping {:?}: {e}", self.rig),
+        };
+        self.p = p;
+        if let Some(o) = self.driver_opts {
+            self.drivers = None; // release the ports before reopening them
+            self.drivers = Some(DriverSet::from_profile(&profile, &self.bus, self.p.actuation.us_per_unit, o.leds));
+        }
+        self.profile = profile;
+        self.rig = rig;
+        self.look = None;
+        let engagement = self.bus.get::<EngagementState>().engagement;
+        self.p.command(PCmd::Mode { mode: system_mode(engagement) });
+        let s = self.stage.clone();
+        self.apply_stage(s, true);
+        tracing::info!(?rig, path = %path.display(), "rig switched: performer reloaded");
     }
 
     /// The gaze target the stage selects (Show only; Bench and Studio hold still), clamped to
@@ -518,6 +568,8 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
     )
     .map_err(|e| anyhow::anyhow!("performer: {e}"))?;
     let drivers = cfg.drivers.map(|o| DriverSet::from_profile(&cfg.profile, bus, p.actuation.us_per_unit, o.leds));
+    // The profile this host starts with is the Original rig's unless it is the Physical file.
+    let rig = if crate::rig_profile_path(Rig::Physical) == crate::default_profile_path() { Rig::Physical } else { Rig::Original };
     let mut host = Host {
         bus: bus.clone(),
         profile: cfg.profile.clone(),
@@ -531,6 +583,9 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         pad: cfg.pad.clone(),
         pad_input: None,
         freeze_sent: None,
+        rig,
+        rig_pending: None,
+        driver_opts: cfg.drivers,
     };
     let mut events = bus.subscribe_all();
     let mut stage = bus.watch::<StageState>();
@@ -547,6 +602,7 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
+                    host.swap_rig();
                     host.update_look();
                     host.update_pad();
                     let t = host.now();

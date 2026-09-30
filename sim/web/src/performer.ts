@@ -11,12 +11,11 @@ import generatedJson from '../../../profiles/r3x/robot.generated.json?raw';
 import { SHOW_FILES } from './show/loader';
 import type { RGB } from './leds';
 
-/**
- * `?profile=generated` runs the profile generated from the mech model (mech/rigsync,
- * robot.generated.diff.md) instead of robot.json: its limits, speeds and joint tree.
- */
-export const PROFILE_JSON: string =
-  typeof location !== 'undefined' && new URLSearchParams(location.search).get('profile') === 'generated' ? generatedJson : profileJson;
+import { ACTIVE_RIG } from './rigchoice';
+
+/** The selected rig's profile (rigchoice.ts): Original = robot.json, Physical = the one
+ *  generated from the mech model. */
+export const PROFILE_JSON: string = ACTIVE_RIG === 'physical' ? generatedJson : profileJson;
 
 export type RunLayer = 'background' | 'gesture' | 'show';
 export type Activity = 'idle' | 'engaged' | 'listening' | 'thinking' | 'speaking' | 'dj';

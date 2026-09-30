@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::envelope::Source;
-use crate::state::{Engagement, GazeSource, OperatingMode, ServiceStatus, Track};
+use crate::state::{Engagement, GazeSource, OperatingMode, Rig, ServiceStatus, Track};
 
 /// Message class; the gateway maps each authenticated client to an allowed set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, JsonSchema)]
@@ -191,6 +191,8 @@ fn one() -> f64 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StageCommand {
+    /// Choose the rig (`state.stage.rig`). Refused in Show while a show-layer run is playing.
+    SetRig { rig: Rig },
     SetMode { mode: OperatingMode },
     SetEngagement { engagement: Engagement },
     /// Gate a driver output (profile actuator or light group name).

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const GLUE = import.meta.glob('../src/wasm/r3x_performer.js');
 const built = Object.keys(GLUE).length > 0;
 const PROFILE = Object.values(import.meta.glob('../../../profiles/r3x/robot.json', { eager: true, import: 'default' }))[0];
+const PHYSICAL = Object.values(import.meta.glob('../../../profiles/r3x/robot.generated.json', { eager: true, import: 'default' }))[0];
 const SHOW = import.meta.glob(['../../../show/clips/*.json', '../../../show/cues/*.json', '../../../show/sequences/*.json', '../../../show/idle.json'], { eager: true, import: 'default' });
 const FIXTURE = Object.values(import.meta.glob('../../../show/tests/fixtures/fx_cue_basic.json', { eager: true, import: 'default' }))[0] as { items: { id: string }[]; fixture: { root: string; bpm: number } };
 const GOLDEN = Object.values(import.meta.glob('../../../show/tests/golden/fx_cue_basic.json', { eager: true, import: 'default' }))[0];
@@ -102,5 +103,13 @@ describe.skipIf(!built)('wasm performer', () => {
   it('lints the show folder against the robot profile', async () => {
     const w = await load();
     expect(JSON.parse(w.lintShow(JSON.stringify(PROFILE), showFiles())).errors).toEqual([]);
+  });
+
+  it('lints against the Physical rig: look_around reaches past the neck gear', async () => {
+    const w = await load();
+    const errs = JSON.parse(w.lintShow(JSON.stringify(PHYSICAL), showFiles())).errors as string[];
+    expect(errs.some((e) => e.includes('look_around') && e.includes('head_pan'))).toBe(true);
+    const p = new w.WasmPerformer(JSON.stringify(PHYSICAL), showFiles(), 3); // the performer loads it
+    p.free();
   });
 });
