@@ -177,3 +177,23 @@ def test_hole_groups(name):
     assert all(t in HOLE_TYPES for t in mod.DESIGNED.values())
     p = mod.make({"inserts": True})
     assert p.is_valid
+
+
+def test_clearance_cut_repairs_an_open_mesh(tmp_path):
+    """A cut mesh with a missing face is closed and subtracted; a mesh with no volume raises."""
+    import numpy as np
+    import trimesh
+
+    from parts.head._shell import mesh_solid
+
+    box = trimesh.creation.box((10, 10, 10))
+    box.update_faces(np.arange(len(box.faces)) != 0)          # open: one triangle missing
+    p = tmp_path / "open.stl"
+    box.export(p)
+    solids = mesh_solid(p)
+    assert len(solids) == 1 and abs(solids[0].volume - 1000.0) < 1.0
+    flat = trimesh.Trimesh([[0, 0, 0], [1, 0, 0], [0, 1, 0]], [[0, 1, 2]])
+    q = tmp_path / "flat.stl"
+    flat.export(q)
+    with pytest.raises(ValueError):
+        mesh_solid(q)

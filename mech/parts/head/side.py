@@ -30,7 +30,7 @@ import math
 import numpy as np
 
 from ._common import Print, hole_features, plane, rot_x
-from ._shell import SHELL_FROM_HEAD
+from ._shell import SHELL_FROM_HEAD, apply_clearance_cuts
 
 TILT_DEG = 1.07
 
@@ -78,6 +78,7 @@ DEFAULTS = dict(
     magnet=(8.71, 99.03, 5.06, 3.25),  # x, z, diameter, depth (up from the floor underside)
     top_pin=(79.96, -92.63, 6.0, 2.46),  # x, z, diameter, depth (down from the rim)
     rib_hole=(68.95, 37.0, 2.70, 4.72, 64.26, 67.26),  # x, y, bore, pocket, pocket z0, z1 (from the back face)
+    clearance_cuts=(),           # STL paths (the side's reference-STL frame) subtracted from the piece
 )
 
 
@@ -182,6 +183,7 @@ def make(side: str = "left", params: dict | None = None, **kw):
 
         feats = {k2: moved(v, MIRROR_X) for k2, v in feats.items()}
         feats = {(k2.replace("_l", "_r") if k2.endswith("_l") else k2): v for k2, v in feats.items()}
+    body = apply_clearance_cuts(body, P["clearance_cuts"], frame)
     return body, feats, P, frame
 
 

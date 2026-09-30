@@ -18,11 +18,14 @@ LABEL = "RX Neck Joint Member V1 (parametric)"
 
 def make(params: dict | None = None, **kw):
     P = resolve(params, kw)
-    part, holes, d = build(P)
+    part, holes = build(P)
     feats: dict = {}
     for k, name in {"xp": "pin", "xn": "pin_b", "zp": "end_a", "zn": "end_b"}.items():
-        p, n = holes[k]
-        hole_features(feats, name, p, n, d / 2, depth=P["wall"], bolt=P["bolt"], kind=P["hole"])
+        p, n, d, t = holes[k]
+        hole_features(feats, name, p, n, d / 2, depth=P["wall"], bolt=P["bolt"], kind=t)
+        if t in ("clearance", "nut_trap"):          # where the lock nut / nut bears
+            inner = tuple(p[i] + n[i] * P["wall"] for i in range(3))
+            feats[f"nut_{name}"] = plane(inner, n)
     feats["face_top"] = plane((0, P["thick"] / 2, 0), (0, 1, 0))
     feats["face_bottom"] = plane((0, -P["thick"] / 2, 0), (0, -1, 0))
     return finish(part, label=LABEL, params=P, features=feats, reference=REFERENCE,

@@ -27,14 +27,15 @@ LABEL = "RX Neck Coupler V1 (parametric)"
 VARIANTS = {"hunter_32": {}, "r3x_26": {"tube_od": 26.0}}
 
 DESIGNED = {"hub": "tapped", "pin": "tapped"}   # the hub's screws and the side pin self-thread (Hunter)
-INSERT_CANDIDATES = ()   # a 5 mm hub plate and a 4 mm wall are too thin for inserts: kept tapped
+INSERT_CANDIDATES = ("hub", "pin")   # the preset: a 7 mm hub plate with inserts, and an insert boss for the pin
 
 DEFAULTS = dict(
     fit=0.0,              # print fit, mm added to every hole and to the bore diameter
     tube_od=32.0,         # neck tube OD the bore takes (Hunter: 32; R-3X kit: 26)
     od=40.0,              # outside diameter
     height=35.0,
-    top_t=5.0,            # hub plate thickness (the tube stops under it)
+    top_t=None,           # hub plate thickness (the tube stops under it): None = 5 as designed, 7 for inserts
+    insert_top_t=7.0,     # the plate when the hub screws go into inserts (the workbench's version)
     centre_hole_d=15.0,   # relief for the sonic hub's centre boss
     hub_pattern=16.0,     # goBILDA sonic hub: 4 holes on a 16 mm square
     hub_bolt="M4",
@@ -46,7 +47,7 @@ DEFAULTS = dict(
 
 
 def make(params: dict | None = None, **kw):
-    from build123d import Axis, BuildPart, BuildSketch, Circle, Hole, Locations, Mode, Plane, extrude
+    from build123d import Align, Axis, BuildPart, BuildSketch, Circle, Cylinder, Hole, Locations, Mode, Plane, extrude
 
     P = dict(DEFAULTS)
     given = dict(params or {}, **kw)
@@ -57,13 +58,17 @@ def make(params: dict | None = None, **kw):
     if unknown:
         raise TypeError(f"unknown neck_coupler parameters: {sorted(unknown)}")
     fit = P["fit"]
-    od, h, tt = P["od"], P["height"], P["top_t"]
+    od, h = P["od"], P["height"]
     bore = P["tube_od"] + fit
     if bore >= od - 2.0:
         raise ValueError(f"tube_od {P['tube_od']} leaves less than a 1 mm wall in a {od} mm coupler")
     types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     if "nut_trap" in types.values():
         raise ValueError("no room for nut traps in the coupler: clearance | heat_set | tapped")
+
+    tt = P["top_t"] if P["top_t"] is not None else (P["insert_top_t"] if types["hub"] == "heat_set" else 5.0)
+    P["top_t"] = tt
+    ins = INSERTS[P["insert"]]
 
     def dia(bolt, t):
         return INSERTS[P["insert"]]["d"] + fit if t == "heat_set" else hole_d(bolt, "tap" if t == "tapped" else t, fit)
@@ -86,10 +91,19 @@ def make(params: dict | None = None, **kw):
             Hole((P["centre_hole_d"] + fit) / 2, tt)
             with Locations(*[(x, y) for x in (-hp, hp) for y in (-hp, hp)]):
                 Hole(d_hub / 2, tt)
-        # side pin hole through the +X wall only
+        # side pin hole through the +X wall only; an insert gets a boss outside the wall when the
+        # wall is thinner than the insert's hole
         wall = (od - bore) / 2
-        with Locations(Plane((od / 2, 0, P["pin_y"]), x_dir=(0, 1, 0), z_dir=(1, 0, 0))):
-            Hole(d_pin / 2, wall + 1.0)                 # through the wall, into the bore
+        x_face = od / 2
+        if types["pin"] == "heat_set":
+            need = ins["length"] + 1.0
+            if wall < need:
+                boss = need - wall
+                with Locations(Plane((od / 2 - 0.5, 0, P["pin_y"]), x_dir=(0, 1, 0), z_dir=(1, 0, 0))):
+                    Cylinder(d_pin / 2 + 1.5, boss + 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                x_face = od / 2 + boss
+        with Locations(Plane((x_face, 0, P["pin_y"]), x_dir=(0, 1, 0), z_dir=(1, 0, 0))):
+            Hole(d_pin / 2, x_face - od / 2 + wall + 1.0)   # through the wall, into the bore
     part = transform(bp.part, rot_x(-90))          # design +Z -> the reference's +Y: (x, y, z) -> (x, z, -y)
 
     # features, in the reference frame (x, y, z) = design (x, z, -y)
@@ -104,7 +118,7 @@ def make(params: dict | None = None, **kw):
     for i, (x, z) in enumerate(hub):
         hole_features(feats, f"cp{i + 1}", (x, h, z), (0, -1, 0), d_hub / 2, depth=tt, bolt=P["hub_bolt"],
                       kind=types["hub"])
-    hole_features(feats, "side_f", (od / 2, P["pin_y"], 0), (-1, 0, 0), d_pin / 2, depth=wall,
+    hole_features(feats, "side_f", (x_face, P["pin_y"], 0), (-1, 0, 0), d_pin / 2, depth=x_face - od / 2 + wall,
                   bolt=P["pin_bolt"], kind=types["pin"])
     return finish(part, label=LABEL, params=P, features=feats, reference=REFERENCE,
                   printability=Print("open end down (y = 0 on the bed)", "bottom", False,

@@ -22,51 +22,70 @@ DEFAULTS = dict(
     corner_r=3.0,       # outer corners
     window_r=3.0,       # window corners
     bolt="M4",
-    pivot_hole=None,    # as designed: tapped (the pivot screws self-thread; they carry the gimbal's shear,
-                        # so the inserts preset leaves them) | clearance | heat_set
+    pivot_hole=None,    # both pivot groups at once; as designed: tapped (the pivot screws self-thread)
+    tilt_hole=None,     # the side walls' pivots: clearance = a through-bolt with a lock nut on the inner
+                        # face (the workbench's choice for the gimbal cross); nut_trap = its nut sunk into
+                        # the wall's inner face; heat_set; tapped
+    roll_hole=None,     # the end walls' pivots, the same choices
+    shoulder_d=None,    # a shoulder bolt: its shoulder diameter runs in the clearance hole
     hole=None,          # the older name for pivot_hole
     inserts=False,
     insert="M4-kit",
 )
-DESIGNED = {"pivot": "tapped"}
+DESIGNED = {"tilt": "tapped", "roll": "tapped"}
 
 
 def build(P: dict):
-    """The ring (build123d Part) and its four hole centres/axes (entry point, direction into the part)."""
-    from build123d import BuildPart, BuildSketch, Hole, Locations, Mode, Plane, RectangleRounded, extrude
+    """The ring (build123d Part) and its four holes: {key: (entry point, direction into the part,
+    diameter, hole type)}. Keys: xp / xn through the side walls (the tilt pivots in the gimbal),
+    zp / zn through the end walls (the roll pivots)."""
+    import math
+
+    from build123d import (Align, BuildPart, BuildSketch, Cylinder, Mode, Plane, RectangleRounded, RegularPolygon,
+                           extrude)
+
+    from ._common import INSERTS, NUTS, resolve_hole_types
 
     L, W, T, wl = P["length"], P["width"], P["thick"], P["wall"]
     if 2 * wl >= min(L, W):
         raise ValueError("wall too thick for the ring")
-    from ._common import INSERTS, resolve_hole_types
-
     if P.get("hole") and not P.get("pivot_hole"):
         P["pivot_hole"] = P["hole"]
-    t = resolve_hole_types(P, DESIGNED)["pivot"]
-    if t == "nut_trap":
-        raise ValueError("pivot_hole: no room for nut traps in the ring's 4 mm walls")
-    P["hole"] = t
-    d = INSERTS[P["insert"]]["d"] + P["fit"] if t == "heat_set" else hole_d(P["bolt"], "tap" if t == "tapped" else t, P["fit"])
-    # sketch on the XZ footprint (Plane.XZ: local (u, v) = (x, z), normal -Y), extruded symmetric in Y
+    for g in ("tilt", "roll"):                      # pivot_hole sets both; tilt_hole / roll_hole one
+        if P.get(f"{g}_hole") is None and P.get("pivot_hole") is not None:
+            P[f"{g}_hole"] = P["pivot_hole"]
+    types = resolve_hole_types(P, DESIGNED)
+    P["hole"] = types["tilt"] if types["tilt"] == types["roll"] else None
+
+    def dia(t):
+        if t == "heat_set":
+            return INSERTS[P["insert"]]["d"] + P["fit"]
+        if t in ("clearance", "nut_trap") and P.get("shoulder_d"):
+            return P["shoulder_d"] + P["fit"]           # a shoulder bolt's shoulder runs in the wall
+        return hole_d(P["bolt"], "tap" if t == "tapped" else "clearance", P["fit"])
+
     pl = Plane.XZ.offset(-T / 2)          # origin at y = +T/2, normal -Y: extrude T down to -T/2
     with BuildPart() as bp:
         with BuildSketch(pl):
             RectangleRounded(W, L, P["corner_r"])
             RectangleRounded(W - 2 * wl, L - 2 * wl, P["window_r"], mode=Mode.SUBTRACT)
         extrude(amount=T)
-        # through each end wall (along Z) and each side wall (along X), at mid-thickness
-        for p, n in (((0, 0, L / 2), (0, 0, -1)), ((0, 0, -L / 2), (0, 0, 1)),
-                     ((W / 2, 0, 0), (-1, 0, 0)), ((-W / 2, 0, 0), (1, 0, 0))):
-            with Locations(Plane(p, z_dir=tuple(-v for v in n))):
-                Hole(d / 2, wl)
-    holes = {
-        "zp": ((0.0, 0.0, L / 2), (0.0, 0.0, -1.0)),
-        "zn": ((0.0, 0.0, -L / 2), (0.0, 0.0, 1.0)),
-        "xp": ((W / 2, 0.0, 0.0), (-1.0, 0.0, 0.0)),
-        "xn": ((-W / 2, 0.0, 0.0), (1.0, 0.0, 0.0)),
-    }
-    return bp.part, holes, d
-
+    body = bp.part
+    spec = {"zp": ((0.0, 0.0, L / 2), (0.0, 0.0, -1.0), "roll"), "zn": ((0.0, 0.0, -L / 2), (0.0, 0.0, 1.0), "roll"),
+            "xp": ((W / 2, 0.0, 0.0), (-1.0, 0.0, 0.0), "tilt"), "xn": ((-W / 2, 0.0, 0.0), (1.0, 0.0, 0.0), "tilt")}
+    holes = {}
+    for k, (p, n, g) in spec.items():
+        t = types[g]
+        d = dia(t)
+        body -= Plane(origin=p, z_dir=n).location * Cylinder(d / 2, wl + 0.02, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        if t == "nut_trap":                         # the nut in the wall's inner face
+            af, nt = NUTS[P["bolt"]]
+            inner = tuple(p[i] + n[i] * wl for i in range(3))
+            with BuildSketch(Plane(origin=inner, z_dir=tuple(-v for v in n))) as hx:
+                RegularPolygon((af + P["fit"]) / math.sqrt(3), 6)
+            body -= extrude(hx.sketch, amount=min(nt + 0.2, wl - 0.6))
+        holes[k] = (p, n, d, t)
+    return body, holes
 
 def resolve(params, kw, extra_defaults=None):
     P = dict(DEFAULTS)

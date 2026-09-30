@@ -20,7 +20,7 @@ Design:
 from __future__ import annotations
 
 from ._common import Print, finish, hole_features, plane, rot_x
-from ._shell import SHELL_FROM_HEAD, elliptic_prism_z, spheroid
+from ._shell import SHELL_FROM_HEAD, apply_clearance_cuts, elliptic_prism_z, spheroid
 
 REFERENCE = "RX Head Top.stl"
 LABEL = "RX Head Top (parametric)"
@@ -48,6 +48,7 @@ DEFAULTS = dict(
     crown_hole_depth=3.38,
     crown_pattern=25.4,               # square, centred on (0, crown_z), plus a centre hole
     crown_z=-0.24,
+    clearance_cuts=(),                # STL paths (the reference STL's frame) subtracted from the shell
 )
 
 
@@ -101,6 +102,7 @@ def make(params: dict | None = None, **kw):
         yt = P["ceiling_y"]
         body -= Pos(x, yt + P["crown_hole_depth"] / 2, z) * Rot(90, 0, 0) * Cylinder(dc / 2, P["crown_hole_depth"] + 0.02)
         hole_features(feats, f"crown{i + 1}", (x, yt, z), (0, 1, 0), dc / 2, depth=P["crown_hole_depth"])
+    body = apply_clearance_cuts(body, P["clearance_cuts"], EXPORT_FRAME)
     feats["rim"] = plane((0, y0, P["band"][1]), (0, -1, 0))
     feats["ceiling"] = plane((0, P["ceiling_y"], 0), (0, -1, 0))
     feats["front"] = plane((0, 100.0, zf), (0, 0, 1))

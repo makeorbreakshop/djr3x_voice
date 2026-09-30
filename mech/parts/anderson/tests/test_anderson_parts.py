@@ -136,7 +136,7 @@ def test_inserts_preset(name):
               and f.get("insert")]
         assert hs, f"{g}: no heat-set holes after the preset"
         for f in hs:
-            ins = next(v for v in INSERTS.values() if v["source"] == f["insert"]) if "as drawn" not in f["insert"] else None
+            ins = next((v for v in INSERTS.values() if v["source"] == f["insert"]), None)
             if ins:
                 assert math.isclose(2 * f["r"], ins["d"], abs_tol=1e-6) and f["depth"] >= ins["length"] + 1 - 1e-6
     with pytest.raises(ValueError):

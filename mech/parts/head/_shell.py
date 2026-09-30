@@ -46,3 +46,76 @@ def elliptic_prism_z(a: float, b: float, xc: float, yc: float, z0: float, z1: fl
                 Ellipse(a, b)
         extrude(amount=z1 - z0)
     return bp.part
+
+
+def mesh_solid(path, to_design=None, simplify: float = 0.05):
+    """A clearance-cut mesh (an STL in the shell's reference frame) as build123d Solids, carried
+    into the part's design frame by `to_design` (4x4). The mesh is repaired first (merged, zero-volume
+    debris dropped, holes filled, made manifold by manifold3d, simplified within `simplify` mm); a
+    mesh that still is not a closed solid raises."""
+    import numpy as np
+    import trimesh
+
+    m = trimesh.load(str(path), force="mesh")
+    m.merge_vertices()
+    m.update_faces(m.nondegenerate_faces())
+    # drop zero-volume debris, close what is left, then let manifold3d make it a manifold
+    parts = [c for c in m.split(only_watertight=False) if abs(c.volume) > 1e-3]
+    if not parts:
+        raise ValueError(f"clearance cut {path}: no volume in the mesh")
+    m = trimesh.util.concatenate(parts)
+    trimesh.repair.fill_holes(m)
+    trimesh.repair.fix_normals(m)
+    import manifold3d
+
+    man = manifold3d.Manifold(manifold3d.Mesh(np.asarray(m.vertices, np.float32), np.asarray(m.faces, np.uint32)))
+    if man.status() != manifold3d.Error.NoError or man.volume() <= 0:
+        raise ValueError(f"clearance cut {path}: repair failed ({man.status()})")
+    vol = man.volume()
+    man = man.simplify(simplify)
+    if abs(man.volume() - vol) > 0.005 * vol:
+        raise ValueError(f"clearance cut {path}: simplifying changed the volume by more than 0.5 %")
+    solids = []
+    for piece in man.decompose():
+        out = piece.to_mesh()
+        pm = trimesh.Trimesh(out.vert_properties[:, :3], out.tri_verts, process=True)
+        pm.merge_vertices()
+        if pm.volume <= 1e-6:
+            continue
+        if to_design is not None:
+            pm.apply_transform(to_design)
+        solids.append(_sewn_solid(pm, path))
+    if not solids:
+        raise ValueError(f"clearance cut {path}: nothing left after repair")
+    return solids
+
+
+def _sewn_solid(m, path):
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeSolid,
+                                    BRepBuilderAPI_Sewing)
+    from OCP.gp import gp_Pnt
+    from OCP.TopoDS import TopoDS
+    from build123d import Solid
+
+    sew = BRepBuilderAPI_Sewing(1e-4)
+    for tri in m.triangles:
+        poly = BRepBuilderAPI_MakePolygon(*[gp_Pnt(*map(float, p)) for p in tri], True)
+        sew.Add(BRepBuilderAPI_MakeFace(poly.Wire()).Face())
+    sew.Perform()
+    solid = Solid(BRepBuilderAPI_MakeSolid(TopoDS.Shell_s(sew.SewedShape())).Solid())
+    if solid.volume < 0:
+        solid = Solid(solid.wrapped.Reversed())
+    if not solid.is_valid or abs(solid.volume - m.volume) > 1e-3 * abs(m.volume) + 1e-6:
+        raise ValueError(f"clearance cut {path}: could not build a valid solid from the mesh")
+    return solid
+
+
+def apply_clearance_cuts(body, cuts, export_frame):
+    """Subtract each clearance-cut mesh (reference-STL frame) from a shell built in its design frame."""
+    import numpy as np
+
+    to_design = np.linalg.inv(export_frame)
+    for c in cuts or []:
+        for piece in mesh_solid(c, to_design):
+            body = body - piece
+    return body

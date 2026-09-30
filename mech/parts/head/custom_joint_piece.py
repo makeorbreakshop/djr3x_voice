@@ -19,12 +19,20 @@ LABEL = "Custom Joint Piece (parametric)"
 
 def make(params: dict | None = None, **kw):
     P = resolve(params, kw)
-    part, holes, d = build(P)
+    if P.get("inserts"):
+        # the gimbal's pivots carry shear: the preset makes them through-bolts with lock nuts, not inserts
+        for g in ("tilt", "roll"):
+            if P.get(f"{g}_hole") is None and P.get("pivot_hole") is None and P.get("hole") is None:
+                P[f"{g}_hole"] = "clearance"
+    part, holes = build(P)
     feats: dict = {}
     names = {"xn": "tilt_l", "xp": "tilt_r", "zn": "roll_f", "zp": "roll_b"}
     for k, name in names.items():
-        p, n = holes[k]
-        hole_features(feats, name, p, n, d / 2, depth=P["wall"], bolt=P["bolt"], kind=P["hole"])
+        p, n, d, t = holes[k]
+        hole_features(feats, name, p, n, d / 2, depth=P["wall"], bolt=P["bolt"], kind=t)
+        if t in ("clearance", "nut_trap"):          # where the lock nut / nut bears
+            inner = tuple(p[i] + n[i] * P["wall"] for i in range(3))
+            feats[f"nut_{name}"] = plane(inner, n)
     feats["face_top"] = plane((0, P["thick"] / 2, 0), (0, 1, 0))
     feats["face_bottom"] = plane((0, -P["thick"] / 2, 0), (0, -1, 0))
     return finish(part, label=LABEL, params=P, features=feats, reference=REFERENCE,

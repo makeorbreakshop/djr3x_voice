@@ -192,6 +192,15 @@ INSERTS = {
     "M5": {"d": 6.4, "length": 9.5, "source": "M5 x 9.5 heat-set (Ruthex RX-M5x9.5: hole 6.4)"},
     # the kit's own: Hunter's head BOM "M4 heat set inserts - 6mm by 6mm", drawn at 6.0
     "M4-kit": {"d": 6.0, "length": 6.0, "source": "R-3X head BOM: M4 heat-set, 6 x 6 mm (Hunter's hole 6.0)"},
+    # Anderson's lift rack, as drawn: a 5.5 x 4.5 mm pocket (a short M4 insert)
+    "M4-anderson": {"d": 5.5, "length": 3.5, "source": "Anderson's lift rack as drawn: 5.5 x 4.5 mm pocket (short M4)"},
+    # the kit's McMaster inserts: no datasheet on this machine - standard values, flagged
+    "94180A331": {"d": 4.0, "length": 5.7, "verified": False,
+                  "source": "McMaster 94180A331 (M3 heat-set): hole unverified, standard M3 values used"},
+    "94180A351": {"d": 5.6, "length": 8.1, "verified": False,
+                  "source": "McMaster 94180A351 (M4 heat-set): hole unverified, standard M4 values used"},
+    "93365A": {"d": 4.0, "length": 5.7, "verified": False,
+               "source": "McMaster 93365A* (tapered heat-set, M3 assumed): hole unverified, standard M3 values used"},
 }
 NUTS = {  # ISO 4032 hex nuts: across flats, thickness
     "M2": (4.0, 1.6), "M2.5": (5.0, 2.0), "M3": (5.5, 2.4), "M4": (7.0, 3.2), "M5": (8.0, 4.7),
