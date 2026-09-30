@@ -303,7 +303,56 @@ def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
                        Joint("visor", "Visor (poseable)", "revolute", "head", "visor", ear, (1.0, 0.0, 0.0), (-15, 30),
                              profile_joint="visor", drive={"kind": "none"})]
         top.children.append(head)
+    use_real_parts(root)
     return root
+
+
+SERVO_CASE = {"SERVO_60KG_270": "large", "SERVO_35KG_270": "standard", "DS3218_DUAL": "standard", "SERVO_7KG": "micro"}
+
+
+def use_real_parts(root: Asm):
+    """Swap the builders' stand-ins ("-dnp" placeholders, box generators) for the real parts from
+    mech/parts: parametric servos to their datasheet case, horns, MGN12 rail/carriage, the
+    F6001ZZ bearing, the neck tube and the 2020 extrusions - each fitted onto its stand-in so
+    placement is unchanged (the fit error is reported per part)."""
+    from parts import models
+
+    def ext(p):
+        from r3xmech.meshes import load_file
+        m = load_file(str(p.file)) if p.file is not None else p.generator()
+        return sorted(m.extents)
+
+    for p in root.all_parts():
+        stem = Path(p.file).stem.lower() if p.file is not None else ""
+        key = p.material.split(":", 1)[1] if p.material.startswith("servo:") else None
+        if p.cls == "servo" and key in SERVO_CASE:
+            p.real = {"kind": "servo", "spec": {"case": SERVO_CASE[key], "dual_shaft": key == "DS3218_DUAL", "model": key}}
+            p.cad = "parametric"
+        elif "disc-dnp" in stem or "disk-dnp" in stem:
+            e = ext(p)
+            p.real = {"kind": "disc_horn", "spec": {"od_mm": round(e[2], 1), "t_mm": round(e[0], 1), "square_mm": 10.0}}
+            p.cad = "parametric"
+        elif "mgn12h-dnp" in stem:
+            p.real = {"kind": "carriage", "spec": {"rail": "MGN12", "carriage": "MGN12H"}}
+            p.cad = "parametric"
+        elif "mgn12rail-dnp" in stem:
+            p.real = {"kind": "linear_rail", "spec": {"rail": "MGN12", "length_mm": round(ext(p)[2]), "carriage": False}}
+            p.cad = "parametric"
+        elif "flanged-bearing-dnp" in stem:
+            p.real = {"kind": "bearing", "spec": {"type": "flanged", "id_mm": 12, "od_mm": 28, "width_mm": 8,
+                                                   "flange_od_mm": 30.5, "flange_mm": 1.5}}
+            p.cad = "parametric"
+        elif p.id == "neck_tube" and p.generator is not None:
+            L = ext(p)[2]
+            p.generator = (lambda L=L: models.tube({"od_mm": 26.0, "id_mm": 23.0, "length_mm": L}))
+            p.cad = "parametric"
+        elif p.generator is not None and "2020" in p.name:
+            L = ext(p)[2]
+            p.generator = (lambda L=L: models.extrusion({"profile": "2020", "length_mm": L}))
+            p.cad = "parametric"
+            p.catalog = "misumi:HFS5-2020"
+        elif p.generator is not None and p.kind == "generated":
+            p.cad = "placeholder"
 
 
 def build():

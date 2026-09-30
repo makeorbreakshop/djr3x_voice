@@ -33,9 +33,16 @@ def to_workbench(a: Asm, variant: dict | None = None):
         m = part_mesh(p)
         mass, note = _mass(p)
         cls = p.cls if p.cls in ("shell", "mech", "servo", "fastener", "bearing", "hardware") else "hardware"
-        parts.append(Part(id=p.id, name=p.name, cls=cls, link=p.link, mesh=m, source=_src(p), material=p.material,
+        src = _src(p)
+        if p.real is not None:
+            src.update({"kind": "parametric", "stand_in": src.get("file"), "real": dict(p.real)})
+        cad = p.cad if p.real is None else ("vendor" if p.catalog and p.catalog.startswith("gobilda") else "parametric")
+        if p.real is None and p.kind == "step":
+            cad = "vendor"
+        parts.append(Part(id=p.id, name=p.name, cls=cls, link=p.link, mesh=m, source=src, material=p.material,
                           printed=p.printed, explode=tuple(p.explode), mass_g=mass, mass_note=note,
-                          inferred=p.inferred, inferred_note=p.inferred_note, note=p.note))
+                          inferred=p.inferred, inferred_note=p.inferred_note, note=p.note,
+                          cad=cad, catalog=p.catalog))
     joints = [Joint(id=j.id, name=j.name, type=j.type, parent_link=j.parent_link, child_link=j.child_link,
                     pivot=tuple(float(v) for v in j.pivot), axis=tuple(float(v) for v in j.axis),
                     limits=tuple(j.limits), unit=j.unit, profile_joint=j.profile_joint,

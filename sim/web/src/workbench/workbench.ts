@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { tameHighlights } from '../look';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
@@ -43,7 +44,7 @@ interface PartObj {
   base: THREE.Vector3;
 }
 
-interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial }
+interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null }
 
 export interface AsmNode {
   asm: MAssembly;
@@ -66,6 +67,7 @@ const CLASS_LOOK: Record<PartClass, { color: number; metalness: number; roughnes
   bearing: { color: 0x9aa1ab, metalness: 0.85, roughness: 0.3 },
   fastener: { color: 0x34353a, metalness: 0.7, roughness: 0.4 },
 };
+const CREASE = (30 * Math.PI) / 180;
 const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff4d4d, warn: 0xffb347 };
 
 export class Workbench {
@@ -93,8 +95,8 @@ export class Workbench {
   /** Parts marked by a sweep reaching the first-contact angle. */
   contact: { parts: string[]; status: 'fail' | 'warn' } | null = null;
 
-  readonly parts = new Map<string, PartObj>();
-  readonly fast = new Map<string, FastObj>();
+  parts = new Map<string, PartObj>();
+  fast = new Map<string, FastObj>();
   private readonly listeners = new Set<() => void>();
   private readonly plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
   private readonly lights = new THREE.Group();
@@ -186,9 +188,13 @@ export class Workbench {
     return this.loading;
   }
 
+  private loadSeq = 0;
+
   private async doLoad(url: string) {
     this.error = '';
+    const seq = ++this.loadSeq;
     const m = await loadManifest(url);
+    if (seq !== this.loadSeq) return; // a newer pick superseded this one
     this.clear();
     this.manifest = m;
     const loader = new GLTFLoader();
@@ -202,8 +208,10 @@ export class Workbench {
             if (!found && (o as THREE.Mesh).isMesh) found = (o as THREE.Mesh).geometry as THREE.BufferGeometry;
           });
           if (!found) throw new Error(`${u}: no mesh`);
-          const geo = found as THREE.BufferGeometry;
-          if (!geo.attributes.normal) geo.computeVertexNormals();
+          // Round faces render round, hard edges stay sharp: weld, then crease at 30 deg.
+          let geo = found as THREE.BufferGeometry;
+          geo.deleteAttribute('normal');
+          geo = toCreasedNormals(mergeVertices(geo, 1e-4), CREASE);
           saneNormals(geo);
           return geo;
         });
@@ -211,7 +219,13 @@ export class Workbench {
       }
       return g;
     };
-    this.top = await this.buildNode(m.root, null, geometry);
+    const parts = new Map<string, PartObj>();
+    const fast = new Map<string, FastObj>();
+    const top = await this.buildNode(m.root, null, geometry, parts, fast);
+    if (seq !== this.loadSeq) return;
+    this.parts = parts;
+    this.fast = fast;
+    this.top = top;
     this.root.add(this.top.group);
     // The droid's highlight knee (look.ts): lit surfaces stay under the bloom threshold.
     tameHighlights(this.root);
@@ -239,7 +253,8 @@ export class Workbench {
     this.contact = null;
   }
 
-  private async buildNode(asm: MAssembly, parent: AsmNode | null, geometry: (u: string) => Promise<THREE.BufferGeometry>): Promise<AsmNode> {
+  private async buildNode(asm: MAssembly, parent: AsmNode | null, geometry: (u: string) => Promise<THREE.BufferGeometry>,
+    parts: Map<string, PartObj>, fast: Map<string, FastObj>): Promise<AsmNode> {
     const group = new THREE.Group();
     group.name = `asm:${asm.id}`;
     const node: AsmNode = { asm, group, links: new Map(), pose: {}, parent, children: [], rodZero: new Map(), rods: new Map() };
@@ -269,7 +284,7 @@ export class Workbench {
       } else {
         (node.links.get(p.link) ?? group).add(mesh);
       }
-      this.parts.set(p.id, { part: p, node, holder, mesh, mat, base: b });
+      parts.set(p.id, { part: p, node, holder, mesh, mat, base: b });
     }));
     const fastMat = this.material('fastener');
     await Promise.all((asm.fasteners ?? []).filter((f) => f.placed && f.mesh && f.transform).map(async (f) => {
@@ -282,8 +297,17 @@ export class Workbench {
       const m = new THREE.Matrix4().compose(new THREE.Vector3(...f.transform!.t), new THREE.Quaternion(...q), new THREE.Vector3(1, 1, 1));
       obj.matrixAutoUpdate = false;
       obj.matrix.copy(m);
-      (node.links.get(f.link) ?? group).add(obj);
-      this.fast.set(f.id, { f, node, obj, base: m, mat });
+      // A ball stud on a servo arm turns with the horn: posed by its linkage like the arm.
+      let holder: THREE.Object3D | null = null;
+      if (f.linkage) {
+        holder = new THREE.Group();
+        holder.matrixAutoUpdate = false;
+        holder.add(obj);
+        group.add(holder);
+      } else {
+        (node.links.get(f.link) ?? group).add(obj);
+      }
+      fast.set(f.id, { f, node, obj, base: m, mat, holder });
     }));
     // Zero-pose rod balls: where the rod meshes were exported.
     const zero = linkMatrices(asm.links, asm.joints, {});
@@ -292,7 +316,7 @@ export class Workbench {
       if (s) node.rodZero.set(lk.id, { a: s.a, b: s.b });
     }
     for (const c of (asm.children ?? []) as MAssembly[]) {
-      const child = await this.buildNode(c, node, geometry);
+      const child = await this.buildNode(c, node, geometry, parts, fast);
       node.children.push(child);
       const mt = c.mount?.transform;
       if (mt) {
@@ -357,6 +381,11 @@ export class Workbench {
     n.rods.set(lk.id, s ? { servoDeg: s.servoDeg } : null);
     if (!s) return; // out of reach: the rod keeps its last pose, the panel says so
     const zero = n.rodZero.get(lk.id);
+    for (const fo of this.fast.values()) {
+      if (fo.node !== n || fo.f.linkage !== lk.id || !fo.holder) continue;
+      fo.holder.matrix.copy(fo.f.role === 'horn' ? hornMatrix(lk, ms.get(lk.horn.link)!, s.servoDeg)
+        : zero ? rodMatrix(zero.a, zero.b, s.a, s.b) : new THREE.Matrix4());
+    }
     for (const pid of lk.parts) {
       const po = this.parts.get(pid);
       if (!po) continue;
@@ -526,7 +555,7 @@ export class Workbench {
       let visible = !hideV.has(id) && !this.hidden.has(id) && (!this.isolated || this.isolated.has(id));
       if (p.class === 'shell' && this.shell === 'hidden') visible = false;
       const f = first.get(id);
-      if (cur && f !== undefined && f > this.step) visible = false;
+      if (cur && f !== undefined && f > this.step && !ctx.has(id)) visible = false;
       po.holder.visible = visible;
       po.mesh.visible = visible;
       const m = po.mat;

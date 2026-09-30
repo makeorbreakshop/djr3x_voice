@@ -1,4 +1,5 @@
 """mech/.venv/bin/python -m workbench build <assembly> [--watch] [--no-checks] [--no-export]
+mech/.venv/bin/python -m workbench test <assembly>     (the suite, TESTS.md; exit 1 on a failure)
 
 Run from mech/ (or set PYTHONPATH=mech). <assembly> is a folder name under mech/assemblies/
 (`hunter_head`), a dotted module, or a path to an assembly.py. Output: mech/out/<id>/.
@@ -25,7 +26,16 @@ def main(argv=None):
     b.add_argument("--no-checks", action="store_true")
     b.add_argument("--no-export", action="store_true")
     b.add_argument("--out", type=Path, default=OUT)
+    t = sub.add_parser("test", help="run the assembly test suite (TESTS.md)")
+    t.add_argument("assembly")
+    t.add_argument("--out", type=Path, default=OUT)
+    t.add_argument("--full", action="store_true", help="1 deg sweeps and 5 deg grids (default: 5 / 10 deg)")
     a = ap.parse_args(argv)
+
+    if a.cmd == "test":
+        from .build import run_suite
+
+        return 1 if run_suite(a.assembly, a.out, a.full)["failed"] else 0
 
     if not a.watch:
         build(a.assembly, a.out, not a.no_checks, not a.no_export)

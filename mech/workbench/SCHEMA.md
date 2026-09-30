@@ -260,7 +260,40 @@ in and out like any other option.
 }
 ```
 
+## Real parts, features and mates (added 2026-09-30, still v1: all optional)
+
+Parts and fasteners carry:
+
+```jsonc
+"cad": "vendor | parametric | mesh | placeholder",  // vendor CAD (B-rep); our parametric model;
+                                                  // a reference mesh; a sized box
+"catalog": "gobilda:2913-0004-0241",              // mech/parts/catalog.json id
+"features": { "hole_fl1": {"type": "axis", "p": [x,y,z], "d": [0,-1,0], "r": 2.24},
+              "face_fl1": {"type": "plane", "p": [x,y,z], "n": [0,1,0]},
+              "spline": {"type": "spline", "p": [...], "d": [...], "teeth": 25},
+              "ball_c": {"type": "ball", "c": [...], "r": 4.75} }   // assembly frame, zero pose
+```
+
+A parametric part's `source` holds `{"kind": "parametric", "model": "parts/hunter.py:base_plate",
+"params": {...}, "reference": "<STL>", "regression": {bbox_mm, volume_ratio, hausdorff_mm,
+p95_mm, mean_mm}}`. Fasteners may also carry `linkage`/`role` (a ball stud turns with its horn).
+
+The assembly carries its connections (workbench/mates.py):
+
+```jsonc
+"mates": [ { "id": "m031_threaded", "type": "concentric | seated | coplanar | spline | ball_link | threaded | press | glue",
+             "a": {"part": "scr_plate_bottom_1", "feature": "shank"},
+             "b": {"part": "ins_bottom_3", "feature": "thread"},
+             "params": {"engage_mm": 6.0, "into": "insert | plastic | metal | nut", "hole_depth_mm": 6.0},
+             "solved": true,          // placed from this mate (false: a vendor assembly placed it; verified)
+             "note": "" } ]
+```
+
+`checks` also holds the test suite's results (`kind: "test"`, TESTS.md); their `status` may be
+`explained` (a traced failure with its cause and fix in the summary).
+
 ## Changes
 
 - v1 (2026-09-30): first version; `variants` and `electronics` added the same day, before any
-  consumer shipped, so still v1 (both optional).
+  consumer shipped, so still v1 (both optional). Same day: `cad`, `catalog`, `features`,
+  `mates`, test checks and the `explained` status (all optional).

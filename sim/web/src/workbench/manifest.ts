@@ -7,6 +7,9 @@
 export type Vec3 = [number, number, number];
 export interface MTransform { t: Vec3; q?: [number, number, number, number] }
 
+/** How exact a part's geometry is: its own source file, the vendor's CAD, a model to spec, or a sized box. */
+export type CadStatus = 'mesh' | 'source' | 'vendor' | 'parametric' | 'placeholder';
+
 export type PartClass = 'shell' | 'mech' | 'servo' | 'fastener' | 'bearing' | 'hardware';
 
 export interface MLink { id: string; name: string; joint: string | null }
@@ -33,6 +36,8 @@ export interface MPart {
   inferred?: boolean;
   inferred_note?: string;
   note?: string;
+  cad?: CadStatus;
+  catalog?: string;
 }
 
 export interface MJoint {
@@ -78,6 +83,10 @@ export interface MFastener {
   transform?: MTransform;
   mesh?: string;
   step: string;
+  linkage?: string;
+  role?: string;
+  cad?: CadStatus;
+  catalog?: string;
   inferred?: boolean;
   inferred_note?: string;
 }
@@ -117,7 +126,7 @@ export interface MBomLine {
 export interface MCheck {
   id: string;
   kind: string;
-  status: 'pass' | 'warn' | 'fail';
+  status: 'pass' | 'warn' | 'fail' | 'explained';
   title: string;
   summary: string;
   joint?: string;
@@ -196,6 +205,10 @@ export function joinUrl(base: string, rel: string): string {
 /** Stamp every node with its base URL and inline ChildRefs (depth-limited). */
 export async function resolveTree(node: MAssembly, base: string, fetchJson: (url: string) => Promise<Manifest>, depth = 0): Promise<MAssembly> {
   node.base = base;
+  // Optional lists default to empty: writers may omit them (SCHEMA.md "Unknown keys"; empty = omitted).
+  node.links ??= [];
+  node.parts ??= [];
+  node.joints ??= [];
   const kids: MAssembly[] = [];
   for (const c of node.children ?? []) {
     if (isRef(c)) {

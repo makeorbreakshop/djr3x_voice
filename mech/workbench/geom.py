@@ -43,7 +43,7 @@ def cached(key: str, fn):
 
 # ------------------------------------------------------------------ loaders
 
-def step_leaves(path: Path, tol: float = 0.05, ang: float = 0.2) -> list[tuple[str, str, np.ndarray, np.ndarray]]:
+def step_leaves(path: Path, tol: float = 0.02, ang: float = 0.12) -> list[tuple[str, str, np.ndarray, np.ndarray]]:
     """Every leaf solid of a STEP assembly, placed by the file's own locations:
     [(path_label, label, vertices, faces)] in the STEP's frame (mm)."""
 
@@ -57,9 +57,8 @@ def step_leaves(path: Path, tol: float = 0.05, ang: float = 0.2) -> list[tuple[s
             kids = list(n.children)
             if not kids or isinstance(n, Solid):
                 s = n.located(n.global_location)
-                v, t = s.tessellate(tol, ang)
-                out.append((f"{trail}/{n.label}", n.label,
-                            np.array([(p.X, p.Y, p.Z) for p in v]), np.array(t, dtype=np.int64)))
+                v, t = _tessellate(s, tol, ang)
+                out.append((f"{trail}/{n.label}", n.label, v, t))
                 return
             for c in kids:
                 walk(c, f"{trail}/{n.label}")
@@ -70,7 +69,28 @@ def step_leaves(path: Path, tol: float = 0.05, ang: float = 0.2) -> list[tuple[s
     return cached(_cache_key("step", _file_sig(path), tol, ang), load)
 
 
-def step_mesh(path: Path, tol: float = 0.05) -> trimesh.Trimesh:
+def _tessellate(shape, tol, ang):
+    """Vertices/faces of a shape; a face that will not mesh is skipped rather than failing the part
+    (some vendor STEPs carry one degenerate face)."""
+    try:
+        v, t = shape.tessellate(tol, ang)
+        return np.array([(p.X, p.Y, p.Z) for p in v]).reshape(-1, 3), np.array(t, dtype=np.int64).reshape(-1, 3)
+    except Exception:
+        vs, ts, n = [], [], 0
+        for f in shape.faces():
+            try:
+                v, t = f.tessellate(tol, ang)
+            except Exception:
+                continue
+            if not len(t):
+                continue
+            vs.append(np.array([(p.X, p.Y, p.Z) for p in v]))
+            ts.append(np.array(t, dtype=np.int64) + n)
+            n += len(v)
+        return (np.vstack(vs) if vs else np.zeros((0, 3))), (np.vstack(ts) if ts else np.zeros((0, 3), dtype=np.int64))
+
+
+def step_mesh(path: Path, tol: float = 0.02) -> trimesh.Trimesh:
     """A single-part STEP as one mesh."""
     leaves = step_leaves(path, tol)
     return trimesh.util.concatenate([trimesh.Trimesh(v, f, process=True) for _, _, v, f in leaves])

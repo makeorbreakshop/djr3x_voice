@@ -35,6 +35,8 @@ def load_file(path: str) -> trimesh.Trimesh:
 
 
 def part_mesh_local(part: Part) -> trimesh.Trimesh:
+    if part.real is not None and (part.file is not None or part.generator is not None):
+        return real_part(part)
     if part.file is not None:
         return load_file(str(part.file))
     if part.generator is not None:
@@ -48,3 +50,27 @@ def part_mesh(part: Part, T_link: np.ndarray | None = None) -> trimesh.Trimesh:
     T = part.T if T_link is None else T_link @ part.T
     m.apply_transform(T)
     return m
+
+
+def real_part(part: Part) -> trimesh.Trimesh:
+    """The real (vendor or parametric, mech/parts) part in place of a builder's stand-in: fitted
+    onto the stand-in's geometry (cached)."""
+    import json
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from parts.library import fit_to_standin, spec_part
+    from workbench.geom import cached, _cache_key, _file_sig
+
+    src = _file_sig(Path(part.file)) if part.file is not None else f"gen:{part.id}"
+    key = _cache_key("real", src, json.dumps({k: v for k, v in part.real.items() if k != "fit_mm"}, sort_keys=True), 1)
+
+    def make():
+        model = spec_part(part.real["kind"], part.real["spec"]).mesh
+        standin = load_file(str(part.file)) if part.file is not None else part.generator()
+        fitted, err = fit_to_standin(standin, model)
+        return fitted.vertices, fitted.faces, err
+
+    v, f, err = cached(key, make)
+    part.real["fit_mm"] = round(float(err), 2)
+    return trimesh.Trimesh(v, f, process=False)

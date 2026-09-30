@@ -1,0 +1,2410 @@
+{
+ "schema": "r3x.mech.parts",
+ "version": 1,
+ "counts": {
+  "vendor": 0,
+  "parametric": 90,
+  "placeholder": 29
+ },
+ "parts": [
+  {
+   "id": "amazon:amzn-15GBPV3",
+   "vendor": "amazon",
+   "pn": "amzn-15GBPV3",
+   "description": "200mm MGN12 linear rail guides",
+   "used_by": {
+    "r3x_animation": 2
+   },
+   "url": "https://a.co/d/15GBPV3",
+   "kind": "linear_rail",
+   "spec": {
+    "rail": "MGN12",
+    "length_mm": 200,
+    "carriage": "MGN12H"
+   },
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "linear_rail to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-2EVuCa8",
+   "vendor": "amazon",
+   "pn": "amzn-2EVuCa8",
+   "description": "3' black cat6 patch cable",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/2EVuCa8",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-4aFGFbG",
+   "vendor": "amazon",
+   "pn": "amzn-4aFGFbG",
+   "description": "35kg servos for body rotation, head tilt and visor",
+   "used_by": {
+    "r3x_animation": 4
+   },
+   "url": "https://a.co/d/4aFGFbG",
+   "kind": "servo",
+   "spec": {
+    "case": "standard",
+    "model": "zoskay_35kg"
+   },
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "servo to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-4ktfO6A",
+   "vendor": "amazon",
+   "pn": "amzn-4ktfO6A",
+   "description": "1 pack F6001ZZ Flanged Ball Bearing 12x28x8mm for the visor tilt",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/4ktfO6A",
+   "kind": "bearing",
+   "spec": {
+    "type": "flanged",
+    "id_mm": 12,
+    "od_mm": 28,
+    "width_mm": 8,
+    "flange_od_mm": 30.5,
+    "flange_mm": 1.5
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "bearing to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-4r4HYVG",
+   "vendor": "amazon",
+   "pn": "amzn-4r4HYVG",
+   "description": "assorted M5 socket button cap screws",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/4r4HYVG",
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M5"
+   },
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "amazon:amzn-4uZWK90",
+   "vendor": "amazon",
+   "pn": "amzn-4uZWK90",
+   "description": "power jack socket",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/4uZWK90",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-55YxuMy",
+   "vendor": "amazon",
+   "pn": "amzn-55YxuMy",
+   "description": "12V AC power supply",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/55YxuMy",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-6AVJNFb",
+   "vendor": "amazon",
+   "pn": "amzn-6AVJNFb",
+   "description": "2 pack RJ45 screw terminal adaptors",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/6AVJNFb",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-6NUFJPY",
+   "vendor": "amazon",
+   "pn": "amzn-6NUFJPY",
+   "description": "8 x 6 x 300mm aluminum tube (arms)",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/6NUFJPY",
+   "kind": "tube",
+   "spec": {
+    "od_mm": 8,
+    "id_mm": 6,
+    "length_mm": 300
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "tube to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-6a569XR",
+   "vendor": "amazon",
+   "pn": "amzn-6a569XR",
+   "description": "arduino nano terminal adapter board",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/6a569XR",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-72BPjk9",
+   "vendor": "amazon",
+   "pn": "amzn-72BPjk9",
+   "description": "assorted M4 socket button cap screws",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/72BPjk9",
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M4"
+   },
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "amazon:amzn-89vVCGP",
+   "vendor": "amazon",
+   "pn": "amzn-89vVCGP",
+   "description": "6\" lazy susan for upper head support",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/89vVCGP",
+   "kind": "lazy_susan",
+   "spec": {
+    "size_in": 6
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "lazy_susan to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-8RaKupz",
+   "vendor": "amazon",
+   "pn": "amzn-8RaKupz",
+   "description": "multipack addressable LEDs",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/8RaKupz",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-8i8lPQm",
+   "vendor": "amazon",
+   "pn": "amzn-8i8lPQm",
+   "description": "assorted M3 socket button cap screws",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/8i8lPQm",
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M3"
+   },
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "amazon:amzn-9lB699x",
+   "vendor": "amazon",
+   "pn": "amzn-9lB699x",
+   "description": "12A buck converter",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/9lB699x",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-a1Fsgvl",
+   "vendor": "amazon",
+   "pn": "amzn-a1Fsgvl",
+   "description": "splice connectors to connect arduino to base",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/a1Fsgvl",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-a8Ppgwu",
+   "vendor": "amazon",
+   "pn": "amzn-a8Ppgwu",
+   "description": "power distribution board for ground connections",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/a8Ppgwu",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-aPCygCY",
+   "vendor": "amazon",
+   "pn": "amzn-aPCygCY",
+   "description": "10\" lazy susan for base",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/aPCygCY",
+   "kind": "lazy_susan",
+   "spec": {
+    "size_in": 10
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "lazy_susan to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-bdM5JLm",
+   "vendor": "amazon",
+   "pn": "amzn-bdM5JLm",
+   "description": "multipack servo extension cables",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/bdM5JLm",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-bfEgC2V",
+   "vendor": "amazon",
+   "pn": "amzn-bfEgC2V",
+   "description": "multipack warm white LEDs (eyes)",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/bfEgC2V",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-cmlYVZz",
+   "vendor": "amazon",
+   "pn": "amzn-cmlYVZz",
+   "description": "multipack basic 3mm LEDs",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/cmlYVZz",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-df8wZ8A",
+   "vendor": "amazon",
+   "pn": "amzn-df8wZ8A",
+   "description": "2A buck converters",
+   "used_by": {
+    "r3x_animation": 5
+   },
+   "url": "https://a.co/d/df8wZ8A",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 5,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-eV8SU7B",
+   "vendor": "amazon",
+   "pn": "amzn-eV8SU7B",
+   "description": "7kg servo for wrist",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/eV8SU7B",
+   "kind": "servo",
+   "spec": {
+    "case": "micro",
+    "model": "injs2065"
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "servo to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-ec3Kyqk",
+   "vendor": "amazon",
+   "pn": "amzn-ec3Kyqk",
+   "description": "arduino nano",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/ec3Kyqk",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-f8DJDOe",
+   "vendor": "amazon",
+   "pn": "amzn-f8DJDOe",
+   "description": "assorted heat set inserts",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/f8DJDOe",
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "M3",
+    "length_mm": 4,
+    "od_mm": 4.5
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-fl2lvkt",
+   "vendor": "amazon",
+   "pn": "amzn-fl2lvkt",
+   "description": "4 pack 6mm rod end joints",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/fl2lvkt",
+   "kind": "rod_end",
+   "spec": {
+    "thread": "M6",
+    "bore_mm": 6
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "rod_end to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-g4LGATh",
+   "vendor": "amazon",
+   "pn": "amzn-g4LGATh",
+   "description": "Pololu maestro 18 channel servo controller",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/g4LGATh",
+   "kind": "electronics",
+   "spec": {
+    "board": "pololu_maestro_18",
+    "size_mm": [
+     55.9,
+     27.9,
+     1.6
+    ]
+   },
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-h1KwHZJ",
+   "vendor": "amazon",
+   "pn": "amzn-h1KwHZJ",
+   "description": "6 way fuse block",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/h1KwHZJ",
+   "kind": "electronics",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "sized box"
+   }
+  },
+  {
+   "id": "amazon:amzn-hFFIrkm",
+   "vendor": "amazon",
+   "pn": "amzn-hFFIrkm",
+   "description": "60kg servo for head lift",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/hFFIrkm",
+   "kind": "servo",
+   "spec": {
+    "case": "large",
+    "model": "ds5160"
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "servo to spec"
+   }
+  },
+  {
+   "id": "amazon:amzn-heIJ5CD",
+   "vendor": "amazon",
+   "pn": "amzn-heIJ5CD",
+   "description": "20kg double shaft servo for hero arm",
+   "used_by": {
+    "r3x_animation": 1
+   },
+   "url": "https://a.co/d/heIJ5CD",
+   "kind": "servo",
+   "spec": {
+    "case": "standard",
+    "model": "ds3218_dual",
+    "dual_shaft": true
+   },
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "servo to spec"
+   }
+  },
+  {
+   "id": "gobilda:1309-0016-4008",
+   "vendor": "gobilda",
+   "pn": "1309-0016-4008",
+   "description": "1309 Series Sonic Hub (8mm REX Bore)",
+   "used_by": {
+    "hunter_head": 1
+   },
+   "url": "https://www.gobilda.com/1309-series-sonic-hub-8mm-rex-bore/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:1311-0016-4008",
+   "vendor": "gobilda",
+   "pn": "1311-0016-4008",
+   "description": "1311 Series Thru-Hole Sonic Hub (8mm REX Bore)",
+   "used_by": {
+    "hunter_head": 1
+   },
+   "url": "https://www.gobilda.com/1311-series-thru-hole-sonic-hub-8mm-rex-bore/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:1501-0006-0430",
+   "vendor": "gobilda",
+   "pn": "1501-0006-0430",
+   "description": "goBILDA 1501 M4 standoff 6mm OD x 43mm (step text says 1501-0006-0460)",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.0,
+    "length_mm": 43.0,
+    "thread": "M4"
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0430",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "gobilda:1501-0006-0460",
+   "vendor": "gobilda",
+   "pn": "1501-0006-0460",
+   "description": "goBILDA 1501 M4 standoff 6mm OD x 46mm",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.0,
+    "length_mm": 46.0,
+    "thread": "M4"
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0460",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "gobilda:1501-0006-0600",
+   "vendor": "gobilda",
+   "pn": "1501-0006-0600",
+   "description": "goBILDA 1501 M4 standoff 6mm OD x 60mm",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.0,
+    "length_mm": 60.0,
+    "thread": "M4"
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=1501-0006-0600",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "gobilda:1516-4008-0960",
+   "vendor": "gobilda",
+   "pn": "1516-4008-0960",
+   "description": "1516 Series 8mm REX Standoff (M4, 96mm), 4-pack",
+   "used_by": {
+    "hunter_head": 1
+   },
+   "url": "https://www.gobilda.com/1516-series-8mm-rex-standoff-m4-x-0-7mm-threads-96mm-length-4-pack/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:1602-0032-0006",
+   "vendor": "gobilda",
+   "pn": "1602-0032-0006",
+   "description": "6mm Bore 1-Side 2-Post Pillow Block (24mm Height)",
+   "used_by": {
+    "hunter_head": 2
+   },
+   "url": "https://www.gobilda.com/6mm-bore-1-side-2-post-pillow-block-24mm-height/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 2,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:1906-0025-0032",
+   "vendor": "gobilda",
+   "pn": "1906-0025-0032",
+   "description": "1906 Series Lightweight Servo Hub (25T spline, 32mm)",
+   "used_by": {
+    "hunter_head": 2
+   },
+   "url": "https://www.gobilda.com/1906-series-lightweight-servo-hub-25-tooth-spline-32mm-diameter/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 2,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:1916-0014-0048",
+   "vendor": "gobilda",
+   "pn": "1916-0014-0048",
+   "description": "Plastic Hub-Mount Control Arm (48mm), cut down",
+   "used_by": {
+    "hunter_head": 2
+   },
+   "url": "https://www.gobilda.com/plastic-hub-mount-control-arm-48mm-length/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 2,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:2000-0025-0002",
+   "vendor": "gobilda",
+   "pn": "2000-0025-0002",
+   "description": "2000 Series Dual Mode Servo (25-2, Torque)",
+   "used_by": {
+    "hunter_head": 2
+   },
+   "url": "https://www.gobilda.com/2000-series-dual-mode-servo-25-2-torque/",
+   "kind": "servo",
+   "spec": {
+    "case": "standard",
+    "model": "gobilda_2000"
+   },
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "servo to spec"
+   }
+  },
+  {
+   "id": "gobilda:2800-0004-0014",
+   "vendor": "gobilda",
+   "pn": "2800-0004-0014",
+   "description": "M4 x 14mm socket head screw (sonic hub clamp, in the STEP)",
+   "used_by": {
+    "hunter_head": 4
+   },
+   "url": "",
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 14
+   },
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "gobilda:2802-0004-0014",
+   "vendor": "gobilda",
+   "pn": "2802-0004-0014",
+   "description": "goBILDA M4 x 14mm button head screw",
+   "used_by": {
+    "kit": 0
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M4",
+    "length_mm": 14.0
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=2802-0004-0014",
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "gobilda:2802-0004-0022",
+   "vendor": "gobilda",
+   "pn": "2802-0004-0022",
+   "description": "goBILDA M4 x 22mm button head screw",
+   "used_by": {
+    "kit": 0
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M4",
+    "length_mm": 22.0
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=2802-0004-0022",
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "gobilda:2808-0004-0050",
+   "vendor": "gobilda",
+   "pn": "2808-0004-0050",
+   "description": "2808 Series Stainless Threaded Rod (M4, 50mm), 2-pack",
+   "used_by": {
+    "hunter_head": 1
+   },
+   "url": "https://www.gobilda.com/2808-series-stainless-steel-threaded-rod-m4-x-0-7mm-50mm-length-2-pack/",
+   "kind": "hardware",
+   "spec": {
+    "type": "threaded_rod",
+    "thread": "M4",
+    "length_mm": 50
+   },
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:2913-0004-0241",
+   "vendor": "gobilda",
+   "pn": "2913-0004-0241",
+   "description": "2913 Series Steel Ball Linkage (Female, M4, 24.1mm), 2-pack",
+   "used_by": {
+    "hunter_head": 2
+   },
+   "url": "https://www.gobilda.com/2913-series-steel-ball-linkage-female-m4-x-0-7mm-24-1mm-length-2-pack/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 2,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "gobilda:2913-0104-0294",
+   "vendor": "gobilda",
+   "pn": "2913-0104-0294",
+   "description": "goBILDA 2913 steel ball linkage, male M4, 29.4mm",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "ball_link",
+   "spec": {
+    "thread": "M4"
+   },
+   "url": "https://www.gobilda.com/search.php?search_query=2913-0104-0294",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "ball_link to spec"
+   }
+  },
+  {
+   "id": "gobilda:4005-0016-0001",
+   "vendor": "gobilda",
+   "pn": "4005-0016-0001",
+   "description": "4005 Series Pattern Mount Universal Joint (16-1)",
+   "used_by": {
+    "hunter_head": 1
+   },
+   "url": "https://www.gobilda.com/4005-series-pattern-mount-universal-joint-16-1/",
+   "kind": "hardware",
+   "spec": {},
+   "qty": 1,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "iso:insert-M4x6",
+   "vendor": "iso",
+   "pn": "insert-M4x6",
+   "description": "M4 heat-set insert, 6 x 6 mm",
+   "used_by": {
+    "hunter_head": 14
+   },
+   "url": "",
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "M4",
+    "length_mm": 6,
+    "od_mm": 6
+   },
+   "qty": 14,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "iso:iso10511-M4",
+   "vendor": "iso",
+   "pn": "iso10511-M4",
+   "description": "M4 nylon-insert lock nuts",
+   "used_by": {
+    "hunter_head": 0
+   },
+   "url": "",
+   "kind": "nut",
+   "spec": {
+    "type": "lock_nut",
+    "thread": "M4"
+   },
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "nut to spec"
+   }
+  },
+  {
+   "id": "iso:iso4762-M4",
+   "vendor": "iso",
+   "pn": "iso4762-M4",
+   "description": "M4 socket head cap screws (lengths from the geometry)",
+   "used_by": {
+    "hunter_head": 0
+   },
+   "url": "",
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4"
+   },
+   "qty": 0,
+   "cad": {
+    "status": "placeholder",
+    "note": "no model yet"
+   }
+  },
+  {
+   "id": "iso:iso7089-M4",
+   "vendor": "iso",
+   "pn": "iso7089-M4",
+   "description": "M4 washers (spacers on the pillow blocks and joint piece)",
+   "used_by": {
+    "hunter_head": 0
+   },
+   "url": "",
+   "kind": "washer",
+   "spec": {
+    "type": "washer",
+    "thread": "M4"
+   },
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "washer to spec"
+   }
+  },
+  {
+   "id": "mcmaster:2867T112",
+   "vendor": "mcmaster",
+   "pn": "2867T112",
+   "description": "sleeve bearing 6mm shaft / 8mm housing, 12mm long",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "bearing",
+   "spec": {
+    "type": "sleeve",
+    "id_mm": 6,
+    "od_mm": 8,
+    "width_mm": 12
+   },
+   "url": "https://www.mcmaster.com/2867T112/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "bearing to spec"
+   }
+  },
+  {
+   "id": "mcmaster:2988K12",
+   "vendor": "mcmaster",
+   "pn": "2988K12",
+   "description": "ball joint rod end, M6 x 1 shank",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "rod_end",
+   "spec": {
+    "thread": "M6",
+    "bore_mm": 6
+   },
+   "url": "https://www.mcmaster.com/2988K12/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "rod_end to spec"
+   }
+  },
+  {
+   "id": "mcmaster:2988K121",
+   "vendor": "mcmaster",
+   "pn": "2988K121",
+   "description": "ball joint rod end, M6 x 1 shank (as printed; poker list prints 2988K12)",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "rod_end",
+   "spec": {
+    "thread": "M6",
+    "bore_mm": 6
+   },
+   "url": "https://www.mcmaster.com/2988K121/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "rod_end to spec"
+   }
+  },
+  {
+   "id": "mcmaster:3088A609",
+   "vendor": "mcmaster",
+   "pn": "3088A609",
+   "description": "steel ring shim 1mm thick, 4mm ID",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "washer",
+   "spec": {
+    "type": "washer",
+    "id_mm": 4.0,
+    "od_mm": 8.0,
+    "t_mm": 1.0
+   },
+   "url": "https://www.mcmaster.com/3088A609/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "washer to spec"
+   }
+  },
+  {
+   "id": "mcmaster:50365K32",
+   "vendor": "mcmaster",
+   "pn": "50365K32",
+   "description": "316 SS tube 8mm OD, 1mm wall (as printed in parts list; see unresolved)",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "tube",
+   "spec": {
+    "od_mm": 8,
+    "id_mm": 6,
+    "length_mm": 80
+   },
+   "url": "https://www.mcmaster.com/50365K32/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "tube to spec"
+   }
+  },
+  {
+   "id": "mcmaster:50365K321",
+   "vendor": "mcmaster",
+   "pn": "50365K321",
+   "description": "316 SS tube 8mm OD, 1mm wall, cut to 80mm",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "tube",
+   "spec": {
+    "od_mm": 8,
+    "id_mm": 6,
+    "length_mm": 80
+   },
+   "url": "https://www.mcmaster.com/50365K321/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "tube to spec"
+   }
+  },
+  {
+   "id": "mcmaster:58605K33",
+   "vendor": "mcmaster",
+   "pn": "58605K33",
+   "description": "high-temp neodymium magnet 1/4in OD x 1/8in",
+   "used_by": {
+    "kit": 52
+   },
+   "kind": "magnet",
+   "spec": {
+    "od_mm": 6.35,
+    "t_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/58605K33/",
+   "qty": 52,
+   "cad": {
+    "status": "parametric",
+    "note": "magnet to spec"
+   }
+  },
+  {
+   "id": "mcmaster:5862K101",
+   "vendor": "mcmaster",
+   "pn": "5862K101",
+   "description": "neodymium magnet 1/8in OD x 1/8in (optional, magnetised doors)",
+   "used_by": {
+    "kit": 80
+   },
+   "kind": "magnet",
+   "spec": {
+    "od_mm": 3.17,
+    "t_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/5862K101/",
+   "qty": 80,
+   "cad": {
+    "status": "parametric",
+    "note": "magnet to spec"
+   }
+  },
+  {
+   "id": "mcmaster:5862K103",
+   "vendor": "mcmaster",
+   "pn": "5862K103",
+   "description": "neodymium magnet 1/4in OD x 1/8in",
+   "used_by": {
+    "kit": 65
+   },
+   "kind": "magnet",
+   "spec": {
+    "od_mm": 6.35,
+    "t_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/5862K103/",
+   "qty": 65,
+   "cad": {
+    "status": "parametric",
+    "note": "magnet to spec"
+   }
+  },
+  {
+   "id": "mcmaster:5862K105",
+   "vendor": "mcmaster",
+   "pn": "5862K105",
+   "description": "neodymium magnet 1/2in OD x 1/8in",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "magnet",
+   "spec": {
+    "od_mm": 12.7,
+    "t_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/5862K105/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "magnet to spec"
+   }
+  },
+  {
+   "id": "mcmaster:5862K141",
+   "vendor": "mcmaster",
+   "pn": "5862K141",
+   "description": "neodymium magnet 1/4in OD x 1/16in",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "magnet",
+   "spec": {
+    "od_mm": 6.35,
+    "t_mm": 1.59
+   },
+   "url": "https://www.mcmaster.com/5862K141/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "magnet to spec"
+   }
+  },
+  {
+   "id": "mcmaster:90145A471",
+   "vendor": "mcmaster",
+   "pn": "90145A471",
+   "description": "SS dowel pin 1/8in x 1/2in",
+   "used_by": {
+    "kit": 0
+   },
+   "kind": "pin",
+   "spec": {
+    "d_mm": 3.175,
+    "length_mm": 12.7
+   },
+   "url": "https://www.mcmaster.com/90145A471/",
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "pin to spec"
+   }
+  },
+  {
+   "id": "mcmaster:90358A135",
+   "vendor": "mcmaster",
+   "pn": "90358A135",
+   "description": "M6 x 6mm ultra-low-profile socket head screw",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs_low",
+    "thread": "M6",
+    "length_mm": 6.0
+   },
+   "url": "https://www.mcmaster.com/90358A135/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:90576A103",
+   "vendor": "mcmaster",
+   "pn": "90576A103",
+   "description": "M4 nylon-insert locknut, class 8",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "nut",
+   "spec": {
+    "type": "lock_nut",
+    "thread": "M4"
+   },
+   "url": "https://www.mcmaster.com/90576A103/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "nut to spec"
+   }
+  },
+  {
+   "id": "mcmaster:90751A111",
+   "vendor": "mcmaster",
+   "pn": "90751A111",
+   "description": "M3 x 0.35 fine-thread x 8mm SS socket head screw (decorative)",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M3",
+    "length_mm": 8.0
+   },
+   "url": "https://www.mcmaster.com/90751A111/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91200A132",
+   "vendor": "mcmaster",
+   "pn": "91200A132",
+   "description": "M4 x 10mm SS pan head slotted screw",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "pan",
+    "thread": "M4",
+    "length_mm": 10.0
+   },
+   "url": "https://www.mcmaster.com/91200A132/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91255A144",
+   "vendor": "mcmaster",
+   "pn": "91255A144",
+   "description": "6-32 x 1/4in black alloy button head screw",
+   "used_by": {
+    "kit": 23
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "#6-32",
+    "length_mm": 6.35
+   },
+   "url": "https://www.mcmaster.com/91255A144/",
+   "qty": 23,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A038",
+   "vendor": "mcmaster",
+   "pn": "91292A038",
+   "description": "M4 x 14mm SS socket head screw",
+   "used_by": {
+    "kit": 6
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 14.0
+   },
+   "url": "https://www.mcmaster.com/91292A038/",
+   "qty": 6,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A107",
+   "vendor": "mcmaster",
+   "pn": "91292A107",
+   "description": "M4 x 6mm SS socket head screw",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 6.0
+   },
+   "url": "https://www.mcmaster.com/91292A107/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A108",
+   "vendor": "mcmaster",
+   "pn": "91292A108",
+   "description": "M4 x 8mm SS socket head screw",
+   "used_by": {
+    "kit": 6
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 8.0
+   },
+   "url": "https://www.mcmaster.com/91292A108/",
+   "qty": 6,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A117",
+   "vendor": "mcmaster",
+   "pn": "91292A117",
+   "description": "M4 x 12mm SS socket head screw",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 12.0
+   },
+   "url": "https://www.mcmaster.com/91292A117/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A122",
+   "vendor": "mcmaster",
+   "pn": "91292A122",
+   "description": "M4 x 25mm SS socket head screw",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 25.0
+   },
+   "url": "https://www.mcmaster.com/91292A122/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A130",
+   "vendor": "mcmaster",
+   "pn": "91292A130",
+   "description": "M4 x 30mm SS socket head screw",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 30.0
+   },
+   "url": "https://www.mcmaster.com/91292A130/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91292A801",
+   "vendor": "mcmaster",
+   "pn": "91292A801",
+   "description": "M3 x 22mm SS socket head screw",
+   "used_by": {
+    "kit": 3
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M3",
+    "length_mm": 22.0
+   },
+   "url": "https://www.mcmaster.com/91292A801/",
+   "qty": 3,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91430A114",
+   "vendor": "mcmaster",
+   "pn": "91430A114",
+   "description": "M3 x 5mm SS slotted flat head screw (decorative)",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 5.0
+   },
+   "url": "https://www.mcmaster.com/91430A114/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91500A360",
+   "vendor": "mcmaster",
+   "pn": "91500A360",
+   "description": "10-32 x 2in 316 SS Phillips flat head screw",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#10-32",
+    "length_mm": 50.8
+   },
+   "url": "https://www.mcmaster.com/91500A360/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91500A829",
+   "vendor": "mcmaster",
+   "pn": "91500A829",
+   "description": "10-32 x 1/2in 316 SS Phillips flat head screw",
+   "used_by": {
+    "kit": 30
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#10-32",
+    "length_mm": 12.7
+   },
+   "url": "https://www.mcmaster.com/91500A829/",
+   "qty": 30,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91500A831",
+   "vendor": "mcmaster",
+   "pn": "91500A831",
+   "description": "10-32 x 3/4in 316 SS Phillips flat head screw",
+   "used_by": {
+    "kit": 6
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#10-32",
+    "length_mm": 19.05
+   },
+   "url": "https://www.mcmaster.com/91500A831/",
+   "qty": 6,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91500A833",
+   "vendor": "mcmaster",
+   "pn": "91500A833",
+   "description": "10-32 x 1in 316 SS Phillips flat head screw",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#10-32",
+    "length_mm": 25.4
+   },
+   "url": "https://www.mcmaster.com/91500A833/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91771A144",
+   "vendor": "mcmaster",
+   "pn": "91771A144",
+   "description": "6-32 x 1/4in SS Phillips flat head screw",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#6-32",
+    "length_mm": 6.35
+   },
+   "url": "https://www.mcmaster.com/91771A144/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91771A148",
+   "vendor": "mcmaster",
+   "pn": "91771A148",
+   "description": "6-32 x 1/2in SS Phillips flat head screw",
+   "used_by": {
+    "kit": 0
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#6-32",
+    "length_mm": 12.7
+   },
+   "url": "https://www.mcmaster.com/91771A148/",
+   "qty": 0,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91780A048",
+   "vendor": "mcmaster",
+   "pn": "91780A048",
+   "description": "aluminium hex standoff 1/4in hex x 2-1/2in, 10-32 female",
+   "used_by": {
+    "kit": 3
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "hex",
+    "od_mm": 6.35,
+    "length_mm": 63.5
+   },
+   "url": "https://www.mcmaster.com/91780A048/",
+   "qty": 3,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91785A191",
+   "vendor": "mcmaster",
+   "pn": "91785A191",
+   "description": "8-32 x 5/16in SS extra-wide truss head slotted screw",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "truss",
+    "thread": "#8-32",
+    "length_mm": 7.94
+   },
+   "url": "https://www.mcmaster.com/91785A191/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91792A103",
+   "vendor": "mcmaster",
+   "pn": "91792A103",
+   "description": "4-40 x 1/8in SS pan head slotted screw (decorative)",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "pan",
+    "thread": "#4-40",
+    "length_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/91792A103/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91792A110",
+   "vendor": "mcmaster",
+   "pn": "91792A110",
+   "description": "4-40 x 1/2in SS pan head slotted screw",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "pan",
+    "thread": "#4-40",
+    "length_mm": 12.7
+   },
+   "url": "https://www.mcmaster.com/91792A110/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:91792A142",
+   "vendor": "mcmaster",
+   "pn": "91792A142",
+   "description": "6-32 x 1/8in SS pan head slotted screw (decorative)",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "pan",
+    "thread": "#6-32",
+    "length_mm": 3.17
+   },
+   "url": "https://www.mcmaster.com/91792A142/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92095A193",
+   "vendor": "mcmaster",
+   "pn": "92095A193",
+   "description": "M4 x 14mm SS button head hex screw",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M4",
+    "length_mm": 14.0
+   },
+   "url": "https://www.mcmaster.com/92095A193/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A104",
+   "vendor": "mcmaster",
+   "pn": "92125A104",
+   "description": "M4 x 15mm SS hex flat head screw",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M4",
+    "length_mm": 15.0
+   },
+   "url": "https://www.mcmaster.com/92125A104/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A128",
+   "vendor": "mcmaster",
+   "pn": "92125A128",
+   "description": "M3 x 8mm SS hex flat head screw",
+   "used_by": {
+    "kit": 10
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 8.0
+   },
+   "url": "https://www.mcmaster.com/92125A128/",
+   "qty": 10,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A130",
+   "vendor": "mcmaster",
+   "pn": "92125A130",
+   "description": "M3 x 10mm SS hex flat head screw",
+   "used_by": {
+    "kit": 11
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 10.0
+   },
+   "url": "https://www.mcmaster.com/92125A130/",
+   "qty": 11,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A132",
+   "vendor": "mcmaster",
+   "pn": "92125A132",
+   "description": "M3 x 12mm SS hex flat head screw",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 12.0
+   },
+   "url": "https://www.mcmaster.com/92125A132/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A135",
+   "vendor": "mcmaster",
+   "pn": "92125A135",
+   "description": "M3 x 18mm SS hex flat head screw",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 18.0
+   },
+   "url": "https://www.mcmaster.com/92125A135/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92125A371",
+   "vendor": "mcmaster",
+   "pn": "92125A371",
+   "description": "M3 x 22mm SS hex flat head screw",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "M3",
+    "length_mm": 22.0
+   },
+   "url": "https://www.mcmaster.com/92125A371/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92185A988",
+   "vendor": "mcmaster",
+   "pn": "92185A988",
+   "description": "10-32 x 3/8in 316 SS socket head screw",
+   "used_by": {
+    "kit": 6
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "#10-32",
+    "length_mm": 9.52
+   },
+   "url": "https://www.mcmaster.com/92185A988/",
+   "qty": 6,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92196A225",
+   "vendor": "mcmaster",
+   "pn": "92196A225",
+   "description": "10-32 x 1-1/2in SS socket head screw, fully threaded",
+   "used_by": {
+    "kit": 2
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "#10-32",
+    "length_mm": 38.1
+   },
+   "url": "https://www.mcmaster.com/92196A225/",
+   "qty": 2,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92855A410",
+   "vendor": "mcmaster",
+   "pn": "92855A410",
+   "description": "M4 x 10mm SS low-profile socket head screw",
+   "used_by": {
+    "kit": 12
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs_low",
+    "thread": "M4",
+    "length_mm": 10.0
+   },
+   "url": "https://www.mcmaster.com/92855A410/",
+   "qty": 12,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92855A419",
+   "vendor": "mcmaster",
+   "pn": "92855A419",
+   "description": "M4 x 20mm SS low-profile socket head screw",
+   "used_by": {
+    "kit": 9
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs_low",
+    "thread": "M4",
+    "length_mm": 20.0
+   },
+   "url": "https://www.mcmaster.com/92855A419/",
+   "qty": 9,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92855A422",
+   "vendor": "mcmaster",
+   "pn": "92855A422",
+   "description": "M4 x 25mm SS low-profile socket head screw",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs_low",
+    "thread": "M4",
+    "length_mm": 25.0
+   },
+   "url": "https://www.mcmaster.com/92855A422/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92871A309",
+   "vendor": "mcmaster",
+   "pn": "92871A309",
+   "description": "SS unthreaded spacer 6mm OD x 9mm, M4",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.0,
+    "length_mm": 9.0,
+    "thread": "M4"
+   },
+   "url": "https://www.mcmaster.com/92871A309/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92871A317",
+   "vendor": "mcmaster",
+   "pn": "92871A317",
+   "description": "SS unthreaded spacer 6mm OD x 24mm, M4",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.0,
+    "length_mm": 24.0,
+    "thread": "M4"
+   },
+   "url": "https://www.mcmaster.com/92871A317/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92949A153",
+   "vendor": "mcmaster",
+   "pn": "92949A153",
+   "description": "6-32 x 1in SS button head hex screw",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "#6-32",
+    "length_mm": 25.4
+   },
+   "url": "https://www.mcmaster.com/92949A153/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:92949A190",
+   "vendor": "mcmaster",
+   "pn": "92949A190",
+   "description": "8-32 x 1/4in SS button head hex screw (decorative)",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "#8-32",
+    "length_mm": 6.35
+   },
+   "url": "https://www.mcmaster.com/92949A190/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93330A516",
+   "vendor": "mcmaster",
+   "pn": "93330A516",
+   "description": "aluminium round standoff 1/4in OD x 7/16in, 6-32 female",
+   "used_by": {
+    "kit": 8
+   },
+   "kind": "standoff",
+   "spec": {
+    "shape": "round",
+    "od_mm": 6.35,
+    "length_mm": 11.11
+   },
+   "url": "https://www.mcmaster.com/93330A516/",
+   "qty": 8,
+   "cad": {
+    "status": "parametric",
+    "note": "standoff to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93365A130",
+   "vendor": "mcmaster",
+   "pn": "93365A130",
+   "description": "6-32 tapered heat-set insert, 0.150in",
+   "used_by": {
+    "kit": 32
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "#6-32",
+    "length_mm": 3.81,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/93365A130/",
+   "qty": 32,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93365A140",
+   "vendor": "mcmaster",
+   "pn": "93365A140",
+   "description": "8-32 tapered heat-set insert, 0.185in",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "#8-32",
+    "length_mm": 4.7,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/93365A140/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93365A154",
+   "vendor": "mcmaster",
+   "pn": "93365A154",
+   "description": "10-32 tapered heat-set insert, 0.225in",
+   "used_by": {
+    "kit": 14
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "#10-32",
+    "length_mm": 5.71,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/93365A154/",
+   "qty": 14,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93365A240",
+   "vendor": "mcmaster",
+   "pn": "93365A240",
+   "description": "10-32 tapered heat-set insert, 0.15in",
+   "used_by": {
+    "kit": 14
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "#10-32",
+    "length_mm": 3.81,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/93365A240/",
+   "qty": 14,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:93705A822",
+   "vendor": "mcmaster",
+   "pn": "93705A822",
+   "description": "M4 x 8mm SS thread-locking socket head screw",
+   "used_by": {
+    "kit": 6
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "shcs",
+    "thread": "M4",
+    "length_mm": 8.0
+   },
+   "url": "https://www.mcmaster.com/93705A822/",
+   "qty": 6,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:94180A331",
+   "vendor": "mcmaster",
+   "pn": "94180A331",
+   "description": "M3 tapered heat-set insert, 3.8mm",
+   "used_by": {
+    "kit": 33
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "M3",
+    "length_mm": 3.8,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/94180A331/",
+   "qty": 33,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:94180A351",
+   "vendor": "mcmaster",
+   "pn": "94180A351",
+   "description": "M4 tapered heat-set insert, 4.7mm",
+   "used_by": {
+    "kit": 47
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "M4",
+    "length_mm": 4.7,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/94180A351/",
+   "qty": 47,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:94180A371",
+   "vendor": "mcmaster",
+   "pn": "94180A371",
+   "description": "M6 tapered heat-set insert, 7.6mm",
+   "used_by": {
+    "kit": 3
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "M6",
+    "length_mm": 7.6,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/94180A371/",
+   "qty": 3,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:94459A250",
+   "vendor": "mcmaster",
+   "pn": "94459A250",
+   "description": "4-40 heat-set insert, 0.135in",
+   "used_by": {
+    "kit": 4
+   },
+   "kind": "insert",
+   "spec": {
+    "type": "insert",
+    "thread": "#4-40",
+    "length_mm": 3.43,
+    "tapered": true
+   },
+   "url": "https://www.mcmaster.com/94459A250/",
+   "qty": 4,
+   "cad": {
+    "status": "parametric",
+    "note": "insert to spec"
+   }
+  },
+  {
+   "id": "mcmaster:94645A101",
+   "vendor": "mcmaster",
+   "pn": "94645A101",
+   "description": "M4 nylon-insert locknut, class 10",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "nut",
+   "spec": {
+    "type": "lock_nut",
+    "thread": "M4"
+   },
+   "url": "https://www.mcmaster.com/94645A101/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "nut to spec"
+   }
+  },
+  {
+   "id": "mcmaster:96505A112",
+   "vendor": "mcmaster",
+   "pn": "96505A112",
+   "description": "M4 oversized washer, 4mm ID x 8mm OD",
+   "used_by": {
+    "kit": 11
+   },
+   "kind": "washer",
+   "spec": {
+    "type": "washer",
+    "id_mm": 4.0,
+    "od_mm": 8.0
+   },
+   "url": "https://www.mcmaster.com/96505A112/",
+   "qty": 11,
+   "cad": {
+    "status": "parametric",
+    "note": "washer to spec"
+   }
+  },
+  {
+   "id": "mcmaster:96640A118",
+   "vendor": "mcmaster",
+   "pn": "96640A118",
+   "description": "6-32 x 5/8in black SS Phillips flat head screw",
+   "used_by": {
+    "kit": 12
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "fhcs",
+    "thread": "#6-32",
+    "length_mm": 15.88
+   },
+   "url": "https://www.mcmaster.com/96640A118/",
+   "qty": 12,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "mcmaster:97654A673",
+   "vendor": "mcmaster",
+   "pn": "97654A673",
+   "description": "M3 x 5mm SS flanged button head screw (decorative)",
+   "used_by": {
+    "kit": 1
+   },
+   "kind": "screw",
+   "spec": {
+    "type": "bhcs",
+    "thread": "M3",
+    "length_mm": 5.0
+   },
+   "url": "https://www.mcmaster.com/97654A673/",
+   "qty": 1,
+   "cad": {
+    "status": "parametric",
+    "note": "screw to spec"
+   }
+  },
+  {
+   "id": "misumi:HFS5-2020",
+   "vendor": "misumi",
+   "pn": "HFS5-2020",
+   "description": "2020 aluminium extrusion (T-slot, 5 series), cut to length",
+   "used_by": {
+    "community": 7
+   },
+   "url": "https://us.misumi-ec.com/vona2/detail/110302683830/",
+   "kind": "extrusion",
+   "spec": {
+    "profile": "2020"
+   },
+   "qty": 7,
+   "cad": {
+    "status": "parametric",
+    "note": "extrusion to spec"
+   }
+  },
+  {
+   "id": "misumi:HNTT5-5",
+   "vendor": "misumi",
+   "pn": "HNTT5-5",
+   "description": "T-nut, M5, for 2020 (Morton: 'a bunch')",
+   "used_by": {
+    "community": 28
+   },
+   "url": "https://us.misumi-ec.com/vona2/detail/110302246940/",
+   "kind": "t_nut",
+   "spec": {
+    "thread": "M5"
+   },
+   "qty": 28,
+   "cad": {
+    "status": "parametric",
+    "note": "t_nut to spec"
+   }
+  }
+ ]
+}

@@ -17,8 +17,11 @@ How the parts were placed, and how sure that is:
   servos' flanges. Fitted, residual in the manifest notes.
 - Shell (top, bottom, sides): the same fit - the head bottom's insert holes define the head
   frame in the shell's own coordinates (yaw 51.8 deg in the kit export). Fitted.
-- Neck joint member, visor servo + mount, visor arms, horns and rods: not placed by any source
-  file. Inferred, and flagged on every part.
+- Purchased hardware (hardware.py): goBILDA vendor STEPs and ISO parametric screws from the
+  parts library (mech/parts), solved from mates on measured features; the push-rod geometry
+  the STEP leaves open is chosen by testing every real-part combination.
+- Neck joint member, visor servo + mount, visor arms: not placed by any source file. Inferred,
+  and flagged on every part.
 """
 
 from __future__ import annotations
@@ -35,6 +38,8 @@ from workbench.geom import align, fastener_mesh
 from workbench.kinematics import apply, horn_basis, link_matrices, solve_rod
 from workbench.model import (Assembly, BomLine, Fastener, Joint, Link, Linkage, Part, Step,
                              Transform)
+from parts.library import part as lib_part
+from assemblies.hunter_head.hardware import add_hardware, clamp_screws, contact_mates, neck_member_pin
 
 ID = "hunter_head"
 MECH = Path(__file__).resolve().parents[2]
@@ -56,6 +61,7 @@ PARAMS = {
     "visor_limits": (-15.0, 30.0),
     "servo_centre_us": 1500,
     "printed_wall_mm": 0.8,       # mass model: 2 x 0.4 mm perimeters on every face
+    "neck_tube_bore": 32.0,       # the coupler's bore: 32 (Hunter's neck), 26 (Anderson's neck tube)
     "printed_infill": 0.15,
 }
 STEP_G = np.array([0.0, 67.0, 0.0])  # gimbal centre in the STEP's frame
@@ -67,6 +73,43 @@ M_PLATE = np.eye(4)
 M_PLATE[:3, 3] = [0, PLATE_STL_TO_STEP[1] - STEP_G[1], PLATE_STL_TO_STEP[0]]
 
 GOBILDA = "https://www.gobilda.com/"
+
+# The test suite's failures this module has traced to a cause, each with the fix proposed to
+# Brandon (TESTS.md). Anything not matched here fails the suite.
+EXPLAINED = [
+    {"test": "no_overlap", "parts": ["side_left", "side_right", "head_top", "head_bottom"],
+     "cause": "Hunter's shell STLs interpenetrate ~3 mm where the top's lip meets the sides (as exported)",
+     "fix": "check the printed parts; if they bind, offset the top's lip 0.3 mm in CAD or sand it"},
+    {"test": "no_overlap", "parts": ["mount_plate", "side_left", "side_right"],
+     "cause": "the V4 plate's back corners run 2.4-2.7 mm into the side shells in the source files",
+     "fix": "trim 3 mm off the plate's back corners (or the sides' inner rib) before printing"},
+    {"test": "no_overlap", "parts": ["mount_plate", "servo_l", "servo_r"],
+     "cause": "the V4 plate's servo pockets are 1-2 mm tighter than goBILDA's 2000-series case (the STEP's "
+              "older plate fits it)",
+     "fix": "open each servo pocket 1.5 mm in the plate"},
+    {"test": "*", "parts": ["visor_servo*", "ins_vmount_*", "scr_vservo_*", "side_right", "visor_arm_r", "visor_horn"],
+     "cause": "where the visor servo goes is not in the sources: on the ear axis next to the arm (the only "
+              "direct-drive spot), the servo and its mount sit inside the right ear shell",
+     "fix": "Brandon confirms Hunter's visor drive position (photo or CAD); likely a shaft through the ear or "
+            "a mount inside the head with a short link"},
+    {"test": "fasteners_real", "parts": ["pin_tilt_*", "custom_joint_piece"],
+     "cause": "the cross is open at its centre: an M4 tilt-pivot screw has only 4.4 mm of plastic before it "
+              "reaches the post (the rule wants 8 mm)",
+     "fix": "heat-set a short M4 insert (4 mm) in each of the cross's pivot holes, or use the 4005 U-joint's "
+            "own pivot pins; confirm what Hunter used"},
+    {"test": "*", "parts": ["neck_joint_member", "neck_coupler", "pin_neck_member"],
+     "cause": "the neck joint member is not in the STEP and a 50 mm bar cannot sit inside the coupler's 32 mm "
+              "bore: its real place (likely inside the neck tube, pinned through the coupler's side holes) is open",
+     "fix": "Brandon confirms how the member meets the neck tube (photo of Hunter's neck)"},
+    {"test": "no_overlap", "parts": ["hub_top", "hub_bottom", "clamp_hub_*"],
+     "cause": "goBILDA's sonic-hub models leave the clamp screw's tapped hole out on one side: the vendor clamp "
+              "screws (from Hunter's STEP) pass through modelled material",
+     "fix": "none needed on the parts (a vendor-model simplification); check against goBILDA's current STEP"},
+    {"test": "clearance", "parts": ["custom_joint_piece", "pillow_f", "pillow_b", "pillow_bearing_*"],
+     "cause": "in the STEP the cross sits 0.1-0.5 mm off the pillow blocks as it turns",
+     "fix": "the BOM's M4 washers as spacers, one each side of the cross (0.8 mm)"},
+]
+
 SERVO = {"model": "goBILDA 2000-0025-0002 (Dual Mode, 25-2 Torque)", "stall_kgcm": 25.2,
          "volts": 6.0, "mass_g": 70.0, "range_deg": 300, "centre_us": 1500,
          "note": "catalogue: 25.2 kg-cm stall at 6 V, 500-2500 us, ~300 deg (inferred from the product page named in the BOM)"}
@@ -134,6 +177,70 @@ def leaf_axis(v: np.ndarray):
     return c, a, float(s.max() - s.min()), s
 
 
+# Swap hook: part id -> a parametric module that replaces the part's geometry. The module exposes
+# make(params: dict) -> build123d Part in the reference STL's frame, with a `features` attribute
+# ({name: axis/plane dict}, SCHEMA.md) and optionally REFERENCE (the STL's file name) for the
+# regression. Without an entry, parts use parts/hunter.py (or their source mesh).
+PARAMETRIC: dict[str, str] = {
+    # "mount_plate": "parts.head.base_plate",
+}
+
+
+def remodel(name: str, M: np.ndarray, part_id: str | None = None, **params):
+    """One of our parametric remodels (mech/parts/hunter.py, or a PARAMETRIC override) placed by
+    M (its reference STL's frame -> head), with its parameters and its regression against the
+    reference."""
+    import importlib
+
+    from parts import hunter
+    from workbench.geom import cached, _cache_key, _file_sig
+
+    if part_id in PARAMETRIC:
+        mod = importlib.import_module(PARAMETRIC[part_id])
+        shape = mod.make(params)
+        r = hunter.Remodel(getattr(mod, "NAME", part_id), params, shape, dict(getattr(shape, "features", {}) or {}),
+                           getattr(mod, "REFERENCE", hunter.REMODELS[name]().reference if name in hunter.REMODELS else ""))
+        name = f"{PARAMETRIC[part_id]}"
+    else:
+        r = hunter.REMODELS[name](**params)
+    ref = vendor(r.reference)
+    mesh = r.mesh()
+
+    def reg():
+        R = geom.stl(ref)
+        if name.endswith("visor_servo_mount"):  # compared in its squared frame
+            R.apply_transform(square_mount(R))
+        return {k: (round(v, 3) if isinstance(v, float) else v) for k, v in hunter.compare(mesh, R, 8000).items()}
+
+    stats = cached(_cache_key("remodel-reg", name, sorted(r.params.items()), _file_sig(ref), 2), reg)
+    placed = mesh.copy()
+    placed.apply_transform(M)
+    feats = {k: moved_feature(v, M) for k, v in r.features.items()}
+    src = {"kind": "parametric", "model": name if part_id in PARAMETRIC else f"parts/hunter.py:{name}",
+           "params": r.params, "reference": r.reference,
+           "regression": stats}
+    return placed, src, feats
+
+
+def moved_feature(f, M):
+    from workbench.mates import moved
+
+    return moved(f, M)
+
+
+def square_mount(m: trimesh.Trimesh) -> np.ndarray:
+    """The visor mount STL's frame -> its squared frame (feet along X, up +Y, pocket along Z)."""
+    xz = m.vertices[:, [0, 2]] - m.vertices[:, [0, 2]].mean(0)
+    _, _, vt = np.linalg.svd(xz, full_matrices=False)
+    yaw = math.atan2(vt[0, 1], vt[0, 0])
+    r = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0], m.centroid)
+    q = m.copy()
+    q.apply_transform(r)
+    t = np.eye(4)
+    t[:3, 3] = -np.array([(q.bounds[0][0] + q.bounds[1][0]) / 2, q.bounds[0][1], q.bounds[0][2]])
+    return t @ r
+
+
 def printed_mass(mesh: trimesh.Trimesh, density=1.24) -> tuple[float, str]:
     wall = PARAMS["printed_wall_mm"]
     shell_v = mesh.area * wall
@@ -189,20 +296,22 @@ def build() -> Assembly:
         parts.append(p)
         return p
 
-    coupler = step_part("RX_Neck_Coupler_V1")
+    step_coupler = step_part("RX_Neck_Coupler_V1")
+    coupler, csrc, cfeat = remodel("neck_coupler", M_STEP, "neck_coupler", bore_d=PARAMS["neck_tube_bore"])
+    csrc["placement"] = "step (the STEP's own coupler instance)"
+    csrc["vs_step_bounds_mm"] = round(float(np.abs(coupler.bounds - step_coupler.bounds).max()), 3)
     m, n = printed_mass(coupler)
-    add(Part("neck_coupler", "RX Neck Coupler V1", "mech", "neck", coupler,
-             src_step("RX_Neck_Coupler_V1", also=["RX Neck Coupler V1 v1.step", "RXNeckCouplerV1.stl"]),
-             "PLA (printed)", True, (0, -1, 0), 60, m, n,
-             note="Slides over the neck tube; the 16 mm pattern on top takes the bottom sonic hub."))
+    add(Part("neck_coupler", "RX Neck Coupler V1 (parametric)", "mech", "neck", coupler, csrc,
+             "PLA (printed)", True, (0, -1, 0), 60, m, n, features=cfeat, cad="parametric",
+             note="Slides over the neck tube; the 16 mm pattern on top takes the bottom sonic hub. "
+                  "bore_d=26 makes the variant for Anderson's 26 mm neck tube."))
 
     # neck joint member: in the coupler, its centre hole on the coupler's side holes (STEP y 15)
-    njm = geom.stl(vendor("RX Neck Joint Member V1.stl"))
-    njm = xf(njm, M_STEP @ _t([0, 15, 0]))
+    njm, nsrc, nfeat = remodel("neck_joint_member", M_STEP @ _t([0, 15, 0]), "neck_joint_member")
+    nsrc["placement"] = "inferred"
     m, n = printed_mass(njm)
-    add(Part("neck_joint_member", "RX Neck Joint Member V1", "mech", "neck", njm,
-             {"file": "RX Neck Joint Member V1.stl", "kind": "stl", "placement": "inferred"},
-             "PLA (printed)", True, (0, -1, 0), 90, m, n, inferred=True,
+    add(Part("neck_joint_member", "RX Neck Joint Member V1 (parametric)", "mech", "neck", njm, nsrc,
+             "PLA (printed)", True, (0, -1, 0), 90, m, n, inferred=True, features=nfeat, cad="parametric",
              inferred_note="Not in the STEP. Placed across the coupler bore with its centre hole on the coupler's "
                            "side holes (STEP y 15); its end holes then face the neck tube wall. Confirm."))
 
@@ -213,13 +322,16 @@ def build() -> Assembly:
         ("hub_top", "Sonic hub, threaded (goBILDA 1309)", "Top of the fixed post; the two push-rod balls screw into its face."),
     ]):
         mesh = step_part("1309-0016-4008", k)
+        if pid == "hub_bottom":
+            mesh = fit_1311(mesh, coupler)
         add(Part(pid, name, "hardware", "neck", mesh,
                  src_step("1309-0016-4008", bom="1311" if pid == "hub_bottom" else "1309"),
                  "aluminium", False, (0, 1 if pid == "hub_top" else -1, 0), 50,
                  metal_mass(mesh, 2.7), "aluminium 2.7 g/cc", inferred=pid == "hub_bottom",
                  inferred_note="The STEP models both hubs as 1309; the BOM lists one 1311 thru-hole + one 1309 "
                                "threaded. The coupler's 3.3 mm (M4 tap) holes need screws from above, so the "
-                               "thru-hole one goes at the bottom." if pid == "hub_bottom" else "",
+                               "thru-hole one goes at the bottom: goBILDA's 1311 STEP, fitted onto the STEP's "
+                               "1309 (axis, face, clamp clocking)." if pid == "hub_bottom" else "",
                  note=note))
 
     shaft = step_part("1516-4008-0960")
@@ -244,15 +356,14 @@ def build() -> Assembly:
              (0, 0, 0), 0, m, n, note="The gimbal cross: tilt axis (X) in the U-joint bearings, "
                                       "roll axis (Z) in the pillow-block bearings."))
 
-    plate_stl = geom.stl(vendor("RX Head Mech Base Plate V4.stl"))
-    plate = xf(plate_stl, M_PLATE)
+    plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate")
     step_plate = step_part("Head_Mounting_Plate")
     dev = float(np.abs(plate.bounds - step_plate.bounds).max())
+    psrc["placement"] = "fitted (the reference V4 STL's frame, on the head bottom's inserts)"
+    psrc["fit"] = f"vs the STEP's Head_Mounting_Plate: bounds agree within {dev:.2f} mm"
     m, n = printed_mass(plate)
-    add(Part("mount_plate", "Head mount plate (RX Head Mech Base Plate V4)", "mech", "head", plate,
-             {"file": "RX Head Mech Base Plate V4.stl", "kind": "stl", "placement": "fitted",
-              "fit": f"STL V4 vs the STEP's Head_Mounting_Plate: bounds agree within {dev:.2f} mm"},
-             "PLA (printed)", True, (0, 1, 0), 50, m, n,
+    add(Part("mount_plate", "Head mount plate (RX Head Mech Base Plate V4, parametric)", "mech", "head", plate, psrc,
+             "PLA (printed)", True, (0, 1, 0), 50, m, n, features=pfeat, cad="parametric",
              note="Carries both servos, the pillow blocks and the head shell (6 x M4 into the head bottom)."))
 
     for k in range(2):
@@ -323,86 +434,47 @@ def build() -> Assembly:
     tip_head = apply(arm_matrix(-1), [tip_c[0], tip_c[1], 0])
 
     # visor servo: output on the visor axis inside the right ear, pointing out (-X)
-    vs_spline = np.array([-(side_x - 30), visor_pivot[1], visor_pivot[2]])
-    # servo_box: spline +Y at the origin, long axis +X -> output out (-X), long axis up (+Y)
+    # the horn (3 mm) meets the right arm's inner face: spline top 3 mm inside it
+    vs_spline = np.array([-(arm_x - t / 2 - 3.0), visor_pivot[1], visor_pivot[2]])
+    # canonical servo: spline +Y at the origin, long side +X -> output out (-X), long side up (+Y)
     m_vs = np.eye(4)
     m_vs[:3, :3] = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], float)
     m_vs[:3, 3] = vs_spline
-    vservo = xf(geom.servo_box(), m_vs)
-    add(Part("visor_servo", "Visor servo (not in the BOM)", "servo", "head", vservo,
-             {"kind": "generated", "placement": "inferred"}, "servo", False, (0, 0, -1), 40, SERVO["mass_g"],
-             "catalogue ~70 g (inferred)", inferred=True,
+    vres = lib_part("gobilda", "2000-0025-0002")
+    vservo = xf(vres.mesh, m_vs)
+    add(Part("visor_servo", "Visor servo (not in the BOM; goBILDA 2000 assumed)", "servo", "head", vservo,
+             {"kind": "step", "file": "vendor/parts_cad/gobilda/2000-0025-0002.step", "placement": "mates"},
+             "servo", False, (0, 0, -1), 40, SERVO["mass_g"],
+             "catalogue ~70 g (inferred)", inferred=True, cad=vres.status, catalog="gobilda:2000-0025-0002",
+             features={"spline": {"type": "spline", "p": vs_spline.tolist(), "d": [-1.0, 0.0, 0.0], "teeth": 25}},
              inferred_note="The BOM names two servos (tilt/roll). A third drives the visor: model and position "
-                           "are not in the sources; drawn as a standard servo with its output on the ear axis."))
-    vmount = geom.stl(vendor("Visor Servo Mount.stl"))
-    # the mount's servo pocket: flange holes at x 52.1/62.5, y 1126.9/1174.9, face z ~ 92
-    # de-yaw the bracket (long axis -> x), then its pocket normal (z) -> -X, up stays up
-    pocket = np.array([57.3, 1150.9 + 10.0, 92.2])  # spline ~10 mm above the flange-hole centre
-    _, _, vt = np.linalg.svd(vmount.vertices[:, [0, 2]] - vmount.vertices[:, [0, 2]].mean(0))
-    yaw = math.atan2(vt[0, 1], vt[0, 0])
-    m_yaw = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0], pocket)
-    rot = np.eye(4)
-    rot[:3, :3] = np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]], float)
-    vm = xf(vmount, _t(vs_spline + [4.0, 0, 0]) @ rot @ _t(-pocket) @ m_yaw)
+                           "are not in the sources; goBILDA's 2000 with its output on the ear axis, just inside "
+                           "the right arm."))
+    vm_sq, vsrc, _ = remodel("visor_servo_mount", np.eye(4), "visor_servo_mount")
+    vm, how = place_visor_mount(vm_sq, m_vs, [p for p in parts if p.id in ("side_right", "head_bottom", "visor_servo", "visor_arm_r")],
+                                squared=True)
     m, n = printed_mass(vm)
     add(Part("visor_servo_mount", "Visor servo mount", "mech", "head", vm,
-             {"file": "Visor Servo Mount.stl", "kind": "stl", "placement": "inferred"}, "PLA (printed)", True,
-             (0, 0, -1), 40, m, n, inferred=True,
-             inferred_note="The STL is exported in another model's coordinates (y 1109-1179). Placed so the servo "
-                           "in its pocket has its output on the visor axis. Confirm where its slotted feet screw."))
+             dict(vsrc, placement="mates", fit=how), "PLA (printed)", True,
+             (0, 0, -1), 40, m, n, inferred=True, cad="parametric",
+             inferred_note="The STL is exported in another model's coordinates (y 1109-1179). Solved from the servo: its "
+                           "four 6 mm bosses on the servo's 48 x 10 flange holes (the face and flip that overlap "
+                           "nothing). Where its slotted feet screw is still open."))
 
-    # ---------------------------------------------------------- push rods (closed form)
-    hp = PARAMS["hub_pattern"]
-    hub_top_face = max(p.mesh.bounds[1][1] for p in parts if p.id == "hub_top")
-    ball_y = hub_top_face + PARAMS["hub_ball_height"]
-    linkages = []
-    for side, sx in (("l", 1), ("r", -1)):
-        c = servos[side]
-        off = PARAMS["horn_hub_height"] + PARAMS["horn_arm_thickness"] + PARAMS["ball_above_arm"]
-        b = np.array([sx * hp, ball_y, -hp])
-        r = PARAMS["horn_radius"]
-        # horn perpendicular to the rod at zero: (C - B).u = -r in the horn plane, forward-most root
-        d = (c - b)[[0, 2]]
-        base = math.atan2(d[1], d[0])
-        phi = math.acos(-r / np.linalg.norm(d))
-        us = [np.array([math.cos(base + s * phi), 0, math.sin(base + s * phi)]) for s in (1, -1)]
-        u = max(us, key=lambda v: v[2])
-        a = c + np.array([0, off, 0]) + r * u
-        length = float(np.linalg.norm(a - b))
-        lk = Linkage(f"rod_{side}", f"servo_{side}", "head", tuple(c), (0, 1, 0), r, tuple(u), off, "neck",
-                     tuple(b), length, (-150, 150), inferred=True,
-                     inferred_note="Horn radius (cut-down arm), hub hole choice and ball heights are not in the "
-                                   "STEP; the horn is set square to the rod at zero for the most even reach.")
-        linkages.append(lk)
-        # horn mesh: horn frame +Y axis, +X arm -> head (u, +Y, u x Y)
-        hm = np.eye(4)
-        w = np.cross(u, [0, 1, 0])
-        hm[:3, 0], hm[:3, 1], hm[:3, 2], hm[:3, 3] = u, [0, 1, 0], -w, c
-        horn = xf(geom.servo_hub_and_arm(r, PARAMS["horn_hub_height"], PARAMS["horn_arm_thickness"]), hm)
-        add(Part(f"horn_{side}", f"Servo hub + cut-down arm ({side.upper()})", "hardware", "head", horn,
-                 {"kind": "generated", "placement": "inferred", "bom": "1906 hub + 48 mm hub-mount arm"},
-                 "aluminium hub, nylon arm", False, (0, 1, 0), 30, 12.0, "estimate", linkage=lk.id, role="horn",
-                 inferred=True, inferred_note=lk.inferred_note))
-        rod_axis = (b - a) / length
-        rod_m = align(rod_axis, a)
-        end_len = 24.1
-        rod_len = 50.0
-        rod = xf(fastener_mesh({"type": "threaded_rod", "thread": "M4", "length_mm": rod_len}),
-                 rod_m @ geom_trans([0, 0, (length - rod_len) / 2]))
-        e_a = xf(geom.ball_link(end_len), rod_m)
-        e_b = xf(geom.ball_link(end_len), align(-rod_axis, b))
-        for pid, mesh, role, nm in ((f"rod_{side}", rod, "rod", "M4 threaded rod, 50 mm (goBILDA 2808)"),
-                                    (f"rod_{side}_end_a", e_a, "rod_end_a", "Ball linkage, horn end (goBILDA 2913)"),
-                                    (f"rod_{side}_end_b", e_b, "rod_end_b", "Ball linkage, post end (goBILDA 2913)")):
-            add(Part(pid, f"{nm} ({side.upper()})", "hardware", "head", mesh,
-                     {"kind": "generated", "placement": "inferred"}, "steel", False,
-                     (0, 1, 0), 30, 6.0 if role == "rod" else 8.0, "estimate", linkage=lk.id, role=role,
-                     inferred=True, inferred_note=f"Ball centres {length:.1f} mm apart at zero: set by the "
-                                                  "thread engagement of the two ball ends."))
-        lk.parts = [f"horn_{side}", f"rod_{side}", f"rod_{side}_end_a", f"rod_{side}_end_b"]
-
+    CAT = {"Servo_-_2000-0025-0002": "gobilda:2000-0025-0002", "1309-0016-4008": "gobilda:1309-0016-4008",
+           "1516-4008-0960": "gobilda:1516-4008-0960", "4005-0016-0001_Outer_Shell": "gobilda:4005-0016-0001",
+           "1602-0032-0006": "gobilda:1602-0032-0006", "1600-0410-0004": "gobilda:1600-0410-0004",
+           "1600-0515-0006": "gobilda:1600-0515-0006"}
+    for p in parts:
+        ent = p.source.get("entity")
+        if p.printed and p.cad not in ("parametric",):
+            p.cad = "vendor" if p.source.get("kind") == "step" else "mesh"  # Hunter's own B-rep vs an STL
+        elif ent in CAT:
+            p.cad, p.catalog = "vendor", CAT[ent]
+            p.source["cad"] = "goBILDA's model, inside Hunter's STEP"
+    P = {p.id: p for p in parts}
+    P["hub_bottom"].catalog = "gobilda:1311-0016-4008"
     asm.parts = parts
-    asm.linkages = linkages
 
     # ---------------------------------------------------------- joints
     asm.joints = [
@@ -425,7 +497,7 @@ def build() -> Assembly:
               PARAMS["visor_limits"], "deg", "visor", plims.get("visor"),
               {"kind": "direct", "servos": ["visor_servo"], "gear_ratio": 1.0,
                "note": "The arm's 9.5 mm hole + 4 x M3 (10 mm square) bolt it to the servo horn: 1:1, no push-rod."},
-              {"how": "Visor at the bottom of its flap with the servo at its centre pulse.", "step": "s11"},
+              {"how": "Visor at the bottom of its flap with the servo at its centre pulse.", "step": "s12"},
               inferred=True, inferred_note="Direct drive read from the arm's hole pattern; the servo is not in the sources."),
     ]
     asm.notes = [
@@ -441,7 +513,9 @@ def build() -> Assembly:
     ]
 
     asm.visor_tip = tip_head  # for the torque check's assumed brow load
-    add_fasteners(asm, fit, servos, linkages, visor_pivot, arm_x, tip_head)
+    asm.clamp_leaves = clamp_leaves()
+    asm.notes += add_hardware(asm, fit, {"spline": vs_spline, "out": [-1.0, 0.0, 0.0], "arm_x": arm_x, "t": t,
+                                         "pivot": visor_pivot, "m_servo": m_vs, "flange": SERVO_FLANGE})
     add_steps(asm)
     add_bom(asm)
     return asm
@@ -490,92 +564,151 @@ def key_of(spec):
     return f"{t}-{spec['thread']}"
 
 
-def add_fasteners(asm: Assembly, fit, servos, linkages, visor_pivot, arm_x, tip_head):
-    fs: list[Fastener] = []
-    down = np.array([0, -1.0, 0])
+def fit_1311(inst_1309: trimesh.Trimesh, coupler=None) -> trimesh.Trimesh:
+    """goBILDA's 1311 (thru-hole) hub, fitted onto the STEP's 1309 instance: the same outer
+    cylinder (axis, centre) and clamp clocking. Both are 32 x 10 mm sonic hubs."""
+    from workbench.geom import step_leaves
 
-    def f(fid, spec, joins, link, step, pos=None, direction=None, inferred=False, note=""):
-        m = align(direction, pos) if pos is not None else None
-        fs.append(Fastener(fid, spec, key_of(spec), joins, link, step, m, inferred, note))
+    leaves = step_leaves(MECH / "vendor" / "parts_cad" / "gobilda" / "1311-0016-4008.step", 0.03)
+    hub = next(trimesh.Trimesh(v, f) for _, lbl, v, f in leaves if lbl.startswith("1311"))
 
-    # inserts: head bottom (6), plate servo bosses (8)
-    for i, h in enumerate(sorted(fit["holes_head"].tolist(), key=lambda p: (p[0], p[2]))):
-        top = [h[0], fit["boss_top_head"], h[2]]
-        f(f"ins_bottom_{i + 1}", INSERT, ["head_bottom"], "head", "s01", top, down)
-        # plate -> bottom: 4 mm flange (ray-measured on the STL) + 6 mm insert => M4x10
-        f(f"scr_plate_bottom_{i + 1}", SHCS(screw_for(4.0, 5.5)), ["mount_plate", "head_bottom"], "head", "s10",
-          [h[0], fit["boss_top_head"] + 4.0, h[2]], down)
-    plate_top = 64.26 - 28.11
-    for side, sx in (("l", 1), ("r", -1)):
-        for i, (px, pz) in enumerate([(16, -60.11), (16, -69.89), (64, -60.11), (64, -69.89)]):
-            pos = [sx * px, plate_top, pz + 0.24]
-            f(f"ins_servo_{side}{i + 1}", INSERT, ["mount_plate"], "head", "s01", pos, down)
-            f(f"scr_servo_{side}{i + 1}", SHCS(8), [f"servo_{side}", "mount_plate"], "head", "s07",
-              [pos[0], pos[1] + 2.5, pos[2]], down, True, "Flange ~2.5 mm + 6 mm insert: M4x8.")
-    # pillow blocks: 4 mm bridge (ray-measured), tapped goBILDA posts
-    for i, (px, pz) in enumerate([(16, 28.79), (-16, 28.79), (16, -28.69), (-16, -28.69)]):
-        side = "f" if pz > 0 else "b"
-        f(f"scr_pillow_{i + 1}", SHCS(screw_for(4.0, 6.0)), ["mount_plate", f"pillow_{side}"], "head", "s05",
-          [px, 56.11 - 28.11, pz + 0.24], down, True, "goBILDA pillow blocks are tapped M4: 4 mm bridge + 6 mm thread.")
-    # gimbal pivots: tilt (X) through the U-joint bearings, roll (Z) through the pillow bearings
-    for sx, side in ((1, "l"), (-1, "r")):
-        f(f"pin_tilt_{side}", SHCS(16), ["ujoint", "custom_joint_piece"], "neck", "s04",
-          [sx * 19.0, 0, 0], [-sx, 0, 0], True, "Pivot screw through the flanged bearing into the cross; "
-                                                 "a washer as spacer (BOM). Length inferred.")
-        f(f"wash_tilt_{side}", WASHER, ["ujoint", "custom_joint_piece"], "neck", "s04",
-          [sx * 11.5, 0, 0], [-sx, 0, 0], True)
-    for sz, side in ((1, "f"), (-1, "b")):
-        f(f"pin_roll_{side}", SHCS(20), [f"pillow_{side}", "custom_joint_piece"], "head", "s05",
-          [0, 0, sz * 36.0], [0, 0, -sz], True, "Pivot screw through the pillow-block bearing into the cross end, "
-                                                 "washer spacer between (BOM). Length inferred.")
-        f(f"wash_roll_{side}", WASHER, [f"pillow_{side}", "custom_joint_piece"], "head", "s05",
-          [0, 0, sz * 25.5], [0, 0, -sz], True)
-    # hubs: bottom hub onto the coupler (4, into the 3.3 mm holes), clamp screws from the STEP
-    coupler_top = 35 - 67
-    for i, (px, pz) in enumerate([(8, 8), (8, -8), (-8, 8), (-8, -8)]):
-        f(f"scr_hub_coupler_{i + 1}", SHCS(16), ["hub_bottom", "neck_coupler"], "neck", "s03",
-          [px, coupler_top + 10.5, pz], down, True, "Thru-hole hub (10 mm) + ~6 mm into the printed M4 tap holes.")
+    def frame(m):
+        c = (m.bounds[0] + m.bounds[1]) / 2
+        ext = m.bounds[1] - m.bounds[0]
+        ax = np.zeros(3)
+        ax[int(np.argmin(ext))] = 1.0
+        # centre on the 8 mm REX bore (the clamp tab makes the bounding box off-centre)
+        k = int(np.argmin(ext))
+        sec = m.section(plane_origin=c, plane_normal=ax)
+        if sec is not None:
+            loops = [e for e in sec.discrete if 3.5 < np.linalg.norm(e - e.mean(0), axis=1).max() < 5.5]
+            if loops:
+                bc = min(loops, key=lambda e: np.linalg.norm(e.mean(0) - c)).mean(0)
+                c = np.array([bc[i] if i != k else c[i] for i in range(3)])
+        # clocking: toward the clamp slot, the side where the hub's material is off-centre
+        off = m.centroid - c
+        off -= ax * (off @ ax)
+        x = off / (np.linalg.norm(off) or 1)
+        f = np.eye(4)
+        f[:3, 0], f[:3, 1], f[:3, 2], f[:3, 3] = x, np.cross(ax, x), ax, c
+        return f
+
+    from workbench.geom import sample
+
+    base = frame(inst_1309) @ np.linalg.inv(frame(hub))
+    best = None
+    for flip in (False, True):
+        for k in range(8):  # clocking about the hub axis, and which face is down
+            R = trimesh.transformations.rotation_matrix(k * math.pi / 4, [0, 0, 1])
+            if flip:
+                R = R @ trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
+            m = frame(inst_1309) @ R @ np.linalg.inv(frame(hub))
+            out = hub.copy()
+            out.apply_transform(m)
+            out.apply_translation([0, inst_1309.bounds[0][1] - out.bounds[0][1], 0])
+            P = sample(out, 1.5, 6000)
+            pen = int(coupler.contains(P).sum()) if coupler is not None else 0
+            # the coupler's 16 mm pattern must show through the hub's thru-holes
+            for hx, hz in ((8, 8), (8, -8), (-8, 8), (-8, -8)):
+                if geom.ray_depth(out, [hx, out.bounds[0][1] - 5, hz], [0, 1, 0]):
+                    pen += 500
+            if best is None or pen < best[0]:
+                full = trimesh.transformations.translation_matrix([0, inst_1309.bounds[0][1] - (hub.copy().apply_transform(m)).bounds[0][1], 0]) @ m
+                best = (pen, out, full)
+    global HUB_1311_M
+    HUB_1311_M = best[2]
+    return best[1]
+
+
+HUB_1311_M = None  # the fitted 1311's matrix (its own clamp screws follow it)
+
+
+SERVO_FLANGE = {"holes": [(10 + sx * 24.0, sz * 4.89) for sx in (-1, 1) for sz in (-1, 1)], "bottom_y": -16.9}
+
+
+def place_visor_mount(mount, m_servo, others, squared=False):
+    """The mount's four insert bosses (measured) onto the servo's flange holes (goBILDA 2000:
+    48 x 9.8 mm, the same pattern Hunter's plate uses), its face on the flange's underside.
+    Every face/flip is tried; the one whose mount overlaps nothing is kept."""
+    from workbench.geom import sample
+
+    # square the bracket first: its long side (feet to feet) along X, the slab face normal to Z
+    m_sq = np.eye(4) if squared else square_mount(mount)
+    orig = mount
+    mount = mount.copy()
+    mount.apply_transform(m_sq)
+    lo, hi = mount.bounds
+    zmid = (lo[2] + hi[2]) / 2
+    holes = []
+    for z in np.linspace(lo[2] + 2, hi[2] - 2, 15):
+        found = [c for c, r in geom.section_holes(mount, 2, z, 2.9, 3.2) if c[1] > lo[1] + 10]
+        if len(found) == 4 and abs(np.ptp([c[1] for c in found]) - 48) < 1.5:
+            holes = found
+            zmid = z
+            break
+    if len(holes) != 4:
+        return orig.copy(), "no insert bosses found: left in the file's frame"
+    H = np.array(holes)
+    faces = []
+    for c in H:
+        hits = geom.ray_depth(mount, [c[0] + 3.6, c[1], lo[2] - 5], [0, 0, 1])
+        faces.append((lo[2] - 5 + hits[0], lo[2] - 5 + hits[-1]) if hits else (lo[2], hi[2]))
+    tgt = np.array([(m_servo @ np.array([x, SERVO_FLANGE["bottom_y"], z, 1.0]))[:3] for x, z in SERVO_FLANGE["holes"]])
+    nb_pts = [sample(o.mesh, 1.5, 12000) for o in others]
+    # order both sets along their long axis, then across
+    def order(P, ax_long):
+        c = P.mean(0)
+        a = (P - c) @ ax_long
+        return P[np.lexsort((P @ np.cross(ax_long, np.cross(ax_long, [0, 0, 1.0]) + 1e-9), a))]
+    best = None
+    for fi in (0, 1):
+        z = np.mean([f[fi] for f in faces])
+        src = H.copy()
+        src[:, 2] = z
+        for perm in ([0, 1, 2, 3], [1, 0, 3, 2], [2, 3, 0, 1], [3, 2, 1, 0], [0, 2, 1, 3], [2, 0, 3, 1], [1, 3, 0, 2], [3, 1, 2, 0]):
+            S = src[np.argsort(src[:, 1] * 100 + src[:, 0])][perm]
+            T = tgt[np.argsort([np.round(t @ [0, 1, 0], 0) * 100 + t @ [0, 0, 1] for t in tgt])]
+            cs, ct = S.mean(0), T.mean(0)
+            U, _, Vt = np.linalg.svd((S - cs).T @ (T - ct))
+            D = np.diag([1, 1, np.sign(np.linalg.det(Vt.T @ U.T))])
+            R = Vt.T @ D @ U.T
+            M = np.eye(4)
+            M[:3, :3], M[:3, 3] = R, ct - R @ cs
+            rms = float(np.sqrt((((S @ R.T + M[:3, 3]) - T) ** 2).sum(1).mean()))
+            if rms > 1.5:
+                continue
+            M = M @ m_sq
+            placed = orig.copy()
+            placed.apply_transform(M)
+            # the mount is closed: count the neighbours' surface points inside it
+            inside = sum(int(placed.contains(Q).sum()) for Q in nb_pts)
+            score = (inside, rms)
+            if best is None or score < best[0]:
+                best = (score, placed, f"insert bosses on the flange holes, rms {rms:.2f} mm, face {fi}, "
+                                       f"{inside} sample points inside neighbours")
+    if best is None:
+        return orig.copy(), "no face/flip matched the flange holes"
+    return best[1], best[2]
+
+
+def clamp_leaves():
+    """The STEP's sonic-hub clamp screws: (hub, head point, direction) measured from the leaves."""
     leaves = geom.step_leaves(vendor("Head Joint Asm.step"))
     clamps = [xf(trimesh.Trimesh(v, fc), M_STEP) for _, lbl, v, fc in leaves if lbl.startswith("2800-0004-0014")]
-    for i, cm in enumerate(sorted(clamps, key=lambda m: m.centroid[1])):
+    clamps = [c for c in clamps if c.centroid[1] > 0]  # the top hub's, from the STEP
+    if HUB_1311_M is not None:  # the bottom (1311) hub's own clamp screws, from goBILDA's file
+        lv = geom.step_leaves(MECH / "vendor" / "parts_cad" / "gobilda" / "1311-0016-4008.step", 0.03)
+        clamps += [xf(trimesh.Trimesh(v, fc), HUB_1311_M) for _, lbl, v, fc in lv if lbl.startswith("2800")]
+    out = []
+    for cm in sorted(clamps, key=lambda m: (m.centroid[1], m.centroid[0])):
         c, a, length, s = leaf_axis(cm.vertices)
-        # the head is the fatter end
         v = cm.vertices - c
-        hi = v[s > s.max() - 3]
-        lo = v[s < s.min() + 3]
         rad = lambda p: np.linalg.norm(p - np.outer(p @ a, a), axis=1).max()
-        if rad(hi) > rad(lo):
+        if rad(v[s > s.max() - 3]) > rad(v[s < s.min() + 3]):
             a = -a
-        head = c - a * (length / 2)
-        which = "hub_bottom" if cm.centroid[1] < 0 else "hub_top"
-        f(f"clamp_{which}_{i % 2 + 1}", {**SHCS(14), "mcmaster": "90128A207"}, [which, "hex_shaft"], "neck",
-          "s03" if which == "hub_bottom" else "s06", head, a, False,
-          "Sonic hub clamp screw (placed from the STEP).")
-    # ball studs: post end into the threaded hub face; horn end through the arm with a lock nut
-    for lk in linkages:
-        side = lk.id[-1]
-        b = np.array(lk.ground_point)
-        f(f"stud_post_{side}", SHCS(16), [f"rod_{side}_end_b", "hub_top"], "neck", "s09",
-          b + [0, 6, 0], down, True, "Through the ball, into the threaded sonic hub. Loctite.")
-        n, u, w = horn_basis(lk)
-        a = np.array(lk.centre) + lk.ball_offset * n + lk.radius * u
-        f(f"stud_horn_{side}", SHCS(16), [f"rod_{side}_end_a", f"horn_{side}"], "head", "s09",
-          a + [0, 6, 0], down, True, "Through the ball and the arm's end hole.")
-        f(f"nut_horn_{side}", LOCKNUT, [f"horn_{side}"], "head", "s09",
-          a - [0, lk.ball_offset - PARAMS["horn_hub_height"] + 0.5, 0], down, True)
-    # neck joint member pin (coupler side holes, STEP x = +/-19.5 -> head z)
-    f("pin_neck_member", SHCS(45), ["neck_coupler", "neck_joint_member"], "neck", "s02",
-      [0, 15 - 67, 22.5], [0, 0, -1], True, "Through the coupler's side holes and the member; lock nut inside.")
-    f("nut_neck_member", LOCKNUT, ["neck_coupler"], "neck", "s02", [0, 15 - 67, -21.0], [0, 0, -1], True)
-    # visor: arm to the servo horn (4 x M3 on 10 mm), left arm on a pivot screw
-    for i, (dx, dy) in enumerate([(-5, 5), (5, 5), (5, -5), (-5, -5)]):
-        f(f"scr_visor_horn_{i + 1}", SHCS(8, "M3"), ["visor_arm_r"], "visor", "s11",
-          [-arm_x - 2, visor_pivot[1] + dy, visor_pivot[2] - dx], [1, 0, 0], True,
-          "M3 clearance holes in the DXF (3.4 mm); the horn is not in the sources.")
-    f("pin_visor_l", SHCS(16), ["visor_arm_l", "side_left"], "visor", "s11",
-      [arm_x + 2, visor_pivot[1], visor_pivot[2]], [-1, 0, 0], True,
-      "The left arm has no servo: a pivot screw into the left ear (inferred).")
-    asm.fasteners = fs
+        # the head's bearing face: 4 mm (head height) in from the head end
+        out.append(("hub_bottom" if cm.centroid[1] < 0 else "hub_top", c - a * (length / 2) + a * 4.0, a))
+    return out
 
 
 # ------------------------------------------------------------------ steps
@@ -583,7 +716,7 @@ def add_fasteners(asm: Assembly, fit, servos, linkages, visor_pivot, arm_x, tip_
 def add_steps(asm: Assembly):
     F = lambda prefix: [f.id for f in asm.fasteners if f.id.startswith(prefix)]
     asm.steps = [
-        Step("s01", "Heat-set the inserts", ["head_bottom", "mount_plate"], F("ins_"),
+        Step("s01", "Heat-set the inserts", [], F("ins_"), context=["head_bottom", "mount_plate"],
              tools=["soldering iron with an M4 insert tip (~220 C for PLA)", "flat plate to seat them level"],
              notes=["Do all 14 before anything else: 6 in the head bottom's bosses, 8 in the plate's servo bosses.",
                     "Press straight and stop flush; a proud insert tilts the plate or the servo."]),
@@ -593,16 +726,19 @@ def add_steps(asm: Assembly):
                     "when the head goes on the droid."],
              inferred=True, inferred_note="The member is not in the STEP; its place and the M4x45 pin are read from the holes."),
         Step("s03", "Bottom sonic hub and the hex post", ["hub_bottom", "hex_shaft"],
-             F("scr_hub_coupler") + F("clamp_hub_bottom"), context=["neck_coupler"],
+             F("clamp_hub_bottom"), context=["neck_coupler"],
              tools=["3 mm hex key", "Loctite 243"],
              notes=["Hub onto the coupler's 16 mm pattern (4 x M4 into the printed holes: snug, not tight).",
                     "Push the hex shaft fully into the hub and clamp both screws, Loctite on the clamps."],
              inferred=True, inferred_note="Thru-hole vs threaded hub assignment and screw length inferred."),
-        Step("s04", "U-joint and the cross (tilt axis)", ["ujoint", "uj_bearing_l", "uj_bearing_r", "custom_joint_piece"],
-             F("pin_tilt") + F("wash_tilt"), context=["hex_shaft", "hub_bottom", "neck_coupler"],
+        Step("s04", "U-joint onto the hub", ["ujoint", "uj_bearing_l", "uj_bearing_r"], F("scr_hub_coupler"),
+             context=["hex_shaft", "hub_bottom", "neck_coupler"], tools=["3 mm hex key"],
+             notes=["Slide the U-joint body down the hex post onto the hub; 4 x M4 down through its pattern "
+                    "mount and the thru-hole hub into the coupler."]),
+        Step("s04b", "The cross into the U-joint (tilt axis)", ["custom_joint_piece"],
+             F("pin_tilt") + F("wash_tilt"), context=["ujoint", "hex_shaft"],
              tools=["3 mm hex key", "Loctite 243"],
-             notes=["Slide the U-joint body down the hex post onto the hub.",
-                    "Pivot the cross in the U-joint's bearings with a washer each side as a spacer: it must swing "
+             notes=["Pivot the cross in the U-joint's bearings with a washer each side as a spacer: it must swing "
                     "freely with no end play."],
              inferred=True, inferred_note="Pivot screw length and washer count are inferred from the BOM note."),
         Step("s05", "Pillow blocks onto the cross (roll axis), then onto the plate",
@@ -623,23 +759,26 @@ def add_steps(asm: Assembly):
                     "Cable routing: run both servo leads down the back of the plate, clear of the roll arc, and "
                     "out through the neck with a service loop - the head tilts and rolls around the post."],
              inferred=True, inferred_note="Cable route inferred; the sources do not show it."),
-        Step("s08", "Centre both servos, then fit the horns", ["horn_l", "horn_r"], [],
-             unplaced=[{"key": "shcs-M4x8", "spec": SHCS(8), "count": 8,
-                        "note": "hub-mount arm to servo hub (goBILDA pattern), 4 per horn - supplied with the parts"}],
+        Step("s08", "Centre both servos, then fit the horns",
+             ["horn_hub_l", "horn_hub_r", "horn_arm_l", "horn_arm_r"], F("scr_arm_"),
              tools=["servo tester or the r3x bench (1500 us)", "2.5 mm hex key"],
              notes=["Power each servo and send its centre pulse (1500 us) BEFORE fitting the horn. This is what "
                     "defines head_tilt = 0 and head_roll = 0 in real life.",
-                    "With the plate held level, fit the hub on the spline and the arm so it sits square to where "
-                    "its rod will run (the step shows the angle). Clamp the hub.",
+                    f"With the plate held level, fit the 1906 hub on the spline and the arm at the angle the step "
+                    f"shows ({asm.linkage_design['pick']['phi']:g} deg from the servo's long side; the 25T spline "
+                    f"clocks in 14.4 deg steps). 4 x M4 through the arm into the hub.",
+                    f"Cut the arm just past the {asm.linkages[0].radius:g} mm hole (it clears the shell).",
                     "Record the centre pulse in the robot profile (actuator center_us) as the zero."],
              joint="head_tilt", pose={"head_tilt": 0, "head_roll": 0},
              inferred=True, inferred_note="1500 us is goBILDA's centre; the horn angle comes from the rod geometry."),
-        Step("s09", "Push rods", ["rod_l", "rod_r", "rod_l_end_a", "rod_l_end_b", "rod_r_end_a", "rod_r_end_b"],
-             F("stud_") + F("nut_horn"), context=["horn_l", "horn_r", "hub_top"],
+        Step("s09", "Push rods", ["rod_l", "rod_r", "link_a_l", "link_b_l", "link_a_r", "link_b_r"],
+             F("stud_") + F("nut_ball") + F("wsh_ball"), context=["horn_arm_l", "horn_arm_r", "hub_top"],
              tools=["3 mm hex key", "7 mm spanner", "calipers", "Loctite 243"],
              notes=[f"Thread a ball end onto each end of the 50 mm rod until the ball centres are "
-                    f"{asm.linkages[0].rod_length:.1f} mm apart (both rods). Loctite the threads.",
-                    "Horn ends: screw through the ball and the arm's end hole, lock nut under the arm.",
+                    f"{asm.linkages[0].rod_length:.1f} mm apart ({asm.linkage_design['pick']['engage']:g} mm of "
+                    f"thread in each end, both rods). Loctite the threads.",
+                    f"Horn ends: screw through the ball, a washer and the arm's {asm.linkages[0].radius:g} mm hole, "
+                    f"ball {asm.linkage_design['pick']['ball']} the arm, lock nut on the other side.",
                     "Post ends: screw through the ball into the threaded top hub.",
                     "With the servos still at centre the plate must sit level: adjust a rod half a turn if not."],
              pose={"head_tilt": 0, "head_roll": 0},
@@ -648,19 +787,22 @@ def add_steps(asm: Assembly):
              tools=["3 mm hex key"],
              notes=["6 x M4x10 down through the plate's flange into the head bottom's inserts.",
                     "Feed the servo leads through the neck opening first."]),
-        Step("s11", "Visor servo, centre it, then the visor arms",
-             ["visor_servo_mount", "visor_servo", "visor_arm_r", "visor_arm_l"],
+        Step("s11", "Visor servo into its mount", ["visor_servo_mount", "visor_servo"], F("ins_vmount") + F("scr_vservo"),
+             tools=["soldering iron with an M4 insert tip", "3 mm hex key"],
+             notes=["Heat-set the mount's four inserts, then 4 x M4 down through the servo's flange."],
+             inferred=True, inferred_note="The mount's position in the head comes from its fit to the servo; "
+                                          "where its feet screw is not in the sources."),
+        Step("s12", "Centre the visor servo, then the visor arms", ["visor_horn", "visor_arm_r", "visor_arm_l"],
              F("scr_visor") + F("pin_visor"),
-             unplaced=[{"key": "shcs-M4x8", "spec": SHCS(8), "count": 4, "note": "visor servo into the mount"},
-                       {"key": "insert-M4x6", "spec": INSERT, "count": 4, "note": "the mount's four 6 mm bosses (beyond the BOM's 14)"},
-                       {"key": "shcs-M4x10", "spec": SHCS(10), "count": 2, "note": "mount feet (slots) to the shell"}],
+             unplaced=[{"key": "shcs-M4x10", "spec": SHCS(10), "count": 2, "note": "mount feet (slots) to the shell: "
+                        "where they land is not in the sources"}],
              tools=["servo tester or the r3x bench", "2.5 mm hex key"],
              notes=["Centre the visor servo (1500 us) before bolting the arm to its horn: that is visor = 0, the "
                     "visor at the bottom of its flap.",
                     "The left arm pivots on a screw in the left ear, no servo."],
-             joint="visor", pose={"visor": 0},
+             joint="visor", pose={"visor": 0}, context=["visor_servo"],
              inferred=True, inferred_note="The visor servo, its horn and the mount's position are not in the sources."),
-        Step("s12", "Sides and top", ["side_left", "side_right", "head_top"], [],
+        Step("s13", "Sides and top", ["side_left", "side_right", "head_top"], [],
              unplaced=[{"key": "pin-align", "spec": {"type": "pin", "note": "alignment pins or filament"},
                         "count": 0, "note": "alignment holes on the side pieces: pins + CA glue (count on the parts)"}],
              tools=["CA glue or 2-part epoxy"],

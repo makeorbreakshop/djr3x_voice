@@ -75,6 +75,9 @@ class Part:
     inferred_note: str = ""
     note: str = ""
     decimate_to: Optional[int] = None  # display triangle budget (None = builder default)
+    features: dict = field(default_factory=dict)  # name -> feature (mates.py), assembly frame, zero pose
+    cad: str = "mesh"  # mesh (a reference mesh) | vendor (vendor CAD) | parametric (ours) | placeholder
+    catalog: Optional[str] = None  # parts catalog id ("gobilda:2913-0004-0241")
 
     def __post_init__(self):
         assert self.cls in CLASSES, self.cls
@@ -115,6 +118,7 @@ class Linkage:
     ground_point: tuple
     rod_length: float
     servo_range: tuple = (-150.0, 150.0)
+    ground_axis: tuple = (0.0, 1.0, 0.0)  # the ground ball's stud axis (swivel test)
     parts: list = field(default_factory=list)
     inferred: bool = False
     inferred_note: str = ""
@@ -131,6 +135,12 @@ class Fastener:
     matrix: Optional[np.ndarray] = None  # +Z = insertion direction, head at origin; None = unplaced
     inferred: bool = False
     inferred_note: str = ""
+    mesh: Any = None  # canonical-frame mesh (parts library); None = the builder's own
+    linkage: Optional[str] = None  # posed with a linkage's horn (ball studs on a servo arm)
+    role: Optional[str] = None
+    cad: str = "parametric"
+    catalog: Optional[str] = None
+    features: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -196,6 +206,9 @@ class Assembly:
     checks: list = field(default_factory=list)
     children: list = field(default_factory=list)  # Assembly | dict (ChildRef)
     notes: list = field(default_factory=list)
+    mates: list = field(default_factory=list)  # mates.Mate
+    tests: list = field(default_factory=list)  # suite results (Check with kind "test")
+    tolerances: dict = field(default_factory=dict)  # overrides for the suite (TESTS.md)
 
     # ------------------------------------------------------------------ lookups
     def part(self, pid: str) -> Part:
@@ -233,6 +246,12 @@ class Assembly:
                 assert p in pids, f"{s.id}: unknown part {p}"
             for f in s.fasteners:
                 assert f in fids, f"{s.id}: unknown fastener {f}"
+        known = pids | fids
+        for m in self.mates:
+            for pid, feat in (m.a, m.b):
+                assert pid in known, f"mate {m.id}: unknown part {pid}"
+                owner = next((p for p in self.parts if p.id == pid), None) or next(f for f in self.fasteners if f.id == pid)
+                assert feat in owner.features, f"mate {m.id}: {pid} has no feature {feat}"
         for c in self.children:
             if isinstance(c, Assembly):
                 c.validate()

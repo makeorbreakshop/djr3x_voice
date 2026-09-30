@@ -34,6 +34,18 @@ function save(s: Stored) {
   }
 }
 
+const CAD_TITLE: Record<string, string> = {
+  mesh: "the source's mesh (a reference STL we have not remodelled)",
+  source: "the source's mesh",
+  vendor: "the vendor's CAD (B-rep)",
+  parametric: 'our parametric model (build123d), to the source or the published spec',
+  placeholder: 'a sized box: no model yet',
+};
+const CAD_LABEL: Record<string, string> = {
+  mesh: 'mesh (reference)', source: 'mesh (reference)', vendor: 'vendor CAD', parametric: 'parametric (ours)', placeholder: 'placeholder',
+};
+const cadBadge = (c?: string) => `<i class="cad ${esc(c ?? 'mesh')}" title="${esc(CAD_TITLE[c ?? 'mesh'])}">${esc(CAD_LABEL[c ?? 'mesh'] ?? c)}</i>`;
+
 const CLASS_LABEL: Record<string, string> = {
   shell: 'shell', mech: 'printed', servo: 'servo', hardware: 'hardware', bearing: 'bearing', fastener: 'fastener',
 };
@@ -101,6 +113,8 @@ export function injectBuildDom() {
       <section class="first"><div id="bp-detail" class="detail"></div></section>
       <section><div id="bp-variants"></div>
         <h2>Parts <button id="bp-show-all" class="link" data-bp="show-all" hidden>show all</button></h2>
+        <p id="bp-cad-sum" class="cad-sum"></p>
+        <div class="row"><button id="bp-notreal" data-bp="notreal" aria-pressed="false" title="Show only what is still a reference mesh or a placeholder: not yet vendor CAD or our parametric model">Not yet real</button></div>
         <ul id="bp-parts" class="part-tree"></ul></section>
     </div>
     <div class="tab-body" data-body="joints" role="tabpanel" hidden>
@@ -130,6 +144,8 @@ export function mountBuildPanel(wb: Workbench) {
   let openAsm = st.assembly ?? '';
   let loadedOnce = false;
   let jointsDirty = true;
+  /** Parts filter: only what is not yet exact (parametric or placeholder). */
+  let notReal = false;
 
   // ------------------------------------------------------------------ scene panel (view only)
   const explode = $<HTMLInputElement>('bv-explode');
@@ -222,6 +238,17 @@ export function mountBuildPanel(wb: Workbench) {
         break;
       }
       case 'variant': wb.setVariant(d.group!, d.id!); break;
+      case 'notreal': {
+        notReal = !notReal;
+        const a = wb.focus?.asm;
+        const unreal = (c?: string) => c === 'mesh' || c === 'source' || c === 'placeholder';
+        const ids = notReal && a ? [
+          ...a.parts.filter((p) => unreal(p.cad)).map((p) => p.id),
+          ...(a.fasteners ?? []).filter((f) => unreal(f.cad)).map((f) => f.id),
+        ] : null;
+        wb.isolate(ids);
+        break;
+      }
     }
   });
   document.getElementById('panel')!.addEventListener('input', (e) => {
@@ -315,7 +342,16 @@ export function mountBuildPanel(wb: Workbench) {
     $('bp-variants').innerHTML = [...groups].map(([g, ids]) => `<div class="kv">${esc(g)}</div><div class="row seg wrap" role="group" aria-label="${esc(g)}">${
       ids.map((id) => `<button data-bp="variant" data-group="${esc(g)}" data-id="${esc(id)}" aria-pressed="${wb.variants[g] === id}">${esc(a.variants!.find((v) => v.id === id)!.name)}</button>`).join('')}</div>`).join('');
     $('bp-variants').hidden = !groups.size;
-    const byLink = a.links.map((l) => ({ l, parts: a.parts.filter((p) => p.link === l.id) }));
+    const unreal = (c?: string) => c === 'mesh' || c === 'source' || c === 'placeholder';
+    const byLink = a.links.map((l) => ({ l, parts: a.parts.filter((p) => p.link === l.id && (!notReal || unreal(p.cad))) }));
+    const fasts = a.fasteners ?? [];
+    const fc: Record<string, number> = {};
+    for (const f of fasts) fc[f.cad ?? 'parametric'] = (fc[f.cad ?? 'parametric'] ?? 0) + 1;
+    const pc: Record<string, number> = {};
+    for (const p of a.parts) pc[p.cad ?? 'source'] = (pc[p.cad ?? 'source'] ?? 0) + 1;
+    $('bp-cad-sum').innerHTML = `Parts ${Object.entries(pc).map(([k, v]) => `${v} ${cadBadge(k)}`).join(' ')}
+      · fasteners ${Object.entries(fc).map(([k, v]) => `${v} ${cadBadge(k)}`).join(' ')}`;
+    $('bp-notreal').setAttribute('aria-pressed', String(notReal));
     body.innerHTML = byLink.filter((g) => g.parts.length).map(({ l, parts }) => {
       const j = l.joint ? a.joints.find((x) => x.id === l.joint) : undefined;
       return `<li class="grp"><span>${esc(l.name)}</span>${j ? `<small>${esc(j.id)}</small>` : '<small>fixed</small>'}
@@ -326,7 +362,7 @@ export function mountBuildPanel(wb: Workbench) {
           return `<li class="part${wb.selected === p.id ? ' sel' : ''}${hidden ? ' off' : ''}">
             <button class="eye" data-bp="eye" data-id="${esc(p.id)}" aria-pressed="${!hidden}" aria-label="${hidden ? 'Show' : 'Hide'} ${esc(p.name)}" title="${hidden ? 'Show' : 'Hide'}">${hidden ? EYE_OFF : EYE}</button>
             <button class="nm" data-bp="select" data-id="${esc(p.id)}" title="${esc(p.name)}">${esc(p.name)}</button>
-            <i class="cls ${esc(p.class)}">${esc(CLASS_LABEL[p.class])}</i>${p.inferred ? '<i class="inf" title="Placement or part inferred">inferred</i>' : ''}
+            ${cadBadge(p.cad)}${p.inferred ? '<i class="inf" title="Placement or part inferred">inferred</i>' : ''}
             <button class="link iso" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${iso}">${iso ? 'all' : 'solo'}</button></li>`;
         }).join('');
     }).join('');
@@ -350,6 +386,7 @@ export function mountBuildPanel(wb: Workbench) {
       }
       el.innerHTML = `<h3>${esc(fastLabel(f.spec))}</h3><dl class="facts">
         <dt>Joins</dt><dd>${f.joins.map((p) => esc(wb.partInfo(p)?.part.name ?? p)).join(' + ')}</dd>
+        <dt>Geometry</dt><dd>${cadBadge(f.cad ?? 'parametric')}${f.catalog ? ` <small>${esc(f.catalog)}</small>` : ''}</dd>
         <dt>Step</dt><dd>${esc(stepTitle(wb.focus?.asm, f.step))}</dd>
         ${f.spec.mcmaster ? `<dt>McMaster</dt><dd>${esc(f.spec.mcmaster)}</dd>` : ''}
         ${f.inferred ? `<dt>Inferred</dt><dd class="inf">${esc(f.inferred_note || 'yes')}</dd>` : ''}</dl>`;
@@ -360,6 +397,8 @@ export function mountBuildPanel(wb: Workbench) {
     const exp = p.export ?? {};
     el.innerHTML = `<h3>${esc(p.name)}</h3><dl class="facts">
       <dt>Class</dt><dd>${esc(CLASS_LABEL[p.class])}${p.material ? ` · ${esc(p.material)}` : ''}</dd>
+      <dt>Geometry</dt><dd>${cadBadge(p.cad)} ${esc(CAD_TITLE[p.cad ?? 'mesh'])}${p.catalog ? ` <small>${esc(p.catalog)}</small>` : ''}</dd>
+      ${regression(p.source)}
       <dt>Source</dt><dd>${esc(src.file ?? src.kind ?? '-')}${src.entity ? ` <small>(${esc(src.entity)})</small>` : ''}</dd>
       <dt>Placed</dt><dd>${esc(src.placement ?? '-')}${src.fit ? ` <small>${esc(src.fit)}</small>` : ''}</dd>
       <dt>Moves with</dt><dd>${j ? `${esc(j.name)} ${profileTag(j.profile_joint)}` : 'fixed (ground)'}${p.linkage ? ` · posed by ${esc(p.linkage)}` : ''}</dd>
@@ -472,13 +511,19 @@ export function mountBuildPanel(wb: Workbench) {
   function renderChecks() {
     const a = wb.focus?.asm;
     const checks = a?.checks ?? [];
-    const counts = { pass: 0, warn: 0, fail: 0 };
+    const counts = { pass: 0, warn: 0, fail: 0, explained: 0 };
     checks.forEach((c) => counts[c.status]++);
-    $('bp-check-sum').textContent = checks.length ? `${counts.fail} fail · ${counts.warn} warn · ${counts.pass} pass` : '';
-    $('bp-checks').innerHTML = checks.map((c: MCheck) => `<li class="${c.status}${wb.check?.id === c.id ? ' on' : ''}">
+    $('bp-check-sum').textContent = checks.length
+      ? `${counts.fail} fail · ${counts.explained} explained · ${counts.warn} warn · ${counts.pass} pass` : '';
+    const row = (c: MCheck) => `<li class="${c.status}${wb.check?.id === c.id ? ' on' : ''}">
       <button data-bp="check" data-id="${esc(c.id)}" data-asm="${esc(a!.id)}" aria-pressed="${wb.check?.id === c.id}">
         <span class="badge ${c.status}">${c.status}</span><b>${esc(c.title)}</b><span class="sum">${esc(c.summary)}</span></button>
-      ${c.assumptions?.length ? `<details><summary>Assumptions</summary><ul>${c.assumptions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</li>`).join('')
+      ${c.assumptions?.length ? `<details><summary>Assumptions</summary><ul>${c.assumptions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</li>`;
+    const order = { fail: 0, explained: 1, warn: 2, pass: 3 };
+    const tests = checks.filter((c) => c.kind === 'test').sort((x, y) => order[x.status] - order[y.status]);
+    const eng = checks.filter((c) => c.kind !== 'test');
+    $('bp-checks').innerHTML = (tests.length ? `<li class="grp">Assembly tests</li>${tests.map(row).join('')}` : '')
+      + (eng.length ? `<li class="grp">Engineering checks</li>${eng.map(row).join('')}` : '')
       || '<li class="hint">No checks in this manifest (build without --no-checks).</li>';
     const tab = document.querySelector<HTMLElement>('[data-tab="checks"]');
     if (tab) tab.dataset.status = counts.fail ? 'fail' : counts.warn ? 'warn' : 'pass';
@@ -514,6 +559,13 @@ function profileTag(p: string | null | undefined) {
   return p
     ? ` <span class="ptag" title="This joint is ${esc(p)} in the robot profile (Bench, Studio, Show)">= ${esc(p)}</span>`
     : ' <span class="ptag none" title="The robot profile has no such joint">not in profile</span>';
+}
+
+/** A parametric remodel's fit to its reference mesh, from the manifest. */
+function regression(src?: { [k: string]: unknown }) {
+  const r = src?.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
+  if (!r) return '';
+  return `<dt>vs reference</dt><dd>${esc(String(src?.reference ?? ''))}: mean ${num(r.mean_mm ?? 0, 2)} mm, 95% within ${num(r.p95_mm ?? 0, 2)} mm, volume ${num((r.volume_ratio ?? 1) * 100, 1)}%</dd>`;
 }
 
 function driveLabel(d?: { kind?: string; servos?: string[]; gear_ratio?: number | null }) {

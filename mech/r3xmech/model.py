@@ -38,6 +38,9 @@ class Part:
     evidence: str = ""
     replaces: list[str] = field(default_factory=list)   # kit parts this build part supersedes
     generator: Callable | None = None                     # makes a trimesh when file is None
+    cad: str = "mesh"             # mesh (a reference mesh) | vendor | parametric (ours) | placeholder
+    catalog: str | None = None    # mech/parts/catalog.json id
+    real: dict | None = None      # {"kind", "spec"}: the real part (mech/parts) fitted onto `file` (a stand-in)
     explode: tuple = (0, 1, 0)
 
 

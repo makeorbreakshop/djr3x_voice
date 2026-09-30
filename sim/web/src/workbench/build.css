@@ -132,3 +132,16 @@ table.bom a:hover { text-decoration: underline; }
 table.bom td.exp a { margin-left: 6px; font: 11px ui-monospace, Menlo, monospace; }
 table.bom tr.grp th { text-align: left; padding: 10px 4px 3px; color: var(--muted); font: 600 10px system-ui, sans-serif;
   text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--line); }
+
+/* cad: how exact a part's geometry is */
+i.cad { font: normal 10px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 99px; padding: 0 5px; white-space: nowrap; }
+i.cad.source, i.cad.mesh { color: var(--warn); border-color: #5a4418; }
+i.cad.vendor { color: #57d38c; border-color: #1f5a3a; }
+i.cad.parametric { color: var(--accent-2); border-color: #23405e; }
+i.cad.placeholder { color: #ff8a8a; border-color: #6b2a2a; }
+.cad-sum { font-size: 11px; color: var(--muted); margin: 0 0 6px; line-height: 1.8; }
+.checks li.grp { border: 0; background: none; margin: 10px 0 4px; font: 600 10px system-ui, sans-serif; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .08em; }
+.checks li.grp:first-child { margin-top: 0; }
+.checks li.explained { border-color: #23405e; }
+.badge.explained { color: var(--accent-2); border-color: #23405e; }
