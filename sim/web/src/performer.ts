@@ -64,6 +64,8 @@ export interface PerfFrames {
   chest: RGB[];
   /** Linear flux per stage-light group (stagelights.ts GROUPS order). */
   stage: RGB[];
+  /** The electronics package's own light groups (grnwave: body, eyes, mouth); {} when native. */
+  package: Record<string, RGB[]>;
   servo: { frame: number; t: number; targets: number[] };
 }
 
@@ -99,9 +101,10 @@ export interface CatalogItem {
 export class Performer {
   private constructor(private readonly w: WasmPerformer) {}
 
-  static async create(seed: number): Promise<Performer> {
+  /** `profileJson`: the robot profile (with `electronics` set to the selected package). */
+  static async create(seed: number, profileJson: string = PROFILE_JSON): Promise<Performer> {
     await init();
-    return new Performer(new WasmPerformer(PROFILE_JSON, JSON.stringify(SHOW_FILES), seed >>> 0));
+    return new Performer(new WasmPerformer(profileJson, JSON.stringify(SHOW_FILES), seed >>> 0));
   }
 
   command(c: PerfCmd) {

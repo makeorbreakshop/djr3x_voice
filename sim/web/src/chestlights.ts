@@ -20,6 +20,7 @@ export interface ChestLightSpec {
 /** Lights behind the panel openings, posed in the middle ring's frame. */
 export class ChestLights {
   private readonly mats: THREE.MeshBasicMaterial[] = [];
+  private readonly meshes: THREE.Mesh[] = [];
   private readonly c = new THREE.Color();
 
   constructor(parent: THREE.Object3D, specs: ChestLightSpec[], private readonly gain = 3.5) {
@@ -36,7 +37,13 @@ export class ChestLights {
       m.quaternion.setFromUnitVectors(z, new THREE.Vector3(...s.normal).normalize());
       parent.add(m);
       this.mats.push(mat);
+      this.meshes.push(m);
     }
+  }
+
+  /** Hidden while an electronics package brings its own body LEDs (electronics.ts). */
+  setVisible(on: boolean) {
+    for (const m of this.meshes) m.visible = on;
   }
 
   update(pixels: RGB[]) {

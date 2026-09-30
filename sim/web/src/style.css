@@ -402,3 +402,19 @@ details.debug small { opacity: .7; }
 }
 .seg button { min-width: 0; }
 .side .seg button { padding-inline: 2px; }
+
+/* Electronics tab (electronics.ts) */
+.elec-pick { display: flex; align-items: center; gap: 8px; }
+.elec-pick select { flex: 1; min-width: 0; }
+table.elec { width: 100%; border-collapse: collapse; font: 11px/1.45 ui-monospace, Menlo, monospace; }
+table.elec th { text-align: left; color: #5b6170; font-weight: 500; border-bottom: 1px solid var(--line); padding-right: 6px; }
+table.elec td { color: var(--muted); padding: 2px 6px 2px 0; vertical-align: top; }
+table.elec td.num { text-align: right; white-space: nowrap; }
+table.elec a, .elec-list a { color: var(--accent); }
+.elec-list { margin: 4px 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
+.support { font: 500 10px ui-monospace, Menlo, monospace; padding: 0 5px; border-radius: 3px; border: 1px solid currentColor; }
+.support.driven { color: #3ddc84; }
+.support.partial { color: #f5b642; }
+.support.listed { color: #8a90a0; }
+abbr.inferred { color: var(--warn); font-size: 10px; text-decoration: underline dotted; cursor: help; }
+#electronics-slot h3 { font-size: 12px; margin: 14px 0 4px; }

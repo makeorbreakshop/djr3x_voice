@@ -117,6 +117,7 @@
         <button role="tab" data-tab="behaviour" data-modes="show">Behaviour</button>
         <button role="tab" data-tab="rig" data-modes="bench">Rig</button>
         <button role="tab" data-tab="test" data-modes="bench">Test</button>
+        <button role="tab" data-tab="electronics" data-modes="bench build">Electronics</button>
         <button role="tab" data-tab="system" data-modes="show bench studio">System <span id="err-count" class="count" hidden></span></button>
       </nav>
 
@@ -254,6 +255,11 @@
         </section>
       </div>
 
+      <!-- ================================================================ Electronics (Bench; Build once it lands) -->
+      <div class="tab-body" data-body="electronics" role="tabpanel" hidden>
+        <div id="electronics-slot"></div>
+      </div>
+
       <!-- ================================================================ Test (Bench) -->
       <div class="tab-body" data-body="test" role="tabpanel" hidden>
         <div id="test-slot"></div>
@@ -313,7 +319,7 @@
           <label class="inline"><input id="whine" type="checkbox" /> Servo whine</label>
         </details>
         <details class="debug">
-          <summary>Face LEDs</summary>
+          <summary>LEDs (selected electronics package)</summary>
           <canvas id="ledview" width="300" height="96"></canvas>
           <ol id="serial-log" title="Board commands the performer sends (standalone)"></ol>
         </details>

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { BodyRegions } from '../src/regions';
 import { PROFILE_JSON } from '../src/performer';
+import { PACKAGES } from '../src/electronics';
 
+// As the runtime sends it: the selected electronics package's light groups first.
 const profile = JSON.parse(PROFILE_JSON);
+profile.lights = [...PACKAGES[profile.electronics].lights, ...profile.lights];
 const regions = new BodyRegions(profile);
 
 describe('body regions (derived from the profile hierarchy)', () => {
