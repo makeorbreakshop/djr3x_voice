@@ -54,6 +54,19 @@ pub type PttHook = Arc<dyn Fn(Ptt) -> Pin<Box<dyn Future<Output = Ack> + Send>> 
 /// default; the parity harness replays the recorded picks.
 pub type Chooser = Arc<dyn Fn(&str, &[String]) -> Option<String> + Send + Sync>;
 
+/// What R3X says when a look produced a description but Claude's answer to it came back
+/// empty or failed: after "let me look" the turn must never end in silence.
+pub const VISION_FALLBACK_LINE: &str = "Hmm, my optics are glitching. Hold it up and ask me again?";
+
+/// The note a failed `analyze_scene` adds to the conversation, in the same shape as a real
+/// description, so Claude answers in character and later turns know the look failed.
+pub fn vision_failure_note(question: &str, reason: &str) -> String {
+    format!(
+        "[Vision system response to '{question}']: nothing - the look failed ({reason}). \
+         You did not see it. Say so briefly in character and ask them to show it again; do not guess what it was."
+    )
+}
+
 /// Vision as the brain sees it (`r3x-vision`, attached with [`Brain::attach_vision`]): the
 /// latest scene description for the turn context, and the `analyze_scene` tool.
 pub trait SceneSource: Send + Sync + 'static {

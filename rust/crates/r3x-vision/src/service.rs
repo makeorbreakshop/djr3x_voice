@@ -312,9 +312,13 @@ impl Vision {
         let b64 = base64::engine::general_purpose::STANDARD.encode(jpeg);
         let req = MessagesRequest::new(self.inner.cfg.scene_max_tokens).messages(vec![Message::user_image("image/jpeg", b64, prompt)]);
         let t0 = Instant::now();
-        let text = llm.create(&req).await?.text();
-        tracing::debug!(ms = t0.elapsed().as_millis() as u64, "scene described");
-        Ok(text)
+        let reply = llm.create(&req).await?;
+        let text = description(&reply);
+        match &text {
+            Ok(_) => tracing::debug!(ms = t0.elapsed().as_millis() as u64, "scene described"),
+            Err(e) => tracing::warn!(ms = t0.elapsed().as_millis() as u64, "scene not described: {e}"),
+        }
+        text
     }
 
     fn publish_scene(&self, turn: Option<String>, description: &str, reason: &str, person: Option<String>) {
@@ -502,9 +506,49 @@ pub fn link_memory(bus: &Bus, memory: Arc<r3x_memory::Memory>) -> JoinHandle<()>
     })
 }
 
+/// A scene reply's text, or why there is none (a refusal and its category, a cut-off): an
+/// empty "success" left the brain silent and the log blank.
+fn description(reply: &r3x_llm::FinalMessage) -> Result<String, VisionError> {
+    let text = reply.text().trim().to_string();
+    if !text.is_empty() {
+        return Ok(text);
+    }
+    let why = match reply.stop_reason.as_deref() {
+        Some("refusal") => {
+            let category = reply.stop_details.as_ref().and_then(|d| d["category"].as_str()).unwrap_or("unspecified");
+            format!("Claude declined to describe the image (refusal: {category})")
+        }
+        Some(r) => format!("Claude returned no description (stop_reason: {r})"),
+        None => "Claude returned no description".to_string(),
+    };
+    Err(VisionError::Model(why))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::face_to_gaze;
+    use super::{description, face_to_gaze};
+    use r3x_llm::FinalMessage;
+
+    fn reply(v: serde_json::Value) -> FinalMessage {
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// A reply with no text is a failed look, never an empty "success": the 2026-09-30 dragon
+    /// turns got `description: ""` four times with nothing in the log to say why.
+    #[test]
+    fn a_reply_without_text_is_an_error_that_says_why() {
+        let ok = reply(serde_json::json!({"content": [{"type": "text", "text": "  A green plush dragon.  "}], "stop_reason": "end_turn"}));
+        assert_eq!(description(&ok).unwrap(), "A green plush dragon.");
+
+        let refused = reply(serde_json::json!({"content": [], "stop_reason": "refusal",
+            "stop_details": {"type": "refusal", "category": "general_harms", "explanation": "..."}}));
+        let e = description(&refused).unwrap_err().to_string();
+        assert!(e.contains("declined") && e.contains("general_harms"), "{e}");
+
+        let cut = reply(serde_json::json!({"content": [{"type": "thinking", "thinking": ""}], "stop_reason": "max_tokens"}));
+        let e = description(&cut).unwrap_err().to_string();
+        assert!(e.contains("max_tokens"), "{e}");
+    }
 
     #[test]
     fn face_centre_maps_to_gaze_through_the_fov() {

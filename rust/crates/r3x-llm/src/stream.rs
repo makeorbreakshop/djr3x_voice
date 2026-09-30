@@ -49,6 +49,9 @@ pub struct FinalMessage {
     pub content: Vec<ContentBlock>,
     #[serde(default)]
     pub stop_reason: Option<String>,
+    /// Why, when `stop_reason` is `refusal` (`{type, category, explanation}`); else absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_details: Option<Value>,
     #[serde(default)]
     pub usage: Usage,
 }

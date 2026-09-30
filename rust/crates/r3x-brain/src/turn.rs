@@ -230,27 +230,50 @@ impl Brain {
     /// `analyze_scene` answered (`claude_service.py` `_generate_vision_response`): the
     /// description joins the conversation and Claude answers again with it, in the main
     /// persona. Tools are kept (prompt cache) but not callable, so it cannot loop.
+    ///
+    /// R3X has already said "let me look", so this never ends in silence: a failed or empty
+    /// look goes into the conversation as [`crate::vision_failure_note`] (Claude says so in
+    /// character, and the next turn knows the last look failed instead of promising again),
+    /// and an empty or failed answer falls back to [`crate::VISION_FALLBACK_LINE`].
     async fn after_vision(&self, turn: &str, result: &Value) {
-        let Some(description) = result.get("description").and_then(Value::as_str).filter(|d| !d.is_empty()) else {
-            tracing::info!(?result, "analyze_scene: nothing seen");
-            return;
-        };
-        let Some(llm) = self.inner.llm.clone() else { return };
         let question = result.get("question").and_then(Value::as_str).unwrap_or("What do you see?");
+        let description = result.get("description").and_then(Value::as_str).map(str::trim).filter(|d| !d.is_empty());
+        let note = match description {
+            Some(d) => format!("[Vision system response to '{question}']: {d}"),
+            None => {
+                let reason = result
+                    .get("message")
+                    .or_else(|| result.get("error"))
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.is_empty())
+                    .unwrap_or("the camera image came back with no description");
+                tracing::warn!(question, reason, "analyze_scene: look failed");
+                crate::vision_failure_note(question, reason)
+            }
+        };
         let history = {
             let mut s = self.inner.session.lock().unwrap();
-            s.add(Role::User, format!("[Vision system response to '{question}']: {description}"));
+            s.add(Role::User, note);
             s.messages()
         };
-        let req = prompt::turn_request(&self.inner.system, history, self.inner.tools.clone(), true);
-        match llm.create(&req).await {
-            Ok(m) if !m.text().is_empty() => {
-                let text = m.text();
-                self.inner.session.lock().unwrap().add(Role::Assistant, text.clone());
-                self.emit_reply(turn, &text);
+        let text = match self.inner.llm.clone() {
+            None => None,
+            Some(llm) => {
+                let req = prompt::turn_request(&self.inner.system, history, self.inner.tools.clone(), true);
+                match llm.create(&req).await {
+                    Ok(m) => Some(m.text()).filter(|t| !t.trim().is_empty()).or_else(|| {
+                        tracing::warn!(stop_reason = ?m.stop_reason, "vision reply came back empty");
+                        None
+                    }),
+                    Err(e) => {
+                        tracing::error!("vision reply failed: {e}");
+                        None
+                    }
+                }
             }
-            Ok(_) => {}
-            Err(e) => tracing::error!("vision reply failed: {e}"),
-        }
+        };
+        let text = text.unwrap_or_else(|| crate::VISION_FALLBACK_LINE.to_string());
+        self.inner.session.lock().unwrap().add(Role::Assistant, text.clone());
+        self.emit_reply(turn, &text);
     }
 }

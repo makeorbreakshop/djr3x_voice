@@ -215,3 +215,101 @@ async fn vision_scene_context_and_analyze_scene() {
         .collect();
     assert_eq!(spoken, ["Let me look.", "A Wookiee! Hi there!"], "scene in the turn (fixture hit), then the vision answer");
 }
+
+/// A look that fails must never end the turn in silence. R3X has already said "let me look";
+/// the dragon report (2026-09-30): the camera answered with an empty description four times
+/// and R3X went quiet each time, then promised to look again, because nothing recorded that
+/// the look had failed.
+mod failed_looks {
+    use super::*;
+
+    struct Eyes(Result<String, String>);
+    impl r3x_brain::SceneSource for Eyes {
+        fn scene(&self) -> Option<(String, f64)> {
+            None
+        }
+        fn analyze<'a>(&'a self, _: &'a str, _: Option<String>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
+            let r = self.0.clone();
+            Box::pin(async move { r })
+        }
+    }
+
+    const ASK: &str = "what is this dragon";
+    const Q: &str = "What is the toy being held up?";
+
+    /// Run one "look at this" turn: Claude says "Let me look." and calls `analyze_scene`; the
+    /// eyes answer `eyes`; `follow_up` is (the vision note the brain must send back, Claude's
+    /// reply to it). Returns what R3X said, and the fixture key misses.
+    async fn look(eyes: Result<String, String>, follow_up: Option<(String, serde_json::Value)>) -> Vec<String> {
+        let dir = std::env::temp_dir().join(format!("r3x-brain-look-{}-{}", std::process::id(), uuid()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let memory = Arc::new(r3x_memory::Memory::open_in_memory().unwrap());
+        let ctx = memory.turn_context(None, 5).unwrap();
+        let turn = prompt::turn_request("sys", vec![Message::user(prompt::user_message(ASK, None, &ctx))], request::default_tools(), false);
+        let mut lines = vec![json!({"key": ClaudeFixtures::key_for("stream", &turn), "method": "stream",
+            "chunks": [{"wait": 0.1, "text": "Let me look."}],
+            "final": {"content": [{"type": "text", "text": "Let me look."},
+                                  {"type": "tool_use", "id": "v1", "name": "analyze_scene", "input": {"question": Q}}]}})];
+        if let Some((note, reply)) = follow_up {
+            let answer = prompt::turn_request("sys", vec![Message::user(note)], vec![], true);
+            lines.push(json!({"key": ClaudeFixtures::key_for("create", &answer), "method": "create", "wait": 0.2, "final": {"content": reply}}));
+        }
+        std::fs::write(dir.join("claude.jsonl"), lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+
+        let bus = Bus::default();
+        bus.update(Source::System, |s: &mut StageState| s.brain = true);
+        stubs(&bus);
+        let rec = log(&bus);
+        let deps = BrainDeps {
+            llm: Some(LlmClient::replay(Arc::new(ClaudeFixtures::load(&dir, 1.0).unwrap()), "claude-sonnet-5-5")),
+            router: IntentRouter::new(JevClient::new("", Duration::from_millis(800)), RouterConfig::default()),
+            memory: Some(memory),
+            latency: None,
+            ptt: None,
+            chooser: random_chooser(),
+        };
+        let brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+        brain.attach_vision(Arc::new(Eyes(eyes)));
+        let say = Command::Intent(IntentCommand::Say { text: ASK.into() });
+        assert!(bus.command(Source::Cli, None, say).await.is_accepted());
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let spoken = rec
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| if let Body::Event(Event::Conversation(ConversationEvent::Speak { text, .. })) = &e.body { Some(text.clone()) } else { None })
+            .collect();
+        spoken
+    }
+
+    fn uuid() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        N.fetch_add(1, Ordering::Relaxed)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_empty_description_is_answered_in_character() {
+        let note = r3x_brain::vision_failure_note(Q, "the camera image came back with no description");
+        let reply = json!([{"type": "text", "text": "My optics are fuzzy on that one. Hold it up again?"}]);
+        let spoken = look(Ok(String::new()), Some((note, reply))).await;
+        assert_eq!(spoken, ["Let me look.", "My optics are fuzzy on that one. Hold it up again?"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_look_is_answered_in_character() {
+        let note = r3x_brain::vision_failure_note(Q, "no recent camera frame");
+        let reply = json!([{"type": "text", "text": "My camera just blinked out."}]);
+        let spoken = look(Err("no recent camera frame".into()), Some((note, reply))).await;
+        assert_eq!(spoken, ["Let me look.", "My camera just blinked out."]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_follow_up_still_gets_a_line() {
+        // The description arrives, but Claude's answer to it comes back empty (or fails).
+        let note = format!("[Vision system response to '{Q}']: a green plush dragon");
+        let spoken = look(Ok("a green plush dragon".into()), Some((note, json!([])))).await;
+        assert_eq!(spoken.len(), 2, "never silent after 'let me look': {spoken:?}");
+        assert_eq!(spoken[1], r3x_brain::VISION_FALLBACK_LINE);
+    }
+}
