@@ -236,6 +236,19 @@ def hole_group_params(designed: dict) -> dict:
     return {"inserts": False, **{f"{g}_hole": None for g in designed}}
 
 
+# ISO 10511 prevailing-torque (nylon insert) lock nuts: AF, height. The pivot rule: a hole that
+# carries a pivot's shear takes a through-bolt with one of these, never a screw tapped into plastic.
+LOCK_NUTS = {"M3": (5.5, 4.0), "M4": (7.0, 5.0), "M5": (8.0, 5.0), "M6": (10.0, 6.0)}
+
+
+def lock_nut(feats: dict, name: str, p, n, bolt: str):
+    """Record a lock nut on hole `name`: `nut_<name>` (the face it bears on, `n` out of the part) and
+    the nut on `hole_<name>`, for the workbench's hardware placement."""
+    af, h = LOCK_NUTS[bolt]
+    feats[f"nut_{name}"] = plane(p, n)
+    feats[f"hole_{name}"]["lock_nut"] = f"{bolt} ISO 10511 nylock, AF {af}, h {h}"
+
+
 def cut_hole(body, feats: dict, name: str, entry, d_into, bolt: str, hole_type: str, depth: float,
              fit: float = 0.0, sizes: dict | None = None, insert: str | None = None, grow_boss: bool = False,
              through: float | None = None):

@@ -163,3 +163,15 @@ def test_visor_drive_interface():
     for mod, g in (("visor_push_rod", "pin"), ("visor_rod_tab", "cross"), ("visor_rod_tab", "tip")):
         p = _mod(f"parts.anderson.{mod}").make({f"{g}_hole": "nut_trap"})
         assert p.is_valid and len(p.solids()) == 1
+
+
+def test_visor_pivots_take_a_lock_nut():
+    """The pivot rule: the horn tip is 3.0 tapped as drawn and a 3.4 bolt + nylock under the preset."""
+    horn = _mod("parts.anderson.visor_horn")
+    f = horn.make().features["hole_tip"]
+    assert f["kind"] == "tapped" and math.isclose(2 * f["r"], 3.0) and "lock_nut" not in f
+    p = horn.make({"inserts": True})
+    f = p.features["hole_tip"]
+    assert f["kind"] == "clearance" and math.isclose(2 * f["r"], 3.4) and "nylock" in f["lock_nut"]
+    assert p.features["nut_tip"]["n"] == [0.0, 0.0, -1.0]
+    assert "nylock" in _mod("parts.anderson.visor_rod_tab").make().features["hole_tip"]["lock_nut"]

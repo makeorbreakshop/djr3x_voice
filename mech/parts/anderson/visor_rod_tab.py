@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, cut_hole, finish, hole_features, hole_group_params, plane, resolve_hole_types
+from parts.head._common import (Print, cut_hole, finish, hole_features, hole_group_params, lock_nut, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - visor-rod-tab.step"
 LABEL = "Visor rod tab (parametric)"
-DESIGNED = {"tip": "clearance", "cross": "clearance"}   # M3 (his 3.5 mm clearance): the rod pivot, the axle pin
+# M3 (his 3.5 mm clearance). `tip` is the push rod's pivot: already a through-bolt, it gets a lock nut.
+DESIGNED = {"tip": "clearance", "cross": "clearance"}
 INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
@@ -71,6 +73,8 @@ def make(params: dict | None = None, **kw):
         hole_features(feats, "tip", (0, 0, tz), (0, -1, 0), d / 2, depth=t, bolt=P["bolt"], kind="clearance")
     else:
         body = cut_hole(body, feats, "tip", (0, 0, tz), (0, -1, 0), P["bolt"], types["tip"], t, fit, HOLE_SIZES)
+    if types["tip"] == "clearance":         # the push rod's pivot: a through-bolt with a lock nut
+        lock_nut(feats, "tip", (0, -t, tz), (0, -1, 0), P["bolt"])
     feats["tip"] = dict(feats["hole_tip"])
     cd, cz = P["cross"]
     if types["cross"] == DESIGNED["cross"]:

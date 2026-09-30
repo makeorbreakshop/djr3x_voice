@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, cut_hole, finish, hole_features, hole_group_params, plane, resolve_hole_types
+from parts.head._common import (Print, cut_hole, finish, hole_features, hole_group_params, lock_nut, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - visor-servo-horn.step"
 LABEL = "Visor servo horn (parametric)"
-DESIGNED = {"tip": "tapped"}   # 3.0 mm: the push rod's M3 screw threads into it (5 mm is too thin for an insert)
+# 3.0 mm as drawn: the push rod's M3 screw threads into it. It is the rod's pivot, so the `inserts`
+# preset makes it a through-bolt (ISO 3.4 mm clearance) with a nylock on the servo side instead.
+DESIGNED = {"tip": "tapped"}
 INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
@@ -41,6 +44,8 @@ def make(params: dict | None = None, **kw):
     unknown = set(P) - set(DEFAULTS)
     if unknown:
         raise TypeError(f"unknown visor_horn parameters: {sorted(unknown)}")
+    if P.get("inserts") and P.get("tip_hole") is None:
+        P["tip_hole"] = "clearance"         # the pivot rule: bolt + lock nut, not a screw in plastic
     types = resolve_hole_types(P, DESIGNED)
     fit, t, L, R, r = P["fit"], P["thickness"], P["arm"], P["hub_r"], P["tip_r"]
     a = math.asin((R - r) / L)                   # the flanks' tilt: tangent to both circles
@@ -60,7 +65,10 @@ def make(params: dict | None = None, **kw):
         hole_features(feats, "tip", (-L, 0, 0), (0, 0, 1), (P["tip_d"] + fit) / 2, depth=t, bolt=P["tip_bolt"],
                       kind="tapped")
     else:
-        body = cut_hole(body, feats, "tip", (-L, 0, 0), (0, 0, 1), P["tip_bolt"], types["tip"], t, fit, HOLE_SIZES)
+        sizes = None if types["tip"] == "clearance" else HOLE_SIZES     # ISO 3.4, not his 3.5
+        body = cut_hole(body, feats, "tip", (-L, 0, t), (0, 0, -1), P["tip_bolt"], types["tip"], t, fit, sizes)
+        if types["tip"] == "clearance":     # the rod on the outer face, the nut on the servo side
+            lock_nut(feats, "tip", (-L, 0, 0), (0, 0, -1), P["tip_bolt"])
     feats["tip"] = dict(feats["hole_tip"])
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,
                   printability=Print("servo face down (z = 0 on the bed)", "servo_face", False,
