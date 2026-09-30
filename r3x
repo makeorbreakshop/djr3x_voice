@@ -239,7 +239,9 @@ if [ "$LEGACY" = 0 ]; then
   BUILD_NOTE=$!
   cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime -p r3x-cli --features r3x-runtime/mouse -q \
     || { kill "$BUILD_NOTE" 2>/dev/null; die "r3x-runtime did not build"; }
-  kill "$BUILD_NOTE" 2>/dev/null; wait "$BUILD_NOTE" 2>/dev/null || true
+  # The note may have printed and exited already (a build over 2 s): under `set -e` a failed
+  # kill here used to end the launcher silently, before the runtime ever started.
+  kill "$BUILD_NOTE" 2>/dev/null || true; wait "$BUILD_NOTE" 2>/dev/null || true
   LOG="$ROOT/logs/r3x-runtime.log"
   set -m  # own process group (pgid = its pid), so cleanup can stop its children too
   "$ROOT/rust/target/release/r3x-runtime" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
