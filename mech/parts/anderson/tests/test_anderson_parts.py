@@ -61,7 +61,10 @@ def test_matches_step(name, built):
     if not path.exists():
         pytest.skip("reference STEP not on this machine (mech/vendor is gitignored)")
     p = built[name]
-    c = R.compare(p, R.load_ref(mod.REFERENCE, ref_dir=REF_DIR))
+    # the model tessellated as finely as load_ref tessellates the STEP, so faceting doesn't read as error
+    from parts.head._common import mesh
+
+    c = R.compare(p, R.load_ref(mod.REFERENCE, ref_dir=REF_DIR), model_mesh=mesh(p, 0.005, 0.05))
     h = R.match_brep_holes(p.features, R.brep_holes(path), tol=0.02)
     print(name, json.dumps({k: round(v, 4) if isinstance(v, float) else v for k, v in c.items()}),
           f"holes {len(h['matched'])}")
@@ -139,8 +142,9 @@ def test_inserts_preset(name):
             ins = next((v for v in INSERTS.values() if v["source"] == f["insert"]), None)
             if ins:
                 assert math.isclose(2 * f["r"], ins["d"], abs_tol=1e-6) and f["depth"] >= ins["length"] + 1 - 1e-6
-    with pytest.raises(ValueError):
-        mod.make({f"{next(iter(designed))}_hole": "rivet"})
+    if designed:
+        with pytest.raises(ValueError):
+            mod.make({f"{next(iter(designed))}_hole": "rivet"})
 
 
 def test_visor_drive_interface():
@@ -175,3 +179,30 @@ def test_visor_pivots_take_a_lock_nut():
     assert f["kind"] == "clearance" and math.isclose(2 * f["r"], 3.4) and "nylock" in f["lock_nut"]
     assert p.features["nut_tip"]["n"] == [0.0, 0.0, -1.0]
     assert "nylock" in _mod("parts.anderson.visor_rod_tab").make().features["hole_tip"]["lock_nut"]
+
+
+def test_hero_arm_fits():
+    """The hero arm's parts agree where they meet (all in their own STEP frames)."""
+    tube = _mod("parts.anderson.bodytube").make().features
+    mount = _mod("parts.anderson.servomount").make().features
+    spacer = _mod("parts.anderson.spacerblock").make().features
+    base = _mod("parts.anderson.mainarm").make().features
+    wrist = _mod("parts.anderson.wrist").make().features
+    cap = _mod("parts.anderson.wrist_cap").make().features
+    arm = _mod("parts.anderson.hand_arm_side").make().features
+    fingers = _mod("parts.anderson.hand_finger_side").make().features
+    # the body tube's 32 mm end sits in the servo mount's 33 mm collar
+    assert 0 < mount["hole_collar"]["r"] - tube["axis"]["r"] <= 0.5
+    # one 10 mm screw square on the tube end, the mount's wall, the spacer and the main arm's foot
+    def square(f, prefix):
+        ps = np.array([v["p"] for k, v in f.items() if k.startswith(f"hole_{prefix}") and "relief" not in k])
+        return sorted(np.round(np.ptp(ps, axis=0), 6).tolist())
+    for f, pre in ((tube, "end"), (mount, "tube"), (spacer, "bolt"), (base, "base")):
+        assert square(f, pre) == [0.0, 10.0, 10.0], pre
+    # the cap's spigot drops into the wrist's rim bore; the hand's collar turns inside the cap
+    assert 0 < wrist["hole_rim_bore"]["r"] - cap["spigot"]["r"] <= 1.0
+    assert arm["hole_collar_bore"]["r"] == cap["hole_lip"]["r"]
+    # the finger side's join holes line up with the arm side's, and the stack meets at z = 7.8
+    for k in range(1, 5):
+        assert np.allclose(arm[f"hole_join{k}"]["p"][:2], fingers[f"hole_join{k}"]["p"][:2])
+    assert arm["top"]["p"][2] == fingers["bed"]["p"][2]

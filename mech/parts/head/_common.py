@@ -194,6 +194,10 @@ INSERTS = {
     "M4-kit": {"d": 6.0, "length": 6.0, "source": "R-3X head BOM: M4 heat-set, 6 x 6 mm (Hunter's hole 6.0)"},
     # Anderson's lift rack, as drawn: a 5.5 x 4.5 mm pocket (a short M4 insert)
     "M4-anderson": {"d": 5.5, "length": 3.5, "source": "Anderson's lift rack as drawn: 5.5 x 4.5 mm pocket (short M4)"},
+    # Anderson's hero arm, as drawn: 4.5 x 3.5 mm pockets over a 3.0 / 3.25 screw-tip relief (a short M3)
+    "M3-anderson": {"d": 4.5, "length": 3.5, "source": "Anderson's hero arm as drawn: 4.5 x 3.5 mm pocket (short M3)"},
+    # Anderson's main arm, as drawn: 5.0 x 3.5 mm pockets over a 3.0 relief (a short, wide M3)
+    "M3-anderson-5": {"d": 5.0, "length": 3.5, "source": "Anderson's main arm as drawn: 5.0 x 3.5 mm pocket (short M3)"},
     # the kit's McMaster inserts: no datasheet on this machine - standard values, flagged
     "94180A331": {"d": 4.0, "length": 5.7, "verified": False,
                   "source": "McMaster 94180A331 (M3 heat-set): hole unverified, standard M3 values used"},
