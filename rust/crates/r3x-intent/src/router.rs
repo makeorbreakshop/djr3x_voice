@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::catalogue::{build_questions, build_state};
+use crate::catalogue::{build_look_questions, build_questions, build_state};
 use crate::client::{JevClient, DEFAULT_TIMEOUT};
 use crate::decide::{decide, JevResult, RouterDecision, DEFAULT_COMMAND_THRESHOLD, DEFAULT_THRESHOLD};
 
@@ -32,6 +32,8 @@ pub struct RouterConfig {
     pub verdict_wait: Duration,
     /// `FAST_ROUTER_OUTCOME_WAIT_S` (1.2): Claude side's outcome wait.
     pub outcome_wait: Duration,
+    /// `JEV_LOOK_THRESHOLD` (0.6): the `look` noul at or above this attaches the camera frame.
+    pub look_threshold: f64,
 }
 
 impl Default for RouterConfig {
@@ -45,6 +47,7 @@ impl Default for RouterConfig {
             speculate: true,
             verdict_wait: Duration::from_millis(1200),
             outcome_wait: Duration::from_millis(1200),
+            look_threshold: 0.6,
         }
     }
 }
@@ -66,6 +69,7 @@ impl RouterConfig {
             speculate: b("JEV_SPECULATE", d.speculate),
             verdict_wait: secs("FAST_ROUTER_WAIT_S", d.verdict_wait),
             outcome_wait: secs("FAST_ROUTER_OUTCOME_WAIT_S", d.outcome_wait),
+            look_threshold: f("JEV_LOOK_THRESHOLD", d.look_threshold),
         }
     }
 
@@ -102,12 +106,13 @@ pub struct IntentRouter {
     client: JevClient,
     cfg: RouterConfig,
     questions: Value,
+    look_questions: Value,
     spec: Mutex<Spec>,
 }
 
 impl IntentRouter {
     pub fn new(client: JevClient, cfg: RouterConfig) -> Arc<Self> {
-        Arc::new(Self { client, cfg, questions: build_questions(), spec: Mutex::default() })
+        Arc::new(Self { client, cfg, questions: build_questions(), look_questions: build_look_questions(), spec: Mutex::default() })
     }
 
     pub fn from_env() -> Arc<Self> {
@@ -178,6 +183,20 @@ impl IntentRouter {
             tracing::debug!("Speculative Jev answer cached for '{}' in {:.0} ms", text.chars().take(40).collect::<String>(), result.latency_ms);
             s.cache.push_back((key, result));
         });
+    }
+
+    /// Should R3X look at the camera to answer `transcript`? One small Jev request of its own
+    /// (see `catalogue::build_look_questions`). Fails closed: no answer (inactive, timeout,
+    /// error) is a no.
+    pub async fn should_look(&self, transcript: &str) -> bool {
+        if !self.active() {
+            return false;
+        }
+        let Some(r) = self.client.classify(&build_state(transcript), &self.look_questions).await else { return false };
+        let p = r.noul("look", 0.0);
+        let look = p >= self.cfg.look_threshold;
+        tracing::info!(p = format!("{p:.2}"), look, "Jev look for '{}'", transcript.chars().take(48).collect::<String>());
+        look
     }
 
     /// The hot path: the authoritative transcript. Uses a speculative answer when one matches,

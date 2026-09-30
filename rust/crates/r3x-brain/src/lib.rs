@@ -67,13 +67,33 @@ pub fn vision_failure_note(question: &str, reason: &str) -> String {
     )
 }
 
+/// The user text of a turn that carries the camera frame (Jev asked to look): it tells Claude
+/// the image is what R3X sees now, so he answers from it in one reply.
+pub fn look_turn_text(msg: &str) -> String {
+    format!("[The attached image is what you see through your camera right now. Answer from what you see; do not say you are taking a picture.]\n\n{msg}")
+}
+
+/// The user text of `analyze_scene`'s follow-up, which carries the camera frame.
+pub fn look_tool_text(question: &str) -> String {
+    format!("[You looked through your camera to answer '{question}'. The attached image is what you see right now. Answer from it; do not mention the camera or a picture.]")
+}
+
+/// A look turn whose image Claude declined: the same turn again, without the image.
+pub fn look_refused_text(msg: &str) -> String {
+    format!("[You tried to look through your camera, but could not make out the image. Say so briefly, in character; do not guess what it was.]\n\n{msg}")
+}
+
 /// Vision as the brain sees it (`r3x-vision`, attached with [`Brain::attach_vision`]): the
-/// latest scene description for the turn context, and the `analyze_scene` tool.
+/// latest scene description for the turn context, and the camera frame for looks.
 pub trait SceneSource: Send + Sync + 'static {
     /// The last description and when it was captured (unix s).
     fn scene(&self) -> Option<(String, f64)>;
-    /// Describe the current frame, answering `question`; `turn` correlates the capture event.
-    fn analyze<'a>(&'a self, question: &'a str, turn: Option<String>) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+    /// Whether the camera is on: the look question is only asked (and paid for) then.
+    fn active(&self) -> bool {
+        true
+    }
+    /// The current camera frame as base64 JPEG, or why there is none.
+    fn snapshot(&self) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send + '_>>;
     /// A console line vision answers (`camera list|status|select N`), else `None`.
     fn console(&self, _line: &str) -> Option<String> {
         None
@@ -190,6 +210,8 @@ pub(crate) struct Inner {
     /// Title of the track the engine last reported started (cleared on stop).
     pub now_playing: Mutex<Option<String>>,
     pub vision: std::sync::OnceLock<Arc<dyn SceneSource>>,
+    /// Frames `analyze_scene` took, per turn, for its follow-up (not on the bus: too big).
+    pub looks: Mutex<HashMap<String, String>>,
 }
 
 /// A running brain. Dropping it stops nothing; call [`Brain::shutdown`].
@@ -265,6 +287,7 @@ impl Brain {
             last_warmup: Mutex::default(),
             now_playing: Mutex::default(),
             vision: std::sync::OnceLock::new(),
+            looks: Mutex::default(),
             cfg,
         });
         tracing::info!(

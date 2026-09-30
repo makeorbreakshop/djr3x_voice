@@ -126,6 +126,9 @@ async fn switched_off_the_camera_closes_and_looks_are_refused() {
     let (vision, _task) = Vision::spawn(&bus, cfg, Box::new(FakeCamera(vec![1u8; 20_000])), Box::new(ByteRecognizer), None);
     assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }));
     assert!(vision.enabled());
+    // A snapshot for the brain to attach to Claude's turn: the latest frame as base64 JPEG.
+    let jpeg = vision.snapshot().await.unwrap();
+    assert!(jpeg.starts_with("/9j/"), "base64 JPEG (FF D8 FF): {}", &jpeg[..8]);
 
     vision.set_enabled(false);
     assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonExited { .. }), "switching off ends the visit");
@@ -134,6 +137,7 @@ async fn switched_off_the_camera_closes_and_looks_are_refused() {
     assert!(!vision.enabled());
     let e = vision.analyze_scene("What is this?", None).await.unwrap_err().to_string();
     assert!(e.contains("switched off"), "{e}");
+    assert!(vision.snapshot().await.unwrap_err().to_string().contains("switched off"));
 
     vision.set_enabled(true);
     assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }), "back on: recognition resumes");

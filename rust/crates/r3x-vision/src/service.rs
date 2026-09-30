@@ -351,6 +351,23 @@ impl Vision {
         Ok(description)
     }
 
+    /// The current camera frame as base64 JPEG (scaled to `scene_max_width`), for the brain to
+    /// attach to Claude's turn so R3X answers from what he sees in the same call. Free: no
+    /// Claude call here. Refused while switched off or without a frame newer than
+    /// `frame_max_age`.
+    pub async fn snapshot(&self) -> Result<String, VisionError> {
+        if !self.enabled() {
+            return Err(VisionError::Camera("vision is switched off".into()));
+        }
+        let frame = match &*lock(&self.inner.latest) {
+            Some((f, at)) if at.elapsed() <= self.inner.cfg.frame_max_age => f.clone(),
+            _ => return Err(VisionError::Camera("no recent camera frame".into())),
+        };
+        let (q, w) = (self.inner.cfg.jpeg_quality, self.inner.cfg.scene_max_width);
+        let jpeg = tokio::task::spawn_blocking(move || frame.to_jpeg_scaled(q, w)).await.map_err(|e| VisionError::Image(e.to_string()))??;
+        Ok(base64::engine::general_purpose::STANDARD.encode(jpeg))
+    }
+
     async fn describe(&self, frame: Arc<Frame>, prompt: &str) -> Result<String, VisionError> {
         let llm = self.inner.llm.as_ref().ok_or(VisionError::Llm(r3x_llm::LlmError::Unavailable))?;
         let (q, w) = (self.inner.cfg.jpeg_quality, self.inner.cfg.scene_max_width);

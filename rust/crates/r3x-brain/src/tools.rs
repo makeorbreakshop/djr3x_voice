@@ -93,8 +93,13 @@ impl Brain {
                 let q = Some(s("question")).filter(|q| !q.is_empty()).unwrap_or_else(|| "What do you see?".into());
                 match self.inner.vision.get() {
                     None => json!({"success": false, "action": "analyze_scene", "question": q, "message": "Vision is not running"}),
-                    Some(v) => match v.analyze(&q, cid).await {
-                        Ok(d) => json!({"success": true, "action": "analyze_scene", "question": q, "description": d}),
+                    // A frame, not a description: the follow-up answers with it attached
+                    // (`after_vision`), so there is no separate describe call.
+                    Some(v) => match v.snapshot().await {
+                        Ok(jpeg) => {
+                            self.inner.looks.lock().unwrap().insert(cid.clone().unwrap_or_default(), jpeg);
+                            json!({"success": true, "action": "analyze_scene", "question": q, "looked": true})
+                        }
                         Err(e) => json!({"success": false, "action": "analyze_scene", "question": q, "message": e}),
                     },
                 }

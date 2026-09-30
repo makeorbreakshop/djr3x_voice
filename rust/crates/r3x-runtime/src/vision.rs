@@ -39,7 +39,8 @@ pub fn start(bus: &Bus, memory: Option<Arc<r3x_memory::Memory>>) -> Option<Visio
     Some(vision)
 }
 
-/// Vision as the brain's [`r3x_brain::SceneSource`]: scene context for turns, `analyze_scene`.
+/// Vision as the brain's [`r3x_brain::SceneSource`]: scene context for turns, and the camera
+/// frame for looks (Jev-flagged turns and `analyze_scene`).
 pub struct BrainEyes(pub Vision);
 
 impl r3x_brain::SceneSource for BrainEyes {
@@ -47,12 +48,12 @@ impl r3x_brain::SceneSource for BrainEyes {
         self.0.scene()
     }
 
-    fn analyze<'a>(
-        &'a self,
-        question: &'a str,
-        turn: Option<String>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>> {
-        Box::pin(async move { self.0.analyze_scene(question, turn).await.map_err(|e| e.to_string()) })
+    fn active(&self) -> bool {
+        self.0.enabled()
+    }
+
+    fn snapshot(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>> {
+        Box::pin(async move { self.0.snapshot().await.map_err(|e| e.to_string()) })
     }
 
     fn console(&self, line: &str) -> Option<String> {

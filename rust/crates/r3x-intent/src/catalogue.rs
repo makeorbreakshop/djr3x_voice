@@ -127,6 +127,23 @@ particular catalog item."),
     Value::Object(q)
 }
 
+/// "Should R3X look?": its own request, sent alongside the main one (so the main request and
+/// the recorded fixtures keyed on it stay byte-identical). A yes attaches the current camera
+/// frame to Claude's turn, so R3X answers from what he sees in one call instead of saying
+/// "let me take a look", describing a photo and answering again.
+pub fn build_look_questions() -> Value {
+    let mut q = Map::new();
+    q.insert("look".into(), noul(
+        "To answer the speaker well, does the droid need to see something in front of its camera right now?",
+        "They ask the droid to look at, check out, or react to something they are showing, holding, wearing, or doing, or \
+they ask what it sees, what something looks like, what colour it is, how many there are, who is there, or whether it likes how \
+they look: \"look at this\", \"what am I holding\", \"check out my dragon\", \"do you like my costume\", \"what colour is this\".",
+        "Nothing visible is needed: \"look\" only as a filler (\"look, I'm tired\"), questions about films, music, facts, or \
+things not in front of the droid (\"have you seen the new movie\"), small talk, or a request for an action like playing music.",
+    ));
+    Value::Object(q)
+}
+
 /// The identity line - load-bearing ("put on some cantina tunes" is general_chat without it).
 /// No conversation history, deliberately: it made the router eager.
 pub const ASSISTANT_IDENTITY: &str = "You are DJ R3X, a Star Wars droid DJ in a cantina. You play music, run a DJ mode where \
