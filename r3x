@@ -153,10 +153,12 @@ if [ "$LEGACY" = 0 ]; then
   # (feature `mouse`; needs Accessibility for Terminal.app, without it the click is simply off).
   MOUSE_ARGS=()
   [ "$CLICK_ANYWHERE" = 1 ] && MOUSE_ARGS=(--mouse)
-  say "building r3x-runtime + r3x-cli (release; the first build takes a few minutes)"
-  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime --features mouse -q \
-    || die "r3x-runtime did not build"
-  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-cli -q || die "r3x-cli did not build"
+  # Cargo only recompiles what changed; say so only when that takes a noticeable while.
+  ( sleep 2; say "compiling changed code (only after an update; the very first build takes a few minutes)" ) &
+  BUILD_NOTE=$!
+  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime -p r3x-cli --features r3x-runtime/mouse -q \
+    || { kill "$BUILD_NOTE" 2>/dev/null; die "r3x-runtime did not build"; }
+  kill "$BUILD_NOTE" 2>/dev/null; wait "$BUILD_NOTE" 2>/dev/null || true
   LOG="$ROOT/logs/r3x-runtime.log"
   set -m  # own process group (pgid = its pid), so cleanup can stop its children too
   "$ROOT/rust/target/release/r3x-runtime" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
