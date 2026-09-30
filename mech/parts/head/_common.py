@@ -33,12 +33,13 @@ HOLES = {
 HOLE_KINDS = ("clearance", "tap", "heatset")
 
 
-def hole_d(bolt: str, kind: str, fit: float = 0.0) -> float:
+def hole_d(bolt: str, kind: str, fit: float = 0.0, sizes: dict | None = None) -> float:
     """Printed hole diameter (mm) for `bolt` ('M4') as `kind` ('clearance' | 'tap' | 'heatset'),
-    opened by the print fit `fit` (mm on the diameter)."""
+    opened by the print fit `fit` (mm on the diameter). `sizes` overrides the table per designer
+    ({"M3": {"clearance": 3.5}}: Anderson draws M3 clearance at 3.5)."""
     if kind not in HOLE_KINDS:
         raise ValueError(f"hole kind {kind!r}: one of {HOLE_KINDS}")
-    return HOLES[bolt][kind] + fit
+    return (sizes or {}).get(bolt, {}).get(kind, HOLES[bolt][kind]) + fit
 
 
 # ------------------------------------------------------------------ features

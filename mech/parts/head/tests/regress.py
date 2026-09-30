@@ -23,8 +23,8 @@ MECH = Path(__file__).resolve().parents[3]
 REF_DIR = MECH / "vendor" / "hunter_head"
 
 
-def load_ref(name: str, thickness: float = 3.0) -> trimesh.Trimesh:
-    p = REF_DIR / name
+def load_ref(name: str, thickness: float = 3.0, ref_dir: Path | None = None) -> trimesh.Trimesh:
+    p = (ref_dir or REF_DIR) / name
     if p.suffix.lower() == ".dxf":        # a cut profile: extruded as the workbench does (centred on z = 0)
         from workbench.geom import dxf_profile, extrude
 
@@ -231,6 +231,67 @@ def _on_axis(c, feats, margin: float = 1.0) -> bool:
         if -margin <= t <= f.get("depth", 10.0) + margin and np.linalg.norm(w - t * d) <= f["r"] + margin:
             return True
     return False
+
+
+def brep_holes(path: Path) -> list[dict]:
+    """Every hole of a STEP, from its B-rep: concave cylindrical faces, merged per axis line and
+    radius (a hole interrupted by a slot is one hole). [{p, d, r, span}] (p on the axis)."""
+    from build123d import GeomType, import_step
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+
+    out: list[dict] = []
+    for f in import_step(str(path)).faces():
+        if f.geom_type != GeomType.CYLINDER:
+            continue
+        cyl = BRepAdaptor_Surface(f.wrapped).Cylinder()
+        ax = cyl.Axis()
+        d = np.array([ax.Direction().X(), ax.Direction().Y(), ax.Direction().Z()])
+        p = np.array([ax.Location().X(), ax.Location().Y(), ax.Location().Z()])
+        c = np.array(tuple(f.center()))
+        n = np.array(tuple(f.normal_at(f.center())))
+        radial = (c - p) - d * ((c - p) @ d)
+        if n @ radial >= 0:                          # a boss or a round, not a hole
+            continue
+        vs = np.array([tuple(v) for v in f.vertices()])
+        t = (vs - p) @ d
+        r = cyl.Radius()
+        # a partial cylinder (a slot end, a fillet) is not a round hole: keep only closed ones
+        if f.area < 0.95 * 2 * np.pi * r * (t.max() - t.min()):
+            continue
+        hit = next((h for h in out if abs(h["r"] - r) < 1e-3 and abs(abs(h["d"] @ d) - 1) < 1e-6
+                    and np.linalg.norm((p - h["p"]) - h["d"] * ((p - h["p"]) @ h["d"])) < 1e-3), None)
+        if hit:
+            s0 = (vs - hit["p"]) @ hit["d"]
+            hit["span"] = [min(hit["span"][0], s0.min()), max(hit["span"][1], s0.max())]
+        else:
+            out.append({"p": p, "d": d, "r": r, "span": [t.min(), t.max()]})
+    return out
+
+
+def match_brep_holes(features: dict, holes: list[dict], tol: float = 0.2) -> dict:
+    """Every hole feature against the B-rep's holes (same axis line within `tol`, radius within
+    0.05 mm) and every B-rep hole against the features."""
+    mh = {k: f for k, f in features.items() if k.startswith("hole_") and f["type"] == "axis"}
+    matched, miss_ref, used = [], [], set()
+    for name, f in sorted(mh.items()):
+        p, d = np.asarray(f["p"]), np.asarray(f["d"])
+        best = None
+        for i, h in enumerate(holes):
+            if abs(abs(h["d"] @ d) - 1) > 1e-4 or abs(h["r"] - f["r"]) > 0.05:
+                continue
+            w = p - h["p"]
+            e = float(np.linalg.norm(w - h["d"] * (w @ h["d"])))
+            if best is None or e < best[0]:
+                best = (e, i)
+        if best is None or best[0] > tol:
+            miss_ref.append((name, None if best is None else round(best[0], 3)))
+        else:
+            matched.append((name, round(best[0], 4)))
+            used.add(best[1])
+    miss_model = [(round(2 * h["r"], 3), np.round(h["p"], 2).tolist(), np.round(h["d"], 3).tolist())
+                  for i, h in enumerate(holes) if i not in used]
+    return {"matched": matched, "missing_in_ref": miss_ref, "missing_in_model": miss_model,
+            "max_err_mm": max([e for _, e in matched], default=0.0)}
 
 
 # ------------------------------------------------------------------ heatmaps (scratchpad only)
