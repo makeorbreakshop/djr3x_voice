@@ -110,12 +110,75 @@ def _sewn_solid(m, path):
     return solid
 
 
-def apply_clearance_cuts(body, cuts, export_frame):
-    """Subtract each clearance-cut mesh (reference-STL frame) from a shell built in its design frame."""
+CUT_CACHE_ENV = "R3X_CUT_CACHE"        # directory override; "0" / "off" disables the cache
+
+
+def _cut_cache_dir():
+    import os
+    from pathlib import Path
+
+    v = os.environ.get(CUT_CACHE_ENV, "")
+    if v.lower() in ("0", "off", "false", "no"):
+        return None
+    return Path(v) if v else Path.home() / ".cache" / "r3x-mech" / "clearance_cuts"
+
+
+def clearance_cut_key(params: dict, cuts, export_frame, sources=()) -> str:
+    """The cache key of a cut shell: the shell's params (the cut list aside), the sources that build
+    it, and each cut mesh's contents (not its path or mtime) plus the frame it is carried through."""
+    import hashlib
+    import json
+    from pathlib import Path
+
     import numpy as np
 
+    h = hashlib.sha256()
+    shell = {k: v for k, v in params.items() if k != "clearance_cuts"}
+    h.update(json.dumps(shell, sort_keys=True, default=repr).encode())
+    here = Path(__file__)
+    for src in (*sources, here, here.with_name("_common.py")):   # plus the repair / sewing path here
+        h.update(Path(src).read_bytes())
+    h.update(np.round(np.asarray(export_frame, float), 9).tobytes())
+    for c in cuts:
+        h.update(hashlib.sha256(Path(c).read_bytes()).digest())
+    return h.hexdigest()[:32]
+
+
+def apply_clearance_cuts(body, cuts, export_frame, params: dict | None = None, sources=()):
+    """Subtract each clearance-cut mesh (reference-STL frame) from a shell built in its design frame.
+
+    The cut is slow (a 158k-triangle repair and a boolean, ~2 min for the top), so when `params` is
+    given the result is cached as BREP, keyed by clearance_cut_key(): it reruns only when the shell's
+    params, its building sources or a cut mesh's contents change."""
+    import numpy as np
+
+    cuts = list(cuts or [])
+    if not cuts:
+        return body
+    cache = _cut_cache_dir() if params is not None else None
+    path = None
+    if cache is not None:
+        from build123d import import_brep
+
+        path = cache / f"{clearance_cut_key(params, cuts, export_frame, sources)}.brep"
+        if path.exists():
+            try:
+                cached = import_brep(str(path))
+                if cached.is_valid:
+                    return cached
+            except Exception:
+                pass                        # a torn / foreign file: rebuild and overwrite it
     to_design = np.linalg.inv(export_frame)
-    for c in cuts or []:
+    for c in cuts:
         for piece in mesh_solid(c, to_design):
             body = body - piece
+    if path is not None:
+        import os
+
+        from build123d import export_brep
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        export_brep(body, str(tmp))
+        os.replace(tmp, path)               # atomic: concurrent builds never read a half-written file
     return body

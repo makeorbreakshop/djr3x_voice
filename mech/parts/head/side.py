@@ -183,7 +183,8 @@ def make(side: str = "left", params: dict | None = None, **kw):
 
         feats = {k2: moved(v, MIRROR_X) for k2, v in feats.items()}
         feats = {(k2.replace("_l", "_r") if k2.endswith("_l") else k2): v for k2, v in feats.items()}
-    body = apply_clearance_cuts(body, P["clearance_cuts"], frame)
+    body = apply_clearance_cuts(body, P["clearance_cuts"], frame, params={**P, "side": side},
+                                sources=(__file__,))
     return body, feats, P, frame
 
 

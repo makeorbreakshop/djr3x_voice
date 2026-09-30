@@ -197,3 +197,31 @@ def test_clearance_cut_repairs_an_open_mesh(tmp_path):
     flat.export(q)
     with pytest.raises(ValueError):
         mesh_solid(q)
+
+
+def test_clearance_cut_cache(tmp_path, monkeypatch):
+    """The cut is cached by (params, sources, cut-mesh contents): a hit skips the mesh repair, and
+    changing a param or the mesh's contents misses."""
+    import numpy as np
+    import trimesh
+    from build123d import Box
+
+    from parts.head import _shell
+
+    monkeypatch.setenv(_shell.CUT_CACHE_ENV, str(tmp_path / "cache"))
+    cut = tmp_path / "cut.stl"
+    trimesh.creation.box((4, 4, 40)).export(cut)
+    calls = []
+    real = _shell.mesh_solid
+    monkeypatch.setattr(_shell, "mesh_solid", lambda *a, **k: calls.append(1) or real(*a, **k))
+    I = np.eye(4)
+    first = _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I, params={"a": 1})
+    again = _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I, params={"a": 1})
+    assert len(calls) == 1 and abs(again.volume - first.volume) < 1e-6 and abs(first.volume - 840.0) < 1e-3
+    _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I, params={"a": 2})
+    assert len(calls) == 2
+    trimesh.creation.box((2, 2, 40)).export(cut)                   # same path, new contents
+    moved = _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I, params={"a": 1})
+    assert len(calls) == 3 and abs(moved.volume - 960.0) < 1e-3
+    _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I)         # no params: never cached
+    assert len(calls) == 4
