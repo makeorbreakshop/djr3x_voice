@@ -21,8 +21,9 @@ async fn settle() {
     tokio::time::sleep(Duration::from_millis(80)).await;
 }
 
-/// A panel in Build claims the pad: the operator layer stands down (no puppet feed, no button
-/// actions) until the claim is returned, then drives again.
+/// A panel in Build claims the pad: the operator layer stands down (a neutral puppet feed, no
+/// button actions) but keeps forwarding the raw pad, which Build's jog reads from the frames
+/// when the browser cannot see the DS3 itself; returned, it drives again.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_claimed_pad_stands_down_until_returned() {
     let bus = Bus::default();
@@ -42,7 +43,13 @@ async fn a_claimed_pad_stands_down_until_returned() {
     assert!(bus.command(Source::Ui, None, claim(Some("panel-a"))).await.is_accepted());
     raw.send_replace(pad(&[b::START]));
     settle().await;
-    assert!(feed.borrow().is_none(), "claimed: no puppet feed (the sticks release)");
+    {
+        let f = feed.borrow().clone().expect("claimed: the raw pad still flows (Build's jog reads it from frames)");
+        assert!(f.raw.buttons[b::START].0, "raw: every button as pressed, for the panel");
+        assert_eq!(f.raw.axes[2], 0.3, "raw sticks too");
+        assert!(f.puppet.buttons.iter().all(|x| !x.0), "puppet: no buttons");
+        assert!(f.puppet.axes.iter().all(|a| *a == 0.0), "puppet: centred sticks (the body does not move)");
+    }
     assert!(!bus.get::<StageState>().frozen, "claimed: buttons do nothing");
 
     assert!(bus.command(Source::Ui, None, claim(None)).await.is_accepted());

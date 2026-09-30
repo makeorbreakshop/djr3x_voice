@@ -136,17 +136,25 @@ impl Operator {
     async fn run(mut self, mut raw: tokio::sync::watch::Receiver<Option<PadState>>, feed: tokio::sync::watch::Sender<Option<PadInput>>) {
         while raw.changed().await.is_ok() {
             let snap = raw.borrow_and_update().clone();
-            // A panel holding the pad (Build jogs the workbench with it) gets it alone: no
-            // puppet feed (the sticks release), no button actions, talk ended.
-            let snap = snap.filter(|_| self.stage().pad_owner.is_none());
-            let Some(pad) = snap else {
-                if self.talking {
-                    self.talking = false;
-                    self.send(Command::Intent(IntentCommand::PttStop), None);
+            let claimed = self.stage().pad_owner.is_some();
+            let pad = match snap {
+                Some(p) if !claimed => p,
+                other => {
+                    // No pad, or a panel holds it (Build jogs the workbench with it): no button
+                    // actions, talk ended. While claimed the raw pad still goes out in the
+                    // frames with a centred puppet (the body stays put): Build's jog reads it
+                    // from there when the browser cannot see the DS3 itself (USB on macOS).
+                    if self.talking {
+                        self.talking = false;
+                        self.send(Command::Intent(IntentCommand::PttStop), None);
+                    }
+                    self.controls.reset();
+                    feed.send_replace(other.filter(|_| claimed).map(|raw| {
+                        let puppet = PadState { axes: vec![0.0; 5], buttons: vec![(false, 0.0); r3x_pad::ds3::std_btn::COUNT] };
+                        PadInput { puppet, raw, controls: Default::default() }
+                    }));
+                    continue;
                 }
-                self.controls.reset();
-                feed.send_replace(None);
-                continue;
             };
             let menu = self.menu();
             let now = self.epoch.elapsed().as_secs_f64();

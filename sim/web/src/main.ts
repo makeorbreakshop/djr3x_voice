@@ -252,6 +252,9 @@ function onPadFrame(p: PadFrame | null | undefined) {
     toggleController(true);
   }
   padOverlay.update(p);
+  // Build's pad jog reads the runtime's pad from here when the browser cannot see the DS3
+  // itself (USB on macOS); while Build holds the pad the runtime keeps sending it raw.
+  mechRig.feedPad(p);
 }
 /** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
 const SUBSYSTEMS: [string, string][] = [

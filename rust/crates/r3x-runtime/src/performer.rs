@@ -320,6 +320,7 @@ impl Host {
     /// puppeteer's share.
     fn patch_pad(&self, frames: &mut r3x_performer_core::Frames) {
         if let (Some(pf), Some(i)) = (frames.pad.as_mut(), &self.pad_input) {
+            pf.axes = i.raw.axes.clone();
             pf.buttons = i.raw.buttons.iter().map(|(down, v)| if *down { v.max(1.0 / 255.0) } else { 0.0 }).collect();
             pf.controls = Some(i.controls.clone());
         }
