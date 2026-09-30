@@ -1,0 +1,2143 @@
+{
+  "id": "grnwave_full_led",
+  "label": "grnwave DJ Rex Full LED Set",
+  "vendor": "grnwave workshop",
+  "url": "https://grnwave.com/product/dj-rex-full-led-set/",
+  "description": "3 body LED boards + 25 Bivar VLP-600-R light pipes, 1 mouth board, 1 eye board with 8 mm NeoPixel-style LEDs. 5 V only; 3-pin 2.54 mm Dupont. Driven here by an Arduino Nano running our firmware/grnwave_nano, which speaks the face/chest named commands, so the runtime drives it unchanged.",
+  "support": "driven",
+  "emulator": "grnwave",
+  "boards": [
+    {
+      "id": "nano",
+      "model": "Arduino Nano (ATmega328P)",
+      "role": "LED controller: body + eyes on D4, mouth on D5",
+      "url": "https://store.arduino.cc/products/arduino-nano",
+      "dims_mm": [
+        45.0,
+        18.0,
+        8.0
+      ],
+      "mount": {
+        "bracket": "middle ring, behind the logic panels",
+        "link": "torso_middle",
+        "t": [
+          -0.1,
+          0.41,
+          0.02
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Anywhere within a short data run of body board A; placed behind panel 2."
+      },
+      "connectors": [
+        {
+          "id": "usb",
+          "kind": "usb_mini_b",
+          "pins": [
+            "VBUS",
+            "D-",
+            "D+",
+            "GND"
+          ],
+          "note": "serial 115200 to the host"
+        },
+        {
+          "id": "d4",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "D4",
+            "5V",
+            "GND"
+          ],
+          "note": "body A DIN (grnwave sample: pin 4)"
+        },
+        {
+          "id": "d5",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "D5",
+            "5V",
+            "GND"
+          ],
+          "note": "mouth board DIN (our choice)"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 20,
+        "typical_ma": 25,
+        "max_ma": 40
+      },
+      "firmware": "firmware/grnwave_nano",
+      "driver": "driver.grnwave",
+      "support": "driven"
+    },
+    {
+      "id": "body_a",
+      "model": "grnwave DJ Rex body LED board",
+      "role": "logic panel 1 (chain 0-31): 8 small LEDs + 6 x 4 5050",
+      "url": "https://grnwave.com/product/dj-rex-body-led-set/",
+      "dims_mm": [
+        60.0,
+        40.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "MS_P_1_Full logic panel 1, from behind (light pipes through the LED holes)",
+        "link": "torso_middle",
+        "t": [
+          -0.1527,
+          0.45285,
+          0.0035
+        ],
+        "q": [
+          0.0,
+          -0.70029,
+          0.0,
+          0.71386
+        ],
+        "inferred": true,
+        "inferred_note": "Panel order A/B/C = our chest panels 1-3 (droid's right side, rear to front) and the board pose behind each panel are inferred; the manual only says 'mount the three boards in the body'."
+      },
+      "connectors": [
+        {
+          "id": "in",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        },
+        {
+          "id": "out",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 10,
+        "typical_ma": 180,
+        "max_ma": 1920.0
+      },
+      "firmware": "firmware/grnwave_nano",
+      "driver": "driver.grnwave",
+      "support": "driven",
+      "inferred": true,
+      "inferred_note": "Board size is inferred (the shop lists 6 x 12 x 2 cm for the set of three, i.e. the parcel)."
+    },
+    {
+      "id": "body_b",
+      "model": "grnwave DJ Rex body LED board",
+      "role": "logic panel 2 (chain 32-63): 8 small LEDs + 6 x 4 5050",
+      "url": "https://grnwave.com/product/dj-rex-body-led-set/",
+      "dims_mm": [
+        60.0,
+        40.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "MS_P_1_Full logic panel 2, from behind (light pipes through the LED holes)",
+        "link": "torso_middle",
+        "t": [
+          -0.1291,
+          0.45287,
+          0.08157
+        ],
+        "q": [
+          0.0,
+          -0.48363,
+          0.0,
+          0.87527
+        ],
+        "inferred": true,
+        "inferred_note": "Panel order A/B/C = our chest panels 1-3 (droid's right side, rear to front) and the board pose behind each panel are inferred; the manual only says 'mount the three boards in the body'."
+      },
+      "connectors": [
+        {
+          "id": "in",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        },
+        {
+          "id": "out",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 10,
+        "typical_ma": 180,
+        "max_ma": 1920.0
+      },
+      "firmware": "firmware/grnwave_nano",
+      "driver": "driver.grnwave",
+      "support": "driven",
+      "inferred": true,
+      "inferred_note": "Board size is inferred (the shop lists 6 x 12 x 2 cm for the set of three, i.e. the parcel)."
+    },
+    {
+      "id": "body_c",
+      "model": "grnwave DJ Rex body LED board",
+      "role": "logic panel 3 (chain 64-95): 8 small LEDs + 6 x 4 5050",
+      "url": "https://grnwave.com/product/dj-rex-body-led-set/",
+      "dims_mm": [
+        60.0,
+        40.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "MS_P_1_Full logic panel 3, from behind (light pipes through the LED holes)",
+        "link": "torso_middle",
+        "t": [
+          -0.06865,
+          0.45286,
+          0.13645
+        ],
+        "q": [
+          0.0,
+          -0.23284,
+          0.0,
+          0.97251
+        ],
+        "inferred": true,
+        "inferred_note": "Panel order A/B/C = our chest panels 1-3 (droid's right side, rear to front) and the board pose behind each panel are inferred; the manual only says 'mount the three boards in the body'."
+      },
+      "connectors": [
+        {
+          "id": "in",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        },
+        {
+          "id": "out",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 10,
+        "typical_ma": 180,
+        "max_ma": 1920.0
+      },
+      "firmware": "firmware/grnwave_nano",
+      "driver": "driver.grnwave",
+      "support": "driven",
+      "inferred": true,
+      "inferred_note": "Board size is inferred (the shop lists 6 x 12 x 2 cm for the set of three, i.e. the parcel)."
+    },
+    {
+      "id": "eyes",
+      "model": "grnwave DJ Rex Eyes LED board (2 x 8 mm NeoPixel)",
+      "role": "eyes: one 8 mm LED behind each eye bulb, daisy-chained after body C (96-97)",
+      "url": "https://grnwave.com/product/dj-rex-head-led-board/",
+      "dims_mm": [
+        110.0,
+        20.0,
+        10.0
+      ],
+      "mount": {
+        "bracket": "head, behind the eye distortion / diffusion bulbs",
+        "link": "head_tilt",
+        "t": [
+          0.00074,
+          0.79899,
+          0.09743
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Board spans the eyes; exact outline not published."
+      },
+      "connectors": [
+        {
+          "id": "in",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ],
+          "note": "no header fitted"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 2,
+        "typical_ma": 40,
+        "max_ma": 120.0
+      },
+      "support": "driven",
+      "inferred": true,
+      "inferred_note": "Two LEDs, droid's left first, from the sample sketch (RandomEyes on 96-97); size inferred."
+    },
+    {
+      "id": "mouth",
+      "model": "grnwave DJ Rex Mouth LED board",
+      "role": "mouth, its own data line (D5)",
+      "url": "https://grnwave.com/product/dj-rex-mouth-led-board/",
+      "dims_mm": [
+        60.0,
+        70.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "mouth grille, from behind",
+        "link": "head_tilt",
+        "t": [
+          -8e-05,
+          0.73164,
+          0.16148
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Board outline from the shop listing (6 x 7 cm)."
+      },
+      "connectors": [
+        {
+          "id": "in",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "DATA",
+            "5V",
+            "GND"
+          ],
+          "note": "no header fitted"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 4,
+        "typical_ma": 90,
+        "max_ma": 480.0
+      },
+      "support": "driven",
+      "inferred": true,
+      "inferred_note": "LED count (8, a V like ours) and order are inferred: the grnwave sample sketch does not drive the mouth."
+    }
+  ],
+  "lights": [
+    {
+      "name": "body",
+      "pixels": 96,
+      "layout": [
+        {
+          "kind": "small",
+          "pos": [
+            -0.15957,
+            0.43355,
+            0.00306
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0192
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16098,
+            0.43871,
+            0.00325
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16226,
+            0.44355,
+            0.00327
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16397,
+            0.45028,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0229
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16544,
+            0.45552,
+            0.004
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16718,
+            0.46218,
+            0.00404
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16848,
+            0.46702,
+            0.00408
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.16974,
+            0.47199,
+            0.00439
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0259
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15226,
+            0.43755,
+            0.00307
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15226,
+            0.44155,
+            0.00307
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15226,
+            0.44555,
+            0.00307
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15226,
+            0.44955,
+            0.00307
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15254,
+            0.43534,
+            0.0131
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1089
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15175,
+            0.43534,
+            0.02025
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1089
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15254,
+            0.44134,
+            0.0131
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1089
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15175,
+            0.44134,
+            0.02025
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1089
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15544,
+            0.44952,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15544,
+            0.45352,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15544,
+            0.45752,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15544,
+            0.46152,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15848,
+            0.46102,
+            0.00384
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15848,
+            0.46502,
+            0.00384
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15848,
+            0.46902,
+            0.00384
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.15848,
+            0.47302,
+            0.00384
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.16089,
+            0.46523,
+            0.01427
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.16014,
+            0.46523,
+            0.02103
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.16089,
+            0.47123,
+            0.01427
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.16014,
+            0.47123,
+            0.02103
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15928,
+            0.46517,
+            0.02847
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15794,
+            0.46517,
+            0.03514
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15928,
+            0.47117,
+            0.02847
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.15794,
+            0.47117,
+            0.03514
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.13509,
+            0.43355,
+            0.08493
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.1362,
+            0.43871,
+            0.08582
+          ],
+          "normal": [
+            -0.8461,
+            0.0,
+            0.5331
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.13739,
+            0.44363,
+            0.08638
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.13871,
+            0.45008,
+            0.08721
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.13978,
+            0.45559,
+            0.08853
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.14119,
+            0.46226,
+            0.08956
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.14229,
+            0.4671,
+            0.09026
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.14346,
+            0.47206,
+            0.09094
+          ],
+          "normal": [
+            -0.8446,
+            0.0,
+            0.5354
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.12446,
+            0.43539,
+            0.08991
+          ],
+          "normal": [
+            -0.7966,
+            0.0,
+            0.6044
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.12011,
+            0.43539,
+            0.09565
+          ],
+          "normal": [
+            -0.7966,
+            0.0,
+            0.6044
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.12446,
+            0.44139,
+            0.08991
+          ],
+          "normal": [
+            -0.7966,
+            0.0,
+            0.6044
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.12011,
+            0.44139,
+            0.09565
+          ],
+          "normal": [
+            -0.7966,
+            0.0,
+            0.6044
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11576,
+            0.43536,
+            0.10126
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.1109,
+            0.43536,
+            0.10657
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11576,
+            0.44136,
+            0.10126
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.1109,
+            0.44136,
+            0.10657
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11858,
+            0.4499,
+            0.10408
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11398,
+            0.4499,
+            0.10909
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11858,
+            0.4559,
+            0.10408
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.11398,
+            0.4559,
+            0.10909
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.12892,
+            0.43763,
+            0.08106
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.12892,
+            0.44163,
+            0.08106
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.12892,
+            0.44563,
+            0.08106
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.12892,
+            0.44963,
+            0.08106
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13133,
+            0.44959,
+            0.08318
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13133,
+            0.45359,
+            0.08318
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13133,
+            0.45759,
+            0.08318
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13133,
+            0.46159,
+            0.08318
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13384,
+            0.4611,
+            0.0849
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13384,
+            0.4651,
+            0.0849
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13384,
+            0.4691,
+            0.0849
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.13384,
+            0.4731,
+            0.0849
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07227,
+            0.43355,
+            0.14228
+          ],
+          "normal": [
+            -0.4529,
+            0.0,
+            0.8916
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07279,
+            0.43865,
+            0.1436
+          ],
+          "normal": [
+            -0.4521,
+            0.0,
+            0.8919
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07314,
+            0.44363,
+            0.14488
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07407,
+            0.45016,
+            0.14636
+          ],
+          "normal": [
+            -0.4515,
+            0.0,
+            0.8922
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07407,
+            0.45559,
+            0.14796
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07499,
+            0.46218,
+            0.14949
+          ],
+          "normal": [
+            -0.4484,
+            0.0,
+            0.8938
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07533,
+            0.4671,
+            0.15073
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "small",
+          "pos": [
+            -0.07598,
+            0.47206,
+            0.15192
+          ],
+          "normal": [
+            -0.4473,
+            0.0,
+            0.8944
+          ],
+          "w": 0.003,
+          "h": 0.003
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06863,
+            0.43763,
+            0.13595
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06863,
+            0.44163,
+            0.13595
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06863,
+            0.44563,
+            0.13595
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06863,
+            0.44963,
+            0.13595
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06959,
+            0.44959,
+            0.13902
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06959,
+            0.45359,
+            0.13902
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06959,
+            0.45759,
+            0.13902
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.06959,
+            0.46159,
+            0.13902
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.07086,
+            0.4611,
+            0.14178
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.07086,
+            0.4651,
+            0.14178
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.07086,
+            0.4691,
+            0.14178
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block_hidden",
+          "pos": [
+            -0.07086,
+            0.4731,
+            0.14178
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.0617,
+            0.45062,
+            0.14479
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.05539,
+            0.45062,
+            0.14732
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.0617,
+            0.45662,
+            0.14479
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.05539,
+            0.45662,
+            0.14732
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.06269,
+            0.46523,
+            0.14849
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.05675,
+            0.46523,
+            0.15086
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.06269,
+            0.47123,
+            0.14849
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.05675,
+            0.47123,
+            0.15086
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.04925,
+            0.46523,
+            0.15423
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.04311,
+            0.46523,
+            0.15606
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.04925,
+            0.47123,
+            0.15423
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "block",
+          "pos": [
+            -0.04311,
+            0.47123,
+            0.15606
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "w": 0.005,
+          "h": 0.005
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "grnwave",
+        "port_hint": "GRNWAVE_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "body_a",
+      "link": "torso_middle",
+      "data_line": "nano.D4",
+      "chain_start": 0,
+      "led": "WS2812B 5050 (small LEDs under VLP-600-R pipes)",
+      "ma_per_led": 60.0,
+      "serves": [
+        "chest",
+        "speech_amplitude",
+        "tempo",
+        "chest_status"
+      ],
+      "inferred": true,
+      "inferred_note": "Per board: 0-7 small LEDs bottom->top in the panel's LED holes, 8-31 six groups of 4. The 3 groups the sample animates sit behind the panel's 3 windows (in our window order); the other 3 are hidden. Positions follow our chest panels; confirm on the boards."
+    },
+    {
+      "name": "eyes",
+      "pixels": 2,
+      "layout": [
+        {
+          "kind": "eye",
+          "pos": [
+            0.04383,
+            0.79899,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.008,
+          "h": 0.008
+        },
+        {
+          "kind": "eye",
+          "pos": [
+            -0.04235,
+            0.79902,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.008,
+          "h": 0.008
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "grnwave",
+        "port_hint": "GRNWAVE_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "eyes",
+      "link": "head_tilt",
+      "data_line": "nano.D4",
+      "chain_start": 96,
+      "led": "8 mm PL9823 / WS2812D-F8",
+      "ma_per_led": 60.0,
+      "serves": [
+        "eyes"
+      ],
+      "inferred": true,
+      "inferred_note": "96 = the droid's left eye is assumed."
+    },
+    {
+      "name": "mouth",
+      "pixels": 8,
+      "layout": [
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.02191,
+            0.75755,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.01552,
+            0.74136,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.00913,
+            0.72452,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.00274,
+            0.70768,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.00258,
+            0.70768,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.00897,
+            0.72452,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.01536,
+            0.74136,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.02175,
+            0.75755,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "grnwave",
+        "port_hint": "GRNWAVE_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "mouth",
+      "link": "head_tilt",
+      "data_line": "nano.D5",
+      "chain_start": 0,
+      "led": "WS2812B",
+      "ma_per_led": 60.0,
+      "serves": [
+        "mouth",
+        "speech_amplitude"
+      ],
+      "inferred": true,
+      "inferred_note": "8 LEDs in a V (ours) until the board is counted."
+    }
+  ],
+  "actuators": [],
+  "power": [
+    {
+      "name": "5V LEDs",
+      "volts": 5.0,
+      "max_ma": 6400.0,
+      "typical_ma": 800,
+      "loads": [
+        "nano",
+        "body_a",
+        "body_b",
+        "body_c",
+        "eyes",
+        "mouth"
+      ],
+      "psu": "5 V 4 A regulated, clean (grnwave: 5 V only, never 6 V); inject at body A and at the eyes",
+      "psu_amps": 4.0,
+      "note": "106 px x 60 mA = 6.4 A at full white; the firmware caps FastLED at 3 A (POWER_LIMIT_MA) and runs brightness 128."
+    }
+  ],
+  "wiring": [
+    {
+      "from": "nano.d4",
+      "to": "body_a.in",
+      "signal": "DATA (330 R)",
+      "connector": "dupont_3p_2.54",
+      "awg": 24
+    },
+    {
+      "from": "body_a.out",
+      "to": "body_b.in",
+      "signal": "DATA + 5V + GND",
+      "connector": "dupont_3p_2.54",
+      "awg": 22
+    },
+    {
+      "from": "body_b.out",
+      "to": "body_c.in",
+      "signal": "DATA + 5V + GND",
+      "connector": "dupont_3p_2.54",
+      "awg": 22
+    },
+    {
+      "from": "body_c.out",
+      "to": "eyes.in",
+      "signal": "DATA + 5V + GND (through the neck)",
+      "connector": "dupont_3p_2.54",
+      "awg": 22,
+      "note": "long run: keep 5V/GND at 22 AWG"
+    },
+    {
+      "from": "nano.d5",
+      "to": "mouth.in",
+      "signal": "DATA (330 R) + 5V + GND",
+      "connector": "dupont_3p_2.54",
+      "awg": 22
+    },
+    {
+      "from": "5 V 4 A supply",
+      "to": "body_a.in",
+      "signal": "5V/GND injection",
+      "connector": "dupont_3p_2.54 / screw terminal",
+      "awg": 18,
+      "note": "1000 uF across 5V/GND at the first board"
+    },
+    {
+      "from": "nano.usb",
+      "to": "host",
+      "signal": "serial (GRNWAVE_SERIAL_PORT)",
+      "connector": "usb_mini_b",
+      "awg": 28
+    }
+  ],
+  "bom": [
+    {
+      "item": "grnwave DJ Rex Full LED Set",
+      "qty": 1,
+      "category": "board",
+      "url": "https://grnwave.com/product/dj-rex-full-led-set/",
+      "unit_usd": 80.0,
+      "note": "includes the 3 body boards, 25 light pipes, mouth board, eye board"
+    },
+    {
+      "item": "Bivar VLP-600-R light pipe",
+      "qty": 25,
+      "category": "optics",
+      "url": "https://www.digikey.com/en/products/result?keywords=VLP-600-R",
+      "note": "in the set; 24 used (3 x 8), 1 spare"
+    },
+    {
+      "item": "Arduino Nano (ATmega328P)",
+      "qty": 1,
+      "category": "board",
+      "url": "https://store.arduino.cc/products/arduino-nano",
+      "unit_usd": 24.9
+    },
+    {
+      "item": "3-pin 2.54 mm Dupont jumper (servo lead)",
+      "qty": 6,
+      "category": "cable"
+    },
+    {
+      "item": "5 V 4 A supply",
+      "qty": 1,
+      "category": "power"
+    },
+    {
+      "item": "330 R resistor",
+      "qty": 2,
+      "category": "hardware"
+    },
+    {
+      "item": "1000 uF 10 V capacitor",
+      "qty": 1,
+      "category": "hardware"
+    }
+  ],
+  "notes": [
+    "Sample code: github.com/grnwaveworkshop/DJ-RexBody (no licence; kept for reference under mech/vendor/grnwave/, not copied). Our firmware/grnwave_nano is written from its facts: FastLED on D4, 3 x 32 body then 2 eyes.",
+    "RS-485 Nano breakouts (grnwave) suit bigger systems; this package uses USB serial like our other boards.",
+    "The servos stay on the R3X servo controller: pair this package with r3x_native's servo_ctl, or add it here."
+  ]
+}

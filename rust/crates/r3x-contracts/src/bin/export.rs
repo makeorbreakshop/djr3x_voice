@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use r3x_contracts::{envelope::Envelope, profile::RobotProfile, ClientMessage};
+use r3x_contracts::{envelope::Envelope, profile::RobotProfile, ClientMessage, ElectronicsPackage};
 use ts_rs::{Config, TS};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,6 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     write_schema(&schema_out, "envelope", schemars::schema_for!(Envelope))?;
     write_schema(&schema_out, "robot_profile", schemars::schema_for!(RobotProfile))?;
     write_schema(&schema_out, "client_message", schemars::schema_for!(ClientMessage))?;
+    // profiles/electronics/<id>.json
+    write_schema(&schema_out, "electronics_package", schemars::schema_for!(ElectronicsPackage))?;
 
     if check {
         for (committed, fresh) in [(&ts_dir, &ts_out), (&schema_dir, &schema_out)] {

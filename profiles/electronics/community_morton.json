@@ -1,0 +1,288 @@
+{
+  "id": "community_morton",
+  "label": "Community: Sam Morton's stack (Kyber + Maestro 12 + HCR)",
+  "vendor": "Sam Morton (community build)",
+  "description": "Sam Morton's documented electronics: a Kyber controller, a Pololu Mini Maestro 12 and a Human Cyborg Relations (HCR) sound board on his bespoke Electronics Mount Bracket, T-nutted to the 2020 lower cage (see his 'Readme Acc.txt'). We drive the Maestro; the Kyber and HCR are listed, not driven. No LED boards are documented: the preview keeps the native face.",
+  "support": "partial",
+  "emulator": "none",
+  "boards": [
+    {
+      "id": "kyber",
+      "model": "Kyber droid controller",
+      "role": "Morton's main controller (sound + servo scripting)",
+      "dims_mm": [
+        80.0,
+        60.0,
+        15.0
+      ],
+      "mount": {
+        "bracket": "Morton Frame Accessory Mounts / Electronics Mount Bracket (2).stl (172 x 85 x 172 mm, T-nuts on the 2020 frame)",
+        "link": "torso_lower",
+        "t": [
+          0.03,
+          0.12,
+          0.0
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "The bracket's place on Morton's 2020 lower cage is not documented; boards laid out on the bracket face."
+      },
+      "connectors": [
+        {
+          "id": "maestro",
+          "kind": "uart_3p",
+          "pins": [
+            "TX",
+            "RX",
+            "GND"
+          ],
+          "note": "to the Maestro"
+        },
+        {
+          "id": "hcr",
+          "kind": "uart_3p",
+          "pins": [
+            "TX",
+            "RX",
+            "GND"
+          ],
+          "note": "to the HCR board"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 80,
+        "typical_ma": 120,
+        "max_ma": 250
+      },
+      "support": "listed",
+      "inferred": true,
+      "inferred_note": "Dimensions and current are placeholders; no datasheet in the readme."
+    },
+    {
+      "id": "maestro",
+      "model": "Pololu Mini Maestro 12-Channel USB Servo Controller (#1352)",
+      "role": "servo channels",
+      "url": "https://www.pololu.com/product/1352",
+      "dims_mm": [
+        27.9,
+        35.6,
+        5.0
+      ],
+      "mount": {
+        "bracket": "Morton Frame Accessory Mounts / Electronics Mount Bracket (2).stl (172 x 85 x 172 mm, T-nuts on the 2020 frame)",
+        "link": "torso_lower",
+        "t": [
+          -0.03,
+          0.12,
+          0.0
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "The bracket's place on Morton's 2020 lower cage is not documented; boards laid out on the bracket face."
+      },
+      "connectors": [
+        {
+          "id": "usb",
+          "kind": "usb_mini_b",
+          "pins": [
+            "VBUS",
+            "D-",
+            "D+",
+            "GND"
+          ]
+        },
+        {
+          "id": "servo",
+          "kind": "servo_3p_2.54 x12",
+          "pins": [
+            "S0..S11",
+            "V+",
+            "GND"
+          ]
+        },
+        {
+          "id": "ttl",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "TX",
+            "RX",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 30,
+        "typical_ma": 40,
+        "max_ma": 50
+      },
+      "driver": "driver.maestro",
+      "support": "driven"
+    },
+    {
+      "id": "hcr",
+      "model": "Human Cyborg Relations sound board (HCR Vocalizer)",
+      "role": "droid vocal sounds",
+      "url": "https://humancyborgrelations.com/",
+      "dims_mm": [
+        70.0,
+        50.0,
+        15.0
+      ],
+      "mount": {
+        "bracket": "Morton Frame Accessory Mounts / Electronics Mount Bracket (2).stl (172 x 85 x 172 mm, T-nuts on the 2020 frame)",
+        "link": "torso_lower",
+        "t": [
+          0.0,
+          0.06,
+          0.0
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "The bracket's place on Morton's 2020 lower cage is not documented; boards laid out on the bracket face."
+      },
+      "connectors": [
+        {
+          "id": "ttl",
+          "kind": "uart_3p",
+          "pins": [
+            "TX",
+            "RX",
+            "GND"
+          ]
+        },
+        {
+          "id": "audio",
+          "kind": "screw_2p",
+          "pins": [
+            "SPK+",
+            "SPK-"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 60,
+        "typical_ma": 300,
+        "max_ma": 1500
+      },
+      "support": "listed",
+      "inferred": true,
+      "inferred_note": "Dimensions and current are placeholders."
+    }
+  ],
+  "lights": [],
+  "actuators": [
+    {
+      "actuators": [
+        "*"
+      ],
+      "board": "maestro",
+      "driver": "maestro",
+      "support": "driven",
+      "note": "12 channels: set each actuator's driver to `maestro` and its channel in the profile; r3x-drivers' MaestroDriver streams frames (host follower)."
+    }
+  ],
+  "power": [
+    {
+      "name": "5V logic + audio",
+      "volts": 5.0,
+      "max_ma": 1800,
+      "typical_ma": 460,
+      "loads": [
+        "kyber",
+        "maestro",
+        "hcr"
+      ],
+      "psu": "5 V 3 A UBEC",
+      "psu_amps": 3.0,
+      "note": "Placeholder figures; the readme lists no power budget."
+    },
+    {
+      "name": "servo rail",
+      "volts": 6.0,
+      "max_ma": 12000,
+      "typical_ma": 1500,
+      "loads": [
+        "maestro"
+      ],
+      "psu": "6 V 10-15 A to the Maestro servo power",
+      "psu_amps": 15.0,
+      "note": "Placeholder: 12 channels of large servos."
+    }
+  ],
+  "wiring": [
+    {
+      "from": "kyber.maestro",
+      "to": "maestro.ttl",
+      "signal": "TTL serial",
+      "connector": "dupont_3p_2.54",
+      "awg": 26
+    },
+    {
+      "from": "kyber.hcr",
+      "to": "hcr.ttl",
+      "signal": "TTL serial",
+      "connector": "dupont_3p_2.54",
+      "awg": 26
+    },
+    {
+      "from": "maestro.usb",
+      "to": "host",
+      "signal": "USB (our MaestroDriver; unplug from the Kyber to drive from R3X)",
+      "connector": "usb_mini_b",
+      "awg": 28
+    }
+  ],
+  "bom": [
+    {
+      "item": "Kyber droid controller",
+      "qty": 1,
+      "category": "board"
+    },
+    {
+      "item": "Pololu Mini Maestro 12-Channel",
+      "qty": 1,
+      "category": "board",
+      "url": "https://www.pololu.com/product/1352",
+      "unit_usd": 34.95
+    },
+    {
+      "item": "HCR Vocalizer",
+      "qty": 1,
+      "category": "board",
+      "url": "https://humancyborgrelations.com/"
+    },
+    {
+      "item": "Morton Electronics Mount Bracket (printed)",
+      "qty": 1,
+      "category": "hardware",
+      "note": "mech/vendor/dropbox/community/Sam Morton - Files/Morton Frame Accessory Mounts/"
+    },
+    {
+      "item": "M5 T-nut + M5 x 10 BHCS (2020)",
+      "qty": 4,
+      "category": "hardware"
+    }
+  ],
+  "notes": [
+    "Readme: the Electronics bracket is bespoke (Kyber, Maestro12, HCR); the Plain bracket is the one to drill for your own boards.",
+    "Morton leaves room above and below the brackets for wiring."
+  ]
+}

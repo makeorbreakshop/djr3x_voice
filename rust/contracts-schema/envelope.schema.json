@@ -84,6 +84,38 @@
       ],
       "type": "object"
     },
+    "ActuatorDrive": {
+      "description": "Which of the profile's actuators (or `*` = all servo channels) a board drives.",
+      "properties": {
+        "actuators": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "board": {
+          "type": "string"
+        },
+        "driver": {
+          "description": "Profile `DriverKind` (`r3x_servo`, `maestro`, ...).",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "support": {
+          "$ref": "#/$defs/Support"
+        }
+      },
+      "required": [
+        "actuators",
+        "board",
+        "driver",
+        "support"
+      ],
+      "type": "object"
+    },
     "AudioConfig": {
       "properties": {
         "ducking": {
@@ -157,6 +189,182 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "Board": {
+      "properties": {
+        "connectors": {
+          "items": {
+            "$ref": "#/$defs/Connector"
+          },
+          "type": "array"
+        },
+        "current": {
+          "$ref": "#/$defs/Current",
+          "description": "The board's own draw plus what it powers directly (LEDs on it)."
+        },
+        "dims_mm": {
+          "description": "Length x width x height, mm.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "driver": {
+          "description": "`r3x-drivers` service name (`driver.face`, `driver.grnwave`, ...).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "firmware": {
+          "description": "Repo path of the firmware we flash, if we own it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "inferred": {
+          "default": false,
+          "type": "boolean"
+        },
+        "inferred_note": {
+          "default": "",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "mount": {
+          "$ref": "#/$defs/BoardMount"
+        },
+        "role": {
+          "description": "What it does in this droid, one line.",
+          "type": "string"
+        },
+        "support": {
+          "$ref": "#/$defs/Support"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "volts": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "role",
+        "dims_mm",
+        "mount",
+        "connectors",
+        "volts",
+        "current",
+        "support"
+      ],
+      "type": "object"
+    },
+    "BoardMount": {
+      "description": "A board's place in the body: which bracket holds it and its pose in the body frame.",
+      "properties": {
+        "bracket": {
+          "description": "The frame bracket / printed part it is fastened to.",
+          "type": "string"
+        },
+        "inferred": {
+          "default": false,
+          "type": "boolean"
+        },
+        "inferred_note": {
+          "default": "",
+          "type": "string"
+        },
+        "link": {
+          "description": "Rig link it rides on (`torso_middle`, `head_tilt`, ...; `torso_lower` = the base).",
+          "type": "string"
+        },
+        "q": {
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "description": "Orientation, unit quaternion `[x, y, z, w]`; board +Z = its component side.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "t": {
+          "description": "Board centre, metres, body frame at zero pose.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "required": [
+        "bracket",
+        "link",
+        "t"
+      ],
+      "type": "object"
+    },
+    "BomItem": {
+      "properties": {
+        "category": {
+          "description": "`board`, `led`, `cable`, `power`, `hardware`, `optics`.",
+          "type": "string"
+        },
+        "item": {
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "qty": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unit_usd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "item",
+        "qty",
+        "category"
       ],
       "type": "object"
     },
@@ -332,6 +540,34 @@
           "type": "string"
         }
       ]
+    },
+    "Connector": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "e.g. `dupont_3p_2.54`, `usb_mini_b`, `screw_2p_5.08`, `jst_sm_3p`.",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "pins": {
+          "description": "Pin names in connector order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "pins"
+      ],
+      "type": "object"
     },
     "ConversationEvent": {
       "description": "Turn lifecycle. The turn id rides on the envelope's `conversation_id`.",
@@ -721,6 +957,28 @@
       ],
       "type": "object"
     },
+    "Current": {
+      "properties": {
+        "idle_ma": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_ma": {
+          "format": "double",
+          "type": "number"
+        },
+        "typical_ma": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "idle_ma",
+        "typical_ma",
+        "max_ma"
+      ],
+      "type": "object"
+    },
     "DjEvent": {
       "oneOf": [
         {
@@ -847,6 +1105,92 @@
       "required": [
         "level",
         "ramp_ms"
+      ],
+      "type": "object"
+    },
+    "ElectronicsPackage": {
+      "properties": {
+        "actuators": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActuatorDrive"
+          },
+          "type": "array"
+        },
+        "boards": {
+          "items": {
+            "$ref": "#/$defs/Board"
+          },
+          "type": "array"
+        },
+        "bom": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BomItem"
+          },
+          "type": "array"
+        },
+        "description": {
+          "type": "string"
+        },
+        "emulator": {
+          "$ref": "#/$defs/LedEmulator",
+          "default": "native"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "lights": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PackageLight"
+          },
+          "type": "array"
+        },
+        "notes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "power": {
+          "items": {
+            "$ref": "#/$defs/Rail"
+          },
+          "type": "array"
+        },
+        "support": {
+          "$ref": "#/$defs/Support"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vendor": {
+          "default": "",
+          "type": "string"
+        },
+        "wiring": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Wire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "description",
+        "support",
+        "boards",
+        "power"
       ],
       "type": "object"
     },
@@ -1228,6 +1572,26 @@
         "prismatic"
       ],
       "type": "string"
+    },
+    "LedEmulator": {
+      "description": "Which LED board emulator the performer runs for this package's lights.",
+      "oneOf": [
+        {
+          "const": "native",
+          "description": "`rex_face_v3_clean` + `rex_chest_v1` (eyes 14, mouth 8, chest 33).",
+          "type": "string"
+        },
+        {
+          "const": "grnwave",
+          "description": "`firmware/grnwave_nano`: 3 body boards (96) + eyes (2) + mouth (8).",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "description": "No LED board we drive: the performer keeps the native emulators for the preview.",
+          "type": "string"
+        }
+      ]
     },
     "LedProtocol": {
       "oneOf": [
@@ -1940,6 +2304,87 @@
         }
       ]
     },
+    "PackageLight": {
+      "description": "One light group of the package: becomes a profile [`LightGroup`].",
+      "properties": {
+        "board": {
+          "description": "The board the LEDs are on.",
+          "type": "string"
+        },
+        "chain_start": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "data_line": {
+          "description": "The data line that feeds it (`nano.D4`) and this group's first index on that line.",
+          "type": "string"
+        },
+        "driver": {
+          "$ref": "#/$defs/LightDriver"
+        },
+        "inferred": {
+          "default": false,
+          "type": "boolean"
+        },
+        "inferred_note": {
+          "default": "",
+          "type": "string"
+        },
+        "layout": {
+          "description": "Per pixel, in chain order. Length = `pixels`.",
+          "items": {
+            "$ref": "#/$defs/LightPixel"
+          },
+          "type": "array"
+        },
+        "led": {
+          "description": "LED part (`WS2812B 5050`, `8 mm PL9823`).",
+          "type": "string"
+        },
+        "link": {
+          "description": "Rig link the group rides on (positions are given at the zero pose).",
+          "type": "string"
+        },
+        "ma_per_led": {
+          "description": "One LED at full white (all three channels at 255), mA.",
+          "format": "double",
+          "type": "number"
+        },
+        "name": {
+          "description": "Profile light group name (`eyes`, `mouth`, `chest`, `body`).",
+          "type": "string"
+        },
+        "pixels": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "serves": {
+          "default": [],
+          "description": "The semantic outputs it shows (`eyes`, `mouth`, `chest_status`, `tempo`, ...).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "pixels",
+        "layout",
+        "driver",
+        "board",
+        "link",
+        "data_line",
+        "chain_start",
+        "led",
+        "ma_per_led"
+      ],
+      "type": "object"
+    },
     "PerfCommand": {
       "description": "Direct body control. Goes to the performer.",
       "oneOf": [
@@ -2551,6 +2996,56 @@
       ],
       "type": "object"
     },
+    "Rail": {
+      "properties": {
+        "loads": {
+          "description": "Board ids on the rail.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_ma": {
+          "description": "Everything on the rail at once at its worst (LEDs full white, servos stalled), mA.",
+          "format": "double",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "psu": {
+          "description": "The supply this package calls for.",
+          "type": "string"
+        },
+        "psu_amps": {
+          "format": "double",
+          "type": "number"
+        },
+        "typical_ma": {
+          "description": "A show at the firmware's brightness, mA.",
+          "format": "double",
+          "type": "number"
+        },
+        "volts": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "volts",
+        "max_ma",
+        "typical_ma",
+        "loads",
+        "psu",
+        "psu_amps"
+      ],
+      "type": "object"
+    },
     "Range": {
       "properties": {
         "max": {
@@ -2636,6 +3131,13 @@
             "outputs": []
           }
         },
+        "electronics": {
+          "description": "The selected electronics package (`profiles/electronics/<id>.json`). Its light groups\nbecome this profile's (`resolve_electronics`). `R3X_ELECTRONICS` overrides it at load.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "emotes": {
           "default": [],
           "description": "Emote slot index -> cue id.",
@@ -2672,6 +3174,17 @@
         },
         "name": {
           "type": "string"
+        },
+        "package": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ElectronicsPackage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The resolved package (filled by `load`/`from_json`; the gateway's hello carries it)."
         },
         "servo_controller": {
           "anyOf": [
@@ -3311,6 +3824,26 @@
         }
       ]
     },
+    "Support": {
+      "description": "How far our runtime drives something.",
+      "oneOf": [
+        {
+          "const": "driven",
+          "description": "A driver and firmware exist in this repo.",
+          "type": "string"
+        },
+        {
+          "const": "partial",
+          "description": "Some of it is driven (a package whose boards are a mix).",
+          "type": "string"
+        },
+        {
+          "const": "listed",
+          "description": "Described (dimensions, wiring, BOM) but nothing here talks to it.",
+          "type": "string"
+        }
+      ]
+    },
     "TelemetryCommand": {
       "oneOf": [
         {
@@ -3510,6 +4043,41 @@
           "type": "object"
         }
       ]
+    },
+    "Wire": {
+      "properties": {
+        "awg": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connector": {
+          "type": "string"
+        },
+        "from": {
+          "description": "`board.connector[.pin]`, a BOM item, or `host`.",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "signal": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "signal",
+        "connector",
+        "awg"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
