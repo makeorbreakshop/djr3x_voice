@@ -179,14 +179,25 @@ def grid(asm: Assembly, joints: list[str], step=5.0):
         yield dict(zip(joints, combo))
 
 
-def shell_clearance(asm: Assembly, geo: Geo) -> Check:
+def shell_clearance(asm: Assembly, geo: Geo, explained: list | None = None) -> Check:
     """Every shell part vs every mechanism part on another link (and the push rods), over a
-    5 deg grid of the joints between them, within their limits."""
+    5 deg grid of the joints between them, within their limits. Pairs an EXPLAINED "clearance"
+    entry covers are left out (named in the summary)."""
+    from fnmatch import fnmatch
+
+    def known(a, b):
+        return any(e.get("test") in ("clearance", "*") and all(any(fnmatch(x, pat) for pat in e["parts"]) for x in (a, b))
+                   for e in explained or [])
+
     shell = [p for p in asm.parts if p.cls == "shell" and not p.linkage]
     mech = [p for p in asm.parts if p.cls != "shell" and not p.linkage]
     results = []
+    skipped = 0
     for s in shell:
         for m in mech:
+            if known(s.id, m.id):
+                skipped += 1
+                continue
             js = sorted(path_joints(asm, s.link, m.link))
             if not js:
                 continue
@@ -219,7 +230,8 @@ def shell_clearance(asm: Assembly, geo: Geo) -> Check:
     fmt = lambda p: ", ".join(f"{k} {v:+g}" for k, v in (p or {}).items()) or "zero pose"
     near = "; ".join(f"{m2} to {s2} {d2:.1f} mm" for d2, _, s2, m2 in results[1:4])
     return Check("shell_clearance", "clearance", status, "Shell clearance, all joints",
-                 f"closest: {m} to {s}, {d:.1f} mm at {fmt(pose)}. Next: {near}",
+                 f"closest: {m} to {s}, {d:.1f} mm at {fmt(pose)}. Next: {near}"
+                 + (f"; {skipped} explained pairs left out" if skipped else ""),
                  value=round(d, 2), pose=pose or {}, parts=[s, m],
                  assumptions=["each shell/mechanism pair swept over a 5 deg grid of the joints between them, "
                               "within the limits",
@@ -409,7 +421,7 @@ def run_all(asm: Assembly, servo: dict | None = None, profile_amax: dict | None 
         checks += authority(asm)
     checks += interference(asm, geo, explained)
     if any(p.cls == "shell" for p in asm.parts):
-        checks.append(shell_clearance(asm, geo))
+        checks.append(shell_clearance(asm, geo, explained))
     if servo:
         checks += torque(asm, servo, profile_amax or {}, extra_loads or {})
     checks.append(mass_summary(asm))

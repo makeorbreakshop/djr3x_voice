@@ -288,6 +288,105 @@ class Suite:
                               "fitted up to that step (not the key's width)"])
 
     # ------------------------------------------------------------------ 4 no overlaps at rest
+    def inserts(self):
+        """The fastening rule (fastening.py): screws into printed parts go into heat-set inserts;
+        each insert's hole, depth, boss wall and engagement against its spec; nut joints say why."""
+        from . import fastening as FR
+
+        parts = {p.id: p for p in self.asm.parts}
+        fast = {f.id: f for f in self.asm.fasteners}
+        raw, hole_bad, wall_bad, eng_bad, nut_bad, unknown = [], [], [], [], [], []
+        for m in self.asm.mates:
+            if m.type != "threaded":
+                continue
+            host = parts.get(m.b[0])
+            if host is not None and host.printed and m.params.get("into") == "plastic":
+                raw.append(((m.a[0], host.id), f"{m.a[0]} threads into printed {host.id}.{m.b[1]} (no insert)"))
+        for f in self.asm.fasteners:
+            if f.spec.get("type") in ("nut", "lock_nut") and not (
+                    f.spec.get("reason") in FR.NUT_OK or any(w in (f.inferred_note or "").lower() for w in FR.NUT_OK)):
+                nut_bad.append(((f.id,), f"{f.id}: a nut joint with no reason (clamp / pivot / captive)"))
+            if f.spec.get("type") != "insert":
+                continue
+            press = next((m for m in self.asm.mates if m.type == "press" and m.a[0] == f.id), None)
+            if press is None or press.b[0] not in parts:
+                continue
+            host = parts[press.b[0]]
+            if not host.printed:
+                continue
+            spec = FR.spec_of(f.spec) or {}
+            hole = host.features.get(press.b[1], {})
+            where = f"{host.id}.{press.b[1]}"
+            r = float(hole.get("r", 0))
+            L = float(spec.get("length_mm") or f.spec.get("length_mm") or 0)
+            od = spec.get("od_mm") or f.spec.get("od_mm")
+            if spec.get("hole_d") is None:
+                unknown.append(((f.id, host.id), f"{where}: {spec.get('key', f.key)} has no datasheet hole size on file"))
+            elif abs(2 * r - spec["hole_d"]) > FR.HOLE_TOL_MM:
+                hole_bad.append(((f.id, host.id), f"{where}: hole {2 * r:.2f} mm, the insert wants {spec['hole_d']:.2f}"))
+            depth, through = self._hole_depth(host, hole, r)
+            if through:
+                if depth + 0.05 < L:
+                    hole_bad.append(((f.id, host.id), f"{where}: through a {depth:.1f} mm wall, the insert is {L:g} long"))
+            elif depth + 0.05 < L + FR.DEPTH_EXTRA_MM:
+                hole_bad.append(((f.id, host.id), f"{where}: {depth:.1f} mm deep, needs {L + FR.DEPTH_EXTRA_MM:g} "
+                                                  f"(insert {L:g} + {FR.DEPTH_EXTRA_MM:g})"))
+            w = self._boss_wall(host, hole, r, min(L, depth))
+            need = FR.wall_min(od)
+            if w is not None and w + 0.05 < need:
+                wall_bad.append(((f.id, host.id), f"{where}: {w:.1f} mm of wall round the insert (needs {need:.1f})"))
+            for m in self.asm.mates:
+                if m.type == "threaded" and m.b[0] == f.id:
+                    d = _nominal(fast[m.a[0]].spec["thread"]) if m.a[0] in fast else 4.0
+                    need_e = min(L, 1.5 * d)
+                    got = float(m.params.get("engage_mm", 0))
+                    if got + 0.05 < need_e:
+                        eng_bad.append(((m.a[0], f.id, host.id), f"{m.a[0]} in {where}: {got:.1f} mm engaged (needs {need_e:.1f})"))
+        items = raw + hole_bad + wall_bad + eng_bad + nut_bad + unknown
+        n_ins = sum(1 for f in self.asm.fasteners if f.spec.get("type") == "insert")
+        self.verdict("inserts", "Screws into prints go into heat-set inserts that fit", items,
+                     f"{n_ins} inserts: holes, depth, walls and engagement to spec; no screw in raw plastic",
+                     assumptions=["fastening.py: hole +/-0.15 mm, blind depth >= insert + 1 mm (through: wall >= insert), "
+                                  "wall >= max(1.5 mm, 0.5 x OD) to the part's nearest other surface, engagement >= "
+                                  "min(insert length, 1.5 d); nut joints carry a reason (clamp / pivot / captive)"])
+
+    def _hole_depth(self, host, hole, r):
+        """(depth, through) of a hole feature: the floor along its axis, or the wall it passes through."""
+        p, d = np.asarray(hole["p"], float), unit(hole["d"])
+        mesh = host.mesh
+        hits = mesh.ray.intersects_location([p + d * 0.3], [d])[0]
+        ts = sorted(float((h - p) @ d) for h in hits if (h - p) @ d > 0.35)
+        if ts and ts[0] < 80:
+            return ts[0], False
+        side = np.cross(d, [1, 0, 0] if abs(d[0]) < 0.9 else [0, 0, 1])
+        side = unit(side) * (r + 0.6)
+        q = p + side - d * 1.0
+        hits = mesh.ray.intersects_location([q], [d])[0]
+        ts = sorted(float((h - q) @ d) for h in hits)
+        return (ts[1] - ts[0], True) if len(ts) >= 2 else (float("inf"), True)
+
+    def _boss_wall(self, host, hole, r, depth):
+        """The thinnest material round a hole over the insert's depth: the nearest surface of the
+        part that is not the hole's own wall, entry face or floor (an edge, another hole)."""
+        p, d = np.asarray(hole["p"], float), unit(hole["d"])
+        m = host.mesh
+        c = m.triangles_center
+        rel = c - p
+        t = rel @ d
+        rho = np.linalg.norm(rel - np.outer(t, d), axis=1)
+        near = (t > -1) & (t < depth + 1) & (rho < r + 12)
+        if not near.any():
+            return None
+        sub = m.submesh([np.nonzero(near)[0]], append=True)
+        pts, _ = trimesh.sample.sample_surface(sub, max(2000, int(sub.area / 0.04)), seed=3)
+        rel = pts - p
+        t = rel @ d
+        rho = np.linalg.norm(rel - np.outer(t, d), axis=1)
+        keep = (t > 0.5) & (t < depth - 0.5) & (rho > r + 0.3)
+        if not keep.any():
+            return None
+        return float(rho[keep].min() - r)
+
     def overlaps(self):
         """At rest: FCL finds the intersecting pairs (AABB broad phase first); only those get the
         exact penetration depth, cached by the two meshes' hashes."""
@@ -508,7 +607,20 @@ class Suite:
                 lo, hi = joints[j].limits
                 st = step1 if len(js) == 1 else stepn
                 axes.append(sorted(set(np.round(np.append(np.arange(lo, hi + 1e-9, st), [lo, hi, 0.0]), 3))))
-            grid = [dict(zip(js, map(float, c))) for c in itertools.product(*axes)]
+            cap = self.tol.get("max_grid_poses")
+            n = int(np.prod([len(ax) for ax in axes]))
+            if cap and n > cap:  # many joints (the whole droid): each axis at its ends and zero, then a sample
+                axes = [sorted({ax[0], ax[-1], min(max(0.0, ax[0]), ax[-1])}) for ax in axes]
+                combos = list(itertools.product(*axes))
+                if len(combos) > cap:
+                    rng = np.random.default_rng(0)
+                    keep = rng.choice(len(combos), size=cap - 1, replace=False)
+                    zero = tuple(min(max(0.0, ax[0]), ax[-1]) for ax in axes)
+                    combos = [zero] + [combos[i] for i in sorted(keep)]
+                self.capped_groups = getattr(self, "capped_groups", 0) + 1
+                grid = [dict(zip(js, map(float, c))) for c in combos]
+            else:
+                grid = [dict(zip(js, map(float, c))) for c in itertools.product(*axes)]
             spec = (js, tuple(len(ax) for ax in axes),
                     tuple((j, joints[j].limits, tuple(joints[j].pivot), tuple(joints[j].axis)) for j in js),
                     tuple((lk.id, lk.rod_length, lk.radius, tuple(lk.zero_dir), tuple(lk.ground_point))
@@ -565,7 +677,9 @@ class Suite:
                      [((a, b), f"{a} to {b}: {d:.2f} mm at {fmt(p)}") for d, a, b, p in low],
                      f">= {tol} mm across {sum(len(p) for p in groups.values())} moving pairs", pose=low[0][3] if low else None,
                      assumptions=[f"{len(groups)} joint groups, each on its own grid ({'1/5' if self.full else '5/10'} deg "
-                                  "for 1/n joints) + every show-clip keyframe for the pairs the grid finds within 3 mm",
+                                  "for 1/n joints) + every show-clip keyframe for the pairs the grid finds within 3 mm"
+                                  + (f"; {self.capped_groups} groups over {self.tol['max_grid_poses']} poses reduced to "
+                                     "each joint's ends and zero (sampled past that)" if getattr(self, "capped_groups", 0) else ""),
                                   "AABB broad phase, FCL distance on the parts' BVHs; cached by geometry hash",
                                   "pairs that touch through a mate are not gaps; a gap the motion does not change "
                                   "(parts turning about a shared axis) is left to the overlap test"])
@@ -609,7 +723,8 @@ class Suite:
         import time
 
         for name, fn in (("connected", self.connected), ("mates_hold", self.mates_hold),
-                         ("fasteners_real", self.fasteners_real), ("no_overlap", self.overlaps),
+                         ("fasteners_real", self.fasteners_real), ("inserts", self.inserts),
+                         ("no_overlap", self.overlaps),
                          ("motion", self.motion), ("printable", self.printable)):
             t0 = time.perf_counter()
             n0 = len(self.results)

@@ -28,6 +28,43 @@ def _file_sig(path: Path) -> str:
     return f"{path}:{st.st_size}:{st.st_mtime_ns}"
 
 
+def code_sig(module_name: str) -> str:
+    """A hash of a parametric model's code: its module file, its package's other modules and
+    mech/parts' top-level modules (what it can import from mech/parts). Mesh caches key on it,
+    so an edited model rebuilds."""
+    import importlib
+
+    mod = importlib.import_module(module_name)
+    here = Path(mod.__file__).resolve()
+    root = Path(__file__).resolve().parents[1] / "parts"
+    files = {here} | set(here.parent.glob("*.py")) | set(root.glob("*.py"))
+    h = hashlib.sha1()
+    for f in sorted(files):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def parametric_mesh(module_name: str, params: dict | None = None):
+    """(trimesh, features, params) of a parametric model (make(params) -> build123d Part with
+    .features/.params), cached on its code and parameters."""
+    import importlib
+
+    import trimesh
+
+    def run():
+        from parts.head._common import mesh as b_mesh
+
+        part = importlib.import_module(module_name).make(dict(params or {}))
+        m = b_mesh(part)
+        return (np.asarray(m.vertices), np.asarray(m.faces), dict(getattr(part, "features", {}) or {}),
+                dict(getattr(part, "params", {}) or {}))
+
+    v, f, feats, prm = cached(_cache_key("pmesh", module_name, code_sig(module_name),
+                                         sorted((k, str(x)) for k, x in (params or {}).items())), run)
+    return trimesh.Trimesh(v, f, process=False), feats, prm
+
+
 def cached(key: str, fn):
     CACHE.mkdir(parents=True, exist_ok=True)
     f = CACHE / f"{key}.pkl"

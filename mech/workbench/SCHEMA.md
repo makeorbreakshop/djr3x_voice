@@ -70,7 +70,14 @@ A child can be inlined, or referenced so two modules can be built separately:
 ```jsonc
 // ChildRef - the reader loads `ref` and applies `mount` from here (it overrides the child's own)
 { "ref": "../hunter_head/manifest.json", "id": "hunter_head", "name": "Hunter head mech",
-  "mount": { "parent_link": "head", "transform": Transform } }
+  "mount": { "parent_link": "head", "transform": Transform },
+  // optional: how the child joins the parent, checked by the whole-droid suite (workbench/droid.py).
+  // "<child id>/<part id>" names the child's side, a plain id the parent's.
+  "interface": {
+    "mates": [{"type": "concentric", "a": ["hunter_head/neck_coupler", "bore"], "b": ["neck_tube", "axis"]}],
+    "fasteners": [{"id": "set_coupler_tube", "spec": {"type": "set_screw", "thread": "M4", "length_mm": 6},
+                   "in": ["hunter_head/ins_coupler_side", "thread"], "onto": "neck_tube"}]
+  } }
 ```
 
 ## Link

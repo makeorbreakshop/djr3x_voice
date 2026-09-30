@@ -14,6 +14,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# bytecode caches on, even under PYTHONDONTWRITEBYTECODE (an agent shell sets it): recompiling
+# build123d/trimesh/sympy costs ~3 s on every build
+sys.dont_write_bytecode = False
+
 from .build import MECH, OUT, build, log
 
 

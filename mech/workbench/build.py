@@ -81,31 +81,94 @@ def _clean(d: dict) -> dict:
     return {k: _jsonable(v) for k, v in d.items() if not _empty(v) or k in ("link",)}
 
 
-def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = True, loaded_children=None) -> dict:
-    """Write the meshes of `asm` under out/prefix and return its manifest node."""
-    parts = []
-    for p in asm.parts:
-        m = p.mesh
-        centre = (m.bounds[0] + m.bounds[1]) / 2
+EXPORT_VERSION = 1  # bump when the export format changes: every file is rewritten
+
+
+class _Sigs:
+    """Incremental export: each written file's signature (mesh hash + settings) in
+    out/<id>/.export_sigs.json; a file whose signature matches and exists is not rewritten."""
+
+    def __init__(self, out: Path):
+        self.f = out / ".export_sigs.json"
+        try:
+            self.d = json.loads(self.f.read_text())
+        except Exception:
+            self.d = {}
+        self.written = 0
+        self.skipped = 0
+
+    def fresh(self, rel: str, sig: str, out: Path) -> bool:
+        if self.d.get(rel) == sig and (out / rel).exists():
+            self.skipped += 1
+            return True
+        return False
+
+    def mark(self, rel: str, sig: str):
+        self.d[rel] = sig
+        self.written += 1
+
+    def save(self):
+        _atomic_json(self.d, self.f)
+
+
+def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
+    """(centre, display faces, source faces, exports) for a part; writes only what changed."""
+    from .collide import mesh_hash
+
+    m = p.mesh
+    centre = (m.bounds[0] + m.bounds[1]) / 2
+    target = p.decimate_to or DISPLAY_FACES.get(p.cls)
+    h = mesh_hash(m)
+    sig = f"{h}:{target}:{EXPORT_VERSION}"
+    mesh_rel = f"{prefix}parts/{p.id}.glb"
+    exports = {}
+    todo = []
+    if not sigs.fresh(mesh_rel, sig, out):
+        todo.append("glb")
+    if export:
+        exports["stl"] = f"{prefix}export/{p.id}.stl"
+        if not sigs.fresh(exports["stl"], sig, out):
+            todo.append("stl")
+        if p.printed:
+            exports["3mf"] = f"{prefix}export/{p.id}.3mf"
+            if not sigs.fresh(exports["3mf"], sig, out):
+                todo.append("3mf")
+    n_disp = sigs.d.get(mesh_rel + "#faces")
+    if todo or n_disp is None:
         local = m.copy()
         local.apply_translation(-centre)
-        target = p.decimate_to or DISPLAY_FACES.get(p.cls)
         disp = geom.decimate(local, target) if target else local
-        mesh_rel = f"{prefix}parts/{p.id}.glb"
-        _glb(disp, out / mesh_rel)
-        exports = {}
-        if export:
-            stl_rel = f"{prefix}export/{p.id}.stl"
-            (out / stl_rel).parent.mkdir(parents=True, exist_ok=True)
-            local.export(out / stl_rel)
-            exports["stl"] = stl_rel
-            if p.printed:
-                try:
-                    tmf_rel = f"{prefix}export/{p.id}.3mf"
-                    local.export(out / tmf_rel)
-                    exports["3mf"] = tmf_rel
-                except Exception as e:  # 3MF needs lxml/networkx; STL always works
-                    log(f"3mf export skipped for {p.id}: {e}")
+        n_disp = int(len(disp.faces))
+        if "glb" in todo:
+            _glb(disp, out / mesh_rel)
+            sigs.mark(mesh_rel, sig)
+        if "stl" in todo:
+            (out / exports["stl"]).parent.mkdir(parents=True, exist_ok=True)
+            local.export(out / exports["stl"])
+            sigs.mark(exports["stl"], sig)
+        if "3mf" in todo:
+            try:
+                local.export(out / exports["3mf"])
+                sigs.mark(exports["3mf"], sig)
+            except Exception as e:  # 3MF needs lxml/networkx; STL always works
+                log(f"3mf export skipped for {p.id}: {e}")
+                exports.pop("3mf", None)
+        sigs.d[mesh_rel + "#faces"] = n_disp
+    return centre, n_disp, mesh_rel, exports
+
+
+def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = True, loaded_children=None,
+                  sigs: "_Sigs | None" = None) -> dict:
+    """Write the meshes of `asm` under out/prefix and return its manifest node. Only files whose
+    mesh changed are rewritten (_Sigs); the writes run in parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    sigs = sigs or _Sigs(out)
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as ex:
+        files = list(ex.map(lambda p: _part_files(p, prefix, out, export, sigs), asm.parts))
+    parts = []
+    for p, (centre, n_disp, mesh_rel, exports) in zip(asm.parts, files):
+        m = p.mesh
         parts.append(_clean({
             "id": p.id, "name": p.name, "class": p.cls, "link": p.link,
             "transform": Transform(tuple(centre)).json(),
@@ -116,7 +179,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "mass_g": round(p.mass_g, 1) if p.mass_g else None, "mass_note": p.mass_note,
             "linkage": p.linkage, "role": p.role,
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
-            "triangles": {"display": int(len(disp.faces)), "source": int(len(m.faces))},
+            "triangles": {"display": n_disp, "source": int(len(m.faces))},
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
             "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch,
         }))
@@ -132,7 +195,13 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             name = (f.catalog or f.key).replace(":", "_").replace("/", "_")
             rel = f"{prefix}fasteners/{name}.glb"
             if rel not in written:
-                _glb(f.mesh if f.mesh is not None else geom.fastener_mesh(f.spec), out / rel)
+                fm = f.mesh if f.mesh is not None else geom.fastener_mesh(f.spec)
+                from .collide import mesh_hash
+
+                fsig = f"{mesh_hash(fm)}:{EXPORT_VERSION}"
+                if not sigs.fresh(rel, fsig, out):
+                    _glb(fm, out / rel)
+                    sigs.mark(rel, fsig)
                 written.add(rel)
             node["mesh"] = rel
         node["placed"] = f.matrix is not None
@@ -140,7 +209,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
     children = []
     for c in asm.children:
         if isinstance(c, Assembly):
-            children.append(assembly_json(c, out, f"{prefix}{c.id}/", export, loaded_children))
+            children.append(assembly_json(c, out, f"{prefix}{c.id}/", export, loaded_children, sigs))
         else:
             children.append(c)
     return _clean({
@@ -187,12 +256,25 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
         f"{len(asm.steps)} steps ({time.time() - t0:.1f} s)")
     if run_checks:
         t1 = time.time()
+        # cached by everything the checks read: each part's geometry and link, the joints and linkages,
+        # the module's explanations and the checks' code
+        from .collide import mesh_hash
+
+        ck = geom._cache_key("checks", sorted((p.id, p.link, p.cls, mesh_hash(p.mesh)) for p in asm.parts),
+                             [(j.id, j.type, j.parent_link, j.child_link, tuple(j.pivot), tuple(j.axis), tuple(j.limits),
+                               json.dumps(j.drive, sort_keys=True, default=str)) for j in asm.joints],
+                             [(lk.id, tuple(lk.centre), lk.radius, tuple(lk.zero_dir), tuple(lk.ground_point), lk.rod_length)
+                              for lk in asm.linkages],
+                             sorted((f.id, f.key, f.link, None if f.matrix is None else np.round(f.matrix, 3).tobytes().hex())
+                                    for f in asm.fasteners),
+                             json.dumps(getattr(mod, "EXPLAINED", None), default=str),
+                             geom.code_sig("workbench.checks"), geom._file_sig(Path(mod.__file__)))
         if hasattr(mod, "checks"):
-            asm.checks = mod.checks(asm)
+            asm.checks = geom.cached(ck, lambda: mod.checks(asm))
         else:
             from .checks import run_all
 
-            asm.checks = run_all(asm)
+            asm.checks = geom.cached(ck, lambda: run_all(asm))
         for c in asm.checks:
             log(f"  [{c.status:4}] {c.title}: {c.summary}")
         log(f"checks {time.time() - t1:.1f} s")
@@ -202,7 +284,11 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
         log(f"suite {time.time() - t2:.1f} s: " + ", ".join(f"{c.id[5:]} {c.status}" for c in asm.tests))
     out = out_root / asm.id
     out.mkdir(parents=True, exist_ok=True)
-    node = assembly_json(asm, out, "", export)
+    t3 = time.time()
+    sigs = _Sigs(out)
+    node = assembly_json(asm, out, "", export, sigs=sigs)
+    sigs.save()
+    log(f"files {time.time() - t3:.1f} s: {sigs.written} written, {sigs.skipped} unchanged")
     manifest = {"schema": SCHEMA, "version": VERSION,
                 "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                 "generator": GENERATOR, "root": node}
@@ -219,11 +305,36 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     return out / "manifest.json"
 
 
-def suite_for(mod, asm, full: bool = False):
+def suite_for(mod, asm, full: bool = False, whole: bool = False):
+    """The suite on `asm`. A root that only holds sub-assemblies (the droid) is tested whole when
+    `whole` (the `test` command: every sub-assembly flattened into one, workbench/droid.py);
+    a build skips it (the flatten builds each ChildRef's module)."""
     from .suite import Suite
 
-    if not asm.parts:  # a root that only holds sub-assemblies (the droid): the suite tests one tree level
-        return []
+    if not asm.parts:
+        if not whole or not asm.children:
+            return []
+        from .droid import REFS, explained_placement, flatten
+
+        t0 = time.time()
+        flat, info = flatten(asm)
+        explained = list(getattr(mod, "EXPLAINED", None) or [])
+        for cid, modname in REFS.items():  # a child module's own explanations hold inside the droid too
+            explained += list(getattr(importlib.import_module(modname), "EXPLAINED", None) or [])
+        explained += explained_placement(info)
+        tol = {**(getattr(mod, "TOLERANCES", None) or {}), "max_grid_poses": 3000}
+        s = Suite(flat, tol=tol, explained=explained, full=full)
+        res = s.run()
+        from .model import Check
+
+        res.insert(0, Check("test_droid_tree", "test", "pass", "Whole droid: the tree, flattened",
+                            f"{len(info['assemblies'])} assemblies, {len(flat.parts)} parts, {len(flat.fasteners)} fasteners, "
+                            f"{len(flat.joints)} joints, {len(flat.mates)} mates; left out (unselected variants): "
+                            f"{', '.join(info['left_out']) or 'none'}; interface: {'; '.join(info['interfaces']) or 'none'}; "
+                            f"flatten {time.time() - t0:.1f} s (child builds included)",
+                            parts=[], assumptions=[f"{a['path']}: {a['parts']} parts, {a['mates']} mates"
+                                                   for a in info["assemblies"]]))
+        return res
     return Suite(asm, tol=getattr(mod, "TOLERANCES", None), explained=getattr(mod, "EXPLAINED", None), full=full).run()
 
 
@@ -234,7 +345,7 @@ def run_suite(name: str, out_root: Path = OUT, full: bool = False) -> dict:
     asm: Assembly = mod.build()
     asm.validate()
     t0 = time.time()
-    tests = suite_for(mod, asm, full)
+    tests = suite_for(mod, asm, full, whole=True)
     took = time.time() - t0
     out = out_root / asm.id
     out.mkdir(parents=True, exist_ok=True)
