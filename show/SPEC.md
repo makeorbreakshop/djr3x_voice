@@ -72,6 +72,29 @@ The file name must equal the `id`. Ids are `snake_case`, unique across all three
   - `speed` (0.5–2, default 1) scales time.
 - **Linted against `sim/web/src/actuation/servo_map.json`:** joint limits (rig min/max, with margin) plus `vMax`/`aMax` after the gear ratio. A clip that the channel cannot physically follow fails the test.
 
+## Frame and zeros
+
+Every value in a clip is relative to one body frame and one rest pose, the same for the sim,
+the performer and the servos:
+
+- **Forward (+Z) is the base's front**: the speaker pod between the `[ ]` brackets. **Up is +Y.**
+  The droid's left is +X.
+- **Every joint at 0 is the rest pose of the park droid:** the head faces forward and is level,
+  the visor is at the bottom of its flap; the lower ring has a vent at the front and the poker arm out to the left;
+  the middle ring has its three logic panels at the front and the throttle arm out to the
+  right; the top ring has the RX-24 plate at the front and the hero arm up at the front-left.
+- **Signs:** `+head_pan` and `+torso_*` turn toward the droid's left (+X). `+head_tilt` and
+  `+visor` tip down.
+- The rings stack. A ring's value turns everything above it, so `head_pan` 0 faces forward
+  only while the rings are at 0. Gaze targets are solved from the current pose (`Rig.aimAt`),
+  and `gaze off` faces the base's front.
+- A servo at its `center_us` puts its joint at `center_value` (0 = the rest pose).
+
+The printable kit is exported in a display pose (rings turned up to 56° from this rest). Until
+the model build bakes the rest in, `sim/web/src/show/rig_limits.json` carries the correction
+(`body_yaw`, per-joint `zero_offset`), and the sim applies it once in the Rig. Only the 3D
+geometry uses these numbers. Values, ranges and pulses are already about the rest.
+
 ## Cue
 
 A cue is one moment: every department fires together, optionally with small offsets.

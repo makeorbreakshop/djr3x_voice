@@ -15,7 +15,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { STILL } from './still'; // first: ?still swaps the clock and RNG before anything reads them
 import { PostPipeline } from './post';
 
-import { Rig, RigDoc } from './rig';
+import { Rig, RigDoc, restFromUrl } from './rig';
 import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
 import { ChestLights } from './chestlights';
 import { SpeechAudio, TtsAmplitudeAgc } from './audio';
@@ -390,19 +390,8 @@ function onPerfOut(o: PerfOut) {
   }
 }
 
-/** The droid's head as the performer wants a look target: (pan, tilt) degrees in the head_pan parent frame. */
-const tmpV = new THREE.Vector3();
-function aimAt(p: THREE.Vector3): [number, number] | null {
-  const pan = rig?.joints.get('head_pan')?.node;
-  const tilt = rig?.joints.get('head_tilt')?.node;
-  if (!pan?.parent || !tilt) return null;
-  const local = pan.parent.worldToLocal(tmpV.copy(p));
-  const dy = local.y - (pan.position.y + tilt.position.y);
-  const yaw = THREE.MathUtils.radToDeg(Math.atan2(local.x, local.z));
-  // Rotation about +X tips the face down, so looking up is negative tilt.
-  const pitch = -THREE.MathUtils.radToDeg(Math.atan2(dy, Math.hypot(local.x, local.z)));
-  return [yaw, pitch];
-}
+/** The droid's head as the performer wants a look target: (pan, tilt) degrees from its rest (Rig.aimAt). */
+const aimAt = (p: THREE.Vector3) => rig?.aimAt(p) ?? null;
 
 let hadPad = false;
 function pollGamepad() {
@@ -624,7 +613,7 @@ async function load() {
   prepareDroidMaterials(gltf.scene, renderer);
   scene.add(gltf.scene);
 
-  rig = new Rig(gltf.scene, doc);
+  rig = new Rig(gltf.scene, doc, restFromUrl());
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
   chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);

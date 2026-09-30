@@ -5,7 +5,8 @@
  * not with the joint): a thin arc over the animation range, subtle ticks at the soft
  * (blue) and hard (red) limits, a white tick at 0 (centre/home), an amber needle at the
  * current angle and a small label in degrees. `head_lift` gets a linear scale in mm, and
- * the body a floor ring with a "front" (0 deg) marker under the base.
+ * the body a floor ring with a "front" marker under the base and the centre line: the
+ * canonical body frame's forward (+Z, the base's front) and vertical axis.
  *
  * Drawn after the post pipeline into its own scene (no depth test, no bloom, no tone
  * mapping), with a dark halo under every stroke, so it reads on every backdrop and never
@@ -205,9 +206,14 @@ export class Centres {
       labelAt = new THREE.Vector3(0.022, 0, 0);
     } else {
       const r = place.r ?? DEFAULT_R;
-      // 0 deg: forward for the body axis, else along the joint's own part (its meshes' centre).
+      // 0 deg: the body frame's forward for the vertical axes, else along the joint's own
+      // part (its meshes' centre). Measured on the rest pose the Rig starts in.
       const hints: V3[] = [];
-      if (Math.abs(axis[1]) < 0.9) {
+      if (Math.abs(axis[1]) >= 0.9) {
+        const q = node.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+        const f = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+        hints.push([f.x, f.y, f.z]);
+      } else {
         const c = ownCentre(node, rig);
         if (c) hints.push([c.x - node.position.x, c.y - node.position.y, c.z - node.position.z]);
       }
@@ -223,6 +229,8 @@ export class Centres {
       if (spec.name === 'torso_lower') {
         // The floor ring: a dim full circle, and a "front" chevron outside it at 0 deg.
         strokes.push(this.stroke(Centres.path(arcPoints(axis, zero, -180, 180, r * 1.06, 6)), COLOR.arc, 1, 0.3, root));
+        // The centre line: forward/back across the floor and the vertical axis up to the head.
+        strokes.push(this.stroke([onCircle(axis, zero, 180, r * 1.32), onCircle(axis, zero, 0, r * 1.2), [0, 0, 0], scale(norm(axis), 0.98)], COLOR.zero, 1, 0.35, root));
         const tip = onCircle(axis, zero, 0, r * 1.32);
         strokes.push(this.stroke([onCircle(axis, zero, -4, r * 1.2), tip, tip, onCircle(axis, zero, 4, r * 1.2)], COLOR.zero, 1.8, 0.9, root));
         const front = document.createElement('div');

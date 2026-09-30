@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import restDoc from './show/rig_limits.json';
 
 export interface JointSpec {
   name: string;
@@ -22,6 +23,32 @@ export interface RigDoc {
 }
 
 /**
+ * The canonical body frame (show/SPEC.md "Frame and zeros"): the kit model is exported in
+ * a display pose, so the rest is applied here, once - `bodyYaw` turns the whole model so
+ * the base's front is +Z, and each joint's `zeroOffset` is how far its part is turned from
+ * the kit pose at value 0. `?rest=kit` shows the raw kit pose (look-dev comparisons).
+ */
+export interface RestPose {
+  bodyYaw: number;
+  zeroOffset: Record<string, number>;
+}
+
+export const KIT_POSE: RestPose = { bodyYaw: 0, zeroOffset: {} };
+
+export const CANONICAL_REST: RestPose = {
+  bodyYaw: restDoc.body_yaw,
+  zeroOffset: Object.fromEntries(
+    Object.entries(restDoc.joints as Record<string, { zero_offset?: number }>)
+      .filter(([, j]) => j.zero_offset !== undefined)
+      .map(([name, j]) => [name, j.zero_offset!]),
+  ),
+};
+
+export function restFromUrl(search = location.search): RestPose {
+  return new URLSearchParams(search).get('rest') === 'kit' ? KIT_POSE : CANONICAL_REST;
+}
+
+/**
  * A joint in the 3D model. It has no dynamics of its own: its angle is whatever the
  * performer's frames say the output shaft is at.
  */
@@ -30,7 +57,12 @@ export class Joint {
   readonly axis: THREE.Vector3;
   private readonly rest: THREE.Vector3;
 
-  constructor(readonly spec: JointSpec, readonly node: THREE.Object3D) {
+  constructor(
+    readonly spec: JointSpec,
+    readonly node: THREE.Object3D,
+    /** deg: node angle = value + zeroOffset (revolute only). */
+    readonly zeroOffset = 0,
+  ) {
     this.axis = new THREE.Vector3(...spec.axis).normalize();
     this.rest = node.position.clone();
   }
@@ -42,7 +74,7 @@ export class Joint {
   set(v: number) {
     this.value = v;
     if (this.prismatic) this.node.position.copy(this.rest).addScaledVector(this.axis, v / 1000);
-    else this.node.quaternion.setFromAxisAngle(this.axis, THREE.MathUtils.degToRad(v));
+    else this.node.quaternion.setFromAxisAngle(this.axis, THREE.MathUtils.degToRad(v + this.zeroOffset));
   }
 }
 
@@ -55,17 +87,21 @@ export class Rig {
   private readonly tmpA = new THREE.Vector3();
   private readonly tmpB = new THREE.Vector3();
 
-  constructor(readonly root: THREE.Object3D, readonly doc: RigDoc) {
+  constructor(readonly root: THREE.Object3D, readonly doc: RigDoc, readonly restPose: RestPose = CANONICAL_REST) {
+    (root.getObjectByName('r3x_root') ?? root).rotation.y = THREE.MathUtils.degToRad(restPose.bodyYaw);
     for (const spec of doc.joints) {
       const node = root.getObjectByName(`j_${spec.name}`);
       if (!node) throw new Error(`GLB is missing joint node j_${spec.name}`);
-      this.joints.set(spec.name, new Joint(spec, node));
+      this.joints.set(spec.name, new Joint(spec, node, spec.type === 'prismatic' ? 0 : restPose.zeroOffset[spec.name] ?? 0));
     }
     root.traverse((o) => {
       if (o.name.startsWith('a_')) this.anchors.set(o.name.slice(2), o);
     });
     this.buildPistonRod();
     this.buildNeckSpring();
+    // Start at the rest pose (every joint 0), which is what Centres measures its zeros on.
+    this.apply(new Map(doc.joints.map((j) => [j.name, 0])));
+    root.updateMatrixWorld(true);
   }
 
   get(name: string) {
@@ -83,6 +119,23 @@ export class Rig {
       const lift = this.joints.get('head_lift')?.value ?? 0;
       this.spring.scale.y = Math.max(0.3, (Rig.SPRING_H + lift / 1000) / Rig.SPRING_H);
     }
+  }
+
+  /**
+   * The head's (pan, tilt) in degrees that would face world point `p`, from the current pose
+   * of the joints above the neck (the head rides the top ring). Pan 0 / tilt 0 is the rest:
+   * with the rings at rest, pan 0 faces the base's front.
+   */
+  aimAt(p: THREE.Vector3): [number, number] | null {
+    const pan = this.joints.get('head_pan');
+    const tilt = this.joints.get('head_tilt');
+    if (!pan?.node.parent || !tilt) return null;
+    const local = pan.node.parent.worldToLocal(this.tmpA.copy(p));
+    const dy = local.y - (pan.node.position.y + tilt.node.position.y);
+    const yaw = THREE.MathUtils.radToDeg(Math.atan2(local.x, local.z));
+    // Rotation about +X tips the face down, so looking up is negative tilt.
+    const pitch = -THREE.MathUtils.radToDeg(Math.atan2(dy, Math.hypot(local.x, local.z)));
+    return [yaw - pan.zeroOffset, pitch - tilt.zeroOffset];
   }
 
   /**

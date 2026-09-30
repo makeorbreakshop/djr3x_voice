@@ -178,6 +178,7 @@ URL flags:
 | `?lut=/my.cube` | Grade from a `.cube` file instead. |
 | `?post=hot` | Magenta marks every pixel above 1.0 before bloom, i.e. everything that blooms. |
 | `?post=ao` | Show the AO term alone. |
+| `?rest=kit` | Pose the model as the kit exports it (its display pose), without the canonical rest from `rig_limits.json`. For before/after comparisons. |
 
 ## Run
 
@@ -342,7 +343,7 @@ are gitignored. Keep your baselines locally. The reference photos are linked fro
 
 `web/src/actuation/servo_map.json` marks what is assumed. For each channel:
 
-1. Jog the servo to the model's rest pose and record `centerUs`.
+1. Jog the servo to the rest pose (every joint 0, `show/SPEC.md` "Frame and zeros"; not the kit's display pose) and record `centerUs`.
 2. Confirm the direction (`invert`).
 3. Measure the neck gear and lift pinion.
 
