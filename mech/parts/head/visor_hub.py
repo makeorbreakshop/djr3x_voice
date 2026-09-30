@@ -19,7 +19,7 @@ from ._common import HOLES, Print, axis, finish, hole_features, plane
 REFERENCE = None
 LABEL = "Visor hub (parametric)"
 
-DEFAULTS = dict(side=1, axis_y=32.3, axis_z=0.9, x=(73.3, 82.3), od=31.0, r=5.85, flat=4.1,
+DEFAULTS = dict(side=1, axis_y=32.3, axis_z=0.9, x=(73.3, 82.3), od=35.0, r=5.85, flat=4.1,
                 flat_dir=(-1.0, 0.0), fit=0.2, holes=(), bolt="M3", set_screw=True,
                 pocket=7.5)  # insert pocket depth: the insert (5.7) plus room for the screw's tip
 
@@ -50,12 +50,15 @@ def make(params: dict | None = None, **kw):
     for i, (y, z) in enumerate(P["holes"]):
         part -= Pos(s * (x1 - dep / 2), y, z) * Rot(0, 90, 0) * Cylinder(d_ins / 2, dep + 0.01)
         hole_features(feats, f"ins{i + 1}", (s * x1, y, z), (-s, 0, 0), d_ins / 2, depth=dep,
-                      bolt=P["bolt"], kind="heatset")
+                      bolt=P["bolt"], kind="heat_set")
     if P["set_screw"]:
-        # radial, onto the flat's middle: tapped M3 from the rim
+        # radial, tapped M3 from the rim, midway between two insert pockets (it only holds the axle
+        # axially: the D bore carries the torque), so each pocket keeps its wall
         tap = HOLES[P["bolt"]]["tap"]
-        part -= Pos(xc, ay, az) * Rot(ang, 0, 0) * Pos(0, (P["od"] / 2 + rb) / 2 - 0.5, 0) * Rot(90, 0, 0) * Cylinder(
-            tap / 2, P["od"] / 2 - P["flat"] + 1)
+        hole_angs = [math.degrees(math.atan2(z - az, y - ay)) for y, z in P["holes"]]
+        ss = max(range(0, 360, 5), key=lambda a: min([abs((a - h + 180) % 360 - 180) for h in hole_angs] or [180]))
+        part -= Pos(xc, ay, az) * Rot(ss, 0, 0) * Pos(0, (P["od"] / 2 + rb) / 2, 0) * Rot(90, 0, 0) * Cylinder(
+            tap / 2, P["od"] / 2 - rb + 1)
     feats["bore"] = axis((s * x0, ay, az), (s, 0, 0), P["r"])
     feats["face_out"] = plane((s * x1, ay, az), (s, 0, 0))
     feats["face_in"] = plane((s * x0, ay, az), (-s, 0, 0))

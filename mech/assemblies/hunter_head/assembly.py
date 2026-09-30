@@ -34,7 +34,8 @@ import numpy as np
 import trimesh
 
 from workbench import geom
-from workbench.geom import align, fastener_mesh
+from workbench.collide import mesh_hash
+from workbench.geom import _cache_key, align, cached, fastener_mesh
 from workbench.kinematics import apply, horn_basis, link_matrices, solve_rod
 from workbench.model import (Assembly, BomLine, Fastener, Joint, Link, Linkage, Part, Step,
                              Transform)
@@ -62,7 +63,10 @@ PARAMS = {
     "visor_limits": (-15.0, 30.0),
     "servo_centre_us": 1500,
     "printed_wall_mm": 0.8,       # mass model: 2 x 0.4 mm perimeters on every face
-    "neck_tube_bore": 32.0,       # the coupler's bore: 32 (Hunter's neck), 26 (Anderson's neck tube)
+    "neck_tube_bore": 26.0,       # the coupler's bore: 26 on Anderson's neck tube (the droid's default); Hunter's own neck is 32
+    "plate_insert_depth": 8.0,
+    "coupler_top_t": 7.0,         # the coupler's hub plate: 7 (was 5) so the hub screws' 6 mm inserts fit (fastening rule)
+    "visor_channel_mm": 1.5,      # clearance channel in the shells along the kit visor's sweep (0 = none)    # servo insert holes: 6 mm insert + 2 mm, so an M4 x 10 clears the drill point
     "printed_infill": 0.15,
 }
 STEP_G = np.array([0.0, 67.0, 0.0])  # gimbal centre in the STEP's frame
@@ -88,15 +92,6 @@ EXPLAINED = [
      "cause": "the V4 plate's servo pockets are 1-2 mm tighter than goBILDA's 2000-series case (the STEP's "
               "older plate fits it)",
      "fix": "open each servo pocket 1.5 mm in the plate"},
-    {"test": "fasteners_real", "parts": ["pin_tilt_*", "custom_joint_piece"],
-     "cause": "the cross is open at its centre: an M4 tilt-pivot screw has only 4.4 mm of plastic before it "
-              "reaches the post (the rule wants 8 mm)",
-     "fix": "heat-set a short M4 insert (4 mm) in each of the cross's pivot holes, or use the 4005 U-joint's "
-            "own pivot pins; confirm what Hunter used"},
-    {"test": "*", "parts": ["neck_joint_member", "neck_coupler", "pin_neck_member"],
-     "cause": "the neck joint member is not in the STEP and a 50 mm bar cannot sit inside the coupler's 32 mm "
-              "bore: its real place (likely inside the neck tube, pinned through the coupler's side holes) is open",
-     "fix": "Brandon confirms how the member meets the neck tube (photo of Hunter's neck)"},
     {"test": "no_overlap", "parts": ["hub_top", "hub_bottom", "clamp_hub_*"],
      "cause": "goBILDA's sonic-hub models leave the clamp screw's tapped hole out on one side: the vendor clamp "
               "screws (from Hunter's STEP) pass through modelled material",
@@ -108,25 +103,39 @@ EXPLAINED = [
               "look wins)",
      "fix": "trim Hunter's shell where each kit part lands (the overlap report gives the depth and place), or "
             "glue the kit part on its surface; nothing moves"},
-    {"test": "mates_hold", "parts": ["h_m_1", "head_bottom"],
-     "cause": "the kit's mouth (H_M_1) mounts on the kit's own bottom shell; on Hunter's head bottom its nearest face "
-              "stands 0.6 mm off (the glue rule wants 0.5)",
-     "fix": "a 0.6 mm shim (or thickened epoxy) under the mouth where it meets the head bottom"},
-    {"test": "fasteners_real", "parts": ["scr_servo_*", "ins_servo_*"],
-     "cause": "M4 x 8 button heads into the plate's 6 mm servo inserts engage 5.3 mm (the rule wants the full 1.5d = "
-              "6 mm); an M4 x 10 would reach the insert's drill point (parametric-plate owner, 2026-09-30)",
-     "fix": "accept 5.3 mm (88 % of the insert) for a servo flange, or deepen the plate's insert holes 2 mm and use "
-            "M4 x 10"},
+    {"test": "inserts", "parts": ["mount_plate", "ins_servo_*"],
+     "cause": "the plate's servo bosses leave 1.0 mm of plastic round four of the 6 mm insert holes (sins1/2/7/8); "
+              "the fastening rule wants max(1.5, 0.5 x 6) = 3 mm",
+     "fix": "parametric plate: grow those bosses (cut_hole grow_boss) to 3 mm round the holes"},
+    {"test": "inserts", "parts": ["neck_coupler", "ins_coupler_*"],
+     "cause": "on the coupler, goBILDA's 16 mm hub pattern puts each 6 mm insert 0.8 mm from the 15 mm centre relief "
+              "(the sonic hub's boss), and the side insert 1.5 mm from an edge: 3 mm is not there",
+     "fix": "M3-size pattern is not an option (the hub is M4): keep the inserts and accept 0.8 mm (PLA at 100 % "
+            "infill there), or through-bolts with nuts under the hub plate if the tube's bore leaves room - Brandon"},
+    {"test": "no_overlap", "parts": ["hex_shaft", "pin_tilt_*", "nut_tilt_*"],
+     "cause": "the tilt pivots as through-bolts with lock nuts (the decision for pivots): inside the cross there are "
+              "2.3 mm between the wall and the hex post's corners, so a 3.2 mm lock nut runs 0.9 mm into the post and "
+              "the bolt's tip 1.3 mm",
+     "fix": "a thin M4 nut (DIN 439, 2.2 mm, Loctite) and the bolt cut flush with it, or cross walls thick enough "
+            "for inserts (parametric cross); the nut sits on the tilt axis, so it only needs to clear the post"},
     {"test": "no_overlap", "parts": ["servo_l", "servo_r", "scr_servo_*"],
-     "cause": "the M4 button heads still sit 0.5-0.6 mm into the goBILDA servo STEP around its flange holes (a socket "
-              "head went 0.9-1.0 mm in); the plate's inserts are on the flange holes within 0.05 mm, so it is the head "
-              "against the case beside the flange",
-     "fix": "M4 x 8 low-head (DIN 7984) or a 0.8 mm washer under each head; check on the real servo"},
+     "cause": "the M4 low heads (DIN 7984) sit 0.5-0.7 mm into the goBILDA servo STEP beside its flange holes (socket "
+              "heads went 0.9-1.0 mm in); the plate's inserts are on the flange holes within 0.05 mm",
+     "fix": "a 0.8 mm washer under each head (lifts it clear of the case), then check on the real servo"},
+    {"test": "mates_hold", "parts": ["h_hp_1", "side_left", "side_right"],
+     "cause": "the kit headband (H_HP_1) stands 0.5 mm off Hunter's side piece where it lands (the kit drew it on the "
+              "kit's own head); the glue rule wants <= 0.5",
+     "fix": "thickened epoxy (or a 0.5 mm pad) where the headband meets the side"},
     {"test": "clearance", "parts": ["side_left", "side_right", "head_top", "h_v_*"],
      "cause": "the kit visor's side arms run 0.90-0.96 mm from Hunter's top and side shells over the whole visor "
               "range (FCL, 3 deg steps; they never touch): the kit visor was drawn round the kit's own shell",
      "fix": "sand 0.5 mm off the shells' inner faces along the arms' path (or accept it: a 0.1 mm shortfall on a "
             "1 mm print-tolerance rule)"},
+    {"test": "clearance", "parts": ["h_v_4", "h_v_5", "h_le_*", "h_re_*"],
+     "cause": "the kit visor's axle ends (H_V_4/5) turn inside the kit's ear cups (H_LE/H_RE) with 0-0.1 mm, as the "
+              "kit draws them: on the kit they are the visor's bearing; here the stub axles carry the visor, so the "
+              "cups only rub",
+     "fix": "open each ear cup's bore 0.5 mm (sand or reprint scaled 102 % in X/Z)"},
     {"test": "clearance", "parts": ["custom_joint_piece", "pillow_f", "pillow_b", "pillow_bearing_*"],
      "cause": "in the STEP the cross sits 0.1-0.5 mm off the pillow blocks as it turns",
      "fix": "the BOM's M4 washers as spacers, one each side of the cross (0.8 mm)"},
@@ -221,33 +230,19 @@ def leaf_axis(v: np.ndarray):
 PARAMETRIC: dict[str, str] = {
     "mount_plate": "parts.head.base_plate",
     "neck_coupler": "parts.head.neck_coupler",
-    "neck_joint_member": "parts.head.neck_joint_member",
     "custom_joint_piece": "parts.head.custom_joint_piece",
     "head_bottom": "parts.head.head_bottom",
     "side_left": "parts.head.side_left",
     "side_right": "parts.head.side_right",
     "head_top": "parts.head.head_top",
 }
+# design defaults passed to the parametric shells (reversible): the fastening rule's hole depths
+SHELL_PARAMS = {"head_bottom": {"insert_depth": 7.0}}  # 6 x 6 mm insert + 1 mm
 # the STEP's own placement of the cross (Custom_Joint_Piece at (0, 67, 0), -90 deg about Y)
 M_CJP = np.array([[0, 0, -1, 0], [0, 1, 0, 67.0], [1, 0, 0, 0], [0, 0, 0, 1.0]])
 
 
-def code_sig(module_name: str) -> str:
-    """A hash of a parametric model's code: its module file, its package's other modules and
-    mech/parts' top-level modules (what it can import from mech/parts). Mesh caches key on it,
-    so an edited model rebuilds."""
-    import hashlib
-    import importlib
-
-    mod = importlib.import_module(module_name)
-    here = Path(mod.__file__).resolve()
-    root = MECH / "parts"
-    files = {here} | set(here.parent.glob("*.py")) | set(root.glob("*.py"))
-    h = hashlib.sha1()
-    for f in sorted(files):
-        h.update(f.name.encode())
-        h.update(f.read_bytes())
-    return h.hexdigest()[:16]
+from workbench.geom import code_sig  # noqa: E402  (kept importable from here: visor.py uses it)
 
 
 def remodel(name: str, M: np.ndarray, part_id: str | None = None, **params):
@@ -364,7 +359,8 @@ def build() -> Assembly:
         return p
 
     step_coupler = step_part("RX_Neck_Coupler_V1")
-    coupler, csrc, cfeat = remodel("neck_coupler", M_STEP, "neck_coupler", bore_d=PARAMS["neck_tube_bore"])
+    coupler, csrc, cfeat = remodel("neck_coupler", M_STEP, "neck_coupler", bore_d=PARAMS["neck_tube_bore"],
+                                    pin_hole="heat_set", hub_hole="heat_set", top_t=PARAMS["coupler_top_t"])
     csrc["placement"] = "step (the STEP's own coupler instance)"
     csrc["vs_step_bounds_mm"] = round(float(np.abs(coupler.bounds - step_coupler.bounds).max()), 3)
     m, n = printed_mass(coupler)
@@ -373,14 +369,8 @@ def build() -> Assembly:
              note="Slides over the neck tube; the 16 mm pattern on top takes the bottom sonic hub. "
                   "bore_d=26 makes the variant for Anderson's 26 mm neck tube."))
 
-    # neck joint member: in the coupler, its centre hole on the coupler's side holes (STEP y 15)
-    njm, nsrc, nfeat = remodel("neck_joint_member", M_STEP @ _t([0, 15, 0]), "neck_joint_member")
-    nsrc["placement"] = "inferred"
-    m, n = printed_mass(njm)
-    add(Part("neck_joint_member", "RX Neck Joint Member V1 (parametric)", "mech", "neck", njm, nsrc,
-             "PLA (printed)", True, (0, -1, 0), 90, m, n, inferred=True, features=nfeat, cad="parametric",
-             inferred_note="Not in the STEP. Placed across the coupler bore with its centre hole on the coupler's "
-                           "side holes (STEP y 15); its end holes then face the neck tube wall. Confirm."))
+    # Hunter's "neck joint member" is the same solid as the cross (custom_joint_piece: the
+    # parametric remodel of both is one model), so it is not a second part here.
 
     hub_names = sorted(range(len(by_label["1309-0016-4008"])),
                        key=lambda k: by_label["1309-0016-4008"][k][2][:, 1].mean())
@@ -419,7 +409,8 @@ def build() -> Assembly:
     cjp = step_part("Custom_Joint_Piece")
     cjsrc, cjkw = src_step("Custom_Joint_Piece", also=["Custom Joint Piece.step"]), {}
     if "custom_joint_piece" in PARAMETRIC:  # ours, on the STEP's own placement of the cross
-        cjp, cjsrc, cjfeat = remodel("custom_joint_piece", M_STEP @ M_CJP, "custom_joint_piece")
+        cjp, cjsrc, cjfeat = remodel("custom_joint_piece", M_STEP @ M_CJP, "custom_joint_piece",
+                                     pivot_hole="clearance")  # through-bolts + lock nuts (fastening rule: pivots)
         cjsrc["placement"] = "step (the STEP's own cross instance)"
         cjkw = {"features": cjfeat, "cad": "parametric"}
     m, n = printed_mass(cjp)
@@ -428,7 +419,7 @@ def build() -> Assembly:
              (0, 0, 0), 0, m, n, note="The gimbal cross: tilt axis (X) in the U-joint bearings, "
                                       "roll axis (Z) in the pillow-block bearings.", **cjkw))
 
-    plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate")
+    plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate", insert_depth=PARAMS["plate_insert_depth"])
     step_plate = step_part("Head_Mounting_Plate")
     dev = float(np.abs(plate.bounds - step_plate.bounds).max())
     psrc["placement"] = "fitted (the reference V4 STL's frame, on the head bottom's inserts)"
@@ -473,7 +464,7 @@ def build() -> Assembly:
     ]:
         src, kw = shell_src(f), {}
         if pid in PARAMETRIC:  # ours, in the STL's frame: the same fit places it
-            mesh, psrc, feats = remodel(pid, m_shell, pid)
+            mesh, psrc, feats = remodel(pid, m_shell, pid, **SHELL_PARAMS.get(pid, {}))
             src = dict(psrc, placement=src["placement"], fit=src["fit"])
             kw = {"features": feats, "cad": "parametric"}
         else:
@@ -496,6 +487,9 @@ def build() -> Assembly:
     for p in V_.fixed_parts(kit, visor_pivot):
         add(p)
     tip_head = next(p for p in parts if p.id == "h_v_1").mesh.centroid
+    shim = V_.mouth_shim_part({p.id: p for p in parts})
+    if shim is not None:
+        add(shim)
 
     asm.parts = parts
 
@@ -549,6 +543,45 @@ def build() -> Assembly:
     asm.parts = [redo.get(p.id, p) for p in asm.parts]
     asm.parts += vparts
     asm.parts.append(V_.cradle_part(asm, vgeo))
+    # the design default: a clearance channel in the shells along the kit visor's sweep (the
+    # parametric shells can take the same envelopes as `clearance_cuts`; exported for them)
+    if PARAMS["visor_channel_mm"]:
+        byid = {p.id: p for p in asm.parts}
+        key = _cache_key("visor-channel", PARAMS["visor_channel_mm"], PARAMS["visor_limits"], visor_pivot.round(3).tolist(),
+                         sorted(mesh_hash(byid[k].mesh) for k in V_.KIT_VISOR + V_.CHANNEL_SHELLS if k in byid))
+        envs = [trimesh.Trimesh(v, f, process=False) for v, f in cached(key, lambda: [
+            (np.asarray(e.vertices), np.asarray(e.faces))
+            for e in V_.visor_channel(byid, visor_pivot, PARAMS["visor_limits"], PARAMS["visor_channel_mm"])])]
+        out_dir = MECH / "out" / "hunter_head" / "clearance"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for k, e in enumerate(envs):
+            e.export(out_dir / f"visor_channel_{k + 1}.stl")  # head frame
+            es = e.copy()
+            es.apply_transform(np.linalg.inv(m_shell))
+            es.export(out_dir / f"visor_channel_{k + 1}_shell_frame.stl")  # the shell STLs' / parametric shells' frame
+        cut_note = []
+        for pid in V_.CHANNEL_SHELLS:
+            p = byid.get(pid)
+            if p is None or not envs:
+                continue
+            hit = [e for e in envs if np.all(e.bounds[0] <= p.mesh.bounds[1]) and np.all(e.bounds[1] >= p.mesh.bounds[0])]
+            if not hit:
+                continue
+            before = float(p.mesh.volume)
+            vf = cached(_cache_key("channel-cut", mesh_hash(p.mesh), sorted(mesh_hash(e) for e in hit)),
+                        lambda: (lambda r: (np.asarray(r[0].vertices), np.asarray(r[0].faces), r[1]))(
+                            V_.cut_meshes(p.mesh, hit)))
+            cut, ok = trimesh.Trimesh(vf[0], vf[1], process=False), vf[2]
+            if ok:
+                p.mesh = cut
+                p.source["clearance_cuts"] = {"visor_channel_mm": PARAMS["visor_channel_mm"],
+                                              "removed_mm3": round(before - float(cut.volume), 1),
+                                              "envelopes": [f"out/hunter_head/clearance/visor_channel_{envs.index(e) + 1}.stl"
+                                                            for e in hit]}
+                cut_note.append(f"{pid} -{before - float(cut.volume):.0f} mm3")
+        asm.notes.append(f"Visor channel ({PARAMS['visor_channel_mm']} mm round the kit visor's sweep, "
+                         f"{PARAMS['visor_limits'][0]:g}..{PARAMS['visor_limits'][1]:g} deg): {len(envs)} envelopes; "
+                         + (", ".join(cut_note) or "no shell cut"))
     asm.visor_link = vlk
     asm.visor_geo = vgeo
     asm.joints[-1].drive["gear_ratio"] = pick.get("ratio")
@@ -560,7 +593,11 @@ def build() -> Assembly:
     del asm._hw
     asm.linkages.append(vlk)
     asm.notes.append(f"Visor: the kit's (H_V_1..5) and ears on Hunter's head, Anderson's drive: "
-                     f"{asm.visor_design['passing']} of {asm.visor_design['candidates']} placements pass; picked lever "
+                     + (f"re-checked the {asm.visor_design['candidates']} placements that passed before this geometry "
+                        f"change, {asm.visor_design['passing']} still pass (WB_RESEARCH=1 for the full search); "
+                        if any(r.get("revalidated") for r in table) else
+                        f"{asm.visor_design['passing']} of {asm.visor_design['candidates']} placements pass; ")
+                     + f"picked lever "
                      f"rest {pick['alpha']} deg, horn {pick.get('phi', 0)} deg off it, rod {pick['theta']} deg, servo orientation {pick['orient']}: "
                      f"{pick['ratio']} visor deg per servo deg mid-range (it varies over the range: a 4-bar), servo travel {pick['travel']} deg, "
                      f"clearance {pick['clear']} mm.")
@@ -784,17 +821,19 @@ def clamp_leaves():
 # ------------------------------------------------------------------ steps
 
 def add_steps(asm: Assembly):
+    from assemblies.hunter_head import visor as V_
+
     F = lambda prefix: [f.id for f in asm.fasteners if f.id.startswith(prefix)]
     asm.steps = [
         Step("s01", "Heat-set the inserts", [], F("ins_"), context=["head_bottom", "mount_plate"],
              tools=["soldering iron with an M4 insert tip (~220 C for PLA)", "flat plate to seat them level"],
              notes=["Do all 14 before anything else: 6 in the head bottom's bosses, 8 in the plate's servo bosses.",
                     "Press straight and stop flush; a proud insert tilts the plate or the servo."]),
-        Step("s02", "Neck coupler and joint member", ["neck_coupler", "neck_joint_member"], F("pin_neck") + F("nut_neck"),
-             tools=["3 mm hex key", "7 mm spanner"],
-             notes=["The member crosses the coupler bore; its end holes take the screws through the neck tube wall "
-                    "when the head goes on the droid."],
-             inferred=True, inferred_note="The member is not in the STEP; its place and the M4x45 pin are read from the holes."),
+        Step("s02", "Neck coupler", ["neck_coupler"], F("ins_coupler"),
+             tools=["3 mm hex key"],
+             notes=["Print the 26 mm-bore coupler for Anderson's neck tube (Hunter's own neck takes 32).",
+                    "Heat-set an M4 insert in its side hole: the set screw that clamps the tube goes in there when "
+                    "the head goes on the droid."]),
         Step("s03", "Bottom sonic hub and the hex post", ["hub_bottom", "hex_shaft"],
              F("clamp_hub_bottom"), context=["neck_coupler"],
              tools=["3 mm hex key", "Loctite 243"],
@@ -824,7 +863,7 @@ def add_steps(asm: Assembly):
                     "Set its height so the balls sit level with the horn balls (both ~67 mm above the gimbal centre)."],
              inferred=True, inferred_note="Hub clocking and height are set by the rod geometry, not stated."),
         Step("s07", "Servos into the plate", ["servo_l", "servo_r"], F("scr_servo"), context=["mount_plate"],
-             tools=["2.5 mm hex key (M4 button heads)"],
+             tools=["2.5 mm hex key (M4 low heads)"],
              notes=["Output splines up, toward the back corners.",
                     "Cable routing: run both servo leads down the back of the plate, clear of the roll arc, and "
                     "out through the neck with a service loop - the head tilts and rolls around the post."],
@@ -900,6 +939,13 @@ def add_steps(asm: Assembly):
              inferred=True, inferred_note="The sources give alignment holes but no fastener for the shell."),
         Step("s13b", "Kit ears", ["h_le_1", "h_le_2", "h_re_1", "h_re_2"], [], context=["side_left", "side_right"],
              tools=["CA glue"], notes=["The kit's ear cups over the visor axle ends, on Hunter's side pieces."]),
+        Step("s13c", "Kit face: plate, eyes, mouth, headband",
+             [*(["mouth_shim"] if any(p.id == "mouth_shim" for p in asm.parts) else []), *V_.KIT_FACE],
+             [], context=["head_bottom", "side_left", "side_right", "head_top"],
+             tools=["CA glue"],
+             notes=["Glue the eyes and the mic into the face plate as the kit does, then the plate into the head's front.",
+                    "The mouth glues to Hunter's head bottom (our shim goes under it only if the gap is over 0.5 mm).",
+                    "Headband over the top, as the kit's goes on."]),
     ]
 
 
@@ -944,14 +990,16 @@ def add_bom(asm: Assembly):
         if p.printed:
             lines.append(BomLine(f"print-{p.id}", f"Print: {p.name}", 1, "printed", parts=[p.id],
                                  spec={"file": p.source.get("file")}, inferred=p.inferred, inferred_note=p.inferred_note))
-    names = {"shcs": "socket head cap screw", "insert": "heat-set insert (6 x 6 mm)", "lock_nut": "lock nut", "pin": "steel pin (Anderson's pin-dnp)",
-             "washer": "washer", "nut": "nut"}
+    names = {"shcs": "socket head cap screw", "shcs_low": "low-head cap screw (DIN 7984)", "bhcs": "button head screw",
+             "insert": "heat-set insert", "lock_nut": "lock nut", "pin": "steel pin", "washer": "washer", "nut": "nut"}
     for key, fl in count.items():
         s = fl[0].spec
         if s["type"] == "pin":
             size = f"{s['d_mm']:g} x {s['length_mm']:g} mm"
         else:
-            size = f"{s['thread']} x {s['length_mm']:g}" if "length_mm" in s and s["type"] != "insert" else s["thread"]
+            size = f"{s['thread']} x {s['length_mm']:g}" if "length_mm" in s else s["thread"]
+            if s["type"] == "insert" and s.get("od_mm"):
+                size += f" (OD {s['od_mm']:g})"
         lines.append(BomLine(key, f"{size} {names.get(s['type'], s['type'])}", len(fl), "fastener", s,
                              fasteners=[f.id for f in fl], inferred=any(f.inferred for f in fl),
                              inferred_note="Length or placement read from the geometry, not the BOM."
@@ -966,6 +1014,10 @@ def add_bom(asm: Assembly):
             else:
                 lines.append(BomLine(u["key"], u["note"], u["count"], "fastener", u["spec"], inferred=True))
     ins = next(b for b in lines if b.key == "insert-M4x6")
-    ins.inferred_note = (f"BOM: 14 inserts; placed here: {len(count.get('insert-M4x6', []))} "
-                         "(6 head bottom + 8 servo bosses) - matches. +4 for the visor mount (not in the BOM).")
+    where = {}
+    for f in count.get("insert-M4x6", []):
+        where[f.joins[0]] = where.get(f.joins[0], 0) + 1
+    ins.inferred_note = ("Hunter's BOM: 14 (6 head bottom + 8 servo bosses); placed here: "
+                         + ", ".join(f"{n} in {k}" for k, n in sorted(where.items()))
+                         + ". The extra ones follow the fastening rule (no screws into raw prints).")
     asm.bom = lines

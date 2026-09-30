@@ -143,8 +143,9 @@ class Hw:
                   hole_depth_mm=avail)
         return f
 
-    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None):
-        spec = {"type": "lock_nut", "thread": "M4"}
+    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None, reason="clamp"):
+        """A lock nut; `reason` is why a nut and not an insert (fastening rule): clamp | pivot | captive."""
+        spec = {"type": "lock_nut", "thread": "M4", "reason": reason}
         r = spec_part("nut", spec)
         d = unit(d)
         feats = {"thread": axis(at, d, 2.0), "face": plane(at, -d)}
@@ -330,7 +331,9 @@ def add_hardware(asm, fit, visor):
     hub_holes = sorted([c for c, r in holes_at(top_hub, 1, hub_face - 2.0, 1.5, 2.1)], key=lambda c: (c[0], c[2]))
     coupler = P["neck_coupler"].mesh
     c_top = float(coupler.bounds[1][1])
-    c_holes = holes_at(coupler, 1, c_top - 1.5, 1.4, 1.9)
+    # the coupler's four hub holes, from its parametric features (heat-set by the fastening rule)
+    cf = P["neck_coupler"].features
+    c_holes = [(np.asarray(cf[k]["p"], float), float(cf[k]["r"])) for k in sorted(cf) if k.startswith("hole_cp")]
     notes.append(f"Measured: {len(flange)} plate flange holes, {len(servo_ins)} servo insert holes, {len(pillow)} "
                  f"pillow holes, {len(b_ins)} head-bottom insert holes, {len(hub_holes)} top-hub holes, "
                  f"{len(c_holes)} coupler holes.")
@@ -375,10 +378,10 @@ def add_hardware(asm, fit, visor):
         if fl_top is None:
             fl_top = p + UP * 2.5
         hw.hole(f"servo_{side}", f"fl{i + 1}", fl_top, -UP, 2.2)
-        # button heads (a socket head's rim hits the servo case beside the flange) and M4 x 8: a 10
-        # reaches the insert's drill point in the plate (parametric-plate owner, 2026-09-30)
+        # low heads (DIN 7984: a socket head's rim hits the servo case beside the flange), M4 x 10
+        # into the plate's 8 mm insert holes (design default 2026-09-30: +2 mm so it clears the drill point)
         hw.screw(f"scr_servo_{i + 1}", fl_top, -UP, [(f"servo_{side}", f"fl{i + 1}")], (f.id, "thread", "insert", 6.0),
-                 "s07", "head", kind="bhcs", length=8, joins=[f"servo_{side}", "mount_plate", f.id])
+                 "s07", "head", kind="shcs_low", length=10, joins=[f"servo_{side}", "mount_plate", f.id])
 
     # --- s05 pillow blocks: down through the plate's 4 mm bridge into the tapped posts ----------
     for i, (c, r) in enumerate(sorted(pillow, key=lambda h: (h[0][0], h[0][2]))):
@@ -401,6 +404,7 @@ def add_hardware(asm, fit, visor):
     uj = P["ujoint"].mesh
     for i, (c, r) in enumerate(sorted(c_holes, key=lambda h: (h[0][0], h[0][2]))):
         hw.hole("neck_coupler", f"cp{i + 1}", [c[0], c_top, c[2]], -UP, r)
+        ins = hw.insert(f"ins_coupler_cp{i + 1}", "neck_coupler", f"cp{i + 1}", "s02")
         hw.hole("hub_bottom", f"cp{i + 1}", [c[0], hb_top, c[2]], -UP, 2.2)
         top = entry_point(uj, np.array([c[0], hb_top + 1.0, c[2]]), -UP, 2.0, probe=40.0)
         clamps = [("hub_bottom", f"cp{i + 1}")]
@@ -409,10 +413,10 @@ def add_hardware(asm, fit, visor):
             hw.hole("ujoint", f"base{i + 1}", top, -UP, 2.2)
             clamps = [("ujoint", f"base{i + 1}")] + clamps
             head = top
-        hw.screw(f"scr_hub_coupler_{i + 1}", head, -UP, clamps, ("neck_coupler", f"hole_cp{i + 1}", "plastic", 12.0),
-                 "s04", "neck", inferred=True, joins=[c[0] for c in clamps] + ["neck_coupler"],
-                 note="Through the U-joint's pattern mount and the thru-hole hub into the coupler's 3.3 mm "
-                      "(M4 tap) holes, self-threading.")
+        hw.screw(f"scr_hub_coupler_{i + 1}", head, -UP, clamps, (ins.id, "thread", "insert", None),
+                 "s04", "neck", inferred=True, joins=[c[0] for c in clamps] + ["neck_coupler", ins.id],
+                 note="Through the U-joint's pattern mount and the thru-hole hub into the coupler's heat-set "
+                      "inserts (fastening rule: no self-tapping into prints).")
 
     # --- servo horns: 1906 hub on the spline, 1916 arm on the hub --------------------------------
     head_side = [p for p in asm.parts if p.link == "head" and not p.linkage]
@@ -518,7 +522,10 @@ def add_hardware(asm, fit, visor):
     _pivots(hw, P)
     # --- hub clamps from the STEP, now library screws on the STEP's own axes ----------------------
     clamp_screws(hw, P, getattr(asm, "clamp_leaves", []))
-    neck_member_pin(hw, P)
+    # no neck joint member (the same solid as the cross): the coupler's side hole takes an M4
+    # insert, and on the droid an M4 set screw in it clamps Anderson's neck tube
+    if "hole_side_f" in P["neck_coupler"].features:
+        hw.insert("ins_coupler_side", "neck_coupler", "side_f", "s02")
     # --- joins the sources make without a fastener (verified contacts) ----------------------------
     for pid in ("hex_shaft", "ujoint"):
         P[pid].features["post_axis"] = axis([0, 0, 0], UP, 4.0)
@@ -579,6 +586,9 @@ def _rod_parts(lk, s):
     return parts[0], parts[1], rod
 
 
+CROSS_WALL = 4.0  # the cross's walls (parts/head/joint_ring.py wall)
+
+
 def _pivots(hw, P):
     """Tilt pivots through the U-joint bearings into the cross; roll pivots through the pillow
     bearings into the cross ends. The bearings and cross are STEP-placed: these mates are verified."""
@@ -594,19 +604,22 @@ def _pivots(hw, P):
                 note="STEP placement, verified")
         cj_face = entry_point(cj, c + d * 4.0, d, 1.6, probe=6.0)
         cj_face = cj_face if cj_face is not None else np.array([sx * 10.0, c[1], c[2]])
-        hw.hole("custom_joint_piece", f"tilt_{s}", cj_face, d, 1.6)
+        hw.hole("custom_joint_piece", f"tilt_{s}", cj_face, d, 2.25)
         wsh_at = cj_face - d * WASHER_T
         hw.fast.append(Fastener(f"wash_tilt_{s}", {"type": "washer", "thread": "M4"}, "washer-M4",
                                 ["ujoint", "custom_joint_piece"], "neck", "s04b", frame_on_axis(wsh_at, d),
                                 mesh=spec_part("washer", {"type": "washer", "thread": "M4"}).mesh, cad="parametric",
                                 features={"bore": axis(wsh_at, d, 2.15), "bottom": plane(cj_face, d)}))
         hw.mate("concentric", (f"wash_tilt_{s}", "bore"), ("custom_joint_piece", f"hole_tilt_{s}"))
-        post_r = 4.62 + 1.0  # the hex post's corners + clearance: the cross is open at its centre
-        avail = float(abs(cj_face[0]) - post_r)
-        hw.screw(f"pin_tilt_{s}", outer, d, [],
-                 ("custom_joint_piece", f"hole_tilt_{s}", "plastic", avail), "s04b", "cross", inferred=True,
-                 joins=[f"uj_bearing_{s}", "custom_joint_piece"],
-                 note="Pivot screw through the flanged bearing into the cross; washer spacer (BOM).")
+        # fastening rule: a pivot carrying shear is a through-bolt with a lock nut (the cross's
+        # pivot holes are clearance, `pivot_hole`), the nut on the wall's inner face
+        nut_at = cj_face + d * CROSS_WALL
+        nid = hw.nut(f"nut_tilt_{s}", nut_at, d, "custom_joint_piece", "s04b", "cross", reason="pivot")
+        hw.screw(f"pin_tilt_{s}", outer, d, [], (nid, "thread", "nut", 8.0), "s04b", "cross", inferred=True,
+                 joins=[f"uj_bearing_{s}", "custom_joint_piece", nid],
+                 note="Pivot bolt through the flanged bearing and the cross wall, lock nut inside (shear joint); "
+                      "washer spacer (BOM).")
+        hw.mate("concentric", (f"pin_tilt_{s}", "shank"), ("custom_joint_piece", f"hole_tilt_{s}"))
         hw.mate("concentric", (f"pin_tilt_{s}", "shank"), (f"uj_bearing_{s}", "bore"), solved=False)
     for s, sz in (("f", 1), ("b", -1)):
         b = P[f"pillow_bearing_{s}"].mesh
@@ -618,10 +631,13 @@ def _pivots(hw, P):
         hw.mate("press", (f"pillow_bearing_{s}", "outer"), (f"pillow_{s}", "seat"), solved=False)
         cj_face = entry_point(cj, c + d * 4.0, d, 1.6, probe=6.0)
         cj_face = cj_face if cj_face is not None else np.array([c[0], c[1], sz * 25.0])
-        hw.hole("custom_joint_piece", f"roll_{s}", cj_face, d, 1.6)
-        hw.screw(f"pin_roll_{s}", outer, d, [], ("custom_joint_piece", f"hole_roll_{s}", "plastic", 10.0), "s05", "head",
-                 inferred=True, joins=[f"pillow_bearing_{s}", "custom_joint_piece"],
-                 note="Pivot screw through the pillow-block bearing (6 mm bore) into the cross end.")
+        hw.hole("custom_joint_piece", f"roll_{s}", cj_face, d, 2.25)
+        nid = hw.nut(f"nut_roll_{s}", cj_face + d * CROSS_WALL, d, "custom_joint_piece", "s05", "cross", reason="pivot")
+        hw.screw(f"pin_roll_{s}", outer, d, [], (nid, "thread", "nut", 8.0), "s05", "head",
+                 inferred=True, joins=[f"pillow_bearing_{s}", "custom_joint_piece", nid],
+                 note="Pivot bolt through the pillow-block bearing (6 mm bore) and the cross end, lock nut inside "
+                      "(shear joint).")
+        hw.mate("concentric", (f"pin_roll_{s}", "shank"), ("custom_joint_piece", f"hole_roll_{s}"))
         hw.mate("concentric", (f"pin_roll_{s}", "shank"), (f"pillow_bearing_{s}", "bore"), solved=False)
 
 

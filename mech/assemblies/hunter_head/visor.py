@@ -128,6 +128,117 @@ def fixed_parts(kit_parts, V):
     return out
 
 
+CHANNEL_MM = 1.5          # design default: the shells clear the kit visor's sweep by this much
+CHANNEL_SHELLS = ("head_top", "side_left", "side_right")
+
+
+def visor_channel(parts_by_id, V, limits, clear=CHANNEL_MM, step_deg=0.5, cell=0.6):
+    """The clearance channel the shells need along the kit visor's path: the visor parts swept
+    about the visor axis over `limits`, grown by `clear`, kept only where a shell comes within
+    `clear` + 2 mm of the sweep (so it is the channel, not the whole sweep). Returns a list of
+    watertight trimesh envelopes (one per region), in the head frame. Cutting them out of the
+    shells leaves >= ~`clear` everywhere along the path (the 0.5 deg step scallops < 0.15 mm)."""
+    import manifold3d as mf
+    from scipy.spatial import cKDTree
+
+    visor = [p for p in parts_by_id.values() if p.id in KIT_VISOR]
+    shells = [parts_by_id[k] for k in CHANNEL_SHELLS if k in parts_by_id]
+    near_r = clear + 2.0
+    # the sweep, sampled
+    base = np.vstack([trimesh.sample.sample_surface(p.mesh, int(p.mesh.area / 0.16), seed=1)[0] for p in visor])
+    angles = np.arange(limits[0], limits[1] + 1e-9, step_deg)
+    # only where a shell is near: shell samples against the swept cloud (coarse first)
+    shell_pts = np.vstack([trimesh.sample.sample_surface(p.mesh, int(p.mesh.area / 1.0), seed=2)[0] for p in shells])
+    coarse = np.vstack([_rot_pts(base[::20], V, a) for a in angles[::4]])
+    d, _ = cKDTree(coarse).query(shell_pts, distance_upper_bound=near_r + 8)
+    hot = shell_pts[d < near_r + 6]
+    if not len(hot):
+        return []
+    # regions: cluster the hot shell points (single linkage, 10 mm)
+    from scipy.cluster.hierarchy import fcluster, linkage
+
+    lab = fcluster(linkage(hot[::max(1, len(hot) // 4000)], "single"), 10.0, "distance") if len(hot) > 1 else np.ones(1, int)
+    sub = hot[::max(1, len(hot) // 4000)]
+    out = []
+    for lb in np.unique(lab):
+        pts = sub[lab == lb]
+        lo, hi = pts.min(0) - (near_r + 2), pts.max(0) + (near_r + 2)
+        sw = np.vstack([_rot_pts(base, V, a) for a in angles])
+        sw = sw[np.all((sw > lo - clear) & (sw < hi + clear), axis=1)]
+        if not len(sw):
+            continue
+        tree = cKDTree(sw)
+
+        def sdf(x, y, z, tree=tree):
+            dd, _ = tree.query((x, y, z), distance_upper_bound=clear + 1.0)
+            return clear - min(dd, clear + 1.0)
+
+        man = mf.Manifold.level_set(sdf, [*lo, *hi], cell)
+        m = man.to_mesh()
+        env = trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts), process=True)
+        if len(env.faces):
+            out.append(env)
+    return out
+
+
+def cut_meshes(mesh, cuts):
+    """mesh minus every cut (manifold booleans); the mesh itself if the boolean fails."""
+    import manifold3d as mf
+
+    def to_mf(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                   tri_verts=np.asarray(m.faces, np.uint32)))
+
+    try:
+        res = to_mf(mesh)
+        for c in cuts:
+            res = res - to_mf(c)
+        m = res.to_mesh()
+        return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts), process=True), True
+    except Exception:
+        return mesh, False
+
+
+def _rot_pts(pts, V, deg):
+    R = trimesh.transformations.rotation_matrix(math.radians(deg), [1.0, 0, 0], V)
+    return pts @ R[:3, :3].T + R[:3, 3]
+
+
+SHIM_MIN_GAP = 0.5  # the glue-contact tolerance: a larger gap under the kit mouth gets our shim
+
+
+def mouth_shim_part(parts_by_id):
+    """Our shim under the kit mouth (parts/head/mouth_shim.py), at the closest approach of H_M_1
+    and Hunter's head bottom, as thick as the gap there."""
+    from scipy.spatial import cKDTree
+
+    from parts.head import mouth_shim
+    from workbench.geom import parametric_mesh, sample
+    from workbench.mates import moved
+
+    A, B = parts_by_id["h_m_1"].mesh, parts_by_id["head_bottom"].mesh
+    pa, pb = sample(A, 0.5, 40000), sample(B, 0.5, 40000)
+    d, i = cKDTree(pb).query(pa)
+    k = int(np.argmin(d))
+    qa, qb = pa[k], pb[i[k]]
+    gap = float(d[k])
+    if gap <= SHIM_MIN_GAP:  # the mouth already sits on the head bottom (glue): no shim
+        return None
+    n = _unit(qa - qb)  # head bottom -> mouth
+    t = round(max(gap, 0.3), 2)
+    mesh, feats, prm = parametric_mesh("parts.head.mouth_shim", {"t": t})
+    # pad frame: +Y along n, centred on the head bottom's point
+    ref = np.array([1.0, 0, 0]) if abs(n[0]) < 0.9 else np.array([0, 0, 1.0])
+    ex = _unit(np.cross(ref, n))
+    ez = np.cross(ex, n)
+    M = _T(_R(ex, n, ez), qb)
+    return Part("mouth_shim", f"Mouth shim {t:g} mm (ours)", "mech", "head", _xf(mesh, M),
+                {"kind": "parametric", "model": "parts/head/mouth_shim.py", "params": prm, "placement": "mates",
+                 "fit": f"the gap between H_M_1 and the head bottom at their closest: {gap:.2f} mm"},
+                "PLA (printed)", True, tuple(n), 20, 0.1, "estimate", cad="parametric",
+                features={k2: moved(v, M) for k2, v in feats.items()})
+
+
 def arm_holes(mesh, V, rh=1.95):
     """The kit arm's four holes round the visor axis ((y, z) centres, head frame), measured in the
     middle of the arm's thickness: the empty patch of about a Ø3.9 hole nearest each of four sites
@@ -219,15 +330,25 @@ def _geometry(V, alpha, theta, orient, phi=0):
     return dict(xr=xr, lev=lev, L=L, T=Tt, h=h, C=C, rod=rod, m_servo=m_servo, x_spline=x_spline)
 
 
+_STL = {}
+
+
+def _anderson_mesh(name):
+    """Anderson's STL, loaded once per process (the drive search places it thousands of times)."""
+    if name not in _STL:
+        _STL[name] = geom.stl(anderson(name))
+    return _STL[name]
+
+
 def _meshes(g, V):
     from parts.library import spec_part
 
     servo = _xf(spec_part("servo", {"case": "standard", "model": "SERVO_35KG_270"}).mesh, g["m_servo"])
-    horn = _xf(geom.stl(anderson("visor-servo-horn")),
+    horn = _xf(_anderson_mesh("visor-servo-horn"),
                _T(_R(-g["h"], np.cross(X, -g["h"]), X), [g["x_spline"], g["C"][1], g["C"][2]]))
-    rod = _xf(geom.stl(anderson("visor-push-rod")),
+    rod = _xf(_anderson_mesh("visor-push-rod"),
               _T(_R(-g["rod"], X, np.cross(-g["rod"], X)), [g["xr"] + ROD_T / 2, g["L"][1], g["L"][2]]))
-    tab = _xf(geom.stl(anderson("visor-rod-tab")),
+    tab = _xf(_anderson_mesh("visor-rod-tab"),
               _T(_R(np.cross(X, g["lev"]), X, g["lev"]), np.array([TAB_X[1], V[1], V[2]]) + TAB_AXIS * g["lev"]))
     return servo, horn, rod, tab
 
@@ -272,7 +393,7 @@ def design_drive(asm, V, visor_limits):
     key = _cache_key("visor-drive-v7", V.round(3).tolist(), visor_limits, np.round(swept, 1).tobytes(),
                      sorted(mesh_hash(p.mesh) for p in head_parts + visor_parts + gimbal))
 
-    def search():
+    def search(candidates=None):
         # the bracket screws' heads (placed later, but they are there)
         heads = []
         for q in head_parts:
@@ -286,8 +407,8 @@ def design_drive(asm, V, visor_limits):
         scene = Scene({p.id: p.mesh for p in head_parts + visor_parts + gimbal + heads})
         tree_sw = cKDTree(swept) if len(swept) else None
         rows = []
-        for phi, alpha, theta, orient in itertools.product((0, -30, 30, -60, 60), range(-180, 180, 15),
-                                                           range(0, 360, 15), range(4)):
+        for phi, alpha, theta, orient in candidates or itertools.product((0, -30, 30, -60, 60), range(-180, 180, 15),
+                                                                         range(0, 360, 15), range(4)):
             g = _geometry(V, alpha, theta, orient, phi)
             servo, horn, rod, tab = _meshes(g, V)
             mine = Scene({"servo": servo, "horn": horn, "rod": rod, "cradle": _cradle_proxy(asm, g)})
@@ -353,8 +474,35 @@ def design_drive(asm, V, visor_limits):
                 asm.linkages = saved
         return rows
 
-    rows = cached(key, search)
+    # incremental: when the geometry changed, re-check the placements that passed last time first
+    # (seconds); the full search (~10 min) runs only when none of them passes any more, or with
+    # WB_RESEARCH=1. The table then says which it was.
+    import os
+
+    from workbench.geom import CACHE
+
+    last_f = CACHE / f"visor-drive-last-{_cache_key(V.round(3).tolist(), visor_limits)}.json"
+    hit = (CACHE / f"{key}.pkl").exists()
+    rows = None
+    if not hit and last_f.exists() and not os.environ.get("WB_RESEARCH"):
+        import json
+
+        prev = json.loads(last_f.read_text())
+        cand = [(r["phi"], r["alpha"], r["theta"], r["orient"]) for r in prev]
+        rows = search(cand)
+        if any(r.get("ok") for r in rows):
+            for r in rows:
+                r["revalidated"] = True
+            cached(key, lambda: rows)
+        else:
+            rows = None
+    if rows is None:
+        rows = cached(key, search)
     ok = [r for r in rows if r.get("ok")]
+    if ok:
+        import json
+
+        last_f.write_text(json.dumps([{k: r[k] for k in ("phi", "alpha", "theta", "orient")} for r in ok]))
     pick = max(ok, key=lambda r: (r["clear"] >= 3.0, round(r["lever"], 2), r["clear"])) if ok else None
     return pick, rows
 
@@ -522,6 +670,17 @@ def visor_mates(hw, P, ctx):
 
     held = [q for q in ("head_top", "side_left", "side_right", "head_bottom", "mount_plate") if q in P]
     todo = [q for q in KIT_FACE if q in P]
+    if "mouth_shim" in P:  # the mouth sits on our shim, the shim on the head bottom
+        hw.mate("glue", ("mouth_shim", "face_bottom"), ("head_bottom", "shim_seat"), solved=False,
+                note="the shim glued where the mouth comes closest", gap_mm=0.0)
+        P["head_bottom"].features["shim_seat"] = dict(P["mouth_shim"].features["face_bottom"],
+                                                      n=[-x for x in P["mouth_shim"].features["face_bottom"]["n"]])
+        hw.mate("glue", ("h_m_1", "shim_top"), ("mouth_shim", "face_top"), solved=False,
+                note="the kit mouth glued on the shim", gap_mm=0.0)
+        P["h_m_1"].features["shim_top"] = dict(P["mouth_shim"].features["face_top"],
+                                               n=[-x for x in P["mouth_shim"].features["face_top"]["n"]])
+        held.append("h_m_1")
+        todo.remove("h_m_1")
     pts = {q: sample(P[q].mesh, 1.5, 6000) for q in held + todo}
     while todo:
         best = None
