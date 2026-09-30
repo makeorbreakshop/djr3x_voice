@@ -9,7 +9,7 @@
 
 import './build.css';
 import type { AsmNode, Workbench } from './workbench';
-import { flatten, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MStep } from './manifest';
+import { flatten, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MStep } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -34,21 +34,32 @@ function save(s: Stored) {
   }
 }
 
-const CAD_TITLE: Record<string, string> = {
-  mesh: "the source's mesh (a reference STL we have not remodelled)",
-  source: "the source's mesh",
-  vendor: "the vendor's CAD (B-rep)",
-  parametric: 'our parametric model (build123d), to the source or the published spec',
-  placeholder: 'a sized box: no model yet',
+/** Where a part's geometry comes from, as one glyph: our parametric model, the vendor's CAD, or a mesh. */
+type Src = 'parametric' | 'vendor' | 'mesh' | 'placeholder';
+const srcOf = (c?: string): Src => (c === 'parametric' || c === 'vendor' || c === 'placeholder' ? c : 'mesh');
+const SRC_LABEL: Record<Src, string> = { parametric: 'Parametric', vendor: 'Vendor CAD', mesh: 'Mesh', placeholder: 'Placeholder' };
+const SRC_TITLE: Record<Src, string> = {
+  parametric: 'Parametric: our build123d model, to the source or the published spec',
+  vendor: "Vendor CAD: the manufacturer's B-rep",
+  mesh: 'Mesh: the source STL, not yet remodelled',
+  placeholder: 'Placeholder: a sized box, no model yet',
 };
-const CAD_LABEL: Record<string, string> = {
-  mesh: 'mesh (reference)', source: 'mesh (reference)', vendor: 'vendor CAD', parametric: 'parametric (ours)', placeholder: 'placeholder',
-};
-const cadBadge = (c?: string) => `<i class="cad ${esc(c ?? 'mesh')}" title="${esc(CAD_TITLE[c ?? 'mesh'])}">${esc(CAD_LABEL[c ?? 'mesh'] ?? c)}</i>`;
+const srcDot = (c?: string) => `<i class="src ${srcOf(c)}" role="img" aria-label="${SRC_LABEL[srcOf(c)]}" title="${esc(SRC_TITLE[srcOf(c)])}"></i>`;
+const notReal = (c?: string) => srcOf(c) === 'mesh' || srcOf(c) === 'placeholder';
 
-const CLASS_LABEL: Record<string, string> = {
-  shell: 'shell', mech: 'printed', servo: 'servo', hardware: 'hardware', bearing: 'bearing', fastener: 'fastener',
-};
+/** The name without a parenthetical the glyph already says, or a long aside (full name on hover). */
+const shortName = (n: string) => n.replace(/\s*\((parametric|ours)\)\s*$/i, '');
+const bare = (n: string) => n.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+
+type Filter = 'all' | 'printed' | 'hardware' | 'servos' | 'notreal' | 'inferred';
+const FILTERS: [Filter, string, (p: MPart) => boolean][] = [
+  ['all', 'All', () => true],
+  ['printed', 'Printed', (p) => p.printed === true || p.class === 'shell' || p.class === 'mech'],
+  ['hardware', 'Hardware', (p) => p.class === 'hardware' || p.class === 'bearing'],
+  ['servos', 'Servos', (p) => p.class === 'servo'],
+  ['notreal', 'Not real', (p) => notReal(p.cad)],
+  ['inferred', 'Inferred', (p) => !!p.inferred],
+];
 
 /**
  * Build's markup, added to the page's two panels before they are wired (main.ts calls this
@@ -101,39 +112,38 @@ export function injectBuildDom() {
   const sys = tabs.querySelector<HTMLElement>('[data-tab="system"]');
   if (sys) sys.dataset.modes = `${sys.dataset.modes ?? ''} build`.trim();
   tabs.after(html(`<div id="build-head" class="build-head" data-build>
-    <div class="row"><select id="bp-assembly" aria-label="Assembly"></select>
-      <button id="bp-reload" class="icon" aria-label="Reload the built assembly" title="Reload (after a workbench build)">
+    <div class="bh-row"><select id="bp-assembly" aria-label="Assembly"></select>
+      <button id="bp-reload" class="icon" aria-label="Reload the built assembly">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5"/></svg></button></div>
-    <nav id="bp-crumbs" class="crumbs" aria-label="Assembly path"></nav>
-    <div id="bp-tree" class="asm-tree" hidden></div>
-    <p id="bp-status" class="hint" role="status"></p>
+    <select id="bp-focus" aria-label="Sub-assembly" hidden></select>
+    <p id="bp-status" class="bh-status" role="status" hidden></p>
   </div>`));
   const bodies = html(`
-    <div class="tab-body" data-body="parts" role="tabpanel" hidden>
-      <section class="first"><div id="bp-detail" class="detail"></div></section>
-      <section><div id="bp-variants"></div>
-        <h2>Parts <button id="bp-show-all" class="link" data-bp="show-all" hidden>show all</button></h2>
-        <p id="bp-cad-sum" class="cad-sum"></p>
-        <div class="row"><button id="bp-notreal" data-bp="notreal" aria-pressed="false" title="Show only what is still a reference mesh or a placeholder: not yet vendor CAD or our parametric model">Not yet real</button></div>
-        <ul id="bp-parts" class="part-tree"></ul></section>
+    <div class="tab-body bp-parts-body" data-body="parts" role="tabpanel" hidden>
+      <div id="bp-variants"></div>
+      <div class="bp-filters" id="bp-filters" role="group" aria-label="Show parts"></div>
+      <div class="bp-legend">${(['parametric', 'vendor', 'mesh'] as Src[]).map((k) => `<span title="${esc(SRC_TITLE[k])}">${srcDot(k)}${SRC_LABEL[k]}</span>`).join('')}
+        <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button></div>
+      <ul id="bp-parts" class="part-tree" aria-label="Parts by link"></ul>
+      <div id="bp-detail" class="bp-drawer" role="region" aria-label="Selected part" hidden></div>
     </div>
     <div class="tab-body" data-body="joints" role="tabpanel" hidden>
-      <section class="first home-row"><button class="primary home-btn" data-bp="home" title="Every joint to 0 (the rest pose). Moves the model only, never the robot">Home</button></section>
-      <section><div id="bp-joints"></div></section>
+      <div class="bp-bar"><span id="bp-joint-n" class="bp-count"></span>
+        <button class="bp-small" data-bp="home" title="Every joint to 0, the rest pose. Moves the model only, never the robot">Home</button></div>
+      <div id="bp-joints"></div>
     </div>
     <div class="tab-body" data-body="steps" role="tabpanel" hidden>
-      <section class="first"><div id="bp-step"></div></section>
-      <section><h2>All steps</h2><ol id="bp-steplist" class="step-list"></ol></section>
+      <div id="bp-step"></div>
+      <details class="bp-disc" id="bp-steps-all"><summary>All steps</summary><ol id="bp-steplist" class="step-list"></ol></details>
     </div>
     <div class="tab-body" data-body="checks" role="tabpanel" hidden>
-      <section class="first"><h2>Checks <small id="bp-check-sum"></small></h2>
-        <p class="hint">Click one to pose the model where it happens.</p>
-        <ul id="bp-checks" class="checks"></ul></section>
+      <div class="bp-bar"><span id="bp-check-sum" class="bp-count"></span></div>
+      <ul id="bp-checks" class="checks"></ul>
     </div>
     <div class="tab-body" data-body="bom" role="tabpanel" hidden>
-      <section class="first"><h2>Bill of materials <small id="bp-bom-sum"></small></h2>
-        <div class="table-wrap"><table class="bom"><thead><tr><th scope="col" class="num">qty</th><th scope="col">item</th><th scope="col">files</th></tr></thead>
-        <tbody id="bp-bom"></tbody></table></div></section>
+      <div class="bp-bar"><span id="bp-bom-sum" class="bp-count"></span></div>
+      <div class="table-wrap"><table class="bom"><thead><tr><th scope="col" class="num">Qty</th><th scope="col">Item</th><th scope="col"><span class="sr">Files</span></th></tr></thead>
+        <tbody id="bp-bom"></tbody></table></div>
     </div>`);
   document.getElementById('build-head')!.after(bodies);
 }
@@ -144,8 +154,8 @@ export function mountBuildPanel(wb: Workbench) {
   let openAsm = st.assembly ?? '';
   let loadedOnce = false;
   let jointsDirty = true;
-  /** Parts filter: only what is not yet exact (parametric or placeholder). */
-  let notReal = false;
+  /** Parts tab filter (the list, and the view isolates what it lists). */
+  let filter: Filter = 'all';
 
   // ------------------------------------------------------------------ scene panel (view only)
   const explode = $<HTMLInputElement>('bv-explode');
@@ -188,6 +198,12 @@ export function mountBuildPanel(wb: Workbench) {
     if (e) void wb.load(MECH_BASE + e.manifest);
   };
   $('bp-reload').onclick = () => void refreshIndex(true);
+  const focusSel = $<HTMLSelectElement>('bp-focus');
+  focusSel.onchange = () => {
+    const n = wb.nodeOf(focusSel.value);
+    if (n) wb.setFocus(n);
+    focusSel.blur();
+  };
 
   async function refreshIndex(reload = false) {
     index = await loadIndex();
@@ -217,14 +233,23 @@ export function mountBuildPanel(wb: Workbench) {
     const node = (d.asm && wb.nodeOf(d.asm)) || wb.focus;
     switch (d.bp) {
       case 'select': wb.select(wb.selected === d.id ? null : d.id!); break;
+      case 'deselect': wb.select(null); break;
+      case 'filter': {
+        filter = d.f as Filter;
+        const a = wb.focus?.asm;
+        const test = FILTERS.find(([f]) => f === filter)![2];
+        wb.isolate(filter === 'all' || !a ? null : a.parts.filter(test).map((p) => p.id));
+        break;
+      }
       case 'eye': wb.toggleHidden(d.id!); break;
       case 'isolate': wb.isolate(wb.isolated?.size === 1 && wb.isolated.has(d.id!) ? null : [d.id!]); break;
       case 'isolate-link': {
         const ids = node?.asm.parts.filter((p) => p.link === d.link).map((p) => p.id) ?? [];
-        wb.isolate(ids);
+        const same = wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
+        wb.isolate(same ? null : ids);
         break;
       }
-      case 'show-all': wb.hidden.clear(); wb.isolate(null); break;
+      case 'show-all': filter = 'all'; wb.hidden.clear(); wb.isolate(null); break;
       case 'focus': if (node) wb.setFocus(node); break;
       case 'home': wb.home(); jointsDirty = true; break;
       case 'sweep': if (node) wb.startSweep(node, d.joint!); break;
@@ -238,24 +263,37 @@ export function mountBuildPanel(wb: Workbench) {
         break;
       }
       case 'variant': wb.setVariant(d.group!, d.id!); break;
-      case 'notreal': {
-        notReal = !notReal;
-        const a = wb.focus?.asm;
-        const unreal = (c?: string) => c === 'mesh' || c === 'source' || c === 'placeholder';
-        const ids = notReal && a ? [
-          ...a.parts.filter((p) => unreal(p.cad)).map((p) => p.id),
-          ...(a.fasteners ?? []).filter((f) => unreal(f.cad)).map((f) => f.id),
-        ] : null;
-        wb.isolate(ids);
-        break;
-      }
     }
+  });
+  document.getElementById('panel')!.addEventListener('change', (e) => {
+    const el = e.target as HTMLSelectElement;
+    if (el.dataset.bp !== 'variant-sel') return;
+    wb.setVariant(el.dataset.group!, el.value);
+    el.blur();
   });
   document.getElementById('panel')!.addEventListener('input', (e) => {
     const el = e.target as HTMLInputElement;
     if (el.dataset.bp !== 'joint') return;
     const node = wb.nodeOf(el.dataset.asm!);
     if (node) wb.setJoint(node, el.dataset.joint!, Number(el.value));
+  });
+
+  // Parts: Up/Down move between rows, Escape closes the part drawer.
+  $('bp-parts').addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement;
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const rows = [...$('bp-parts').querySelectorAll<HTMLElement>('button.nm, button.grp-btn')];
+    const i = rows.indexOf(t);
+    if (i < 0) return;
+    rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
+    e.preventDefault();
+  });
+  document.querySelector('[data-body="parts"]')!.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Escape' && wb.selected) {
+      const id = wb.selected;
+      wb.select(null);
+      $('bp-parts').querySelector<HTMLElement>(`button.nm[data-id="${CSS.escape(id)}"]`)?.focus();
+    }
   });
 
   // Steps: arrow keys while the Steps tab is open.
@@ -304,68 +342,80 @@ export function mountBuildPanel(wb: Workbench) {
   function renderHead() {
     const m = wb.manifest;
     const status = $('bp-status');
-    if (wb.loading) status.textContent = 'Loading…';
-    else if (wb.error) status.textContent = wb.error;
-    else if (!index.length) status.innerHTML = 'Nothing built yet: <code>cd mech &amp;&amp; .venv/bin/python -m workbench build hunter_head</code>';
-    else status.textContent = m ? `Built ${new Date(m.generated_at).toLocaleString()}` : '';
+    let msg = '';
+    if (wb.loading) msg = 'Loading…';
+    else if (wb.error) msg = esc(wb.error);
+    else if (!index.length) msg = 'Nothing built yet: <code>cd mech &amp;&amp; .venv/bin/python -m workbench build hunter_head</code>';
+    status.innerHTML = msg;
+    status.hidden = !msg;
     status.classList.toggle('err', !!wb.error);
-    const crumbs = $('bp-crumbs');
-    if (!wb.top || !wb.focus) {
-      crumbs.innerHTML = '';
-      return;
+    $('bp-reload').title = m ? `Reload · built ${new Date(m.generated_at).toLocaleString()}` : 'Reload';
+    // Sub-assemblies: one picker, indented, only when there are any.
+    const all = wb.top ? flatten(wb.top.asm) : [];
+    focusSel.hidden = all.length < 2;
+    if (all.length > 1) {
+      const sig = all.map((x) => x.node.id).join();
+      if (focusSel.dataset.sig !== sig) {
+        focusSel.dataset.sig = sig;
+        focusSel.innerHTML = all.map(({ node, path }, i) =>
+          `<option value="${esc(node.id)}">${i ? `${' '.repeat(path.length - 2)}${esc(bare(node.name))}` : 'Whole assembly'}</option>`).join('');
+      }
+      focusSel.value = wb.focus?.asm.id ?? all[0].node.id;
     }
-    const path: AsmNode[] = [];
-    for (let n: AsmNode | null = wb.focus; n; n = n.parent) path.unshift(n);
-    crumbs.innerHTML = path.map((n, i) => i === path.length - 1
-      ? `<span aria-current="location">${esc(n.asm.name)}</span>`
-      : `<button class="link" data-bp="focus" data-asm="${esc(n.asm.id)}">${esc(n.asm.name)}</button>`).join('<span class="sep">›</span>');
-    const kids = flatten(wb.top.asm).slice(1);
-    $('bp-tree').hidden = !kids.length;
-    $('bp-tree').innerHTML = kids.length
-      ? `<span class="hint">Sub-assemblies</span>` + kids.map(({ node, path: p }) =>
-        `<button class="chip${wb.focus?.asm.id === node.id ? ' on' : ''}" data-bp="focus" data-asm="${esc(node.id)}" style="margin-left:${(p.length - 2) * 10}px">${esc(node.name)}</button>`).join('')
-      : '';
   }
 
   // ---------------------------------------------------------------- Parts
+  const groupName = (a: MAssembly, l: MLink) => {
+    const j = l.joint ? a.joints.find((x) => x.id === l.joint) : undefined;
+    const name = bare(l.name);
+    if (!j) return { name, how: 'fixed', j };
+    const word = j.id.replace(/^head_/, '').replace(/_/g, ' ');
+    return { name, how: name.toLowerCase().startsWith(word) ? (j.type === 'prismatic' ? 'slide' : 'hinge') : word, j };
+  };
+
   function renderParts() {
     const node = wb.focus;
     const body = $('bp-parts');
     if (!node) {
       body.innerHTML = '';
-      $('bp-detail').innerHTML = '';
+      $('bp-filters').innerHTML = '';
+      renderDetail();
       return;
     }
     const a = node.asm;
     const groups = new Map<string, string[]>();
     for (const v of a.variants ?? []) groups.set(v.group, [...(groups.get(v.group) ?? []), v.id]);
-    $('bp-variants').innerHTML = [...groups].map(([g, ids]) => `<div class="kv">${esc(g)}</div><div class="row seg wrap" role="group" aria-label="${esc(g)}">${
-      ids.map((id) => `<button data-bp="variant" data-group="${esc(g)}" data-id="${esc(id)}" aria-pressed="${wb.variants[g] === id}">${esc(a.variants!.find((v) => v.id === id)!.name)}</button>`).join('')}</div>`).join('');
+    $('bp-variants').innerHTML = [...groups].map(([g, ids]) =>
+      variantSelect(g, ids.map((id) => ({ id, name: a.variants!.find((v) => v.id === id)!.name })), wb.variants[g])).join('');
     $('bp-variants').hidden = !groups.size;
-    const unreal = (c?: string) => c === 'mesh' || c === 'source' || c === 'placeholder';
-    const byLink = a.links.map((l) => ({ l, parts: a.parts.filter((p) => p.link === l.id && (!notReal || unreal(p.cad))) }));
-    const fasts = a.fasteners ?? [];
-    const fc: Record<string, number> = {};
-    for (const f of fasts) fc[f.cad ?? 'parametric'] = (fc[f.cad ?? 'parametric'] ?? 0) + 1;
-    const pc: Record<string, number> = {};
-    for (const p of a.parts) pc[p.cad ?? 'source'] = (pc[p.cad ?? 'source'] ?? 0) + 1;
-    $('bp-cad-sum').innerHTML = `Parts ${Object.entries(pc).map(([k, v]) => `${v} ${cadBadge(k)}`).join(' ')}
-      · fasteners ${Object.entries(fc).map(([k, v]) => `${v} ${cadBadge(k)}`).join(' ')}`;
-    $('bp-notreal').setAttribute('aria-pressed', String(notReal));
-    body.innerHTML = byLink.filter((g) => g.parts.length).map(({ l, parts }) => {
-      const j = l.joint ? a.joints.find((x) => x.id === l.joint) : undefined;
-      return `<li class="grp"><span>${esc(l.name)}</span>${j ? `<small>${esc(j.id)}</small>` : '<small>fixed</small>'}
-        <button class="link" data-bp="isolate-link" data-link="${esc(l.id)}" data-asm="${esc(a.id)}">isolate</button></li>` +
+
+    // Filter chips with counts (a filter with nothing in it stands aside).
+    $('bp-filters').innerHTML = FILTERS.map(([f, label, test]) => {
+      const n = a.parts.filter(test).length;
+      if (!n && f !== 'all' && filter !== f) return '';
+      return `<button class="chip" data-bp="filter" data-f="${f}" aria-pressed="${filter === f}">${label} <span>${n}</span></button>`;
+    }).join('');
+    const test = FILTERS.find(([f]) => f === filter)![2];
+
+    const byLink = a.links.map((l) => ({ l, parts: a.parts.filter((p) => p.link === l.id && test(p)) })).filter((g) => g.parts.length);
+    body.innerHTML = byLink.map(({ l, parts }) => {
+      const g = groupName(a, l);
+      const ids = a.parts.filter((p) => p.link === l.id).map((p) => p.id);
+      const iso = !!wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
+      const tip = `${l.name}${g.j ? ` · ${g.j.name}` : ''}. Click to show only this link`;
+      return `<li class="grp"><button class="grp-btn" data-bp="isolate-link" data-link="${esc(l.id)}" data-asm="${esc(a.id)}" aria-pressed="${iso}" title="${esc(tip)}">${esc(g.name)} <span>· ${esc(g.how)}</span></button><span class="grp-n">${parts.length}</span></li>` +
         parts.map((p) => {
           const hidden = wb.hidden.has(p.id);
-          const iso = wb.isolated?.size === 1 && wb.isolated.has(p.id);
-          return `<li class="part${wb.selected === p.id ? ' sel' : ''}${hidden ? ' off' : ''}">
-            <button class="eye" data-bp="eye" data-id="${esc(p.id)}" aria-pressed="${!hidden}" aria-label="${hidden ? 'Show' : 'Hide'} ${esc(p.name)}" title="${hidden ? 'Show' : 'Hide'}">${hidden ? EYE_OFF : EYE}</button>
-            <button class="nm" data-bp="select" data-id="${esc(p.id)}" title="${esc(p.name)}">${esc(p.name)}</button>
-            ${cadBadge(p.cad)}${p.inferred ? '<i class="inf" title="Placement or part inferred">inferred</i>' : ''}
-            <button class="link iso" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${iso}">${iso ? 'all' : 'solo'}</button></li>`;
+          const solo = wb.isolated?.size === 1 && wb.isolated.has(p.id);
+          return `<li class="part${wb.selected === p.id ? ' sel' : ''}${hidden ? ' off' : ''}${solo ? ' solo' : ''}">
+            ${srcDot(p.cad)}
+            <button class="nm" data-bp="select" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-current="${wb.selected === p.id}"><span>${esc(shortName(p.name))}</span>${p.inferred ? `<sup class="inf" title="Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}">?</sup>` : ''}</button>
+            <span class="acts">
+              <button class="ic" data-bp="eye" data-id="${esc(p.id)}" aria-label="${hidden ? 'Show' : 'Hide'} ${esc(p.name)}" title="${hidden ? 'Show' : 'Hide'}">${hidden ? EYE_OFF : EYE}</button>
+              <button class="ic solo" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${solo}" aria-label="${solo ? 'Show everything' : `Show only ${esc(p.name)}`}" title="${solo ? 'Show everything' : 'Solo'}">${SOLO}</button>
+            </span></li>`;
         }).join('');
-    }).join('');
+    }).join('') || '<li class="empty">No parts match.</li>';
     $('bp-show-all').hidden = !wb.isolated && !wb.hidden.size;
     renderDetail();
   }
@@ -373,40 +423,47 @@ export function mountBuildPanel(wb: Workbench) {
   function renderDetail() {
     const el = $('bp-detail');
     const id = wb.selected;
+    el.hidden = !id;
     if (!id) {
-      el.innerHTML = '<p class="hint">Click a part in the view or the list.</p>';
+      el.innerHTML = '';
       return;
     }
+    const head = (name: string, glyph: string) => `<div class="dr-head">${glyph}<b title="${esc(name)}">${esc(name)}</b>
+      <button class="icon" data-bp="deselect" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></div>`;
+    const row = (k: string, v: string, tip = '') => (v ? `<dt>${k}</dt><dd${tip ? ` title="${esc(tip)}"` : ''}>${v}</dd>` : '');
     const info = wb.partInfo(id);
     if (!info) {
       const f = wb.fastenerInfo(id);
       if (!f) {
-        el.innerHTML = '';
+        el.hidden = true;
         return;
       }
-      el.innerHTML = `<h3>${esc(fastLabel(f.spec))}</h3><dl class="facts">
-        <dt>Joins</dt><dd>${f.joins.map((p) => esc(wb.partInfo(p)?.part.name ?? p)).join(' + ')}</dd>
-        <dt>Geometry</dt><dd>${cadBadge(f.cad ?? 'parametric')}${f.catalog ? ` <small>${esc(f.catalog)}</small>` : ''}</dd>
-        <dt>Step</dt><dd>${esc(stepTitle(wb.focus?.asm, f.step))}</dd>
-        ${f.spec.mcmaster ? `<dt>McMaster</dt><dd>${esc(f.spec.mcmaster)}</dd>` : ''}
-        ${f.inferred ? `<dt>Inferred</dt><dd class="inf">${esc(f.inferred_note || 'yes')}</dd>` : ''}</dl>`;
+      el.innerHTML = head(fastLabel(f.spec), srcDot(f.cad ?? 'parametric')) + `<dl class="facts">
+        ${row('Joins', f.joins.map((p) => esc(shortName(wb.partInfo(p)?.part.name ?? p))).join(' + '))}
+        ${row('Step', esc(stepTitle(wb.focus?.asm, f.step)))}
+        ${row('Catalog', esc(f.catalog ?? ''))}</dl>
+        ${f.inferred ? `<p class="dr-inf">Inferred: ${esc(f.inferred_note || 'not confirmed')}</p>` : ''}`;
       return;
     }
     const { part: p, joint: j, node } = info;
     const src = p.source ?? {};
     const exp = p.export ?? {};
-    el.innerHTML = `<h3>${esc(p.name)}</h3><dl class="facts">
-      <dt>Class</dt><dd>${esc(CLASS_LABEL[p.class])}${p.material ? ` · ${esc(p.material)}` : ''}</dd>
-      <dt>Geometry</dt><dd>${cadBadge(p.cad)} ${esc(CAD_TITLE[p.cad ?? 'mesh'])}${p.catalog ? ` <small>${esc(p.catalog)}</small>` : ''}</dd>
-      ${regression(p.source)}
-      <dt>Source</dt><dd>${esc(src.file ?? src.kind ?? '-')}${src.entity ? ` <small>(${esc(src.entity)})</small>` : ''}</dd>
-      <dt>Placed</dt><dd>${esc(src.placement ?? '-')}${src.fit ? ` <small>${esc(src.fit)}</small>` : ''}</dd>
-      <dt>Moves with</dt><dd>${j ? `${esc(j.name)} ${profileTag(j.profile_joint)}` : 'fixed (ground)'}${p.linkage ? ` · posed by ${esc(p.linkage)}` : ''}</dd>
-      ${p.mass_g ? `<dt>Mass</dt><dd>${num(p.mass_g)} g <small>${esc(p.mass_note ?? '')}</small></dd>` : ''}
-      ${p.triangles ? `<dt>Mesh</dt><dd>${p.triangles.display.toLocaleString()} shown / ${p.triangles.source.toLocaleString()} source triangles</dd>` : ''}
-      ${exp.stl || exp['3mf'] ? `<dt>Export</dt><dd>${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''} ${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}</dd>` : ''}
-      ${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}
-      ${p.inferred ? `<dt>Inferred</dt><dd class="inf">${esc(p.inferred_note || 'yes')}</dd>` : ''}</dl>`;
+    const mates = ((node.asm as MAssembly & { mates?: { a: { part: string }; b: { part: string } }[] }).mates ?? [])
+      .filter((m) => m.a?.part === p.id || m.b?.part === p.id).length;
+    const params = src.params as Record<string, unknown> | undefined;
+    const reg = src.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
+    const file = (src.file as string | undefined) ?? (src.reference as string | undefined) ?? (src.model as string | undefined) ?? '';
+    el.innerHTML = head(shortName(p.name), srcDot(p.cad)) + `<dl class="facts">
+      ${row('Source', `${SRC_LABEL[srcOf(p.cad)]}${file ? ` · <span class="mono">${esc(file)}</span>` : ''}`, SRC_TITLE[srcOf(p.cad)] + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
+      ${row('Material', esc(p.material ?? ''))}
+      ${row('Joint', j ? `${esc(bare(j.name))}${j.profile_joint ? ` <span class="mono dim">${esc(j.profile_joint)}</span>` : ''}` : 'fixed', j?.name)}
+      ${row('Mates', mates ? String(mates) : '')}
+      ${params ? row('Params', Object.entries(params).map(([k, v]) => `<span class="mono">${esc(k)} ${esc(v)}</span>`).join(' · ')) : ''}
+      ${reg ? row('Fit', `p95 ${num(reg.p95_mm ?? 0, 2)} mm`, `vs ${String(src.reference ?? 'reference')}: mean ${num(reg.mean_mm ?? 0, 2)} mm, volume ${num((reg.volume_ratio ?? 1) * 100, 1)}%`) : ''}
+      ${p.mass_g ? row('Mass', `${num(p.mass_g)} g`, p.mass_note ?? '') : ''}
+      ${exp.stl || exp['3mf'] ? row('Export', `${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''}${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}`) : ''}</dl>
+      ${p.inferred ? `<p class="dr-inf">Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}</p>` : ''}
+      ${p.note ? `<details class="bp-disc"><summary>Note</summary><p>${esc(p.note)}</p></details>` : ''}`;
   }
 
   // ---------------------------------------------------------------- Joints
@@ -420,24 +477,25 @@ export function mountBuildPanel(wb: Workbench) {
     }
     const nodes: AsmNode[] = [];
     wb.forEachNode((n) => nodes.push(n), node);
+    const total = nodes.reduce((k, n) => k + n.asm.joints.length, 0);
+    $('bp-joint-n').textContent = total ? `${total} joint${total === 1 ? '' : 's'}` : '';
     const sig = nodes.map((n) => n.asm.id + n.asm.joints.map((j) => j.id).join()).join('|') + wb.sweeping;
     if (sig !== jointSig || jointsDirty) {
       jointSig = sig;
       jointsDirty = false;
-      body.innerHTML = nodes.flatMap((n) => n.asm.joints.map((j) => {
+      body.innerHTML = nodes.flatMap((n) => n.asm.joints.map((j: MJoint) => {
         const v = n.pose[j.id] ?? 0;
         const pl = j.profile_limits;
-        return `<div class="joint" data-joint-card="${esc(n.asm.id)}:${esc(j.id)}">
-          <div class="jhead"><b>${esc(j.name)}</b>${profileTag(j.profile_joint)}</div>
-          <div class="jrow"><input type="range" data-bp="joint" data-asm="${esc(n.asm.id)}" data-joint="${esc(j.id)}"
+        const tip = `${j.name}\n${num(j.limits.min)}…${signed(j.limits.max)} ${j.unit}${pl ? ` (profile ${num(pl.min)}…${signed(pl.max)})` : ''} · ${driveLabel(j.drive)}`;
+        const k = `${esc(n.asm.id)}:${esc(j.id)}`;
+        return `<div class="joint">
+          <div class="jhead"><b title="${esc(tip)}">${esc(bare(j.name))}</b>${profileTag(j.profile_joint)}${j.inferred ? `<sup class="inf" title="Inferred: ${esc(j.inferred_note ?? '')}">?</sup>` : ''}
+            <output data-out="${k}">${signed(v)}</output>
+            <button class="ic" data-bp="sweep" data-asm="${esc(n.asm.id)}" data-joint="${esc(j.id)}" aria-label="Sweep ${esc(j.name)}" title="Sweep through the range; the first contact lights up" aria-pressed="${wb.sweeping === j.id}">${SWEEP}</button></div>
+          <input type="range" data-bp="joint" data-asm="${esc(n.asm.id)}" data-joint="${esc(j.id)}"
             min="${j.limits.min}" max="${j.limits.max}" step="0.5" value="${v}" aria-label="${esc(j.name)}">
-            <output data-out="${esc(n.asm.id)}:${esc(j.id)}">${signed(v)}</output>
-            <button data-bp="sweep" data-asm="${esc(n.asm.id)}" data-joint="${esc(j.id)}" title="Animate through the range; the first contact lights up">${wb.sweeping === j.id ? 'Sweeping…' : 'Sweep'}</button></div>
-          <div class="jmeta">${num(j.limits.min)}…${signed(j.limits.max)} ${esc(j.unit)}${pl ? ` · profile ${num(pl.min)}…${signed(pl.max)}` : ''}
-            · ${esc(driveLabel(j.drive))}</div>
-          <div class="jlive" data-jlive="${esc(n.asm.id)}:${esc(j.id)}"></div>
-          ${j.inferred ? `<div class="jmeta inf">${esc(j.inferred_note)}</div>` : ''}</div>`;
-      })).join('') || '<p class="hint">No joints in this assembly.</p>';
+          <div class="jlive" data-jlive="${k}"></div></div>`;
+      })).join('') || '<p class="empty">No joints in this assembly.</p>';
     }
     // live values: slider positions, servo angles, contact
     for (const n of nodes) {
@@ -447,7 +505,7 @@ export function mountBuildPanel(wb: Workbench) {
         const inp = body.querySelector<HTMLInputElement>(`input[data-asm="${CSS.escape(n.asm.id)}"][data-joint="${CSS.escape(j.id)}"]`);
         if (inp && document.activeElement !== inp) inp.value = String(v);
         const out = body.querySelector(`[data-out="${CSS.escape(k)}"]`);
-        if (out) out.textContent = signed(v);
+        if (out) out.textContent = `${signed(v)}°`;
         const live = body.querySelector<HTMLElement>(`[data-jlive="${CSS.escape(k)}"]`);
         if (!live) continue;
         const bits: string[] = [];
@@ -457,9 +515,10 @@ export function mountBuildPanel(wb: Workbench) {
           bits.push(r ? `${esc(lk?.servo ?? lid)} ${signed(r.servoDeg)}°` : `<span class="bad">${esc(lk?.servo ?? lid)} out of reach</span>`);
         }
         const chk = n.asm.checks?.find((c) => c.id === `interference_${j.id}`);
-        if (chk?.value != null) bits.push(`first contact ${signed(chk.value)}°`);
-        if (wb.sweeping === j.id && wb.contact) bits.push(`<span class="${wb.contact.status === 'fail' ? 'bad' : 'meh'}">touching: ${wb.contact.parts.map(esc).join(' × ')}</span>`);
+        if (chk?.value != null) bits.push(`contact ${signed(chk.value)}°`);
+        if (wb.sweeping === j.id && wb.contact) bits.push(`<span class="${wb.contact.status === 'fail' ? 'bad' : 'meh'}">touching ${wb.contact.parts.map(esc).join(' × ')}</span>`);
         live.innerHTML = bits.join(' · ');
+        live.hidden = !bits.length;
       }
     }
   }
@@ -470,8 +529,9 @@ export function mountBuildPanel(wb: Workbench) {
     const steps = a?.steps ?? [];
     const body = $('bp-step');
     const list = $('bp-steplist');
+    $('bp-steps-all').hidden = !steps.length;
     if (!steps.length) {
-      body.innerHTML = '<p class="hint">No steps for this assembly.</p>';
+      body.innerHTML = '<p class="empty">No steps for this assembly.</p>';
       list.innerHTML = '';
       return;
     }
@@ -488,23 +548,23 @@ export function mountBuildPanel(wb: Workbench) {
       f.joins.forEach((p) => c.joins.add(p));
       callouts.set(f.key, c);
     }
-    const name = (id: string) => wb.partInfo(id)?.part.name ?? id;
+    const name = (id: string) => shortName(wb.partInfo(id)?.part.name ?? id);
     body.innerHTML = `<div class="step-nav">
-        <button data-bp="prev" ${i === 0 ? 'disabled' : ''} aria-label="Previous step">‹ Prev</button>
-        <span class="step-n">Step ${s.n ?? i + 1} of ${steps.length}</span>
-        <button data-bp="next" ${i >= steps.length - 1 ? 'disabled' : ''} aria-label="Next step">Next ›</button></div>
-      <h3 class="step-title">${esc(s.title)}${s.guide_page ? ` <small>Guide p. ${s.guide_page}</small>` : ''}</h3>
-      ${s.inferred ? `<p class="inf-line">Inferred: ${esc(s.inferred_note || 'confirm this step')}</p>` : ''}
+        <button class="ic" data-bp="prev" ${i === 0 ? 'disabled' : ''} aria-label="Previous step" title="Previous (←)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
+        <span class="step-n">${s.n ?? i + 1} / ${steps.length}</span>
+        <button class="ic" data-bp="next" ${i >= steps.length - 1 ? 'disabled' : ''} aria-label="Next step" title="Next (→)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
+        <h3 class="step-title">${esc(s.title)}</h3>${s.guide_page ? `<span class="step-page" title="Build guide page">p. ${s.guide_page}</span>` : ''}</div>
+      ${s.inferred ? `<p class="dr-inf">Inferred: ${esc(s.inferred_note || 'confirm this step')}</p>` : ''}
       ${s.joint ? `<p class="zero-line">Sets the zero of <b>${esc(s.joint)}</b>${profileTag(a?.joints.find((j) => j.id === s.joint)?.profile_joint ?? null)}</p>` : ''}
       ${s.parts?.length ? `<h4>Parts</h4><ul class="plain">${s.parts.map((p) => `<li><button class="link" data-bp="select" data-id="${esc(p)}">${esc(name(p))}</button></li>`).join('')}</ul>` : ''}
       ${callouts.size ? `<h4>Fasteners</h4><ul class="callouts">${[...callouts.values()].map((c) =>
-        `<li><b>${c.n} ×</b><span>${esc(c.label)}${c.inferred ? ' <i class="inf">inferred</i>' : ''}<small>${[...c.joins].map((p) => esc(name(p))).join(' · ')}</small></span></li>`).join('')}</ul>` : ''}
-      ${s.unplaced?.length ? `<h4>Also (not shown in 3D)</h4><ul class="callouts">${s.unplaced.map((u) =>
-        `<li><b>${u.count ? `${u.count} ×` : '–'}</b><span>${esc(u.spec ? fastLabel(u.spec) : u.key)}<small>${esc(u.note ?? '')}</small></span></li>`).join('')}</ul>` : ''}
+        `<li><b>${c.n}×</b><span title="${esc([...c.joins].map(name).join(' · '))}">${esc(c.label)}${c.inferred ? '<sup class="inf" title="Inferred">?</sup>' : ''}</span></li>`).join('')}</ul>` : ''}
+      ${s.unplaced?.length ? `<h4>Also, not drawn</h4><ul class="callouts">${s.unplaced.map((u) =>
+        `<li><b>${u.count ? `${u.count}×` : '–'}</b><span title="${esc(u.note ?? '')}">${esc(u.spec ? fastLabel(u.spec) : u.key)}</span></li>`).join('')}</ul>` : ''}
       ${s.tools?.length ? `<h4>Tools</h4><ul class="plain">${s.tools.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
       ${s.notes?.length ? `<h4>Notes</h4><ul class="notes">${s.notes.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}`;
     list.innerHTML = steps.map((x: MStep, k) => `<li><button class="${k === i ? 'on' : ''}" data-bp="step" data-i="${k}" aria-current="${k === i ? 'step' : 'false'}">
-      <span>${x.n ?? k + 1}</span>${esc(x.title)}${x.inferred ? ' <i class="inf" title="Contains inferred details">?</i>' : ''}</button></li>`).join('');
+      <span>${x.n ?? k + 1}</span>${esc(x.title)}${x.inferred ? '<sup class="inf" title="Contains inferred details">?</sup>' : ''}</button></li>`).join('');
   }
 
   // ---------------------------------------------------------------- Checks
@@ -513,18 +573,26 @@ export function mountBuildPanel(wb: Workbench) {
     const checks = a?.checks ?? [];
     const counts = { pass: 0, warn: 0, fail: 0, explained: 0 };
     checks.forEach((c) => counts[c.status]++);
-    $('bp-check-sum').textContent = checks.length
-      ? `${counts.fail} fail · ${counts.explained} explained · ${counts.warn} warn · ${counts.pass} pass` : '';
-    const row = (c: MCheck) => `<li class="${c.status}${wb.check?.id === c.id ? ' on' : ''}">
-      <button data-bp="check" data-id="${esc(c.id)}" data-asm="${esc(a!.id)}" aria-pressed="${wb.check?.id === c.id}">
-        <span class="badge ${c.status}">${c.status}</span><b>${esc(c.title)}${c.seconds != null ? ` <small class="secs">${num(c.seconds, 2)} s</small>` : ''}</b><span class="sum">${esc(c.summary)}</span></button>
-      ${c.assumptions?.length ? `<details><summary>Assumptions</summary><ul>${c.assumptions.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</li>`;
+    $('bp-check-sum').innerHTML = checks.length
+      ? (['fail', 'explained', 'warn', 'pass'] as const).filter((k) => counts[k]).map((k) => `<span class="st ${k}">${counts[k]} ${k}</span>`).join('') : '';
+    const row = (c: MCheck) => {
+      const b = brief(c);
+      const on = wb.check?.id === c.id;
+      const more = b.items.length > 1 || c.assumptions?.length;
+      return `<li class="chk ${c.status}${on ? ' on' : ''}">
+      <button data-bp="check" data-id="${esc(c.id)}" data-asm="${esc(a!.id)}" aria-pressed="${on}" title="${on ? 'Back to the rest pose' : 'Pose the model where this happens'}">
+        <span class="st ${c.status}" role="img" aria-label="${c.status}" title="${c.status}">${STATUS_GLYPH[c.status]}</span><b title="${esc(c.title)}">${esc(c.title)}</b>
+        ${b.cause ? `<span class="l1">${esc(b.cause)}</span>` : ''}${b.fix ? `<span class="l2">→ ${esc(b.fix)}</span>` : ''}</button>
+      ${more ? `<details class="bp-disc"><summary${c.seconds != null ? ` title="Ran in ${num(c.seconds, 2)} s"` : ''}>Details</summary>
+        ${b.items.length > 1 ? `<ul>${b.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${c.assumptions?.length ? `<p class="dim">Assumes: ${c.assumptions.map(esc).join('; ')}</p>` : ''}</details>` : ''}</li>`;
+    };
     const order = { fail: 0, explained: 1, warn: 2, pass: 3 };
     const tests = checks.filter((c) => c.kind === 'test').sort((x, y) => order[x.status] - order[y.status]);
     const eng = checks.filter((c) => c.kind !== 'test');
     $('bp-checks').innerHTML = (tests.length ? `<li class="grp">Assembly tests</li>${tests.map(row).join('')}` : '')
       + (eng.length ? `<li class="grp">Engineering checks</li>${eng.map(row).join('')}` : '')
-      || '<li class="hint">No checks in this manifest (build without --no-checks).</li>';
+      || '<li class="empty">No checks in this build. Build without <code>--no-checks</code>.</li>';
     const tab = document.querySelector<HTMLElement>('[data-tab="checks"]');
     if (tab) tab.dataset.status = counts.fail ? 'fail' : counts.warn ? 'warn' : 'pass';
   }
@@ -539,12 +607,13 @@ export function mountBuildPanel(wb: Workbench) {
       const base = i!.node.asm.base ?? '/';
       return [e.stl ? `<a href="${esc(joinUrl(base, e.stl))}" download>STL</a>` : '', e['3mf'] ? `<a href="${esc(joinUrl(base, e['3mf']))}" download>3MF</a>` : ''].filter(Boolean).join(' ');
     }).join(' ');
-    $('bp-bom').innerHTML = cats.map((cat) => `<tr class="grp"><th colspan="3">${esc(cat)}</th></tr>` + lines.filter((b) => b.category === cat).map((b) => `<tr>
+    const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+    $('bp-bom').innerHTML = cats.map((cat) => `<tr class="grp"><th colspan="3" scope="rowgroup">${esc(cap(cat))} <span>${lines.filter((b) => b.category === cat).length}</span></th></tr>` + lines.filter((b) => b.category === cat).map((b) => `<tr>
       <td class="num">${num(b.qty, 0)}</td>
-      <td>${b.source ? `<a href="${esc(b.source)}" target="_blank" rel="noopener">${esc(b.item)}</a>` : esc(b.item)}${b.inferred ? ` <i class="inf" title="${esc(b.inferred_note ?? '')}">inferred</i>` : ''}</td>
+      <td>${b.source ? `<a href="${esc(b.source)}" target="_blank" rel="noopener">${esc(b.item)}</a>` : esc(b.item)}${b.inferred ? `<sup class="inf" title="Inferred: ${esc(b.inferred_note ?? '')}">?</sup>` : ''}</td>
       <td class="exp">${cat === 'printed' ? exportsFor(b.parts) : ''}</td></tr>`).join('')).join('');
     const printed = lines.filter((b) => b.category === 'printed').length;
-    $('bp-bom-sum').textContent = lines.length ? `${lines.length} lines · ${printed} printed parts` : '';
+    $('bp-bom-sum').textContent = lines.length ? `${lines.length} lines · ${printed} printed` : '';
   }
 
   return { refreshIndex };
@@ -553,19 +622,39 @@ export function mountBuildPanel(wb: Workbench) {
 // ------------------------------------------------------------------ helpers
 
 const EYE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+const STATUS_GLYPH: Record<string, string> = { fail: '✕', warn: '!', explained: 'i', pass: '✓' };
+const SOLO = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>';
+const SWEEP = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11a5.5 5.5 0 0 1 10 0"/><path d="m13 11-.3-2.6M13 11l-2.4-.9"/></svg>';
+
+/**
+ * A check's summary as two short lines: the cause and the fix ("explained: X -> fix: Y"), or
+ * the first finding with a count of the rest. Long coordinates are rounded and dropped from the
+ * line (the Details list keeps every finding).
+ */
+export function brief(c: { summary: string }): { cause: string; fix: string; items: string[] } {
+  const round = (t: string) => t.replace(/-?\d+\.\d{3,}/g, (m) => String(Math.round(Number(m) * 10) / 10));
+  const s = round(c.summary.replace(/^\s*explained:\s*/i, ''));
+  const arrow = s.split(/\s*->\s*/);
+  if (arrow.length > 1) return { cause: arrow[0], fix: arrow.slice(1).join(' -> ').replace(/^fix:\s*/i, ''), items: [s] };
+  const items = s.split(/;\s+/).filter(Boolean);
+  const first = (items[0] ?? '').replace(/\s+at \[[^\]]*\]/g, '');
+  return { cause: items.length > 1 ? `${first} (+${items.length - 1} more)` : first, fix: '', items };
+}
+
 const EYE_OFF = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2l12 12M6.5 4a6.5 6.5 0 0 1 8 4 9 9 0 0 1-1.6 2.2M9.8 12.3A6.4 6.4 0 0 1 1.5 8a9 9 0 0 1 2.3-2.8"/></svg>';
 
 function profileTag(p: string | null | undefined) {
   return p
-    ? ` <span class="ptag" title="This joint is ${esc(p)} in the robot profile (Bench, Studio, Show)">= ${esc(p)}</span>`
+    ? ` <span class="ptag" title="This joint is ${esc(p)} in the robot profile (Bench, Studio, Show)">${esc(p)}</span>`
     : ' <span class="ptag none" title="The robot profile has no such joint">not in profile</span>';
 }
 
-/** A parametric remodel's fit to its reference mesh, from the manifest. */
-function regression(src?: { [k: string]: unknown }) {
-  const r = src?.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
-  if (!r) return '';
-  return `<dt>vs reference</dt><dd>${esc(String(src?.reference ?? ''))}: mean ${num(r.mean_mm ?? 0, 2)} mm, 95% within ${num(r.p95_mm ?? 0, 2)} mm, volume ${num((r.volume_ratio ?? 1) * 100, 1)}%</dd>`;
+/** One variant group as a labelled select: short option names (full on hover). */
+function variantSelect(group: string, opts: { id: string; name: string }[], picked: string | undefined) {
+  const label = group.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  const cur = opts.find((o) => o.id === picked);
+  return `<label class="bp-var" title="${esc(cur?.name ?? label)}"><span>${esc(label)}</span><select data-bp="variant-sel" data-group="${esc(group)}">${
+    opts.map((o) => `<option value="${esc(o.id)}"${o.id === picked ? ' selected' : ''}>${esc(bare(o.name))}</option>`).join('')}</select></label>`;
 }
 
 function driveLabel(d?: { kind?: string; servos?: string[]; gear_ratio?: number | null }) {

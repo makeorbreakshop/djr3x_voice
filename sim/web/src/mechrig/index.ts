@@ -105,12 +105,15 @@ export class MechRig {
       const note = sec.querySelector<HTMLElement>('.model-note')!;
       const v = this.view;
       note.classList.toggle('err', v.status === 'error');
-      note.textContent = this.mode === 'build' ? 'Build shows the workbench assembly.'
-        : v.status === 'loading' ? 'Loading the mech assembly (mech/out/r3x_droid)…'
-          : v.status === 'error' ? `Mechanical model unavailable: ${v.error}. It needs the dev server and a built mech/out/r3x_droid.`
-            : v.status === 'ready' && this.model !== 'visual'
-              ? `${v.stats.parts} parts, ${v.stats.fasteners} fasteners in ${v.stats.drawCalls} draw calls (${(v.stats.triangles / 1e6).toFixed(1)} M tris); rods solved per frame.${v.unreachable.length ? ` Out of reach: ${v.unreachable.join(', ')}.` : ''}`
-              : 'The performer drives either model; Mechanical is the CAD assembly, joints and linkages from mech/out.';
+      // Only what needs attention is shown (loading, an error, a rod out of reach); the model's
+      // size is a tooltip (draw calls and triangles live in Frame stats).
+      const mechOn = v.status === 'ready' && this.model !== 'visual';
+      note.textContent = v.status === 'loading' ? 'Loading mech/out/r3x_droid…'
+        : v.status === 'error' ? `Mechanical model unavailable: ${v.error}. Build mech/out/r3x_droid and use the dev server.`
+          : mechOn && v.unreachable.length ? `Out of reach: ${v.unreachable.join(', ')}` : '';
+      note.hidden = !note.textContent;
+      sec.title = mechOn ? `${v.stats.parts} parts, ${v.stats.fasteners} fasteners; rods solved per frame`
+        : 'The performer drives either model. Mechanical is the CAD assembly from mech/out.';
     }
     this.meter.visible = this.mode === 'bench' || this.mode === 'studio' || (this.mode === 'build' && this.jog.owns);
     this.meter.el.classList.toggle('overlay', this.mode === 'studio');
