@@ -158,18 +158,39 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
-if port_busy "$PANEL_PORT"; then
-  say "panel already running on $PANEL_URL - reusing it"
-else
-  npm --prefix "$WEB" run dev -- --port "$PANEL_PORT" --strictPort >"$ROOT/logs/panel.log" 2>&1 &
-  PANEL_PID=$!
-  for _ in $(seq 1 60); do
-    port_busy "$PANEL_PORT" && break
-    kill -0 "$PANEL_PID" 2>/dev/null || die "panel failed to start - see logs/panel.log"
-    sleep 0.25
+# Start fresh: a panel left on the port (another terminal, a test, a crashed launcher) is
+# replaced, so the page is always served by this checkout and paired with this runtime.
+panel_pids() {
+  local pid
+  for pid in $(lsof -nP -t -iTCP:"$PANEL_PORT" -sTCP:LISTEN 2>/dev/null); do
+    case "$(ps -p "$pid" -o command= 2>/dev/null)" in *vite*) echo "$pid" ;; esac
   done
-  port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
+}
+if [ -n "$(panel_pids)" ]; then
+  say "replacing the panel already on :$PANEL_PORT"
+  for pid in $(panel_pids); do pkill -P "$pid" 2>/dev/null || true; kill "$pid" 2>/dev/null || true; done
+  for _ in $(seq 1 20); do [ -z "$(panel_pids)" ] && break; sleep 0.25; done
+  for pid in $(panel_pids); do kill -KILL "$pid" 2>/dev/null || true; done
 fi
+port_busy "$PANEL_PORT" && die "port $PANEL_PORT is taken by something that is not the panel: $(lsof -nP -iTCP:"$PANEL_PORT" -sTCP:LISTEN | tail -n +2)"
+# Leftovers that would fight the fresh runtime for the mic, camera or ports: a CantinaOS
+# (unless that is what we're starting) and a camera capture orphaned by a crashed runtime.
+if [ "$LEGACY" != 1 ]; then
+  for pid in $(pgrep -f "python.* -m cantina_os.main" 2>/dev/null); do
+    say "stopping a CantinaOS still running (pid $pid)"; kill -INT "$pid" 2>/dev/null || true
+  done
+fi
+for pid in $(pgrep -f "ffmpeg.*avfoundation" 2>/dev/null); do
+  [ "$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')" = 1 ] && { say "stopping an orphaned camera capture (pid $pid)"; kill "$pid" 2>/dev/null || true; }
+done
+npm --prefix "$WEB" run dev -- --port "$PANEL_PORT" --strictPort >"$ROOT/logs/panel.log" 2>&1 &
+PANEL_PID=$!
+for _ in $(seq 1 60); do
+  port_busy "$PANEL_PORT" && break
+  kill -0 "$PANEL_PID" 2>/dev/null || die "panel failed to start - see logs/panel.log"
+  sleep 0.25
+done
+port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
 # The backend's websockets need a token and an allowed Origin. One local token for both
 # backends (~/.config/dj-r3x/tap_token, 0600, as r3x-runtime and cantina_os/tap/auth.py make
 # it). The panel gets it in the URL fragment (never sent to a server) and keeps it.
