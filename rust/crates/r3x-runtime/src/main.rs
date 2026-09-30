@@ -1,4 +1,4 @@
-//! `r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
+//! `r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--no-pad] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]`
 //!
 //! Standalone (the default): the whole robot in this process - voice, the Rust brain, the
 //! Rust music engine, vision (fail-open), performer and drivers - with no CantinaOS.
@@ -20,7 +20,10 @@
 //! `R3X_CANTINA_DIR` (one-time memory import), `R3X_MUSIC` (= `--music`; with `--bridge` run
 //! CantinaOS with `R3X_EXTERNAL_MUSIC=1`), `MUSIC_DIR`, `R3X_SFX_DIR`, `R3X_CLAP_DIR`,
 //! `R3X_BEAT_CACHE_DIR`, `R3X_FIXTURES=replay` + `R3X_FIXTURE_DIR` (no paid calls: Claude,
-//! Jev, TTS and the recorded picks replay; STT is scripted).
+//! Jev, TTS and the recorded picks replay; STT is scripted), `R3X_PAD` (`0` = `--no-pad`).
+//!
+//! A DualShock 3 on USB drives the puppeteer unless `--no-pad` or `--headless` (plug it in,
+//! press PS; mapping in `r3x-performer-core` `show::puppeteer`).
 
 use std::sync::Arc;
 
@@ -30,7 +33,7 @@ use r3x_contracts::RobotProfile;
 use r3x_gateway::tokens;
 use r3x_runtime::{bridge::BridgeConfig, RuntimeConfig};
 
-const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
+const USAGE: &str = "usage: r3x-runtime [--standalone | --bridge] [--headless] [--public] [--bind ADDR] [--audio device|null] [--no-voice] [--no-vision] [--voice] [--mouse] [--leds r3x|cantina] [--brain cantina|rust] [--music cantina|rust] [--vision] [--no-pad] [--show-dir DIR] [--tap-url URL] [--profile PATH] [--session-log DIR]";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     let (mut voice, mut vision) = (on("R3X_VOICE"), on("R3X_VISION"));
     let mut music: Option<r3x_runtime::music::MusicMode> = env("R3X_MUSIC").map(|v| v.parse()).transpose().map_err(anyhow::Error::msg)?;
     let mut mouse = false;
+    let mut pad = on("R3X_PAD").unwrap_or(true);
     let (mut headless, mut public) = (false, false);
     // Who drives the face/chest boards: r3x (default; run CantinaOS with R3X_EXTERNAL_BODY=1)
     // or CantinaOS (`--leds cantina` / R3X_LEDS=cantina).
@@ -75,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
                 o => anyhow::bail!("--audio {o}: expected device or null"),
             },
             "--mouse" => mouse = true,
+            "--no-pad" => pad = false,
             "--leds" => leds = val()? != "cantina",
             "--show-dir" => show_dir = val()?.into(),
             "--brain" => brain = Some(val()?.parse().map_err(anyhow::Error::msg)?),
@@ -116,7 +121,8 @@ async fn main() -> anyhow::Result<()> {
     // Read by boot(); set before any other thread starts.
     std::env::set_var("R3X_MUSIC", if music == MusicMode::Rust { "rust" } else { "cantina" });
     std::env::set_var("R3X_VISION", if vision { "1" } else { "0" });
-    tracing::info!(standalone, ?brain, ?music, voice, vision, "r3x runtime");
+    std::env::set_var("R3X_PAD", if pad && !headless { "1" } else { "0" });
+    tracing::info!(standalone, ?brain, ?music, voice, vision, pad, "r3x runtime");
 
     let profile = RobotProfile::load(&profile_path).with_context(|| format!("profile {}", profile_path.display()))?;
     let bridge = if bridge {

@@ -24,6 +24,7 @@ use r3x_performer_core::behavior::AliveLayers;
 use r3x_performer_core::leds::host::SystemMode;
 use r3x_performer_core::performer::{Command as PCmd, Enables, Out, PerformerConfig};
 use r3x_performer_core::show::catalog::Catalog;
+use r3x_performer_core::show::puppeteer::PadState;
 use r3x_performer_core::show::player::{EndReason as PEnd, RunInfo as PRun, RunLayer};
 use r3x_performer_core::show::types::{Action, Kind, Source as PSource};
 use r3x_performer_core::Performer;
@@ -43,7 +44,13 @@ pub struct PerformerHostConfig {
     /// A catalogue shared read-only between performers (the public server's sessions): used
     /// as is, never reloaded. `None` = load `show_dir` and hot-reload it.
     pub catalog: Option<Arc<Catalog>>,
+    /// The gamepad (`crate::pad`): the latest standard-layout state, `None` while no pad is
+    /// attached. `None` here = no pad input at all.
+    pub pad: Option<PadFeed>,
 }
+
+/// Latest pad state, `None` while no pad is attached.
+pub type PadFeed = tokio::sync::watch::Receiver<Option<PadState>>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct DriverOptions {
@@ -189,6 +196,9 @@ struct Host {
     face: Option<(f64, f64)>,
     /// What the performer was last told to look at.
     look: Option<(f64, f64)>,
+    pad: Option<PadFeed>,
+    /// A freeze the pad toggled, sent to the stage and not yet reflected in its state.
+    freeze_sent: Option<bool>,
 }
 
 impl Host {
@@ -228,6 +238,34 @@ impl Host {
         }?;
         let clamp = |j: &str, v: f64| self.profile.joint(j).map_or(v, |j| j.animation.clamp(v));
         Some((clamp("head_pan", raw.0), clamp("head_tilt", raw.1)))
+    }
+
+    /// Hand the performer the pad's latest state (or its loss) before a tick.
+    fn update_pad(&mut self) {
+        let Some(rx) = &mut self.pad else { return };
+        if !rx.has_changed().unwrap_or(false) {
+            return;
+        }
+        let c = match &*rx.borrow_and_update() {
+            Some(s) => PCmd::Pad(s.clone()),
+            None => PCmd::PadLost,
+        };
+        self.p.command(c);
+    }
+
+    /// The pad's Start toggles the performer's freeze directly; `state.stage.frozen` is the
+    /// one switch, so make it agree (else the next stage change would undo the pad).
+    fn sync_freeze(&mut self) {
+        let frozen = self.p.frozen();
+        if frozen == self.stage.frozen {
+            self.freeze_sent = None;
+        } else if self.freeze_sent != Some(frozen) {
+            self.freeze_sent = Some(frozen);
+            let bus = self.bus.clone();
+            tokio::spawn(async move {
+                bus.command(Source::System, None, Command::Stage(StageCommand::Freeze { on: frozen })).await;
+            });
+        }
     }
 
     fn update_look(&mut self) {
@@ -468,6 +506,8 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         viewport: None,
         face: None,
         look: None,
+        pad: cfg.pad.clone(),
+        freeze_sent: None,
     };
     let mut events = bus.subscribe_all();
     let mut stage = bus.watch::<StageState>();
@@ -485,8 +525,10 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
             tokio::select! {
                 _ = tick.tick() => {
                     host.update_look();
+                    host.update_pad();
                     let t = host.now();
                     let frames = host.p.tick(t);
+                    host.sync_freeze();
                     host.flush(Some(frames));
                 }
                 Some(req) = commands.recv() => host.on_command(req),

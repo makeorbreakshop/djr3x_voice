@@ -32,6 +32,7 @@ import { SceneLook, type Backdrop } from './scene';
 import { Centres, atHome, formatValue } from './centres';
 import { mountScenePanel } from './scenepanel';
 import { mountPanels } from './layout';
+import { PadOverlay } from './padoverlay';
 import { BodyRegions } from './regions';
 import type { RobotProfile } from './generated/RobotProfile';
 import type { GazeSource } from './generated/GazeSource';
@@ -204,6 +205,10 @@ const PANEL_ID = (() => {
   return fresh;
 })();
 const SLOTS = PROFILE.emotes;
+/** The controller overlay (G): what the pad is doing and what that does to R3X. */
+const padOverlay = new PadOverlay(SLOTS);
+document.body.append(padOverlay.root);
+$('pp-overlay').onclick = () => padOverlay.toggle();
 /** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
 const SUBSYSTEMS: [string, string][] = [
   ['mic / speech-to-text', 'DeepgramDirectMicService'], ['LLM', 'ClaudeService'], ['text-to-speech', 'ElevenLabsService'],
@@ -455,6 +460,7 @@ function tickPerformer(t: number) {
   }
   pollGamepad();
   const f = performer.tick(t);
+  padOverlay.update(f.pad);
   for (const o of performer.events()) onPerfOut(o);
   studio.tick(f);
   view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets };
@@ -463,6 +469,7 @@ function tickPerformer(t: number) {
 // ------------------------------------------------------------------ gateway follower
 function onFrames(f: Frames) {
   if (studioLocal) return; // Studio previews on the embedded performer
+  padOverlay.update(f.pad);
   const px = (k: string) => f.lights[k] ?? [];
   view = {
     joints: f.joints, eyes: px('eyes'), mouth: px('mouth'), chest: px('chest'),

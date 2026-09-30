@@ -4,6 +4,7 @@
 pub mod brain;
 pub mod bridge;
 pub mod music;
+pub mod pad;
 pub mod performer;
 pub mod public;
 pub mod replay;
@@ -128,6 +129,8 @@ pub struct Runtime {
     pub music: Option<music::MusicStack>,
     pub brain: Option<r3x_brain::Brain>,
     pub vision: Option<r3x_vision::Vision>,
+    /// The gamepad reader (`R3X_PAD`); dropping it stops the thread.
+    pub pad: Option<r3x_pad::PadReader>,
     gateway: GatewayConfig,
     bridged: bool,
 }
@@ -183,8 +186,13 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         #[cfg(not(feature = "mouse"))]
         anyhow::bail!("--mouse needs r3x-runtime built with --features mouse");
     }
+    // `R3X_PAD` (the binary's default): a DualShock 3 on USB drives the puppeteer.
+    let (pad, pad_feed) = match cfg.profile.is_some() && pad::enabled_from_env() {
+        true => pad::start(&bus).map_or((None, None), |(r, f)| (Some(r), Some(f))),
+        false => (None, None),
+    };
     if let Some(profile) = cfg.profile.clone() {
-        let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers, catalog: None };
+        let pc = performer::PerformerHostConfig { profile, show_dir: cfg.show_dir.clone(), drivers: cfg.drivers, catalog: None, pad: pad_feed };
         performer::spawn(&bus, pc)?;
     }
     let choices = replay::Choices::from_env();
@@ -234,7 +242,7 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
         audio: voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default(),
         filter: None,
     };
-    Ok(Runtime { bus, voice, music, brain, vision, gateway, bridged: cfg.bridge.is_some() })
+    Ok(Runtime { bus, voice, music, brain, vision, pad, gateway, bridged: cfg.bridge.is_some() })
 }
 
 /// `R3X_PROFILE`, else `profiles/r3x/robot.json` in the repo this binary was built from.

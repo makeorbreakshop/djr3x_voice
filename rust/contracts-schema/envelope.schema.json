@@ -1003,6 +1003,17 @@
           "description": "Light group name -> one colour per pixel.",
           "type": "object"
         },
+        "pad": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PadFrame"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The operator's gamepad while one drives the puppeteer (the panel's controller overlay)."
+        },
         "t_mono": {
           "format": "double",
           "type": "number"
@@ -1939,6 +1950,46 @@
           "type": "object"
         }
       ]
+    },
+    "PadFrame": {
+      "description": "A gamepad as the puppeteer read it this frame, and what it made of it.",
+      "properties": {
+        "axes": {
+          "description": "Standard gamepad layout: left x, left y, right x, right y in [-1, 1], down = +.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "buttons": {
+          "description": "Standard layout, one per button: 0 = up, else how far in (pressure where the pad\nmeasures it, else 1).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "intents": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "The puppeteer's smoothed intents in [-1, 1] (gaze_yaw, gaze_pitch, lift, body_yaw,\nlean, visor, arm_raise, energy).",
+          "type": "object"
+        },
+        "mode": {
+          "description": "idle | engaged | dj",
+          "type": "string"
+        }
+      },
+      "required": [
+        "axes",
+        "buttons",
+        "intents",
+        "mode"
+      ],
+      "type": "object"
     },
     "PerfCommand": {
       "description": "Direct body control. Goes to the performer.",

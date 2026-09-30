@@ -1,0 +1,12 @@
+[package]
+name = "r3x-pad"
+description = "Gamepad input for the puppeteer: a DualShock 3 read over HID (USB today, Bluetooth on Linux), mapped to the standard gamepad layout."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+r3x-performer-core = { path = "../r3x-performer-core" }
+tracing.workspace = true
+hidapi = "2"

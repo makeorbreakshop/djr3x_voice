@@ -22,7 +22,7 @@ use crate::show::idle::{IdleAction, IdleContext, IdleRunner};
 use crate::show::player::{
     DispatchCtx, EndReason, PlayerHost, PlayerOptions, RunInfo, RunLayer, ShowPlayer, StopSel,
 };
-use crate::show::puppeteer::{PadState, PuppetEvent, PuppetMode, Puppeteer};
+use crate::show::puppeteer::{PadState, PuppetEvent, PuppetMode, Puppeteer, CONTINUOUS};
 use crate::show::take::{TakeRecorder, TakeSample};
 use crate::show::types::{Action, Clip, Params, ShowItem, Source};
 use crate::show::validate::validate_item;
@@ -154,6 +154,9 @@ pub enum Command {
         slot: usize,
     },
     Pad(PadState),
+    /// The pad went away: forget it and let the sticks go (min-jerk release), so a dropped
+    /// link never leaves the last stick position applied.
+    PadLost,
     Enables(Enables),
     Alive(AliveLayers),
     Mode {
@@ -299,6 +302,8 @@ pub struct Frames {
     pub stage: Output,
     /// The last controller frame (pulses per channel).
     pub servo: Frame,
+    /// The gamepad and what the puppeteer made of it, while one is attached.
+    pub pad: Option<r3x_contracts::PadFrame>,
 }
 
 impl Frames {
@@ -320,6 +325,7 @@ impl Frames {
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect(),
+            pad: self.pad.clone(),
         }
     }
 }
@@ -510,6 +516,11 @@ impl Performer {
             Command::PuppetMode { mode } => self.puppet.set_mode(mode),
             Command::Emote { slot } => self.puppet.trigger(slot),
             Command::Pad(p) => self.pad = Some(p),
+            Command::PadLost => {
+                if self.pad.take().is_some() {
+                    self.puppet.release();
+                }
+            }
             Command::Enables(e) => self.enables = e,
             Command::Alive(a) => {
                 // A layer switched back on ends the hold (switching them off does not).
@@ -1202,7 +1213,23 @@ impl Performer {
             chest: self.chest_fw.pixels.clone(),
             stage: self.lights.out,
             servo: self.actuation.last_frame.clone(),
+            pad: self.pad_frame(),
         }
+    }
+
+    fn pad_frame(&self) -> Option<r3x_contracts::PadFrame> {
+        let pad = self.pad.as_ref()?;
+        let mode = match self.puppet.mode {
+            PuppetMode::Idle => "idle",
+            PuppetMode::Engaged => "engaged",
+            PuppetMode::Dj => "dj",
+        };
+        Some(r3x_contracts::PadFrame {
+            axes: pad.axes.clone(),
+            buttons: pad.buttons.iter().map(|(down, v)| if *down { v.max(1.0 / 255.0) } else { 0.0 }).collect(),
+            intents: CONTINUOUS.iter().zip(self.puppet.cmd).map(|(k, v)| (k.to_string(), v)).collect(),
+            mode: mode.into(),
+        })
     }
 
     fn puppet_mode(&mut self, m: PuppetMode) {

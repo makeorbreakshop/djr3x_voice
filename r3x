@@ -12,6 +12,9 @@
 #   ./r3x --panel-only    just the panel (it runs its own demo until a backend connects)
 #   ./r3x --legacy        CantinaOS instead of the Rust runtime (its own CLI in this terminal)
 #   ./r3x -- ARGS         extra r3x-runtime arguments, e.g. -- --no-vision, -- --audio null
+#   ./r3x --stop          stop an r3x-runtime left running anywhere (another terminal, a crash,
+#                         a test) and exit; a plain ./r3x replaces one by itself
+#   ./r3x --status        say whether an r3x-runtime is running, where from, and its log
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +29,8 @@ BACKEND=1
 LEGACY=0
 LOGS=0
 CLICK_ANYWHERE=0
+STOP_ONLY=0
+STATUS_ONLY=0
 RUNTIME_ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -35,8 +40,10 @@ while [ $# -gt 0 ]; do
     --legacy) LEGACY=1 ;;
     --logs) LOGS=1 ;;
     --click-anywhere) CLICK_ANYWHERE=1 ;;
+    --stop) STOP_ONLY=1 ;;
+    --status) STATUS_ONLY=1 ;;
     --) shift; RUNTIME_ARGS=("$@"); break ;;
-    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -45,6 +52,54 @@ done
 say() { printf '\033[38;5;208m[r3x]\033[0m %s\n' "$*"; }
 die() { printf '\033[31m[r3x]\033[0m %s\n' "$*" >&2; exit 1; }
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+# PIDs of r3x-runtime processes listening on the gateway port (anything else there is not ours).
+runtime_pids() {
+  local pid
+  for pid in $(lsof -nP -t -iTCP:"$GATEWAY_PORT" -sTCP:LISTEN 2>/dev/null); do
+    case "$(ps -p "$pid" -o comm= 2>/dev/null)" in *r3x-runtime) echo "$pid" ;; esac
+  done
+}
+# Stop every r3x-runtime on the gateway port: SIGINT (its clean shutdown), then TERM, then KILL.
+stop_runtimes() {
+  local pids pid
+  pids="$(runtime_pids)"
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    say "stopping r3x-runtime (pid $pid, $(ps -p "$pid" -o command= 2>/dev/null | cut -c1-80))"
+    kill -INT "$pid" 2>/dev/null || true
+  done
+  for _ in $(seq 1 20); do [ -z "$(runtime_pids)" ] && break; sleep 0.25; done
+  for pid in $(runtime_pids); do kill -TERM "$pid" 2>/dev/null || true; done
+  sleep 0.5
+  for pid in $(runtime_pids); do kill -KILL "$pid" 2>/dev/null || true; done
+  sleep 0.3
+  [ -z "$(runtime_pids)" ] || die "could not stop r3x-runtime on :$GATEWAY_PORT"
+}
+
+if [ "$STATUS_ONLY" = 1 ]; then
+  pids="$(runtime_pids)"
+  if [ -z "$pids" ]; then
+    port_busy "$GATEWAY_PORT" && say "port $GATEWAY_PORT is held by something else: $(lsof -nP -iTCP:"$GATEWAY_PORT" -sTCP:LISTEN | tail -n +2)" \
+      || say "no r3x-runtime running"
+  else
+    for pid in $pids; do
+      say "r3x-runtime running: pid $pid, up $(ps -p "$pid" -o etime= | tr -d ' ')"
+      say "  $(ps -p "$pid" -o command=)"
+    done
+    for pid in $pids; do
+      out="$(lsof -p "$pid" -a -d 1 -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+      say "  log: ${out:-unknown (not writing to a file)}"
+    done
+    say "  stop it: dj-r3x --stop   restart: dj-r3x"
+  fi
+  exit 0
+fi
+if [ "$STOP_ONLY" = 1 ]; then
+  [ -n "$(runtime_pids)" ] || { say "no r3x-runtime running"; exit 0; }
+  stop_runtimes
+  say "stopped"
+  exit 0
+fi
 
 # ---------------------------------------------------------------- preflight
 command -v npm >/dev/null || die "npm not found - install Node.js first"
@@ -57,8 +112,13 @@ if [ "$BACKEND" = 1 ] && [ "$LEGACY" = 1 ]; then
 elif [ "$BACKEND" = 1 ]; then
   command -v cargo >/dev/null || die "cargo not found - install Rust (rustup.rs) first"
   [ -f "$ROOT/.env" ] || say "no .env at $ROOT/.env - voice needs DEEPGRAM/ELEVENLABS keys, the brain ANTHROPIC or OPENROUTER"
+  # A runtime left running (another terminal, a crash, a test) is replaced, not an error.
+  if [ -n "$(runtime_pids)" ]; then
+    say "an r3x-runtime is already running - replacing it"
+    stop_runtimes
+  fi
   if port_busy "$GATEWAY_PORT"; then
-    die "port $GATEWAY_PORT is taken - is r3x-runtime already running? (lsof -iTCP:$GATEWAY_PORT)"
+    die "port $GATEWAY_PORT is taken by something that is not r3x-runtime: $(lsof -nP -iTCP:"$GATEWAY_PORT" -sTCP:LISTEN | tail -n +2)"
   fi
 fi
 if [ ! -d "$WEB/node_modules" ]; then

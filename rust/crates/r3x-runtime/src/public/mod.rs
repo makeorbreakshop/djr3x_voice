@@ -288,6 +288,7 @@ async fn session(sv: Arc<PublicServer>, socket: WebSocket, visitor: Visitor) {
         show_dir: cfg.show_dir.clone(),
         drivers: None,
         catalog: Some(sv.catalog.clone()),
+        pad: None,
     };
     if let Err(e) = crate::performer::spawn(&bus, pc) {
         tracing::error!("visitor performer: {e}");

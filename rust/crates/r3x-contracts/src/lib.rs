@@ -15,7 +15,7 @@ pub use envelope::{
     AudioDirection, AudioMeta, Body, ClientBody, ClientInfo, ClientMessage, Envelope, Hello, Kind, LogLine, Source, Tier,
     PROTOCOL_VERSION,
 };
-pub use frames::{Frames, Rgb};
+pub use frames::{Frames, PadFrame, Rgb};
 pub use messages::{
     Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, IntentCommand,
     MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind, ServoChannelTelemetry,

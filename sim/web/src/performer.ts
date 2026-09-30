@@ -5,6 +5,7 @@
  * `r3x_performer_core::performer::{Command, Frames, Out}`.
  */
 import init, { WasmPerformer } from './wasm/r3x_performer';
+import type { PadFrame } from './generated/PadFrame';
 import profileJson from '../../../profiles/r3x/robot.json?raw';
 import { SHOW_FILES } from './show/loader';
 import type { RGB } from './leds';
@@ -65,6 +66,8 @@ export interface PerfFrames {
   /** Linear flux per stage-light group (stagelights.ts GROUPS order). */
   stage: RGB[];
   servo: { frame: number; t: number; targets: number[] };
+  /** The gamepad and what the puppeteer made of it, while one is attached. */
+  pad?: PadFrame | null;
 }
 
 export type LightsAction = { do: 'lights'; cue?: string; mode?: string; fade?: number; hold?: number; rig?: string };

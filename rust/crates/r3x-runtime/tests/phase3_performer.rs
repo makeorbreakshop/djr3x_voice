@@ -46,6 +46,7 @@ async fn performer_on_the_bus() {
         show_dir: performer::default_show_dir(),
         drivers: Some(DriverOptions { leds: false }),
         catalog: None,
+        pad: None,
     };
     performer::spawn(&bus, cfg).unwrap();
 
@@ -114,7 +115,7 @@ async fn home_resets_the_bench_and_gaze_follows_the_owning_panel() {
     let profile = Arc::new(RobotProfile::load(r3x_runtime::default_profile_path()).unwrap());
     r3x_stage::spawn(&bus, r3x_stage::StageConfig::from_profile(&profile), None).unwrap();
     let mut frames = bus.subscribe_frames();
-    let cfg = PerformerHostConfig { profile, show_dir: performer::default_show_dir(), drivers: Some(DriverOptions { leds: false }), catalog: None };
+    let cfg = PerformerHostConfig { profile, show_dir: performer::default_show_dir(), drivers: Some(DriverOptions { leds: false }), catalog: None, pad: None };
     performer::spawn(&bus, cfg).unwrap();
     let cmd = |c| bus.command(Source::Ui, None, c);
     let stage = |c| Command::Stage(c);
@@ -168,4 +169,50 @@ async fn home_resets_the_bench_and_gaze_follows_the_owning_panel() {
     let _ = cmd(Command::Perf(PerfCommand::Stop(StopTarget::All))).await;
     assert_eq!(cmd(play("nod")).await, Ack::Accepted);
     until("hold released", || !bus.get::<PerfState>().homing).await;
+}
+
+/// The gamepad feed (`R3X_PAD`): the right stick turns the head, Start toggles the stage's
+/// freeze (the one switch, not just the performer's copy), and a lost pad lets go.
+#[tokio::test(flavor = "multi_thread")]
+async fn pad_drives_the_puppeteer_and_freeze() {
+    use r3x_contracts::StageState;
+    use r3x_performer_core::show::puppeteer::PadState;
+    let bus = Bus::default();
+    let profile = Arc::new(RobotProfile::load(r3x_runtime::default_profile_path()).unwrap());
+    r3x_stage::spawn(&bus, r3x_stage::StageConfig::from_profile(&profile), None).unwrap();
+    let mut frames = bus.subscribe_frames();
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    let cfg = PerformerHostConfig {
+        profile,
+        show_dir: performer::default_show_dir(),
+        drivers: Some(DriverOptions { leds: false }),
+        catalog: None,
+        pad: Some(rx),
+    };
+    performer::spawn(&bus, cfg).unwrap();
+    let pad = |right_x: f64, start: bool| {
+        let mut buttons = vec![(false, 0.0); 17];
+        buttons[9] = (start, f64::from(u8::from(start)));
+        Some(PadState { axes: vec![0.0, 0.0, right_x, 0.0], buttons })
+    };
+
+    let rest = frame_after(&mut frames, Duration::from_millis(300)).await.joints["head_pan"];
+    tx.send_replace(pad(1.0, false));
+    let turned = frame_after(&mut frames, Duration::from_millis(1500)).await.joints["head_pan"];
+    assert!(turned - rest > 30.0, "right stick turns the head: {rest} -> {turned}");
+
+    // Pulled out mid-turn: the head comes back instead of holding the last stick value.
+    tx.send_replace(None);
+    let released = frame_after(&mut frames, Duration::from_millis(1500)).await.joints["head_pan"];
+    assert!((released - rest).abs() < 10.0, "released: {rest} -> {released}");
+
+    // Start: press, release, press = frozen, then thawed, in the retained stage state.
+    tx.send_replace(pad(0.0, true));
+    until("frozen by Start", || bus.get::<StageState>().frozen).await;
+    until("perf state agrees", || bus.get::<PerfState>().frozen).await;
+    tx.send_replace(pad(0.0, false));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(bus.get::<StageState>().frozen, "releasing Start changes nothing");
+    tx.send_replace(pad(0.0, true));
+    until("thawed by Start", || !bus.get::<StageState>().frozen).await;
 }
