@@ -34,4 +34,79 @@ pub struct PadFrame {
     pub intents: BTreeMap<String, f64>,
     /// idle | engaged | dj
     pub mode: String,
+    /// The runtime's operator layer (`r3x-pad` controls): absent from the sim's own pad.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub controls: Option<PadControls>,
+}
+
+/// What the operator layer is doing, for the overlay.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadControls {
+    /// The bank held: `l1` | `r1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bank: Option<String>,
+    /// The open menu, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub menu: Option<PadMenuView>,
+    /// L2 held: push-to-talk.
+    pub talking: bool,
+    /// Motion outputs enabled (PS hold toggles).
+    pub armed: bool,
+    /// The last thing a button did, for a moment ("Nod", "DJ mode on", "refused: ...").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub last: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadMenuView {
+    /// Titles from the root to the open level.
+    pub path: Vec<String>,
+    pub items: Vec<String>,
+    pub cursor: usize,
+}
+
+/// The operator mapping (`profiles/<robot>/pad.json`): the two hold banks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadMapping {
+    /// A face button held this long fires its hold binding instead of its tap one.
+    pub tap_hold_s: f64,
+    /// PS held this long toggles motion arming.
+    pub arm_hold_s: f64,
+    pub banks: PadBanks,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadBanks {
+    pub l1: PadBank,
+    pub r1: PadBank,
+}
+
+/// Face order: cross, circle, square, triangle. D-pad order: up, right, down, left.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadBank {
+    pub name: String,
+    pub face_tap: [PadBinding; 4],
+    pub face_hold: [PadBinding; 4],
+    pub dpad: [PadBinding; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct PadBinding {
+    pub label: String,
+    /// A clip, cue or sequence id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub play: Option<String>,
+    /// A sound id (file stem in the sfx kit, case/space/underscore-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sfx: Option<String>,
+    /// An emote slot (0-7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub emote: Option<u8>,
 }

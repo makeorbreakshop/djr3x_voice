@@ -2181,7 +2181,9 @@ name = "r3x-pad"
 version = "0.1.0"
 dependencies = [
  "hidapi",
+ "r3x-contracts",
  "r3x-performer-core",
+ "serde_json",
  "tracing",
 ]
 

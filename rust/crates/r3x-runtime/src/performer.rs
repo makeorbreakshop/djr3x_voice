@@ -49,8 +49,18 @@ pub struct PerformerHostConfig {
     pub pad: Option<PadFeed>,
 }
 
-/// Latest pad state, `None` while no pad is attached.
-pub type PadFeed = tokio::sync::watch::Receiver<Option<PadState>>;
+/// Latest pad input, `None` while no pad is attached.
+pub type PadFeed = tokio::sync::watch::Receiver<Option<PadInput>>;
+
+/// One pad snapshot as the operator layer (`crate::pad`) split it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PadInput {
+    /// What the puppeteer reads (sticks, R2, the d-pad when free).
+    pub puppet: PadState,
+    /// Every button as pressed, for the overlay.
+    pub raw: PadState,
+    pub controls: r3x_contracts::PadControls,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct DriverOptions {
@@ -197,6 +207,7 @@ struct Host {
     /// What the performer was last told to look at.
     look: Option<(f64, f64)>,
     pad: Option<PadFeed>,
+    pad_input: Option<PadInput>,
     /// A freeze the pad toggled, sent to the stage and not yet reflected in its state.
     freeze_sent: Option<bool>,
 }
@@ -246,11 +257,22 @@ impl Host {
         if !rx.has_changed().unwrap_or(false) {
             return;
         }
-        let c = match &*rx.borrow_and_update() {
-            Some(s) => PCmd::Pad(s.clone()),
+        let input = rx.borrow_and_update().clone();
+        let c = match &input {
+            Some(i) => PCmd::Pad(i.puppet.clone()),
             None => PCmd::PadLost,
         };
         self.p.command(c);
+        self.pad_input = input;
+    }
+
+    /// The overlay sees every button as pressed and the operator layer's state, not just the
+    /// puppeteer's share.
+    fn patch_pad(&self, frames: &mut r3x_performer_core::Frames) {
+        if let (Some(pf), Some(i)) = (frames.pad.as_mut(), &self.pad_input) {
+            pf.buttons = i.raw.buttons.iter().map(|(down, v)| if *down { v.max(1.0 / 255.0) } else { 0.0 }).collect();
+            pf.controls = Some(i.controls.clone());
+        }
     }
 
     /// The pad's Start toggles the performer's freeze directly; `state.stage.frozen` is the
@@ -507,6 +529,7 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
         face: None,
         look: None,
         pad: cfg.pad.clone(),
+        pad_input: None,
         freeze_sent: None,
     };
     let mut events = bus.subscribe_all();
@@ -527,7 +550,8 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
                     host.update_look();
                     host.update_pad();
                     let t = host.now();
-                    let frames = host.p.tick(t);
+                    let mut frames = host.p.tick(t);
+                    host.patch_pad(&mut frames);
                     host.sync_freeze();
                     host.flush(Some(frames));
                 }

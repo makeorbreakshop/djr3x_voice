@@ -29,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Envelope::export_all(&cfg)?;
     RobotProfile::export_all(&cfg)?;
     ClientMessage::export_all(&cfg)?;
+    r3x_contracts::PadMapping::export_all(&cfg)?;
 
     write_schema(&schema_out, "envelope", schemars::schema_for!(Envelope))?;
     write_schema(&schema_out, "robot_profile", schemars::schema_for!(RobotProfile))?;

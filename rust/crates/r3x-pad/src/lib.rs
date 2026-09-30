@@ -11,10 +11,11 @@
 //! [`PadEvent::Lost`] fires after [`SILENCE`], and the host must release the sticks then,
 //! never hold the last value.
 
+pub mod controls;
 pub mod ds3;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -32,14 +33,46 @@ const WAKE_HINT_AFTER: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, PartialEq)]
 pub enum PadEvent {
     Connected { name: String },
-    State(Ds3Report),
+    State(Box<Ds3Report>),
     Lost { reason: String },
+}
+
+/// What the pad shows the operator: player LEDs (bit 0 = LED 1) and rumble (0 = off).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Feedback {
+    pub leds: u8,
+    pub rumble: u8,
+}
+
+impl Default for Feedback {
+    fn default() -> Self {
+        Feedback { leds: 0b0001, rumble: 0 }
+    }
 }
 
 /// The reader thread; dropping it stops the thread.
 pub struct PadReader {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    feedback: Arc<Mutex<Feedback>>,
+}
+
+impl PadReader {
+    /// A handle to set the pad's LEDs and rumble from any thread; the reader sends changes.
+    pub fn feedback(&self) -> FeedbackHandle {
+        FeedbackHandle(self.feedback.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct FeedbackHandle(Arc<Mutex<Feedback>>);
+
+impl FeedbackHandle {
+    pub fn set(&self, f: impl FnOnce(&mut Feedback)) {
+        if let Ok(mut g) = self.0.lock() {
+            f(&mut g);
+        }
+    }
 }
 
 impl Drop for PadReader {
@@ -54,12 +87,13 @@ impl Drop for PadReader {
 /// Watch for a DualShock 3 and stream its state to `on_event` (on the reader thread).
 pub fn spawn(on_event: impl FnMut(PadEvent) + Send + 'static) -> std::io::Result<PadReader> {
     let stop = Arc::new(AtomicBool::new(false));
-    let flag = stop.clone();
-    let thread = std::thread::Builder::new().name("r3x-pad".into()).spawn(move || run(&flag, on_event))?;
-    Ok(PadReader { stop, thread: Some(thread) })
+    let feedback = Arc::new(Mutex::new(Feedback::default()));
+    let (flag, fb) = (stop.clone(), feedback.clone());
+    let thread = std::thread::Builder::new().name("r3x-pad".into()).spawn(move || run(&flag, &fb, on_event))?;
+    Ok(PadReader { stop, thread: Some(thread), feedback })
 }
 
-fn run(stop: &AtomicBool, mut on_event: impl FnMut(PadEvent)) {
+fn run(stop: &AtomicBool, feedback: &Mutex<Feedback>, mut on_event: impl FnMut(PadEvent)) {
     let mut api = match HidApi::new() {
         Ok(a) => a,
         Err(e) => {
@@ -74,7 +108,7 @@ fn run(stop: &AtomicBool, mut on_event: impl FnMut(PadEvent)) {
                 announced_absent = false;
                 tracing::info!(%name, "pad: DualShock 3 attached");
                 on_event(PadEvent::Connected { name: name.clone() });
-                let reason = stream(stop, &dev, &mut on_event);
+                let reason = stream(stop, &dev, feedback, &mut on_event);
                 tracing::info!(%name, %reason, "pad: lost");
                 on_event(PadEvent::Lost { reason });
             }
@@ -112,8 +146,9 @@ fn wake(dev: &HidDevice) {
 }
 
 /// Read until the link drops; returns why.
-fn stream(stop: &AtomicBool, dev: &HidDevice, on_event: &mut impl FnMut(PadEvent)) -> String {
+fn stream(stop: &AtomicBool, dev: &HidDevice, feedback: &Mutex<Feedback>, on_event: &mut impl FnMut(PadEvent)) -> String {
     let opened = Instant::now();
+    let mut sent: Option<Feedback> = None;
     let mut last: Option<Instant> = None;
     let mut hinted = false;
     let mut buf = [0u8; 64];
@@ -121,11 +156,16 @@ fn stream(stop: &AtomicBool, dev: &HidDevice, on_event: &mut impl FnMut(PadEvent
         if stop.load(Ordering::Relaxed) {
             return "stopped".into();
         }
-        match dev.read_timeout(&mut buf, 100) {
+        let want = feedback.lock().map(|g| *g).unwrap_or_default();
+        if sent != Some(want) {
+            let _ = dev.write(&ds3::output_report(want.leds, false, want.rumble));
+            sent = Some(want);
+        }
+        match dev.read_timeout(&mut buf, 20) {
             Ok(n) if n > 0 => {
                 if let Some(r) = ds3::parse(&buf[..n]) {
                     last = Some(Instant::now());
-                    on_event(PadEvent::State(r));
+                    on_event(PadEvent::State(Box::new(r)));
                 }
             }
             Ok(_) => {}

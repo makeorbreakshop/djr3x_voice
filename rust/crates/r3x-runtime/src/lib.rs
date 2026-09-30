@@ -188,7 +188,8 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
     }
     // `R3X_PAD` (the binary's default): a DualShock 3 on USB drives the puppeteer.
     let (pad, pad_feed) = match cfg.profile.is_some() && pad::enabled_from_env() {
-        true => pad::start(&bus).map_or((None, None), |(r, f)| (Some(r), Some(f))),
+        true => pad::start(&bus, cfg.profile.clone().expect("checked"), &default_profile_path(), &cfg.show_dir)
+            .map_or((None, None), |(r, f)| (Some(r), Some(f))),
         false => (None, None),
     };
     if let Some(profile) = cfg.profile.clone() {

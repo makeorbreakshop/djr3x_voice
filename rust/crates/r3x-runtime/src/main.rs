@@ -122,6 +122,8 @@ async fn main() -> anyhow::Result<()> {
     std::env::set_var("R3X_MUSIC", if music == MusicMode::Rust { "rust" } else { "cantina" });
     std::env::set_var("R3X_VISION", if vision { "1" } else { "0" });
     std::env::set_var("R3X_PAD", if pad && !headless { "1" } else { "0" });
+    // The pad's operator mapping sits next to the profile (`pad.json`); boot() finds it here.
+    std::env::set_var("R3X_PROFILE", &profile_path);
     tracing::info!(standalone, ?brain, ?music, voice, vision, pad, "r3x runtime");
 
     let profile = RobotProfile::load(&profile_path).with_context(|| format!("profile {}", profile_path.display()))?;

@@ -1951,6 +1951,49 @@
         }
       ]
     },
+    "PadControls": {
+      "description": "What the operator layer is doing, for the overlay.",
+      "properties": {
+        "armed": {
+          "description": "Motion outputs enabled (PS hold toggles).",
+          "type": "boolean"
+        },
+        "bank": {
+          "description": "The bank held: `l1` | `r1`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last": {
+          "description": "The last thing a button did, for a moment (\"Nod\", \"DJ mode on\", \"refused: ...\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "menu": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PadMenuView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The open menu, if any."
+        },
+        "talking": {
+          "description": "L2 held: push-to-talk.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "talking",
+        "armed"
+      ],
+      "type": "object"
+    },
     "PadFrame": {
       "description": "A gamepad as the puppeteer read it this frame, and what it made of it.",
       "properties": {
@@ -1970,6 +2013,17 @@
           },
           "type": "array"
         },
+        "controls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PadControls"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The runtime's operator layer (`r3x-pad` controls): absent from the sim's own pad."
+        },
         "intents": {
           "additionalProperties": {
             "format": "double",
@@ -1988,6 +2042,34 @@
         "buttons",
         "intents",
         "mode"
+      ],
+      "type": "object"
+    },
+    "PadMenuView": {
+      "properties": {
+        "cursor": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "Titles from the root to the open level.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "items",
+        "cursor"
       ],
       "type": "object"
     },

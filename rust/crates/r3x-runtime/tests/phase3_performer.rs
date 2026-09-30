@@ -193,7 +193,8 @@ async fn pad_drives_the_puppeteer_and_freeze() {
     let pad = |right_x: f64, start: bool| {
         let mut buttons = vec![(false, 0.0); 17];
         buttons[9] = (start, f64::from(u8::from(start)));
-        Some(PadState { axes: vec![0.0, 0.0, right_x, 0.0], buttons })
+        let state = PadState { axes: vec![0.0, 0.0, right_x, 0.0], buttons };
+        Some(performer::PadInput { puppet: state.clone(), raw: state, controls: Default::default() })
     };
 
     let rest = frame_after(&mut frames, Duration::from_millis(300)).await.joints["head_pan"];

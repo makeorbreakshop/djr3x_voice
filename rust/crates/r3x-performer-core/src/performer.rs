@@ -1229,6 +1229,7 @@ impl Performer {
             buttons: pad.buttons.iter().map(|(down, v)| if *down { v.max(1.0 / 255.0) } else { 0.0 }).collect(),
             intents: CONTINUOUS.iter().zip(self.puppet.cmd).map(|(k, v)| (k.to_string(), v)).collect(),
             mode: mode.into(),
+            controls: None,
         })
     }
 

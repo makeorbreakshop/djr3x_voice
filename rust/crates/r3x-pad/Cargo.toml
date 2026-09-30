@@ -7,6 +7,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+r3x-contracts.workspace = true
 r3x-performer-core = { path = "../r3x-performer-core" }
 tracing.workspace = true
 hidapi = "2"
+
+[dev-dependencies]
+serde_json.workspace = true

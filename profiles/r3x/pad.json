@@ -1,0 +1,49 @@
+{
+  "$comment": "DualShock 3 operator mapping, read by the runtime (r3x-pad controls) and the panel's controller overlay. Base layer is fixed in code (sticks, d-pad lift/visor, L2 talk, R2 arm, face tap/hold = emote slots 1-4/5-8, L3 alive layers, R3 cancel, Start freeze, PS hold arm, Select menu). Banks: hold L1 or R1 and press. Face order: cross, circle, square, triangle. D-pad order: up, right, down, left. A binding is {label, play: <clip|cue|sequence id>} or {label, sfx: <sound id>} or {label, emote: <slot 0-7>}.",
+  "tap_hold_s": 0.35,
+  "arm_hold_s": 1.0,
+  "banks": {
+    "l1": {
+      "name": "Gestures",
+      "face_tap": [
+        { "label": "Nod", "play": "nod" },
+        { "label": "Head shake", "play": "head_shake" },
+        { "label": "Double take", "play": "double_take" },
+        { "label": "Fist pump", "play": "fist_pump" }
+      ],
+      "face_hold": [
+        { "label": "Curious tilt", "play": "tilt_curious" },
+        { "label": "Shrug", "play": "shrug" },
+        { "label": "Bow", "play": "bow" },
+        { "label": "Recoil", "play": "recoil" }
+      ],
+      "dpad": [
+        { "label": "Look up", "play": "look_up_think" },
+        { "label": "Glance right", "play": "glance_right" },
+        { "label": "Look around", "play": "look_around" },
+        { "label": "Glance left", "play": "glance_left" }
+      ]
+    },
+    "r1": {
+      "name": "Sounds",
+      "face_tap": [
+        { "label": "Hi there", "sfx": "hi_there" },
+        { "label": "Having fun", "sfx": "having_fun" },
+        { "label": "Yahoo", "sfx": "yahoo" },
+        { "label": "Request line open", "sfx": "request_line_open" }
+      ],
+      "face_hold": [
+        { "label": "Roger control", "sfx": "roger_control" },
+        { "label": "Bad feeling", "sfx": "bad_feeling" },
+        { "label": "Loose wire", "sfx": "loose_wire" },
+        { "label": "DJ pilot", "sfx": "dj_pilot" }
+      ],
+      "dpad": [
+        { "label": "Air horn", "sfx": "air_horn" },
+        { "label": "Scratch", "sfx": "scratch" },
+        { "label": "Once again", "sfx": "once_again" },
+        { "label": "Synth", "sfx": "synth" }
+      ]
+    }
+  }
+}
