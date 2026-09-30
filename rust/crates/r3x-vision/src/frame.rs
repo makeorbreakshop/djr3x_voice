@@ -42,6 +42,23 @@ impl Frame {
         Ok(out)
     }
 
+    /// JPEG at `quality`, scaled down (aspect kept) to at most `max_width` wide: what scene
+    /// descriptions send to Claude, where image tokens grow with the pixel count.
+    pub fn to_jpeg_scaled(&self, quality: u8, max_width: u32) -> Result<Vec<u8>, VisionError> {
+        if self.width <= max_width || max_width == 0 {
+            return self.to_jpeg(quality);
+        }
+        let img = image::RgbImage::from_raw(self.width, self.height, self.rgb.clone())
+            .ok_or_else(|| VisionError::Image("frame size does not match its pixels".into()))?;
+        let h = ((u64::from(self.height) * u64::from(max_width)) / u64::from(self.width)).max(1) as u32;
+        let small = image::imageops::resize(&img, max_width, h, image::imageops::FilterType::Triangle);
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+            .encode(small.as_raw(), max_width, h, image::ExtendedColorType::Rgb8)
+            .map_err(|e| VisionError::Image(e.to_string()))?;
+        Ok(out)
+    }
+
     /// Bilinear RGB at a sub-pixel position (pixel centres on integers); black outside, as
     /// OpenCV's `warpAffine` border.
     #[inline]
@@ -64,5 +81,25 @@ impl Frame {
             o[k] = top + (bot - top) * fy;
         }
         o
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Frame;
+
+    fn dims(jpeg: &[u8]) -> (u32, u32) {
+        let img = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).unwrap();
+        (img.width(), img.height())
+    }
+
+    /// Scene photos go to Claude at most `max_width` wide (image tokens ~ w*h/750, so 768 px
+    /// is ~ a third of 1280x720's); a smaller frame is sent as it is.
+    #[test]
+    fn scene_jpegs_are_scaled_to_the_max_width() {
+        let big = Frame::new(1280, 720, vec![128; 1280 * 720 * 3]).unwrap();
+        assert_eq!(dims(&big.to_jpeg_scaled(85, 768).unwrap()), (768, 432));
+        let small = Frame::new(640, 360, vec![128; 640 * 360 * 3]).unwrap();
+        assert_eq!(dims(&small.to_jpeg_scaled(85, 768).unwrap()), (640, 360));
     }
 }

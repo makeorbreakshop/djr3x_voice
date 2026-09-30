@@ -4,11 +4,14 @@
 //!
 //! Preserved: an exit only after `exit_frames` consecutive frames without the person (10 at
 //! 5 fps = 2 s) or, as analysis is adaptive (`cadence`: 1-2 fps when nothing changes), the
-//! same `exit_after_s` since they were last seen, whichever comes first; a capture on the first frame, on a new person unless they left < 120 s ago
-//! (re-entry grace) or were captured < 300 s ago (per-person cooldown), on an exit after > 30 s
-//! present, and when the last capture is > 300 s old.
-//! Differences: CantinaOS declared but never applied its 60 s minimum between automatic
-//! captures; it is applied here (startup excepted). A *different* person replacing the current
+//! same `exit_after_s` since they were last seen, whichever comes first; a capture on a new
+//! person unless they left < 120 s ago (re-entry grace) or were captured < 300 s ago
+//! (per-person cooldown).
+//! Differences: only an arrival captures. CantinaOS also captured on the first frame, on an
+//! exit after > 30 s present and when the last capture was > 300 s old; each paid for a photo
+//! of an empty room or a description no turn used (a turn reads one only within 60 s), so
+//! they were dropped (2026-09-30). CantinaOS declared but never applied its 60 s minimum
+//! between automatic captures; it is applied here. A *different* person replacing the current
 //! one now exits the old person first (CantinaOS overwrote them, so memory never closed the
 //! visit).
 
@@ -21,9 +24,7 @@ pub struct PresenceConfig {
     pub exit_after_s: f64,
     pub reentry_grace_s: f64,
     pub person_scene_cooldown_s: f64,
-    pub staleness_s: f64,
     pub min_scene_interval_s: f64,
-    pub exit_capture_after_s: f64,
     /// Automatic captures at all (on-demand `analyze_scene` is unaffected).
     pub scenes: bool,
 }
@@ -35,9 +36,7 @@ impl Default for PresenceConfig {
             exit_after_s: 2.0,
             reentry_grace_s: 120.0,
             person_scene_cooldown_s: 300.0,
-            staleness_s: 300.0,
             min_scene_interval_s: 60.0,
-            exit_capture_after_s: 30.0,
             scenes: true,
         }
     }
@@ -118,9 +117,6 @@ impl Presence {
                     if self.missing >= self.cfg.exit_frames || now - self.last_seen >= self.cfg.exit_after_s {
                         let (name, duration_s) = (name.clone(), now - t0);
                         self.person_exit.insert(name.clone(), now);
-                        if duration_s > self.cfg.exit_capture_after_s {
-                            want = Some(format!("person_exited_{name}_after_{duration_s:.0}s"));
-                        }
                         step.transitions.push(Transition::Exited { name, duration_s });
                         self.current = None;
                         self.missing = 0;
@@ -128,17 +124,23 @@ impl Presence {
                 }
             }
         }
-        if self.frames == 1 {
-            want = Some("startup_first_frame".into());
-        } else if self.last_capture.is_some_and(|t| now - t > self.cfg.staleness_s) {
-            want = Some("scene_staleness_exceeded".into());
-        }
-        let startup = self.frames == 1;
         let spaced = self.last_capture.is_none_or(|t| now - t >= self.cfg.min_scene_interval_s);
-        if self.cfg.scenes && (startup || spaced) {
+        if self.cfg.scenes && spaced {
             step.capture = want;
         }
         step
+    }
+
+    /// Vision switched off at `now`: whoever is present has left (memory closes the visit).
+    pub fn clear(&mut self, now: f64) -> Vec<Transition> {
+        self.missing = 0;
+        match self.current.take() {
+            Some((name, _, t0)) => {
+                self.person_exit.insert(name.clone(), now);
+                vec![Transition::Exited { name, duration_s: now - t0 }]
+            }
+            None => vec![],
+        }
     }
 
     /// A scene was captured at `now` with `person` present. Marked when the capture is started,
@@ -178,7 +180,7 @@ mod tests {
         let mut t = 0.0;
         let s = run(&mut p, &mut t, 1, Some(("Brandon", 0.7)));
         assert_eq!(s[0].transitions, [Transition::Detected { name: "Brandon".into(), confidence: 0.7 }]);
-        assert_eq!(s[0].capture.as_deref(), Some("startup_first_frame"));
+        assert_eq!(s[0].capture.as_deref(), Some("person_changed_from_none_to_Brandon"), "an arrival, even on the first frame");
         // 9 empty frames, then seen again: no exit, no second detection.
         assert!(transitions(&run(&mut p, &mut t, 9, None)).is_empty());
         assert!(transitions(&run(&mut p, &mut t, 3, Some(("Brandon", 0.72)))).is_empty());
@@ -193,8 +195,7 @@ mod tests {
     fn capture_grace_cooldown_and_spacing() {
         let mut p = Presence::new(PresenceConfig::default());
         let mut t = 0.0;
-        run(&mut p, &mut t, 1, None); // startup capture at t=0.2
-        // Brandon arrives 100 s later: new person, but < 60 s spacing? No: 100 s > 60 s.
+        assert!(run(&mut p, &mut t, 1, None)[0].capture.is_none(), "an empty room at startup is not worth a photo");
         t = 100.0;
         let s = run(&mut p, &mut t, 1, Some(("Brandon", 0.7)));
         assert_eq!(s[0].capture.as_deref(), Some("person_changed_from_none_to_Brandon"));
@@ -208,11 +209,27 @@ mod tests {
         run(&mut p, &mut t, 10, None);
         t += 150.0;
         assert!(run(&mut p, &mut t, 1, Some(("Brandon", 0.7)))[0].capture.is_none());
-        // Staleness: > 300 s since the last capture fires, once.
-        t = 100.2 + 301.0;
-        let s = run(&mut p, &mut t, 2, Some(("Brandon", 0.7)));
-        assert_eq!(s[0].capture.as_deref(), Some("scene_staleness_exceeded"));
-        assert!(s[1].capture.is_none());
+        // Past the cooldown (and the grace): a fresh arrival is worth one again.
+        run(&mut p, &mut t, 10, None);
+        t += 400.0;
+        assert_eq!(run(&mut p, &mut t, 1, Some(("Brandon", 0.7)))[0].capture.as_deref(), Some("person_changed_from_none_to_Brandon"));
+    }
+
+    /// Photos are paid for (Claude image input) and a description is only used by a turn
+    /// within 60 s (`r3x-memory` SCENE_MAX_AGE_S), so only an arrival earns one: never an
+    /// empty room (startup, or on a timer), never a room someone just left, never a timer
+    /// while someone stays (2026-09-30: every 5 min, all day, with nobody there).
+    #[test]
+    fn only_an_arrival_pays_for_a_photo() {
+        let mut p = Presence::new(PresenceConfig::default());
+        let mut t = 0.0;
+        let empty = run(&mut p, &mut t, 3000, None); // 10 min of an empty room
+        assert!(empty.iter().all(|s| s.capture.is_none()), "an empty room never captures");
+        let stay = run(&mut p, &mut t, 6000, Some(("Brandon", 0.7))); // 20 min present
+        let reasons: Vec<_> = stay.iter().filter_map(|s| s.capture.clone()).collect();
+        assert_eq!(reasons, ["person_changed_from_none_to_Brandon"], "one photo on arrival, none while staying");
+        let leave = run(&mut p, &mut t, 20, None);
+        assert!(leave.iter().all(|s| s.capture.is_none()), "no photo of the room they left");
     }
 
     #[test]

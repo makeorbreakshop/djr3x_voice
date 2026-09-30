@@ -111,6 +111,8 @@ pub struct VisionConfig {
     /// `R3X_CAMERA_INDEX`; otherwise the first non-Continuity camera.
     pub camera: Option<u32>,
     pub jpeg_quality: u8,
+    /// Scene photos are scaled to at most this wide before they go to Claude.
+    pub scene_max_width: u32,
     /// `analyze_scene` refuses a frame older than this.
     pub frame_max_age: Duration,
     pub scene_max_tokens: u32,
@@ -120,7 +122,7 @@ pub struct VisionConfig {
 
 impl Default for VisionConfig {
     fn default() -> Self {
-        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0 }
+        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, scene_max_width: 768, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0 }
     }
 }
 
@@ -158,6 +160,8 @@ pub struct CameraStatus {
 
 enum Control {
     Select(u32),
+    /// `true` closes the camera (the ffmpeg child goes with it) until `false` reopens it.
+    Pause(bool),
     Stop,
 }
 
@@ -189,6 +193,8 @@ struct Inner {
     scene: Mutex<Option<(String, f64)>>,
     status: Arc<Mutex<CameraStatus>>,
     control: Mutex<std_mpsc::Sender<Control>>,
+    /// The panel's Vision switch; the presence loop follows it.
+    enabled: tokio::sync::watch::Sender<bool>,
 }
 
 #[derive(Clone)]
@@ -218,6 +224,7 @@ impl Vision {
             scene: Mutex::new(None),
             status: status.clone(),
             control: Mutex::new(ctl_tx),
+            enabled: tokio::sync::watch::Sender::new(true),
         });
         let (fps, initial) = (cfg.fps, cfg.camera);
         std::thread::Builder::new()
@@ -244,6 +251,25 @@ impl Vision {
             return Err(VisionError::Camera(format!("no camera {index}")));
         }
         lock(&self.inner.control).send(Control::Select(index)).map_err(|_| VisionError::Camera("capture stopped".into()))
+    }
+
+    /// The Vision switch: off closes the camera, ends the current visit, forgets the last
+    /// frame and refuses `analyze_scene` (no paid call); on reopens the selected camera.
+    pub fn set_enabled(&self, on: bool) {
+        if *self.inner.enabled.borrow() == on {
+            return;
+        }
+        if !on {
+            *lock(&self.inner.latest) = None;
+        }
+        let _ = lock(&self.inner.control).send(Control::Pause(!on));
+        self.inner.enabled.send_replace(on);
+        tracing::info!("vision {}", if on { "on" } else { "off" });
+        r3x_ops::report(&self.inner.bus, "vision", if on { ServiceStatus::Running } else { ServiceStatus::Stopped }, (!on).then(|| "switched off".into()));
+    }
+
+    pub fn enabled(&self) -> bool {
+        *self.inner.enabled.borrow()
     }
 
     pub fn shutdown(&self) {
@@ -284,6 +310,21 @@ impl Vision {
                 Err(e) => e.to_string(),
             }),
             ["camera", ..] => Some("usage: camera list | camera status | camera select <index>".into()),
+            ["vision", "on"] => {
+                self.set_enabled(true);
+                Some("Vision on".into())
+            }
+            ["vision", "off"] => {
+                self.set_enabled(false);
+                Some("Vision off: camera closed, no scene photos".into())
+            }
+            ["vision", "status"] => Some(format!(
+                "vision: {} | camera streaming: {} | person: {}",
+                if self.enabled() { "on" } else { "off" },
+                s.streaming,
+                s.person.as_deref().unwrap_or("none")
+            )),
+            ["vision", ..] => Some("usage: vision on | vision off | vision status".into()),
             _ => None,
         }
     }
@@ -292,6 +333,9 @@ impl Vision {
     /// `vision.scene_captured` (reason `on_demand`) on `turn`. This is what `r3x-brain`'s
     /// `analyze_scene` handler should await instead of "Vision is not available yet".
     pub async fn analyze_scene(&self, question: &str, turn: Option<String>) -> Result<String, VisionError> {
+        if !self.enabled() {
+            return Err(VisionError::Camera("vision is switched off".into()));
+        }
         let frame = {
             let l = lock(&self.inner.latest);
             match &*l {
@@ -307,8 +351,8 @@ impl Vision {
 
     async fn describe(&self, frame: Arc<Frame>, prompt: &str) -> Result<String, VisionError> {
         let llm = self.inner.llm.as_ref().ok_or(VisionError::Llm(r3x_llm::LlmError::Unavailable))?;
-        let q = self.inner.cfg.jpeg_quality;
-        let jpeg = tokio::task::spawn_blocking(move || frame.to_jpeg(q)).await.map_err(|e| VisionError::Image(e.to_string()))??;
+        let (q, w) = (self.inner.cfg.jpeg_quality, self.inner.cfg.scene_max_width);
+        let jpeg = tokio::task::spawn_blocking(move || frame.to_jpeg_scaled(q, w)).await.map_err(|e| VisionError::Image(e.to_string()))??;
         let b64 = base64::engine::general_purpose::STANDARD.encode(jpeg);
         let req = MessagesRequest::new(self.inner.cfg.scene_max_tokens).messages(vec![Message::user_image("image/jpeg", b64, prompt)]);
         let t0 = Instant::now();
@@ -331,7 +375,33 @@ impl Vision {
         let mut presence = Presence::new(self.inner.cfg.presence.clone());
         let clock = self.inner.bus.clock();
         let mut gaze: Option<(f64, f64)> = None;
-        while let Some(Observation { frame, analysed }) = rx.recv().await {
+        let mut enabled = self.inner.enabled.subscribe();
+        loop {
+            let obs = tokio::select! {
+                o = rx.recv() => o,
+                r = enabled.changed() => {
+                    if r.is_err() { break }
+                    if !*enabled.borrow_and_update() {
+                        // Switched off: nobody is in view any more, as far as anyone knows.
+                        for t in presence.clear(clock.t_mono()) {
+                            if let Transition::Exited { name, duration_s } = t {
+                                tracing::info!("person exited: {name} ({duration_s:.1}s, vision off)");
+                                self.inner.bus.publish(Source::System, None, Event::Vision(VisionEvent::PersonExited { name, duration_s }));
+                            }
+                        }
+                        if gaze.take().is_some() {
+                            self.inner.bus.publish(Source::System, None, Event::Vision(VisionEvent::FaceLost));
+                        }
+                        let mut st = lock(&self.inner.status);
+                        (st.person, st.present) = (None, false);
+                    }
+                    continue;
+                }
+            };
+            let Some(Observation { frame, analysed }) = obs else { break };
+            if !*enabled.borrow() {
+                continue; // a frame read just before the pause
+            }
             *lock(&self.inner.latest) = Some((frame.clone(), Instant::now()));
             let Some((seen, face)) = analysed else { continue };
             let at = face.map(|c| face_to_gaze(c, frame.width, frame.height, self.inner.cfg.hfov_deg));
@@ -412,14 +482,33 @@ fn capture_loop(
     let mut cadence = Cadence::new(fps);
     let mut source: Option<Box<dyn FrameSource>> = None;
     let mut next = Instant::now();
+    let mut paused = false;
     loop {
         match ctl.try_recv() {
             Ok(Control::Select(i)) => {
                 source = None;
                 want = Some(i);
             }
+            Ok(Control::Pause(p)) => {
+                paused = p;
+                if p {
+                    source = None; // drops the capture: the ffmpeg child is killed
+                    let mut st = lock(&status);
+                    st.streaming = false;
+                    tracing::info!("camera closed (vision off)");
+                }
+            }
             Ok(Control::Stop) | Err(std_mpsc::TryRecvError::Disconnected) => break,
             Err(std_mpsc::TryRecvError::Empty) => {}
+        }
+        if paused {
+            match ctl.recv_timeout(Duration::from_millis(500)) {
+                Ok(Control::Pause(p)) => paused = p,
+                Ok(Control::Select(i)) => want = Some(i),
+                Ok(Control::Stop) | Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            continue;
         }
         let Some(src) = source.as_mut() else {
             match want {
@@ -439,6 +528,7 @@ fn capture_loop(
                 // Nothing to read: wait for a select (or stop).
                 None => match ctl.recv_timeout(Duration::from_millis(500)) {
                     Ok(Control::Select(i)) => want = Some(i),
+                    Ok(Control::Pause(p)) => paused = p,
                     Ok(Control::Stop) | Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(std_mpsc::RecvTimeoutError::Timeout) => {}
                 },

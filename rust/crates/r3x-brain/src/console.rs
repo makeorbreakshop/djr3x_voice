@@ -51,7 +51,7 @@ r3x commands:
   brain on|off | autonomy on|off | output <name> on|off | layer <name> on|off
   log <filter> | debug level <level>       runtime log filter (debug, info, r3x_gateway=trace)
   status | state                           summary (st) | full retained state
-  debug latency | reset | camera list|status|select <n>
+  debug latency | reset | camera list|status|select <n> | vision on|off|status
   help | quit                              (h, q; quit leaves the terminal client)";
 
 /// What a line means.
@@ -217,7 +217,7 @@ pub fn parse(line: &str, emotes: &[String]) -> Parsed {
             };
             send(Command::Telemetry(TelemetryCommand::SetLogLevel { level }))
         }
-        (Some("debug"), Some("latency")) | (Some("reset"), None) | (Some("conversation"), Some("reset")) | (Some("camera"), _) => pass(),
+        (Some("debug"), Some("latency")) | (Some("reset"), None) | (Some("conversation"), Some("reset")) | (Some("camera"), _) | (Some("vision"), _) => pass(),
         (Some("debug"), _) => Parsed::Error("usage: debug latency | debug level <level>".into()),
         _ => Parsed::Error(format!("unknown command '{line}' - `help` lists them")),
     }
@@ -395,6 +395,7 @@ mod tests {
             ("DJ Transition Now", "dj transition now"),
             ("r", "reset"),
             ("camera list", "camera list"),
+            ("vision off", "vision off"),
         ] {
             assert_eq!(parse(line, &[]), Parsed::Pass(to.into()), "{line}");
         }
@@ -411,7 +412,7 @@ mod tests {
             "stop music", "next music", "music seek -30", "dj start", "dj stop", "dj next", "dj test", "dj transition now", "show list", "show wave", "show stop", "freeze",
             "unfreeze", "eye pattern thinking", "eye status", "emote yes", "mode show", "brain on", "autonomy off",
             "output face on", "layer breath off", "log debug", "debug level info", "status", "state", "debug latency",
-            "reset", "camera status", "help", "quit",
+            "reset", "camera status", "vision on", "vision off", "vision status", "help", "quit",
         ] {
             let p = parse(line, &["yes".into()]);
             assert!(!matches!(p, Parsed::Error(_) | Parsed::Empty), "{line}: {p:?}");

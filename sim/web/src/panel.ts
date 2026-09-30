@@ -713,7 +713,32 @@ export class ControlPanel {
     out.scrollTop = out.scrollHeight;
   }
 
+  /** System > Vision: the runtime's camera switch (console `vision on|off`), shown from the
+   * `vision` service's status: running = on, stopped = switched off, absent = not started. */
+  private renderVision(s: RetainedState) {
+    const h = s.services.services['vision'];
+    const b = $<HTMLButtonElement>('vision-toggle');
+    const on = h?.status === 'running';
+    const off = h?.status === 'stopped';
+    b.disabled = !on && !off;
+    b.setAttribute('aria-pressed', String(on));
+    b.textContent = on ? 'Camera on' : off ? 'Camera off' : 'Camera unavailable';
+    $('vision-note').textContent = on
+      ? 'Face tracking runs locally (free); a photo goes to Claude only when someone arrives or he is asked to look.'
+      : off
+        ? 'Camera closed: no tracking, no photos, no cost.'
+        : h
+          ? `Vision is ${h.status}${h.detail ? `: ${h.detail}` : ''}`
+          : 'Vision was not started (run the runtime with vision on).';
+    b.onclick = async () => {
+      b.disabled = true;
+      const ack = await this.gw.send({ class: 'intent', type: 'console', line: on ? 'vision off' : 'vision on' });
+      if (!ok(ack)) this.toast(reason(ack));
+    };
+  }
+
   private renderServices(s: RetainedState) {
+    this.renderVision(s);
     const svc = s.services.services;
     const names = Object.keys(svc).sort();
     const bad = names.filter((n) => svc[n].status === 'error' || svc[n].status === 'degraded');

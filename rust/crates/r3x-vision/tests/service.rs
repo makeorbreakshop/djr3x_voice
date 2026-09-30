@@ -78,7 +78,7 @@ async fn presence_scene_memory_and_on_demand_analysis() {
     let exited: Vec<_> = got.iter().filter(|e| matches!(e, VisionEvent::PersonExited { name, .. } if name == "Brandon")).collect();
     assert_eq!((detected.len(), exited.len()), (1, 1), "{got:?}");
     assert!(got.iter().any(|e| matches!(e, VisionEvent::SceneCaptured { reason, person: Some(p), description }
-        if reason == "startup_first_frame" && p == "Brandon" && description == "A workshop with a droid.")));
+        if reason == "person_changed_from_none_to_Brandon" && p == "Brandon" && description == "A workshop with a droid.")));
     assert_eq!(vision.scene().unwrap().0, "A workshop with a droid.");
 
     // Memory saw the visit (the link task runs concurrently: give it a moment).
@@ -105,4 +105,46 @@ async fn presence_scene_memory_and_on_demand_analysis() {
     }
     vision.shutdown();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+async fn next_vision(rx: &mut r3x_bus::EventReceiver) -> VisionEvent {
+    loop {
+        let Received::Message(env) = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("vision event").unwrap() else { continue };
+        if let Body::Event(Event::Vision(e)) = &env.body {
+            return e.clone();
+        }
+    }
+}
+
+/// The panel's Vision switch (stage `set_vision`): off closes the camera, ends the current
+/// visit and refuses looks (no paid call); on reopens it and recognition resumes.
+#[tokio::test]
+async fn switched_off_the_camera_closes_and_looks_are_refused() {
+    let bus = Bus::new(BusConfig::default());
+    let mut rx = bus.subscribe(Domain::Vision);
+    let cfg = VisionConfig { fps: 50.0, frame_max_age: Duration::from_secs(30), ..Default::default() };
+    let (vision, _task) = Vision::spawn(&bus, cfg, Box::new(FakeCamera(vec![1u8; 20_000])), Box::new(ByteRecognizer), None);
+    assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }));
+    assert!(vision.enabled());
+
+    vision.set_enabled(false);
+    assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonExited { .. }), "switching off ends the visit");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!vision.status().streaming, "camera closed");
+    assert!(!vision.enabled());
+    let e = vision.analyze_scene("What is this?", None).await.unwrap_err().to_string();
+    assert!(e.contains("switched off"), "{e}");
+
+    vision.set_enabled(true);
+    assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }), "back on: recognition resumes");
+    assert!(vision.status().streaming);
+
+    // The same switch as console lines (the panel's System tab sends these).
+    assert_eq!(vision.console("vision off").as_deref(), Some("Vision off: camera closed, no scene photos"));
+    assert!(!vision.enabled());
+    assert!(vision.console("vision status").unwrap().starts_with("vision: off"));
+    assert_eq!(vision.console("vision on").as_deref(), Some("Vision on"));
+    assert!(vision.enabled());
+    assert!(vision.console("vision sideways").unwrap().starts_with("usage: vision on"));
+    vision.shutdown();
 }
