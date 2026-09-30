@@ -16,13 +16,18 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 from . import base_servo_top as _top
 
 REFERENCE = "r3x-internal - base-center.step"
 LABEL = "Base centre (parametric)"
+
+DESIGNED = {"top": "clearance", "clamp": "clearance", "disc": "clearance", "bridge": "clearance",
+            "servo_mount": "clearance"}
+INSERT_CANDIDATES = ("top",)             # base_servo_top's four screws thread into the housing
 
 DEFAULTS = dict(
     fit=0.0,
@@ -39,6 +44,7 @@ DEFAULTS = dict(
     slope=(59.03, -33.5),                                         # the cut over the housing: angle from horizontal, from x at the housing top
     bridge_holes=(23.0, 25.0, 4),                                 # M5 along Y at x = 0: first z, pitch, count
     bolt3="M3", bolt5="M5", hole_sizes=HOLE_SIZES,
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -120,7 +126,15 @@ def make(params: dict | None = None, **kw):
                       bolt=P["bolt3"], kind="clearance")
         hole_features(feats, f"clamp_head{i + 1}", (x, hy0, zc), (0, 1, 0), (4.5 + fit) / 2, depth=cbdep)
     tdep = P["top_holes"][0]
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
+    for g in ("clamp", "disc", "bridge", "servo_mount"):
+        if types[g] != "clearance":
+            raise ValueError(f"{g}_hole: the {g} screws are through-bolts or clamps here; clearance only")
     for i, (x, y) in enumerate(tp["holes"]):
+        if types["top"] != "clearance":
+            body = cut_hole(body, feats, f"top{i + 1}", (x, y, zh), (0, 0, -1), P["bolt3"], types["top"], tdep, fit,
+                            P["hole_sizes"], grow_boss=False)
+            continue
         body -= Pos(x, y, zh - tdep / 2) * Cylinder(d3 / 2, tdep + 0.02)
         body -= Pos(x, y, zh - cbdep / 2) * Cylinder((4.5 + fit) / 2, cbdep + 0.02)
         hole_features(feats, f"top{i + 1}", (x, y, zh - cbdep), (0, 0, -1), d3 / 2, depth=tdep - cbdep,

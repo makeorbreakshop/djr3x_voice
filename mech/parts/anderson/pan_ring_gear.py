@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - headlift-base-mount.step"
 LABEL = "Pan ring-gear sector (parametric)"
+
+DESIGNED = {"fix": "clearance"}
+INSERT_CANDIDATES = ("fix", )
 
 DEFAULTS = dict(
     fit=0.0,
@@ -29,6 +33,7 @@ DEFAULTS = dict(
     flank_slope=0.25,                 # tooth half-width grows 0.25 per mm toward the root
     root_fillet=2.0,
     bolt="M5", hole_sizes=HOLE_SIZES, holes=(118.5, (180.0, 270.0)),
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -70,10 +75,15 @@ def make(params: dict | None = None, **kw):
     w = P["width"]
     feats: dict = {"bottom": plane((0, 0, 0), (0, 0, -1)), "top": plane((0, 0, w), (0, 0, 1)),
                    "gear_axis": {"type": "axis", "p": [0.0, 0.0, 0.0], "d": [0.0, 0.0, 1.0], "r": tc}}
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     d = hole_d(P["bolt"], "clearance", P["fit"], P["hole_sizes"])
     r, angs = P["holes"]
     for i, a in enumerate(angs):
         x, y = pol(r, math.radians(a))
+        if types["fix"] != DESIGNED["fix"]:
+            body = cut_hole(body, feats, f"h{i + 1}", (x, y, w), (0, 0, -1), P["bolt"], types["fix"], w, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x, y, w / 2) * Cylinder(d / 2, w + 0.02)
         hole_features(feats, f"h{i + 1}", (x, y, w), (0, 0, -1), d / 2, depth=w, bolt=P["bolt"], kind="clearance")
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,

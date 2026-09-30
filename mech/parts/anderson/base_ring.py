@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - headlift-base-mount (1).step"
 LABEL = "Head-lift base ring (parametric)"
+
+DESIGNED = {"flange": "clearance", "tube": "clearance"}   # through-bolts
+INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
     fit=0.0,
@@ -25,6 +29,7 @@ DEFAULTS = dict(
     flange_holes=(144.0, 8, 0.0, 5.0),   # radius, count, first angle, diameter (Anderson: 5.0 here)
     tube_holes=(118.5, 4, 0.0),          # radius, count, first angle: M5 clearance through the wall
     pocket=(7.0, 5.5),                   # under each tube hole: diameter, depth
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -46,9 +51,14 @@ def make(params: dict | None = None, **kw):
                    "flange_under": plane((P["tube_r"] + 5, 0, H - ft), (0, 0, -1))}
     hole_features(feats, "bore", (0, 0, 0), (0, 0, 1), rb, depth=H)
     r, n, a0, fd = P["flange_holes"]
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     for k in range(n):
         a = math.radians(a0 + 360.0 * k / n)
         x, y = r * math.cos(a), r * math.sin(a)
+        if types["flange"] != "clearance":
+            body = cut_hole(body, feats, f"flange{k + 1}", (x, y, H), (0, 0, -1), P["bolt"], types["flange"], ft, fit,
+                            P["hole_sizes"])
+            continue
         body -= Pos(x, y, H - ft / 2) * Cylinder((fd + fit) / 2, ft + 0.02)
         hole_features(feats, f"flange{k + 1}", (x, y, H), (0, 0, -1), (fd + fit) / 2, depth=ft)
     d = hole_d(P["bolt"], "clearance", fit, P["hole_sizes"])
@@ -57,6 +67,10 @@ def make(params: dict | None = None, **kw):
     for k in range(n):
         a = math.radians(a0 + 360.0 * k / n)
         x, y = r * math.cos(a), r * math.sin(a)
+        if types["tube"] != "clearance":
+            body = cut_hole(body, feats, f"tube{k + 1}", (x, y, H), (0, 0, -1), P["bolt"], types["tube"], H, fit,
+                            P["hole_sizes"])
+            continue
         body -= Pos(x, y, H / 2) * Cylinder(d / 2, H + 0.02)
         body -= Pos(x, y, pdep / 2) * Cylinder((pd + fit) / 2, pdep + 0.02)
         hole_features(feats, f"tube{k + 1}", (x, y, H), (0, 0, -1), d / 2, depth=H - pdep, bolt=P["bolt"], kind="clearance")

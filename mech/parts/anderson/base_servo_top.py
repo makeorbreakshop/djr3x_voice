@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 from ._sketch import profile
 
 REFERENCE = "r3x-internal - base-servo-top.step"
 LABEL = "Base servo top (parametric)"
+
+DESIGNED = {"h": "clearance", "clamp": "clearance"}
+INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
     fit=0.0,
@@ -31,6 +35,7 @@ DEFAULTS = dict(
     holes=((-82.25, 39.683), (-82.25, 59.683), (-39.25, 39.683), (-39.25, 59.683)),
     clamp=((-69.25, -52.25), 89.75, 4.5, 4.5, 16.5),   # clamp screws from the bottom edge: x, z, head bore
                                                        # diameter and depth, total depth
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -80,10 +85,15 @@ def make(params: dict | None = None, **kw):
     face = outline(P)
     z0, t = P["z0"], P["thickness"]
     body = extrude(Plane.XY.offset(z0) * face, amount=t)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     dh = hole_d(P["bolt"], "clearance", fit, P["hole_sizes"])
     feats: dict = {"bottom": plane(((x0 + x1) / 2, (y0 + y1) / 2, z0), (0, 0, -1)),
                    "top": plane(((x0 + x1) / 2, (y0 + y1) / 2, z0 + t), (0, 0, 1))}
     for i, (x, y) in enumerate(P["holes"]):
+        if types["h"] != DESIGNED["h"]:
+            body = cut_hole(body, feats, f"h{i + 1}", (x, y, z0 + t), (0, 0, -1), P["bolt"], types["h"], t, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x, y, z0 + t / 2) * Cylinder(dh / 2, t + 0.02)
         hole_features(feats, f"h{i + 1}", (x, y, z0 + t), (0, 0, -1), dh / 2, depth=t, bolt=P["bolt"], kind="clearance")
     xs, cz, cbd, cbdep, dep = P["clamp"]

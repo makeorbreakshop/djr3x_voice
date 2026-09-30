@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - neck-support-ring-outer.step"
 LABEL = "Neck support ring, outer (parametric)"
+
+DESIGNED = {"ring": "clearance"}
+INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
     fit=0.0,
@@ -27,6 +31,7 @@ DEFAULTS = dict(
     windows=(6, 72.5, 95.0, 16.0, 8.0),   # count, inner r, outer r, spoke width (deg), corner r
     bolt="M5", hole_sizes=HOLE_SIZES,
     hole_circles=((118.0, 12, 0.0), (104.0, 12, 0.0), (64.0, 8, 0.0)),   # radius, count, first angle (deg)
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -74,6 +79,7 @@ def make(params: dict | None = None, **kw):
     feats: dict = {"bottom": plane((0, 0, 0), (0, 0, -1)), "top": plane((0, 0, t), (0, 0, 1))}
     hole_features(feats, "bore", (0, 0, 0), (0, 0, 1), rb, depth=t)
     hole_features(feats, "rim", (0, 0, t + rh), (0, 0, -1), rr, depth=rh + gd)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     d = hole_d(P["bolt"], "clearance", P["fit"], P["hole_sizes"])
     i = 0
     for r, cnt, a0 in P["hole_circles"]:
@@ -81,6 +87,11 @@ def make(params: dict | None = None, **kw):
         for k in range(cnt):
             a = math.radians(a0 + 360.0 * k / cnt)
             x, y = r * math.cos(a), r * math.sin(a)
+            if types["ring"] != DESIGNED["ring"]:
+                i += 1
+                body = cut_hole(body, feats, f"h{i}", (x, y, 0), (0, 0, 1), P["bolt"], types["ring"], depth, P["fit"],
+                                P.get("hole_sizes"), grow_boss=True)
+                continue
             body -= Pos(x, y, depth / 2) * Cylinder(d / 2, depth + 0.02)
             i += 1
             hole_features(feats, f"h{i}", (x, y, 0), (0, 0, 1), d / 2, depth=depth, bolt=P["bolt"], kind="clearance")

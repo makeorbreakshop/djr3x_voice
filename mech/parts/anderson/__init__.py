@@ -30,4 +30,14 @@ PARTS = {
     "parts.anderson.pan_ring_gear": "headlift-base-mount",
     "parts.anderson.base_ring": "headlift-base-mount (1)",
 }
+# parts his STEP folder does not have: sourced from the STLs in their animation folders.
+# module -> {variant name ("" = defaults): what it is}
+STL_PARTS = {
+    "parts.anderson.ring_servo_gear": {"": "top-ring-servo-gear", "LOWER": "lower-ring-servo-gear"},
+    "parts.anderson.ring_gear": {"": "lower-ring-inner-gear", "TOP": "top-ring-inner-gear"},
+    "parts.anderson.ring_servo_mount": {"": "lower-ring-servo-mount", "MAIN": "top-ring-servo-mount-main",
+                                        "SPACER": "top-ring-servo-mount-spacer"},
+}
+STL_DIR = REF_DIR.parent
+
 # not modelled: mgn12-rail-with-2020 is a stand-in for purchased parts (a 2020 extrusion + MGN12 rail)

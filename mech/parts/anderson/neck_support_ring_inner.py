@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - neck-support-ring-inner.step"
 LABEL = "Neck support ring, inner (parametric)"
+
+DESIGNED = {"ring": "clearance", "tab": "clearance"}
+INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
     fit=0.0,
@@ -30,6 +34,7 @@ DEFAULTS = dict(
     window=(12.5, -42.25, -33.75),   # through the disc under the tab: width, y0, y1
     tab_bolt="M3", tab_holes=(16.5, 41.5),         # z of the two holes (along Y, x = 0)
     hole_sizes=HOLE_SIZES,
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -68,11 +73,16 @@ def make(params: dict | None = None, **kw):
     feats: dict = {"bottom": plane((0, 0, 0), (0, 0, -1)), "top": plane((0, 0, t), (0, 0, 1)),
                    "tab_face": plane((0, ty, (t + tz) / 2), (0, -1, 0))}
     hole_features(feats, "bore", (0, 0, 0), (0, 0, 1), rb, depth=t)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     d5 = hole_d(P["ring_bolt"], "clearance", fit, P["hole_sizes"])
     r, cnt, a0 = P["ring_holes"]
     for k in range(cnt):
         a = math.radians(a0 + 360.0 * k / cnt)
         x, y = r * math.cos(a), r * math.sin(a)
+        if types["ring"] != DESIGNED["ring"]:
+            body = cut_hole(body, feats, f"ring{k + 1}", (x, y, 0), (0, 0, 1), P["ring_bolt"], types["ring"], t, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x, y, t / 2) * Cylinder(d5 / 2, t + 0.02)
         hole_features(feats, f"ring{k + 1}", (x, y, 0), (0, 0, 1), d5 / 2, depth=t, bolt=P["ring_bolt"], kind="clearance")
         if abs(x) < 1e-6 and y < 0 and y - d5 / 2 < ty:                # the one under the tab's foot fillet
@@ -81,6 +91,10 @@ def make(params: dict | None = None, **kw):
             hole_features(feats, "head_relief", (x, y, t + rf), (0, 0, -1), hr, depth=rf)
     d3 = hole_d(P["tab_bolt"], "clearance", fit, P["hole_sizes"])
     for k, z in enumerate(P["tab_holes"]):
+        if types["tab"] != DESIGNED["tab"]:
+            body = cut_hole(body, feats, f"tab{k + 1}", (0, ty, z), (0, 1, 0), P["tab_bolt"], types["tab"], tt, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(0, ty + tt / 2, z) * Rot(90, 0, 0) * Cylinder(d3 / 2, tt + 0.02)
         hole_features(feats, f"tab{k + 1}", (0, ty, z), (0, 1, 0), d3 / 2, depth=tt, bolt=P["tab_bolt"], kind="clearance")
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,

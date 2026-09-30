@@ -10,12 +10,16 @@ end wall at -Y.
 
 from __future__ import annotations
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - slide-platform.step"
 LABEL = "Slide platform (parametric)"
+
+DESIGNED = {"carriage": "clearance", "pocket": "clearance", "wall": "clearance"}
+INSERT_CANDIDATES = ("pocket", "wall", )
 
 DEFAULTS = dict(
     fit=0.0,
@@ -28,6 +32,7 @@ DEFAULTS = dict(
     pocket=((-36.0, -3.0), (-63.5, -50.5), 2.0),
     pocket_holes=((-30.0, -57.0), (-9.0, -57.0)),
     wall_bolt="M4", wall_holes=(21.5, (-62.0, -33.5, -5.0)),   # z, y positions (through the groove's floor)
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -54,20 +59,33 @@ def make(params: dict | None = None, **kw):
     body -= box(x0 - 1, x0 + gd, y0 - 1, y1 + 1, gz0, gz1)
     (px0, px1), (py0, py1), pd = P["pocket"]
     body -= box(px0, px1, py0, py1, t - pd, t + 0.01)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     d3 = hole_d(P["bolt"], "clearance", fit, P["hole_sizes"])
     feats: dict = {"bottom": plane((x0 / 2, (y0 + y1) / 2, 0), (0, 0, -1)), "top": plane((x0 / 2, (y0 + y1) / 2, t), (0, 0, 1)),
                    "wall_face": plane((x0 + gd, (y0 + y1) / 2, (gz0 + gz1) / 2), (-1, 0, 0))}
     (cx, cy), pitch = P["carriage"]
     for i, (x, y) in enumerate(sorted((cx + sx * pitch / 2, cy + sy * pitch / 2) for sx in (-1, 1) for sy in (-1, 1))):
+        if types["carriage"] != DESIGNED["carriage"]:
+            body = cut_hole(body, feats, f"carriage{i + 1}", (x, y, 0), (0, 0, 1), P["bolt"], types["carriage"], t, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x, y, t / 2) * Cylinder(d3 / 2, t + 0.02)
         hole_features(feats, f"carriage{i + 1}", (x, y, 0), (0, 0, 1), d3 / 2, depth=t, bolt=P["bolt"], kind="clearance")
     for i, (x, y) in enumerate(P["pocket_holes"]):
+        if types["pocket"] != DESIGNED["pocket"]:
+            body = cut_hole(body, feats, f"pocket{i + 1}", (x, y, t - pd), (0, 0, -1), P["bolt"], types["pocket"], t - pd, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x, y, (t - pd) / 2) * Cylinder(d3 / 2, t - pd + 0.02)
         hole_features(feats, f"pocket{i + 1}", (x, y, 0), (0, 0, 1), d3 / 2, depth=t - pd, bolt=P["bolt"], kind="clearance")
     d4 = hole_d(P["wall_bolt"], "clearance", fit, P["hole_sizes"])
     z, ys = P["wall_holes"]
     th = sw - gd
     for i, y in enumerate(ys):
+        if types["wall"] != DESIGNED["wall"]:
+            body = cut_hole(body, feats, f"wall{i + 1}", (x0 + sw, y, z), (-1, 0, 0), P["wall_bolt"], types["wall"], th, P["fit"],
+                            P.get("hole_sizes"), grow_boss=True)
+            continue
         body -= Pos(x0 + gd + th / 2, y, z) * Rot(0, 90, 0) * Cylinder(d4 / 2, th + 0.02)
         hole_features(feats, f"wall{i + 1}", (x0 + gd, y, z), (1, 0, 0), d4 / 2, depth=th, bolt=P["wall_bolt"], kind="clearance")
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,

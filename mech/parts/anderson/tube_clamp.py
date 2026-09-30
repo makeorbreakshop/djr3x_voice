@@ -13,13 +13,17 @@ block toward +X.
 
 from __future__ import annotations
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 
 REFERENCE = "r3x-internal - neck-rod-clamp.step"
 ALSO = ("r3x-internal - pipeclamp.step",)       # the same solid under a second name
 LABEL = "Tube clamp (parametric)"
+
+DESIGNED = {"clamp": "clearance", "mount": "nut_trap"}   # both clamp: they stay (the design rule)
+INSERT_CANDIDATES = ()
 
 DEFAULTS = dict(
     fit=0.0,              # print fit, mm on the bore and every hole
@@ -36,6 +40,7 @@ DEFAULTS = dict(
     mount_depth=10.0,
     nut=(17.75, 2.5, 7.0, 2.25),   # nut slots: near face x, thickness (X), width (Y), floor z (open to the top)
     hole_sizes=HOLE_SIZES,         # printed hole diameters by bolt (Anderson: M3 clearance 3.5)
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -71,6 +76,9 @@ def make(params: dict | None = None, **kw):
     feats: dict = {"bottom": plane((0, 0, 0), (0, 0, -1)), "top": plane((0, 0, h), (0, 0, 1)),
                    "mount_face": plane((bx, 0, h / 2), (1, 0, 0))}
     hole_features(feats, "bore", (0, 0, 0), (0, 0, 1), rb, depth=h)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
+    if types["clamp"] != "clearance":
+        raise ValueError("clamp_hole: the clamp screw pinches the split ring - clearance (with its nut) only")
     # clamp screw across the ears (clearance both sides of the split)
     dc = hole_d(P["clamp_bolt"], "clearance", fit, P["hole_sizes"])
     xe = P["split"] / 2 + ew
@@ -82,10 +90,14 @@ def make(params: dict | None = None, **kw):
     nx, nt, nw, nz = P["nut"]
     for i, sy in enumerate((-1, 1)):
         y = sy * P["mount_bolt_y"]
+        if types["mount"] != "nut_trap":
+            body = cut_hole(body, feats, f"mount{i + 1}", (bx, y, h / 2), (-1, 0, 0), P["mount_bolt"], types["mount"],
+                            P["mount_depth"], fit, P["hole_sizes"], grow_boss=False)
+            continue
         body -= Pos(bx - P["mount_depth"] / 2, y, h / 2) * Rot(0, 90, 0) * Cylinder(dm / 2, P["mount_depth"] + 0.02)
         body -= Pos(nx + nt / 2, y, (nz + h + 1) / 2) * Box(nt + fit, nw + fit, h + 1 - nz)
         hole_features(feats, f"mount{i + 1}", (bx, y, h / 2), (-1, 0, 0), dm / 2, depth=P["mount_depth"],
-                      bolt=P["mount_bolt"], kind="clearance")
+                      bolt=P["mount_bolt"], kind="nut_trap")
         feats[f"nut{i + 1}"] = plane((nx, y, h / 2), (-1, 0, 0))
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,
                   printability=Print("flat (z = 0 on the bed)", "bottom", False,

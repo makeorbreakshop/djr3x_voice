@@ -11,13 +11,17 @@ long side along X.
 
 from __future__ import annotations
 
-from parts.head._common import Print, finish, hole_d, hole_features, plane
+from parts.head._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane,
+                                resolve_hole_types)
 
 from . import HOLE_SIZES
 from parts.head.servos import servo as servo_spec
 
 REFERENCE = "r3x-internal - neck-rotation-servo-mount.step"
 LABEL = "Pan servo mount (parametric)"
+
+DESIGNED = {"mount": "clearance", "servo": "clearance"}
+INSERT_CANDIDATES = ("mount", "servo")   # base_center's screws come up into the rails; the servo's down into the plate
 
 DEFAULTS = dict(
     fit=0.0,
@@ -27,6 +31,7 @@ DEFAULTS = dict(
     rail=(9.0, 20.0),                              # rail width (Y, each side), height below the plate
     bolt="M3", hole_sizes=HOLE_SIZES,
     mount=(50.0, 30.0),                            # the four mount holes: pitch X x Y
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -54,12 +59,21 @@ def make(params: dict | None = None, **kw):
     feats: dict = {"top": plane((0, 0, t), (0, 0, 1)), "feet": plane((0, 0, -rh), (0, 0, -1))}
     fp = P["flange_pattern"] or (sv["pattern_l"], sv["pattern_w"])
     mx, my = P["mount"]
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     for i, (x, y) in enumerate(sorted((sx * mx / 2, sy * my / 2) for sx in (-1, 1) for sy in (-1, 1))):
-        body -= Pos(x, y, (t - rh) / 2) * Cylinder(d / 2, t + rh + 0.02)
-        hole_features(feats, f"mount{i + 1}", (x, y, t), (0, 0, -1), d / 2, depth=t + rh, bolt=P["bolt"], kind="clearance")
+        if types["mount"] == "clearance":
+            body -= Pos(x, y, (t - rh) / 2) * Cylinder(d / 2, t + rh + 0.02)
+            hole_features(feats, f"mount{i + 1}", (x, y, t), (0, 0, -1), d / 2, depth=t + rh, bolt=P["bolt"], kind="clearance")
+        else:        # the screw comes up from below into the rail
+            body = cut_hole(body, feats, f"mount{i + 1}", (x, y, -rh), (0, 0, 1), P["bolt"], types["mount"], t + rh,
+                            fit, P["hole_sizes"], grow_boss=True)
     for i, (x, y) in enumerate(sorted((sx * fp[0] / 2, sy * fp[1] / 2) for sx in (-1, 1) for sy in (-1, 1))):
-        body -= Pos(x, y, t / 2) * Cylinder(d / 2, t + 0.02)
-        hole_features(feats, f"servo{i + 1}", (x, y, t), (0, 0, -1), d / 2, depth=t, bolt=P["bolt"], kind="clearance")
+        if types["servo"] == "clearance":
+            body -= Pos(x, y, t / 2) * Cylinder(d / 2, t + 0.02)
+            hole_features(feats, f"servo{i + 1}", (x, y, t), (0, 0, -1), d / 2, depth=t, bolt=P["bolt"], kind="clearance")
+        else:
+            body = cut_hole(body, feats, f"servo{i + 1}", (x, y, t), (0, 0, -1), P["bolt"], types["servo"], t, fit,
+                            P["hole_sizes"], grow_boss=True)
     feats["pocket"] = {"type": "axis", "p": [0.0, 0.0, t], "d": [0.0, 0.0, -1.0], "r": 0.0, "size": [pl, pw]}
     return finish(body, label=LABEL, params=P, features=feats, reference=REFERENCE,
                   printability=Print("plate down (z = thickness on the bed), rails up", "top", False,

@@ -22,7 +22,7 @@ import pytest
 MECH = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MECH))
 
-from parts.anderson import PARTS, REF_DIR  # noqa: E402
+from parts.anderson import PARTS, REF_DIR, STL_DIR, STL_PARTS  # noqa: E402
 from parts.head.tests import regress as R  # noqa: E402
 
 MODULES = sorted(PARTS)
@@ -83,3 +83,61 @@ def test_same_solid_twice(name, built):
             pytest.skip("reference STEP not on this machine")
         other = import_step(str(path))
         assert math.isclose(other.volume, built[name].volume, rel_tol=1e-4)
+
+
+# ------------------------------------------------------------------ parts sourced from STLs
+STL_CASES = [(m, v) for m, vs in sorted(STL_PARTS.items()) for v in vs]
+
+
+def _stl_case(module, variant):
+    mod = _mod(module)
+    params = getattr(mod, variant) if variant else {}
+    sub, ref = getattr(mod, variant + "_REFERENCE") if variant else (mod.REF_SUBDIR, mod.REFERENCE)
+    return mod, params, STL_DIR / sub, ref
+
+
+@pytest.mark.parametrize("module,variant", STL_CASES)
+def test_stl_part_matches(module, variant):
+    """No B-rep for these: held to the STL (its faceting ~0.01 mm): mean deviation <= 0.05 mm, volume
+    within 1 %, bbox within 2 mm (the ring sectors' simplified end blends), holes found on the mesh
+    matched both ways within 0.2 mm."""
+    mod, params, ref_dir, ref = _stl_case(module, variant)
+    p = mod.make(params)
+    assert p.is_valid and len(p.solids()) == 1
+    if not (ref_dir / ref).exists():
+        pytest.skip("reference STL not on this machine")
+    refm = R.load_ref(ref, ref_dir=ref_dir)
+    c = R.compare(p, refm)
+    h = R.match_holes(p.features, refm, rmin=0.5)
+    print(module, variant or "default", json.dumps({k: round(v, 4) if isinstance(v, float) else v for k, v in c.items()}),
+          f"holes {len(h['matched'])}")
+    assert abs(c["volume_ratio"] - 1) <= 0.01 and c["mean_mm"] <= 0.05 and c["bbox_mm"] <= 2.0, c
+    assert not h["missing_in_ref"] and not h["missing_in_model"], h
+
+
+# ------------------------------------------------------------------ hole types and the inserts preset
+ALL_MODULES = sorted(set(MODULES) | set(STL_PARTS))
+
+
+@pytest.mark.parametrize("name", ALL_MODULES)
+def test_inserts_preset(name):
+    """`inserts=True` turns the part's screw-into-plastic groups into heat-set holes (datasheet
+    diameter, depth >= insert length + 1) and leaves the rest as designed."""
+    from parts.head._common import HOLE_TYPES, INSERTS
+
+    mod = _mod(name)
+    designed = getattr(mod, "DESIGNED", None)
+    assert designed is not None, "every part exposes its hole groups (DESIGNED)"
+    assert all(t in HOLE_TYPES for t in designed.values())
+    p = mod.make({"inserts": True})
+    assert p.is_valid and len(p.solids()) == 1
+    for g in getattr(mod, "INSERT_CANDIDATES", ()):
+        hs = [f for k, f in p.features.items() if k.startswith("hole_") and f.get("kind") == "heat_set"
+              and f.get("insert")]
+        assert hs, f"{g}: no heat-set holes after the preset"
+        for f in hs:
+            ins = next(v for v in INSERTS.values() if v["source"] == f["insert"]) if "as drawn" not in f["insert"] else None
+            if ins:
+                assert math.isclose(2 * f["r"], ins["d"], abs_tol=1e-6) and f["depth"] >= ins["length"] + 1 - 1e-6
+    with pytest.raises(ValueError):
+        mod.make({f"{next(iter(designed))}_hole": "rivet"})

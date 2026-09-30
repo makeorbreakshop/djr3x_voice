@@ -11,20 +11,25 @@ from __future__ import annotations
 
 import math
 
-from parts.head._common import Print, finish, hole_features, plane
+from parts.head._common import Print, cut_hole, finish, hole_features, hole_group_params, plane, resolve_hole_types
 
 from ._gear import polygon_tooth, spur, trapezoid
 
 REFERENCE = "r3x-internal - lift-gear.step"
 LABEL = "Head-lift gear (parametric)"
 
+DESIGNED = {"horn_screw": "tapped"}          # the disc horn's screws self-thread into the gear
+INSERT_CANDIDATES = ("horn_screw",)
+
 DEFAULTS = dict(
     fit=0.0,
+    horn_bolt="M2",
     teeth=19, root_r=25.0, width=12.0,
     tooth=(5.0, 2.5, 26.0, 30.0),       # root width, tip land, straight-wall top, tip (radii along the tooth)
     centre_d=3.5, centre_depth=6.0,     # M3 through the horn's centre, from the front face
     horn=(30.5, 4.0, 13.0, 2.0),        # disc-horn pocket diameter/depth, spline-boss pocket diameter/depth (from the back)
     horn_screws=(12.0, 8, 2.0, 8.0),    # radius, count, diameter, depth from the front face
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -55,9 +60,14 @@ def make(params: dict | None = None, **kw):
     hole_features(feats, "horn", (0, -w, 0), (0, 1, 0), (hd + fit) / 2, depth=hdep)
     hole_features(feats, "spline_boss", (0, -w + hdep, 0), (0, 1, 0), (bd + fit) / 2, depth=bdep)
     r, n, sd, sdep = P["horn_screws"]
+    ht = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)["horn_screw"]
     for k in range(n):
         a = 2 * math.pi * k / n
         x, z = r * math.cos(a), r * math.sin(a)
+        if ht != DESIGNED["horn_screw"]:        # from the horn's face (the back pocket's floor) into the gear
+            body = cut_hole(body, feats, f"horn_screw{k + 1}", (x, -w + hdep, z), (0, 1, 0), P["horn_bolt"], ht,
+                            w - hdep, fit)
+            continue
         body -= along_y(sd + fit, 0, -sdep, x, z)
         hole_features(feats, f"horn_screw{k + 1}", (x, 0, z), (0, -1, 0), (sd + fit) / 2, depth=sdep)
     feats["axis"] = {"type": "axis", "p": [0.0, -w, 0.0], "d": [0.0, 1.0, 0.0], "r": P["root_r"]}
