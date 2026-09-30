@@ -168,3 +168,106 @@ def trans(v):
     m = np.eye(4)
     m[:3, 3] = v
     return m
+
+
+# ------------------------------------------------------------------ hole types, inserts and nuts
+# Every screw hole group in a parametric part has a `hole_type`:
+#   clearance  the screw passes (the designer's clearance diameter)
+#   heat_set   a heat-set insert: its datasheet hole diameter, depth >= insert length + 1 mm
+#   tapped     the screw self-threads into the plastic (tap-drill diameter)
+#   nut_trap   clearance, with a hex pocket for the nut at the far end
+# Parts reproduce their source "as designed" by default. `inserts=True` (a named preset) turns the
+# groups a part lists as screw-into-plastic into heat_set; a group's own `<group>_hole` parameter
+# overrides both. Nut traps and through-bolts stay where they clamp or carry pivot shear.
+
+HOLE_TYPES = ("clearance", "heat_set", "tapped", "nut_trap")
+
+# Heat-set inserts (datasheet hole diameter, insert length). Standard metric brass inserts (Ruthex /
+# CNC Kitchen sizes) unless a kit names its own; hole depth = length + 1 mm.
+INSERTS = {
+    "M2": {"d": 3.2, "length": 4.0, "source": "M2 x 4 heat-set (Ruthex RX-M2x4: hole 3.2)"},
+    "M2.5": {"d": 3.6, "length": 5.7, "source": "M2.5 x 5.7 heat-set (Ruthex RX-M2.5x5.7: hole 3.6)"},
+    "M3": {"d": 4.0, "length": 5.7, "source": "M3 x 5.7 heat-set (Ruthex RX-M3x5.7: hole 4.0)"},
+    "M4": {"d": 5.6, "length": 8.1, "source": "M4 x 8.1 heat-set (Ruthex RX-M4x8.1: hole 5.6)"},
+    "M5": {"d": 6.4, "length": 9.5, "source": "M5 x 9.5 heat-set (Ruthex RX-M5x9.5: hole 6.4)"},
+    # the kit's own: Hunter's head BOM "M4 heat set inserts - 6mm by 6mm", drawn at 6.0
+    "M4-kit": {"d": 6.0, "length": 6.0, "source": "R-3X head BOM: M4 heat-set, 6 x 6 mm (Hunter's hole 6.0)"},
+}
+NUTS = {  # ISO 4032 hex nuts: across flats, thickness
+    "M2": (4.0, 1.6), "M2.5": (5.0, 2.0), "M3": (5.5, 2.4), "M4": (7.0, 3.2), "M5": (8.0, 4.7),
+}
+WALL_MIN = 1.5            # plastic round an insert
+
+
+def insert_for(bolt: str, insert: str | None = None) -> dict:
+    return INSERTS[insert or bolt]
+
+
+ALIASES = {"tap": "tapped", "heatset": "heat_set", "heat-set": "heat_set", "nut": "nut_trap"}
+
+
+def resolve_hole_types(P: dict, designed: dict, candidates: tuple = ()) -> dict:
+    """{group: hole_type}: the part's `<group>_hole` parameter if set, else heat_set when the
+    `inserts` preset is on and the group is a screw-into-plastic candidate, else as designed."""
+    out = {}
+    for g, t in designed.items():
+        v = P.get(f"{g}_hole")
+        if v is None:
+            v = "heat_set" if P.get("inserts") and g in candidates else t
+        v = ALIASES.get(v, v)
+        if v not in HOLE_TYPES:
+            raise ValueError(f"{g}_hole = {v!r}: one of {HOLE_TYPES}")
+        out[g] = v
+    return out
+
+
+def hole_group_params(designed: dict) -> dict:
+    """The DEFAULTS entries for a part's hole groups: `inserts` (the preset) and `<group>_hole`
+    (None = as designed / preset)."""
+    return {"inserts": False, **{f"{g}_hole": None for g in designed}}
+
+
+def cut_hole(body, feats: dict, name: str, entry, d_into, bolt: str, hole_type: str, depth: float,
+             fit: float = 0.0, sizes: dict | None = None, insert: str | None = None, grow_boss: bool = False,
+             through: float | None = None):
+    """Cut one screw hole of `hole_type` into `body`, entering at `entry` along `d_into`, and record
+    it as `hole_<name>` / `face_<name>`. `depth` is the hole's length as designed (the material it
+    runs through); `through` (if longer) keeps a clearance hole on past an insert for the screw tip.
+    Returns the new body."""
+    import numpy as np
+    from build123d import Align, BuildSketch, Cylinder, Plane, RegularPolygon, extrude
+
+    d_into = np.asarray(d_into, float) / np.linalg.norm(d_into)
+    entry = np.asarray(entry, float)
+    pl = Plane(origin=tuple(entry), z_dir=tuple(d_into))
+
+    def cyl(r, length, start=0.0):
+        return (Plane(origin=tuple(entry + d_into * start), z_dir=tuple(d_into)).location
+                * Cylinder(r, length, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+
+    extra = {"bolt": bolt, "kind": hole_type}
+    if hole_type == "heat_set":
+        ins = insert_for(bolt, insert)
+        dh = ins["d"] + fit
+        L = ins["length"] + 1.0
+        if grow_boss:
+            body = body + cyl(dh / 2 + WALL_MIN, L)
+        body = body - cyl(dh / 2, L + 0.01, -0.01)
+        rest = max(depth, through or 0.0) - L
+        if rest > 0:
+            body = body - cyl(hole_d(bolt, "clearance", fit, sizes) / 2, rest + 0.02, L - 0.01)
+        extra.update(insert=ins["source"], insert_length=ins["length"])
+        hole_features(feats, name, entry, d_into, dh / 2, depth=L)
+    else:
+        kind = "tap" if hole_type == "tapped" else "clearance"
+        dh = hole_d(bolt, kind, fit, sizes)
+        body = body - cyl(dh / 2, depth + 0.02, -0.01)
+        if hole_type == "nut_trap":
+            af, nt = NUTS[bolt]
+            with BuildSketch(Plane(origin=tuple(entry + d_into * (depth - nt - 0.2)), z_dir=tuple(d_into))) as hx:
+                RegularPolygon((af + fit) / math.sqrt(3), 6)
+            body = body - extrude(hx.sketch, amount=nt + 0.21)
+            extra.update(nut=f"{bolt} ISO 4032, AF {af}")
+        hole_features(feats, name, entry, d_into, dh / 2, depth=depth)
+    feats[f"hole_{name}"].update(extra)
+    return body

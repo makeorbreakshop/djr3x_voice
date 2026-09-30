@@ -31,11 +31,14 @@ from __future__ import annotations
 
 import math
 
-from ._common import Print, finish, hole_d, hole_features, plane
+from ._common import Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane, resolve_hole_types
 from .servos import servo as servo_spec
 
 REFERENCE = "RX Head Mech Base Plate V4.stl"
 LABEL = "RX Head Mech Base Plate V4 (parametric)"
+
+DESIGNED = {"fl": "clearance", "pb": "clearance", "sins": "heat_set"}   # flange onto the head's inserts; pillow
+INSERT_CANDIDATES = ()   # blocks' tapped posts; the servos' screws already go into the kit's M4 inserts
 
 DEFAULTS = dict(
     # print fit, mm added to every hole diameter and to the servo pocket (both ways)
@@ -83,6 +86,8 @@ DEFAULTS = dict(
     foot_fillet_r=5.0,       # bars' front/back feet into the deck
     tunnel=(18.0, 20.0, 5.0),  # arched cable tunnel through each outer post: width (Z), height, corner r
     insert_depth=6.0,        # heat-set insert hole depth (+ a 118 deg drill point)
+    insert="M4-kit",         # the servo bosses' inserts: the BOM's 6 x 6 mm M4
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -249,7 +254,11 @@ def make(params: dict | None = None, **kw):
 
     # 2. head holes: 6 x clearance through the flange, entered from the top (screws go down)
     heads = sorted([(sx * P["head_holes_x"], k * P["head_holes_pitch"]) for sx in (-1, 1) for k in (-1, 0, 1)])
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
     for i, (x, z) in enumerate(heads):
+        if types["fl"] != "clearance":
+            body = cut_hole(body, feats, f"fl{i + 1}", (x, fy, z), (0, -1, 0), bolt, types["fl"], ft, fit)
+            continue
         body -= through_y(x, z, fy, ft)
         hole_features(feats, f"fl{i + 1}", (x, fy, z), (0, -1, 0), d_clear / 2, depth=ft, bolt=bolt, kind="clearance")
     # 5. bridge window and pillow-block holes
@@ -258,6 +267,9 @@ def make(params: dict | None = None, **kw):
     pw, pz = P["pillow_pattern"]
     pillows = sorted([(sx * pw / 2, sz * pz / 2) for sx in (-1, 1) for sz in (-1, 1)])
     for i, (x, z) in enumerate(pillows):
+        if types["pb"] != "clearance":
+            body = cut_hole(body, feats, f"pb{i + 1}", (x, ty, z), (0, -1, 0), bolt, types["pb"], t, fit)
+            continue
         body -= through_y(x, z, ty, t)
         hole_features(feats, f"pb{i + 1}", (x, ty, z), (0, -1, 0), d_clear / 2, depth=t, bolt=bolt, kind="clearance")
     # 6. servo inserts: blind, 118 deg drill point
@@ -266,10 +278,13 @@ def make(params: dict | None = None, **kw):
     ins = sorted([(s * (P["servo_x"] + dxp), zc + dzp) for s in (-1, 1)
                   for dxp in (-pat_l / 2, pat_l / 2) for dzp in (-pat_w / 2, pat_w / 2)])
     for i, (x, z) in enumerate(ins):
+        if types["sins"] != "heat_set":
+            body = cut_hole(body, feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), bolt, types["sins"], depth, fit)
+            continue
         drill = Pos(x, by - depth / 2 + 0.01, z) * Rot(90, 0, 0) * Cylinder(d_ins / 2, depth + 0.02)
         drill += Pos(x, by - depth, z) * Rot(90, 0, 0) * Cone(d_ins / 2, 0, tip, align=(Align.CENTER, Align.CENTER, Align.MIN))
         body -= drill
-        hole_features(feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), d_ins / 2, depth=depth, bolt=bolt, kind="heatset")
+        hole_features(feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), d_ins / 2, depth=depth, bolt=bolt, kind="heat_set")
 
     feats["underside"] = plane((0, y0, 0), (0, -1, 0))
     feats["top"] = plane((0, ty, 0), (0, 1, 0))

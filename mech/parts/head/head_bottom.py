@@ -23,7 +23,8 @@ from __future__ import annotations
 
 import math
 
-from ._common import Print, finish, hole_d, hole_features, plane, rot_x
+from ._common import (Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane, resolve_hole_types,
+                      rot_x)
 from ._shell import SHELL_FROM_HEAD
 
 REFERENCE = "RX Head Bottom with mount holes.stl"
@@ -31,8 +32,12 @@ LABEL = "RX Head Bottom (parametric)"
 TILT_DEG = 1.07
 EXPORT_FRAME = SHELL_FROM_HEAD @ rot_x(TILT_DEG)
 
+DESIGNED = {"ins": "heat_set", "pad": "tapped"}
+INSERT_CANDIDATES = ("pad",)
+
 DEFAULTS = dict(
     fit=0.0,                   # print fit, mm on every hole diameter
+    pad_bolt="M3",
     seat_y=-3.69,              # the plate's seat (top face)
     chamfer_y=-9.67,           # the 45 deg underside chamfers start here
     bottom_y=-16.6,            # octagon underside
@@ -42,7 +47,7 @@ DEFAULTS = dict(
     opening=(36.6, -48.28, 31.46, 43.79, 50.25),  # half-width, back z, arch radius, arch centre z, ledge z
     fins=(36.6, 53.1, 70.1, 32.41, 1.0),    # x0, x1 (each side), arc radius, arc centre y, z
     bolt="M4",
-    inserts=(60.0, 0.36, 28.74),            # |x|, centre z, pitch: six heat-set holes (the plate's pattern)
+    insert_pattern=(60.0, 0.36, 28.74),            # |x|, centre z, pitch: six heat-set holes (the plate's pattern)
     insert_depth=6.0,
     pin_d=1.944,                            # 1.75 mm filament pins into the side pieces
     pin_depth=5.5,
@@ -50,6 +55,7 @@ DEFAULTS = dict(
     pad_hole_d=2.834,
     pad_hole_depth=3.0,
     pad_holes=((75.7, -36.13), (89.89, -36.13), (75.7, 44.29), (89.89, 44.29)),  # (|x|, z), mirrored
+    **hole_group_params(DESIGNED),
 )
 
 
@@ -121,14 +127,14 @@ def make(params: dict | None = None, **kw):
     feats: dict = {}
     d_ins = hole_d(P["bolt"], "heatset", fit)
     tip = (d_ins / 2) / math.tan(math.radians(59))
-    ix, izc, ip = P["inserts"]
+    ix, izc, ip = P["insert_pattern"]
     ins = sorted([(s * ix, izc + k * ip) for s in (-1, 1) for k in (-1, 0, 1)])
     for i, (x, z) in enumerate(ins):
         dep = P["insert_depth"]
         drill = Pos(x, ys - dep / 2 + 0.01, z) * Rot(90, 0, 0) * Cylinder(d_ins / 2, dep + 0.02)
         drill += Pos(x, ys - dep, z) * Rot(90, 0, 0) * Rot(180, 0, 0) * Cone(d_ins / 2, 0, tip, align=(Align.CENTER, Align.CENTER, Align.MIN))
         body -= drill
-        hole_features(feats, f"ins{i + 1}", (x, ys, z), (0, -1, 0), d_ins / 2, depth=dep, bolt=P["bolt"], kind="heatset")
+        hole_features(feats, f"ins{i + 1}", (x, ys, z), (0, -1, 0), d_ins / 2, depth=dep, bolt=P["bolt"], kind="heat_set")
     dp = P["pin_d"] + fit
     pins = sorted([(s * x, z) for x, z in P["pins"] for s in (-1, 1)])
     for i, (x, z) in enumerate(pins):
@@ -137,7 +143,14 @@ def make(params: dict | None = None, **kw):
     dh = P["pad_hole_d"] + fit
     py = P["pad"][4]
     ph = sorted([(s * x, z) for x, z in P["pad_holes"] for s in (-1, 1)])
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
+    if types["ins"] != "heat_set":
+        raise ValueError("ins_hole: the plate's screws need the kit's M4 inserts here")
     for i, (x, z) in enumerate(ph):
+        if types["pad"] != "tapped":
+            body = cut_hole(body, feats, f"pad{i + 1}", (x, py, z), (0, 1, 0), P["pad_bolt"], types["pad"],
+                            P["pad_hole_depth"], fit, grow_boss=False)
+            continue
         body -= Pos(x, py + P["pad_hole_depth"] / 2, z) * Rot(90, 0, 0) * Cylinder(dh / 2, P["pad_hole_depth"] + 0.02)
         hole_features(feats, f"pad{i + 1}", (x, py, z), (0, 1, 0), dh / 2, depth=P["pad_hole_depth"])
     feats["boss_top"] = plane((0, ys, izc), (0, 1, 0))

@@ -17,13 +17,17 @@ Variants:
 
 from __future__ import annotations
 
-from ._common import Print, axis, finish, hole_d, hole_features, plane, rot_x, transform
+from ._common import (INSERTS, Print, axis, finish, hole_d, hole_features, hole_group_params, plane,
+                      resolve_hole_types, rot_x, transform)
 
 REFERENCE = "RXNeckCouplerV1.stl"          # the mesh the workbench regresses against (same solid, same frame)
 REFERENCE_CAD = "RX Neck Coupler V1 v1.step"  # Hunter's B-rep: what the defaults are read from
 LABEL = "RX Neck Coupler V1 (parametric)"
 
 VARIANTS = {"hunter_32": {}, "r3x_26": {"tube_od": 26.0}}
+
+DESIGNED = {"hub": "tapped", "pin": "tapped"}   # the hub's screws and the side pin self-thread (Hunter)
+INSERT_CANDIDATES = ()   # a 5 mm hub plate and a 4 mm wall are too thin for inserts: kept tapped
 
 DEFAULTS = dict(
     fit=0.0,              # print fit, mm added to every hole and to the bore diameter
@@ -34,10 +38,10 @@ DEFAULTS = dict(
     centre_hole_d=15.0,   # relief for the sonic hub's centre boss
     hub_pattern=16.0,     # goBILDA sonic hub: 4 holes on a 16 mm square
     hub_bolt="M4",
-    hub_hole="tap",       # 'tap' (self-threaded, Hunter) | 'heatset' | 'clearance'
     pin_bolt="M4",
-    pin_hole="tap",
     pin_y=15.0,           # side pin hole height above the open end
+    insert="M4-kit",      # the head's inserts: the BOM's 6 x 6 mm M4
+    **hole_group_params(DESIGNED),   # hub_hole / pin_hole: clearance | heat_set | tapped (as designed: tapped)
 )
 
 
@@ -57,8 +61,15 @@ def make(params: dict | None = None, **kw):
     bore = P["tube_od"] + fit
     if bore >= od - 2.0:
         raise ValueError(f"tube_od {P['tube_od']} leaves less than a 1 mm wall in a {od} mm coupler")
-    d_hub = hole_d(P["hub_bolt"], P["hub_hole"], fit)
-    d_pin = hole_d(P["pin_bolt"], P["pin_hole"], fit)
+    types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
+    if "nut_trap" in types.values():
+        raise ValueError("no room for nut traps in the coupler: clearance | heat_set | tapped")
+
+    def dia(bolt, t):
+        return INSERTS[P["insert"]]["d"] + fit if t == "heat_set" else hole_d(bolt, "tap" if t == "tapped" else t, fit)
+
+    d_hub = dia(P["hub_bolt"], types["hub"])
+    d_pin = dia(P["pin_bolt"], types["pin"])
     hp = P["hub_pattern"] / 2
 
     # design frame: axis +Z, open end at z = 0 (turned to the reference's +Y at the end)
@@ -92,9 +103,9 @@ def make(params: dict | None = None, **kw):
     hub = sorted([(x, z) for x in (-hp, hp) for z in (-hp, hp)])
     for i, (x, z) in enumerate(hub):
         hole_features(feats, f"cp{i + 1}", (x, h, z), (0, -1, 0), d_hub / 2, depth=tt, bolt=P["hub_bolt"],
-                      kind=P["hub_hole"])
+                      kind=types["hub"])
     hole_features(feats, "side_f", (od / 2, P["pin_y"], 0), (-1, 0, 0), d_pin / 2, depth=wall,
-                  bolt=P["pin_bolt"], kind=P["pin_hole"])
+                  bolt=P["pin_bolt"], kind=types["pin"])
     return finish(part, label=LABEL, params=P, features=feats, reference=REFERENCE,
                   printability=Print("open end down (y = 0 on the bed)", "bottom", False,
                                      "the 5 mm hub plate bridges the 32 mm bore: a clean bridge at 0.2 mm layers; "

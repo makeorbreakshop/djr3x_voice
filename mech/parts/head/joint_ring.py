@@ -22,8 +22,13 @@ DEFAULTS = dict(
     corner_r=3.0,       # outer corners
     window_r=3.0,       # window corners
     bolt="M4",
-    hole="tap",         # 'tap': the pivot screws self-thread (Hunter) | 'heatset' | 'clearance'
+    pivot_hole=None,    # as designed: tapped (the pivot screws self-thread; they carry the gimbal's shear,
+                        # so the inserts preset leaves them) | clearance | heat_set
+    hole=None,          # the older name for pivot_hole
+    inserts=False,
+    insert="M4-kit",
 )
+DESIGNED = {"pivot": "tapped"}
 
 
 def build(P: dict):
@@ -33,7 +38,15 @@ def build(P: dict):
     L, W, T, wl = P["length"], P["width"], P["thick"], P["wall"]
     if 2 * wl >= min(L, W):
         raise ValueError("wall too thick for the ring")
-    d = hole_d(P["bolt"], P["hole"], P["fit"])
+    from ._common import INSERTS, resolve_hole_types
+
+    if P.get("hole") and not P.get("pivot_hole"):
+        P["pivot_hole"] = P["hole"]
+    t = resolve_hole_types(P, DESIGNED)["pivot"]
+    if t == "nut_trap":
+        raise ValueError("pivot_hole: no room for nut traps in the ring's 4 mm walls")
+    P["hole"] = t
+    d = INSERTS[P["insert"]]["d"] + P["fit"] if t == "heat_set" else hole_d(P["bolt"], "tap" if t == "tapped" else t, P["fit"])
     # sketch on the XZ footprint (Plane.XZ: local (u, v) = (x, z), normal -Y), extruded symmetric in Y
     pl = Plane.XZ.offset(-T / 2)          # origin at y = +T/2, normal -Y: extrude T down to -T/2
     with BuildPart() as bp:

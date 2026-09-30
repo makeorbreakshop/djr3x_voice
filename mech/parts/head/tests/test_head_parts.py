@@ -162,5 +162,18 @@ def test_servo_pocket_follows_the_catalogue():
 def test_bolt_size_drives_holes():
     from parts.head import custom_joint_piece
 
-    p = custom_joint_piece.make(bolt="M3", hole="heatset")
-    assert p.features["hole_tilt_l"]["r"] == 2.0 and p.features["hole_tilt_l"]["kind"] == "heatset"
+    p = custom_joint_piece.make(bolt="M3", pivot_hole="clearance")
+    assert p.features["hole_tilt_l"]["r"] == 3.4 / 2 and p.features["hole_tilt_l"]["kind"] == "clearance"
+    q = custom_joint_piece.make(hole="heatset")                    # the older name and value still work
+    assert q.features["hole_tilt_l"]["r"] == 3.0 and q.features["hole_tilt_l"]["kind"] == "heat_set"
+
+
+@pytest.mark.parametrize("name", [m for m in MODULES if hasattr(_mod(m), "DESIGNED")])
+def test_hole_groups(name):
+    """Every screw hole group is exposed; the defaults are the source's; the preset builds."""
+    from parts.head._common import HOLE_TYPES
+
+    mod = _mod(name)
+    assert all(t in HOLE_TYPES for t in mod.DESIGNED.values())
+    p = mod.make({"inserts": True})
+    assert p.is_valid
