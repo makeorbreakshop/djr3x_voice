@@ -98,6 +98,11 @@ export function injectBuildDom() {
       <button id="bv-fasteners" aria-pressed="true" title="Screws, inserts, nuts and washers">Fasteners</button>
       <button id="bv-frame" title="Point the camera at the visible model">Frame model</button>
     </div>
+    <div class="kv">Overlays</div>
+    <div class="stack">
+      <button id="bv-intf" aria-pressed="false" title="Parts that overlap at rest, as the test suite sees them: the shared solid in red (orange: explained)">Interference <span id="bv-intf-n" class="n"></span></button>
+    </div>
+    <ul id="bv-intf-list" class="intf" hidden></ul>
   </section>`));
   // Operating-mode switches: Build first.
   for (const sel of ['.stage-modes', '.rail-modes']) {
@@ -187,6 +192,11 @@ export function mountBuildPanel(wb: Workbench) {
     save(st);
   };
   $('bv-frame').onclick = () => wb.frame();
+  $('bv-intf').onclick = () => wb.setInterference(!wb.interferenceOn);
+  $('bv-intf-list').onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-k]');
+    if (b) wb.frameInterference(Number(b.dataset.k));
+  };
 
   // ------------------------------------------------------------------ assembly picker + breadcrumb
   const pick = $<HTMLSelectElement>('bp-assembly');
@@ -335,6 +345,22 @@ export function mountBuildPanel(wb: Workbench) {
     press('bv-section', wb.section.on);
     press('bv-flip', wb.section.flip);
     press('bv-fasteners', wb.fasteners);
+    press('bv-intf', wb.interferenceOn);
+    const pairs = wb.interference;
+    const open = pairs.filter((p) => !p.explained).length;
+    $('bv-intf-n').textContent = pairs.length ? `${open}${pairs.length > open ? ` + ${pairs.length - open}` : ''}` : '';
+    $('bv-intf').title = pairs.length
+      ? `${open} unexplained and ${pairs.length - open} explained overlaps at rest (the suite's no-overlap test)`
+      : 'No overlaps at rest in this build (or the suite has not run: python -m workbench test)';
+    const list = $('bv-intf-list');
+    list.hidden = !wb.interferenceOn || !pairs.length;
+    const sig = pairs.map((p) => `${p.a}|${p.b}|${p.depth_mm}`).join();
+    if (list.dataset.sig !== sig) {
+      list.dataset.sig = sig;
+      const short = (id: string) => shortName(wb.partInfo(id.includes('/') && !wb.partInfo(id) ? id.slice(id.indexOf('/') + 1) : id)?.part.name ?? id);
+      list.innerHTML = pairs.map((p, k) => `<li class="${p.explained ? 'known' : 'hot'}"><button data-k="${k}" title="${esc(`${p.a} x ${p.b}: ${p.depth_mm} mm deep${p.volume_mm3 != null ? `, ${p.volume_mm3} mm³ shared` : ''}${p.explained ? ' (explained)' : ''}. Click to frame it`)}">
+        <span>${esc(short(p.a))} × ${esc(short(p.b))}</span><span class="d">${num(p.depth_mm, 1)} mm</span></button></li>`).join('');
+    }
     $<HTMLSelectElement>('bv-axis').value = wb.section.axis;
     $<HTMLInputElement>('bv-cut').disabled = !wb.section.on;
   }

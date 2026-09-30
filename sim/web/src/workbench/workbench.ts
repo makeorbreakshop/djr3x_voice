@@ -46,6 +46,8 @@ interface PartObj {
   sBase?: THREE.Vector3;
 }
 
+export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
+
 interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null }
 
 export interface AsmNode {
@@ -120,6 +122,10 @@ export class Workbench {
    * above index the ones in shown assemblies first). */
   private allParts: PartObj[] = [];
   private allFast: FastObj[] = [];
+  /** The suite's overlapping pairs at rest (out/<id>/interference.json), and the overlay's state. */
+  interference: InterferencePair[] = [];
+  interferenceOn = false;
+  private ifGroup = new THREE.Group();
   /** Nodes out of the model: under an unpicked child variant (e.g. the droid's other head). */
   private variantHidden = new Set<AsmNode>();
   private readonly listeners = new Set<() => void>();
@@ -301,10 +307,13 @@ export class Workbench {
     const fast: FastObj[] = [];
     const top = await this.buildNode(m.root, null, geometry, parts, fast);
     if (seq !== this.loadSeq) return;
+    await this.loadInterference(url, geometry);
+    if (seq !== this.loadSeq) return;
     this.allParts = parts;
     this.allFast = fast;
     this.top = top;
     this.root.add(this.top.group);
+    this.top.group.add(this.ifGroup);
     // No highlight knee here (look.ts tameHighlights): it squeezes every lit value above 0.7
     // into 0.85-1.0, which is what flattened the light shells. The Inspection rig keeps them
     // under the bloom threshold instead.
@@ -318,6 +327,73 @@ export class Workbench {
     this.pose();
     this.refresh();
     if (this.active) this.frame();
+  }
+
+  /** The suite's interference.json next to the manifest: each pair's shared solid (a GLB) or,
+   * for open meshes, a marker at its deepest point. On by itself when any pair is unexplained. */
+  private async loadInterference(url: string, geometry: (u: string) => Promise<THREE.BufferGeometry>) {
+    this.interference = [];
+    this.ifGroup.clear();
+    const dir = url.replace(/[^/]*$/, '');
+    try {
+      const r = await fetch(`${dir}interference.json`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const doc = (await r.json()) as { pairs?: InterferencePair[] };
+      this.interference = doc.pairs ?? [];
+    } catch {
+      return;
+    }
+    const hot = new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.9, depthTest: false });
+    const known = new THREE.MeshBasicMaterial({ color: 0xffa21a, transparent: true, opacity: 0.8, depthTest: false });
+    await Promise.all(this.interference.map(async (it, k) => {
+      let obj: THREE.Object3D;
+      if (it.mesh) {
+        const g = await geometry(joinUrl(dir, it.mesh)).catch(() => null);
+        obj = g ? new THREE.Mesh(g, it.explained ? known : hot) : new THREE.Object3D();
+      } else {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(Math.max(1.5, it.depth_mm), 16, 12), it.explained ? known : hot);
+        m.position.set(...it.at);
+        obj = m;
+      }
+      obj.renderOrder = 10;
+      obj.name = `interference:${k}`;
+      obj.userData.interference = k;
+      this.ifGroup.add(obj);
+    }));
+    this.interferenceOn = this.interference.some((p) => !p.explained);
+  }
+
+  /** Part id as the viewer knows it (the whole-droid suite prefixes ids that repeat). */
+  private pid(id: string) {
+    return this.parts.has(id) ? id : id.includes('/') ? id.slice(id.indexOf('/') + 1) : id;
+  }
+
+  setInterference(on: boolean) {
+    this.interferenceOn = on;
+    if (on) this.home();
+    this.refresh();
+    this.emit();
+  }
+
+  /** Frame one pair: its shared solid (or its point) and the two parts. */
+  frameInterference(k: number) {
+    const it = this.interference[k];
+    if (!it) return;
+    if (!this.interferenceOn) this.setInterference(true);
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    const o = this.ifGroup.children.find((c) => c.userData.interference === k);
+    if (o) box.expandByObject(o);
+    for (const id of [it.a, it.b]) {  // and the two parts, so the pair reads in context
+      const po = this.parts.get(this.pid(id));
+      if (!po) continue;
+      if (!po.mesh.geometry.boundingBox) po.mesh.geometry.computeBoundingBox();
+      box.union(po.mesh.geometry.boundingBox!.clone().applyMatrix4(po.mesh.matrixWorld));
+    }
+    this.selected = this.pid(it.a);
+    this.refresh();
+    this.emit();
+    if (!box.isEmpty()) this.frameBox(box, true);
   }
 
   private clear() {
@@ -674,6 +750,12 @@ export class Workbench {
     const checkParts = new Set(this.check?.parts ?? []);
     const contact = new Set(this.contact?.parts ?? []);
     const clip = this.section.on ? [this.sectionPlane()] : null;
+    const ifHot = new Set<string>();
+    const ifKnown = new Set<string>();
+    if (this.interferenceOn) {
+      for (const it of this.interference) for (const id of [it.a, it.b]) (it.explained ? ifKnown : ifHot).add(this.pid(id));
+    }
+    this.ifGroup.visible = this.interferenceOn;
 
     for (const [id, po] of this.parts) {
       const p = po.part;
@@ -696,6 +778,11 @@ export class Workbench {
       if (this.check && checkParts.has(id)) {
         m.emissive.setHex(this.check.status === 'fail' ? HIGHLIGHT.fail : this.check.status === 'warn' ? HIGHLIGHT.warn : HIGHLIGHT.step);
         opacity = 1;
+      }
+      if (this.interferenceOn && !cur && !this.check) {
+        if (ifHot.has(id)) { m.emissive.setHex(HIGHLIGHT.fail); opacity = Math.min(opacity, 0.55); }
+        else if (ifKnown.has(id)) { m.emissive.setHex(HIGHLIGHT.warn); opacity = Math.min(opacity, 0.55); }
+        else opacity = Math.min(opacity, 0.14);
       }
       if (contact.has(id)) {
         m.emissive.setHex(this.contact?.status === 'fail' ? HIGHLIGHT.fail : HIGHLIGHT.warn);
