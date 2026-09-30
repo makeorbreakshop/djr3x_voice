@@ -42,7 +42,7 @@ DEFAULTS = dict(
 
 
 def make(params: dict | None = None, **kw):
-    from build123d import Align, Axis, BuildPart, BuildSketch, Circle, Cylinder, Hole, Locations, Mode, Plane, Pos, Rot, extrude
+    from build123d import Axis, BuildPart, BuildSketch, Circle, Hole, Locations, Mode, Plane, extrude
 
     P = dict(DEFAULTS)
     given = dict(params or {}, **kw)

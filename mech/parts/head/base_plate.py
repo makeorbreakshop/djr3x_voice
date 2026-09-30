@@ -89,7 +89,7 @@ DEFAULTS = dict(
 def make(params: dict | None = None, **kw):
     """Hunter's V4 base plate from named parameters (see DEFAULTS; mm)."""
     from build123d import (Align, Axis, Box, BuildLine, BuildPart, BuildSketch, Circle, Cone, Cylinder,
-                           Locations, Mode, Plane, Polyline, Pos, Rectangle, Rot, Vector, extrude, fillet,
+                           Locations, Mode, Plane, Polyline, Pos, Rectangle, Rot, extrude, fillet,
                            make_face, mirror)
 
     P = dict(DEFAULTS)

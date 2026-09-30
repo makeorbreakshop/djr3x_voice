@@ -9,7 +9,7 @@ bearings. In `Head Joint Asm.step` it sits at (0, 67, 0) turned -90 deg about Y,
 from __future__ import annotations
 
 from ._common import Print, finish, hole_features, plane
-from .joint_ring import DEFAULTS, build, resolve
+from .joint_ring import DEFAULTS, build, resolve  # noqa: F401  (DEFAULTS re-exported)
 
 REFERENCE = "RX Neck Joint Member V1.stl"   # the STEP's mesh twin (identical solid, same frame): the
                                               # workbench's regression loads meshes only

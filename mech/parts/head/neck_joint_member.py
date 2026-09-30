@@ -10,7 +10,7 @@ inferred); the mates name its holes by where they face in its own frame:
 from __future__ import annotations
 
 from ._common import Print, finish, hole_features, plane
-from .joint_ring import build, resolve
+from .joint_ring import DEFAULTS, build, resolve  # noqa: F401  (DEFAULTS re-exported)
 
 REFERENCE = "RX Neck Joint Member V1.stl"
 LABEL = "RX Neck Joint Member V1 (parametric)"

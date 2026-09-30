@@ -29,7 +29,7 @@ import math
 
 import numpy as np
 
-from ._common import Print, finish, hole_d, hole_features, plane, rot_x, trans
+from ._common import Print, hole_features, plane, rot_x
 from ._shell import SHELL_FROM_HEAD
 
 TILT_DEG = 1.07
@@ -82,7 +82,7 @@ DEFAULTS = dict(
 
 
 def make(side: str = "left", params: dict | None = None, **kw):
-    from build123d import (Box, BuildLine, BuildPart, BuildSketch, Circle, Cone, Cylinder, Locations, Mode, Plane,
+    from build123d import (Box, BuildLine, BuildPart, BuildSketch, Circle, Cone, Cylinder, Locations, Plane,
                            Polyline, Pos, Rectangle, Rot, extrude, make_face)
 
     if side not in ("left", "right"):
@@ -102,8 +102,7 @@ def make(side: str = "left", params: dict | None = None, **kw):
     def cone_solid(r_at_0, y0, y1):
         """A cone frustum about the head axis: radius r_at_0 + k*y, from y0 to y1."""
         ra, rb = r_at_0 + k * y0, r_at_0 + k * y1
-        return Pos(0, y0, cz) * Rot(-90, 0, 0) * Cone(ra, rb, y1 - y0, align=None).moved(Pos(0, 0, (y1 - y0) / 2)) \
-            if False else Pos(0, (y0 + y1) / 2, cz) * Rot(-90, 0, 0) * Cone(ra, rb, y1 - y0)
+        return Pos(0, (y0 + y1) / 2, cz) * Rot(-90, 0, 0) * Cone(ra, rb, y1 - y0)   # Cone runs +Z: turned to +Y
 
     half = Pos(big / 2, 0, 0) * Box(big, big, big)                 # x >= 0
     dr = wall * math.sqrt(1 + k * k)                                 # the wall along the radius

@@ -19,9 +19,7 @@ Design:
 
 from __future__ import annotations
 
-import numpy as np
-
-from ._common import Print, finish, hole_d, hole_features, plane, rot_x
+from ._common import Print, finish, hole_features, plane, rot_x
 from ._shell import SHELL_FROM_HEAD, elliptic_prism_z, spheroid
 
 REFERENCE = "RX Head Top.stl"

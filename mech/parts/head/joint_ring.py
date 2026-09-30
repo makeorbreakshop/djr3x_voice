@@ -28,7 +28,7 @@ DEFAULTS = dict(
 
 def build(P: dict):
     """The ring (build123d Part) and its four hole centres/axes (entry point, direction into the part)."""
-    from build123d import Axis, BuildPart, BuildSketch, Hole, Locations, Mode, Plane, RectangleRounded, extrude
+    from build123d import BuildPart, BuildSketch, Hole, Locations, Mode, Plane, RectangleRounded, extrude
 
     L, W, T, wl = P["length"], P["width"], P["thick"], P["wall"]
     if 2 * wl >= min(L, W):

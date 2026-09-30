@@ -28,7 +28,7 @@ import pytest
 MECH = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(MECH))
 
-from parts.head import PARTS, SHELLS  # noqa: E402
+from parts.head import PARTS  # noqa: E402
 from parts.head.tests import regress as R  # noqa: E402
 
 MODULES = sorted(set(PARTS.values()))

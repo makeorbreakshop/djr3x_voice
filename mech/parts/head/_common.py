@@ -106,8 +106,6 @@ def finish(part, *, label: str, params: dict, features: dict, reference: str, pr
            frame: np.ndarray | None = None):
     """Attach the metadata the swap hook reads. `frame` (4x4), when given, carries the part and
     its features from the design frame into the reference file's frame."""
-    from build123d import Matrix  # noqa: F401  (import check)
-
     if frame is not None:
         part = transform(part, frame)
         features = {k: moved(v, frame) for k, v in features.items()}
