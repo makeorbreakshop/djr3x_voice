@@ -101,16 +101,8 @@ Performer.create(Math.floor(Math.random() * 2 ** 31))
   })
   .catch((e) => console.error('performer (wasm) failed to load', e));
 
-/** (pan, tilt) degrees in the head_pan parent frame, towards `p`. */
-const tmp = new THREE.Vector3();
-function aimAt(p: THREE.Vector3): [number, number] | null {
-  const pan = rig?.joints.get('head_pan')?.node;
-  const tilt = rig?.joints.get('head_tilt')?.node;
-  if (!pan?.parent || !tilt) return null;
-  const l = pan.parent.worldToLocal(tmp.copy(p));
-  const dy = l.y - (pan.position.y + tilt.position.y);
-  return [THREE.MathUtils.radToDeg(Math.atan2(l.x, l.z)), -THREE.MathUtils.radToDeg(Math.atan2(dy, Math.hypot(l.x, l.z)))];
-}
+/** (pan, tilt) degrees from the head's rest, towards `p` (Rig.aimAt). */
+const aimAt = (p: THREE.Vector3) => rig?.aimAt(p) ?? null;
 
 function onFrames(f: Frames) {
   const px = (k: string) => f.lights[k] ?? [];

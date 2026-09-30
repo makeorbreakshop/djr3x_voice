@@ -516,7 +516,7 @@
         "mm_per_deg": 0.21
       },
       "extended": false,
-      "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = kit pose (0 mm), 800-2200 us = +/-20 mm."
+      "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = rest (0 mm), 800-2200 us = +/-20 mm."
     },
     {
       "name": "headtilt",
@@ -581,7 +581,7 @@
         "status": "assumed"
       },
       "extended": false,
-      "note": "20 kg double-shaft servo in the hero-arm elbow disc. Script 'up' 7361 qus = model pose."
+      "note": "20 kg double-shaft servo in the hero-arm elbow disc. Script 'up' 7361 qus = rest."
     },
     {
       "name": "hand",

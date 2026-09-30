@@ -46,7 +46,7 @@ screenshots in the R-3X Animation folder.
   The sim treats them as posable. The `extended` profile shows what nine more servos would
   add.
 - Supply is 12 V into buck converters; 6 V at the servos is assumed.
-- **Still assumed and needing the bench:** each channel's centre pulse (the model rest pose),
+- **Still assumed and needing the bench:** each channel's centre pulse (the rest pose, every joint 0: `show/SPEC.md` "Frame and zeros"),
   the direction, the neck gear ratio (1.5 assumed), and the lift pinion (0.21 mm/° ⇒ ±20 mm
   over 800-2200 µs).
 

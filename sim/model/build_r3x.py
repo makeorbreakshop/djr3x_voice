@@ -113,6 +113,11 @@ DIAG = "--diag" in argv
 # --------------------------------------------------------------------------------------
 
 # Body front: direction of the RX-24 plate's centre, atan2(x, z) = -33.0 deg.
+# This is the kit's display pose, not the canonical rest (show/SPEC.md "Frame and zeros":
+# +Z = the base's front pod, which is kit -45.0 deg; the rings turned to the park droid's
+# rest). sim/web/src/show/rig_limits.json carries that correction (body_yaw, zero_offset)
+# and the sim's Rig applies it. If this build bakes the rest in, zero those entries in the
+# same change, or the sim applies it twice.
 BODY_YAW = math.radians(33.0)
 # Head front: perpendicular to the ear axis (H_LE_1 -> H_RE_1 centres), -52.2 deg.
 # The kit poses the head turned 19.2 deg off the body; we square it up.
