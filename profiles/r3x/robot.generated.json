@@ -1469,13 +1469,14 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-09-30T21:00:48+00:00",
+    "generated_at": "2026-09-30T23:26:13+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-09-30T21:00:42+00:00",
+      "generated_at": "2026-09-30T23:26:09+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
+        "base_panels_closed",
         "r3x_neck_drive",
         "hunter_head",
         "morton_frame",
@@ -1484,6 +1485,8 @@
         "top_ring"
       ],
       "skipped": [
+        "base_panels_open",
+        "base_panels_port",
         "head_r3x",
         "randall_frame"
       ]
@@ -2000,8 +2003,8 @@
         },
         "first_contact": {
           "min": null,
-          "max": 31.5,
-          "source": "hunter_head check interference_head_tilt: range -20..+25 deg; first contact +31.5 hex_shaft x mount_plate (6.5 past the limit); -33 hex_shaft x mount_plate (13 past the limit)"
+          "max": 32.5,
+          "source": "hunter_head check interference_head_tilt: range -20..+25 deg; first contact +32.5 hex_shaft x mount_plate (7.5 past the limit); -33.5 hex_shaft x mount_plate (13.5 past the limit)"
         },
         "inferred": false,
         "driven": true
@@ -2048,8 +2051,8 @@
         },
         "first_contact": {
           "min": null,
-          "max": 18.0,
-          "source": "hunter_head check interference_head_roll: range -12..+12 deg; first contact +18 neck_joint_member x head_bottom (6 past the limit); -18 neck_joint_member x head_bottom (6 past the limit); 4 explained ne"
+          "max": 21.0,
+          "source": "hunter_head check interference_head_roll: range -12..+12 deg; first contact +21 hex_shaft x mount_plate (9 past the limit); -20.5 hex_shaft x mount_plate (8.5 past the limit); 4 explained near-miss pair"
         },
         "inferred": true,
         "driven": true
@@ -2094,7 +2097,7 @@
         "first_contact": {
           "min": null,
           "max": 33.0,
-          "source": "hunter_head check interference_visor: range -15..+30 deg; first contact +33 h_v_1 x h_m_1 (3 past the limit); clear to -40; 15 explained near-miss pairs left out"
+          "source": "hunter_head check interference_visor: range -15..+30 deg; first contact +33 h_v_1 x h_m_1 (3 past the limit); clear to -40; 23 explained near-miss pairs left out"
         },
         "inferred": true,
         "driven": true
@@ -2241,40 +2244,61 @@
         "id": "base/base",
         "name": "Base skirt, top and pedestal (static)",
         "joint": null,
-        "kg": 3.9348,
+        "kg": 3.1868,
         "com": [
-          -0.2,
-          101.42,
-          -0.66
+          -0.25,
+          95.77,
+          -0.82
         ],
         "inertia": [
-          0.1178,
-          0.1843,
-          0.1172,
-          9.412e-05,
-          -0.0003446,
-          0.0003008
+          0.0963,
+          0.1433,
+          0.09576,
+          9.856e-05,
+          -0.0003444,
+          0.0003156
         ],
-        "parts": 33,
+        "parts": 21,
+        "catalogue_parts": 0
+      },
+      {
+        "id": "base_panels_closed/side_panels",
+        "name": "Side panels (static)",
+        "joint": null,
+        "kg": 0.3142,
+        "com": [
+          -0.11,
+          124.69,
+          -0.04
+        ],
+        "inertia": [
+          0.008694,
+          0.017,
+          0.008626,
+          -8.565e-05,
+          -2.56e-06,
+          -2.855e-05
+        ],
+        "parts": 4,
         "catalogue_parts": 0
       },
       {
         "id": "r3x_neck_drive/neck_stage",
         "name": "Pan stage ring + sector (fixed to the base)",
         "joint": null,
-        "kg": 0.6162,
+        "kg": 0.6161,
         "com": [
           -1.71,
           -49.0,
           13.89
         ],
         "inertia": [
-          0.005204,
-          0.009608,
-          0.004663,
-          2.502e-05,
-          6.748e-05,
-          -0.0002038
+          0.005203,
+          0.009606,
+          0.004662,
+          2.501e-05,
+          6.746e-05,
+          -0.0002037
         ],
         "parts": 2,
         "catalogue_parts": 0
@@ -2291,8 +2315,8 @@
         ],
         "inertia": [
           0.06255,
-          0.004597,
-          0.06152,
+          0.004596,
+          0.06151,
           -0.001666,
           -0.0004922,
           0.0006688
@@ -2304,19 +2328,19 @@
         "id": "r3x_neck_drive/slide",
         "name": "Lift carriage + neck tube",
         "joint": "head_lift",
-        "kg": 0.411,
+        "kg": 0.4094,
         "com": [
-          -1.93,
-          280.49,
-          -10.23
+          -1.94,
+          278.89,
+          -10.27
         ],
         "inertia": [
-          0.02744,
-          0.0001565,
-          0.02738,
-          -0.0002334,
-          2.407e-06,
-          -5.181e-05
+          0.02716,
+          0.0001561,
+          0.02711,
+          -0.0002322,
+          2.439e-06,
+          -4.509e-05
         ],
         "parts": 8,
         "catalogue_parts": 3
@@ -2325,22 +2349,22 @@
         "id": "hunter_head/neck",
         "name": "Neck post (coupler, hubs, hex shaft, U-joint body)",
         "joint": "head_lift",
-        "kg": 0.0643,
+        "kg": 0.0625,
         "com": [
           0.0,
-          728.8,
-          -0.01
+          729.86,
+          -0.03
         ],
         "inertia": [
-          8.95e-05,
-          1.227e-05,
-          9.265e-05,
-          4.995e-10,
+          8.675e-05,
+          1.123e-05,
+          8.923e-05,
+          5.299e-10,
           1.836e-08,
-          -1.995e-08
+          -7.149e-08
         ],
-        "parts": 8,
-        "catalogue_parts": 8
+        "parts": 7,
+        "catalogue_parts": 7
       },
       {
         "id": "hunter_head/cross",
@@ -2353,12 +2377,12 @@
           0.0
         ],
         "inertia": [
-          8.751e-07,
-          1.033e-06,
-          1.932e-07,
-          -6.031e-24,
-          3.237e-24,
-          1.622e-24
+          8.756e-07,
+          1.035e-06,
+          1.956e-07,
+          -1.463e-24,
+          -2.675e-23,
+          1.672e-24
         ],
         "parts": 1,
         "catalogue_parts": 1
@@ -2367,18 +2391,18 @@
         "id": "hunter_head/head",
         "name": "Head (mount plate, servos, shell)",
         "joint": "head_roll",
-        "kg": 1.3891,
+        "kg": 1.3892,
         "com": [
           1.99,
-          783.13,
-          1.89
+          783.12,
+          1.87
         ],
         "inertia": [
-          0.009446,
+          0.009447,
           0.01475,
           0.01229,
-          -0.0001129,
-          -2.918e-05,
+          -0.0001131,
+          -2.935e-05,
           0.001091
         ],
         "parts": 47,
@@ -2395,11 +2419,11 @@
           22.61
         ],
         "inertia": [
-          0.0005782,
-          0.001752,
+          0.0005786,
+          0.001753,
           0.001908,
-          3.278e-06,
-          9.375e-06,
+          3.215e-06,
+          9.379e-06,
           -0.0002279
         ],
         "parts": 10,
@@ -2430,19 +2454,19 @@
         "id": "lower_ring/lower_ring_mount",
         "name": "Lower-ring lazy susan (static race)",
         "joint": null,
-        "kg": 0.2549,
+        "kg": 0.2548,
         "com": [
           -0.76,
-          366.06,
-          -35.78
+          366.07,
+          -35.77
         ],
         "inertia": [
           0.00138,
           0.002098,
-          0.0009403,
-          2.651e-06,
-          -9.158e-06,
-          -0.0001381
+          0.0009402,
+          2.648e-06,
+          -9.155e-06,
+          -0.000138
         ],
         "parts": 4,
         "catalogue_parts": 1
@@ -2833,6 +2857,6 @@
         "inferred_note": "Anderson's horn/rod/tab; the servo's place on Hunter's head is chosen by design_drive (lever rest 0 deg, horn -30 deg off it, rod 90 deg, servo orientation 1)."
       }
     },
-    "total_kg": 13.339
+    "total_kg": 12.901
   }
 }

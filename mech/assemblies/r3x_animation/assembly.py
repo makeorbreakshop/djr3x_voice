@@ -130,6 +130,122 @@ def coil_generator(r=21.0, wire_r=3.2, h=55.0, turns=5.5, n=240, sides=10):
     return g
 
 
+# Anderson's load-path parts, remodelled (mech/parts/anderson, each in its reference STEP's frame,
+# which is the vendored STL's frame too - checked on every build, see swap_parametric)
+PARAMETRIC = {
+    "headlift-base-mount (1)": "parts.anderson.base_ring",
+    "headlift-base-mount": "parts.anderson.pan_ring_gear",
+    "base-center": "parts.anderson.base_center",
+    "base-servo-top": "parts.anderson.base_servo_top",
+    "neck-rotation-servo-mount": "parts.anderson.pan_servo_mount",
+    "head-rotate-servo-gea": "parts.anderson.pan_gear",
+    "lift-gear": "parts.anderson.lift_gear",
+    "slide-platform": "parts.anderson.slide_platform",
+    "head-lift-straight-gear": "parts.anderson.lift_rack",
+    "pipeclamp": "parts.anderson.tube_clamp",
+    "neck-rod-clamp": "parts.anderson.tube_clamp",
+    "neck-support-ring-outer": "parts.anderson.neck_support_ring_outer",
+    "neck-support-ring-inner": "parts.anderson.neck_support_ring_inner",
+    "neck-support-platform": "parts.anderson.neck_support_platform",
+    # the ring drives: (module, the module's preset dict for this variant)
+    "lower-ring-inner-gear": "parts.anderson.ring_gear",
+    "top-ring-inner-gear": ("parts.anderson.ring_gear", "TOP"),
+    "top-ring-servo-gear": "parts.anderson.ring_servo_gear",
+    "lower-ring-servo-gear": ("parts.anderson.ring_servo_gear", "LOWER"),
+    "lower-ring-servo-mount": "parts.anderson.ring_servo_mount",
+    "top-ring-servo-mount-main": ("parts.anderson.ring_servo_mount", "MAIN"),
+    "top-ring-servo-mount-spacer": ("parts.anderson.ring_servo_mount", "SPACER"),
+}
+FRAME_TOL_MM = 0.5  # parametric vs vendored STL bounds: past this, the frames differ and the swap is refused
+
+
+def swap_parametric(parts: list, report: list):
+    """The PARAMETRIC hook: every part whose vendored STL has a parametric model takes the model's
+    mesh (same frame), keeping its placement. The bounds against the STL are checked and noted."""
+    from r3xmech.meshes import load_file
+    from workbench.geom import parametric_mesh
+
+    for p in parts:
+        if p.file is None:
+            continue
+        stem = p.file.stem.split(" - ", 1)[-1]
+        mod = PARAMETRIC.get(stem)
+        if mod is None:
+            continue
+        preset = {}
+        if isinstance(mod, tuple):
+            import importlib
+
+            mod, name = mod
+            preset = dict(getattr(importlib.import_module(mod), name))
+        m, feats, prm = parametric_mesh(mod, preset)
+        mod = mod + (f"({', '.join(f'{k}={v}' for k, v in preset.items() if k == 'kind' or k == 'teeth')})" if preset else "")
+        dev = float(np.abs(m.bounds - load_file(str(p.file)).bounds).max())
+        if dev > FRAME_TOL_MM:
+            report.append(f"{p.id}: {mod} NOT swapped (bounds {dev:.2f} mm off the STL: another frame)")
+            continue
+        ref = p.file.name
+        p.generator = (lambda m=m: m.copy())
+        p.file = None
+        p.kind, p.origin, p.cad = "parametric", "ours", "parametric"
+        p.evidence = (p.evidence + "; " if p.evidence else "") + f"{mod} (ref {ref}; bounds within {dev:.2f} mm)"
+        report.append(f"{p.id}: {mod} ({dev:.2f} mm)")
+
+
+MESHES = (("pan_pinion", "pan_sector", 15), ("lift_pinion", "lift_rack", 19), ("lower_pinion", "lower_sector", 25),
+          ("top_pinion", "top_sector", 20))
+
+
+def phase_gears(parts: list, report: list):
+    """Each pinion turned about its own axis to mesh with its sector/rack at rest: the phase (within
+    one tooth pitch, 0.25 deg steps) with the least shared volume. The placements came from the
+    CAD's positions, not its tooth phase; unphased teeth sit 1-2 mm inside each other."""
+    import manifold3d as mf
+
+    from r3xmech.meshes import part_mesh
+    from workbench.geom import _cache_key, cached
+
+    by = {p.id: p for p in parts}
+
+    def man(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32), tri_verts=np.asarray(m.faces, np.uint32)))
+
+    for pid, gid, teeth in MESHES:
+        if pid not in by or gid not in by:
+            continue
+        P_, G_ = by[pid], by[gid]
+        pm, gm = part_mesh(P_), part_mesh(G_)
+        if not (pm.is_watertight and gm.is_watertight):
+            report.append(f"{pid}: not phased (open mesh)")
+            continue
+        # the pinion's axis: its thinnest principal direction, through its centroid
+        ev, vec = np.linalg.eigh(np.cov((pm.vertices - pm.centroid).T))
+        ax = vec[:, 0]
+        c = pm.centroid
+
+        def turned(deg):
+            return trimesh.transformations.rotation_matrix(math.radians(deg), ax, c)
+
+        def shared(deg):
+            m = pm.copy()
+            m.apply_transform(turned(deg))
+            return (man(m) ^ man(gm)).volume()
+
+        key = _cache_key("gear-phase", pid, gid, np.round(pm.bounds, 3).tolist(), np.round(gm.bounds, 3).tolist(),
+                         len(pm.faces), len(gm.faces))
+
+        def best():
+            steps = np.arange(0.0, 360.0 / teeth, 0.25)
+            vols = [shared(float(d)) for d in steps]
+            k = int(np.argmin(vols))
+            return float(steps[k]), float(vols[0]), float(vols[k])
+
+        deg, v0, v1 = cached(key, best)
+        if deg:
+            P_.T = turned(deg) @ P_.T
+        report.append(f"{pid} turned {deg:g} deg on its axis: shared with {gid} {v0:.0f} -> {v1:.0f} mm3")
+
+
 SPRING_Y, SPRING_H = 608.5, 55.0  # the sim's spring: on the top cap (TR_N), 55 mm at head lift 0
 
 
@@ -213,14 +329,20 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
     y_tube_bot = Y_BASE_STAGE + (z_pin + 33.5 - 77.0)          # slide bottom (S y = -77)
     # default head = Hunter's gimbal: coupler socket (R16 bore, y -67..-37 in its head frame) at body
     # y 738.3 - 37; the R-3X yoke variant needs the tube 15.7 mm shorter (socket top at 685.6)
-    y_tube_top = HUNTER_ORIGIN_Y - 37.0
+    # the tube stops under the coupler's hub plate: Hunter's coupler top is 32 below the gimbal
+    # centre, its plate `coupler_top_t` thick (hunter_head PARAMS): the droid suite checks this seat
+    from assemblies.hunter_head.assembly import PARAMS as HUNTER_PARAMS
+
+    y_tube_top = HUNTER_ORIGIN_Y - (32.0 + HUNTER_PARAMS["coupler_top_t"])
     L = y_tube_top - y_tube_bot
     a.parts.append(P("neck_tube", f"Neck tube 26 mm OD, {L:.0f} mm (CAD placeholder neck-dnp is 500 mm)",
                      "hardware", "slide", trans(0, y_tube_bot, 0) @ ZUP, None, generator=tube_generator(L),
                      kind="generated", origin="ours", material="aluminium", printed=False,
                      mass_g=L * catalog.PURCHASED["neck_tube"]["g_per_mm"], placement="fitted",
                      evidence="length = neck-main socket (head) - slide bottom (base stage)",
-                     inferred=True, inferred_note="tube material/wall not in the parts list; stage height assumed"))
+                     inferred=True, inferred_note="tube material/wall not in the parts list; stage height assumed",
+                     features={"axis": {"type": "axis", "p": [0.0, 0.0, 0.0], "d": [0.0, 0.0, 1.0], "r": 13.0},
+                               "top": {"type": "plane", "p": [0.0, 0.0, float(L)], "n": [0.0, 0.0, 1.0]}}))
 
     # the cosmetic neck spring (the real droid and the Hasbro figure have one; the kit does not
     # model it): the sim's Visual look draws it procedurally, so this is its twin, stretched by
@@ -301,6 +423,10 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
         "the tube (and the two R13 clamps) to 32 mm.",
     ]
     base_asm.children.append(a)
+    swapped: list[str] = []
+    swap_parametric(a.parts, swapped)
+    if swapped:
+        a.notes.append("Parametric (mech/parts/anderson) in place of the vendored STLs: " + "; ".join(swapped))
     return a, dict(tube_top=y_tube_top, tube_len=L)
 
 
@@ -538,19 +664,45 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm):
     # tilt + visor with the kit shells (inline, built here)
     head.mount_link = "slide"
     head.links.insert(0, Link("head_mount", "Neck top (yoke on the tube)", None))
-    head.id, head.name = "head_r3x", "Head: kit shells + R-3X Animation tilt/visor (alternate)"
-    head.variant = {"group": "head_mech", "id": "r3x_anderson", "default": False}
+    head.id, head.name = "head_r3x", "Head: kit shells + R-3X Animation tilt/visor - reference (not engineered)"
+    head.variant = {"group": "head_mech", "id": "r3x_anderson", "default": False, "reference": True}
     nd.children.append({
         "ref": "../hunter_head/manifest.json", "id": "hunter_head", "name": "Head: Hunter's gimbal mech (default)",
         "mount": {"parent_link": "slide", "transform": {"t": [0, HUNTER_ORIGIN_Y, 0], "q": [0, 0, 0, 1]},
                   "variant": {"group": "head_mech", "id": "hunter", "default": True}, "inferred": False,
                   "note": "the coupler clamps the neck tube top; the tube turns (head_pan) and slides (head_lift)"},
+        # the head <-> neck interface, as mates the droid suite checks (workbench/droid.py): the
+        # 26 mm coupler bore on the tube, the tube's top on the bore stop (the height stop), and an
+        # M4 set screw in the coupler's side insert clamping the tube
+        "interface": {
+            "mates": [
+                {"type": "concentric", "a": ["hunter_head/neck_coupler", "bore"], "b": ["neck_tube", "axis"],
+                 "note": "coupler bore (26 mm) on Anderson's neck tube"},
+                {"type": "seated", "a": ["hunter_head/neck_coupler", "bore_stop"], "b": ["neck_tube", "top"],
+                 "note": "height stop: the tube's top against the coupler's hub plate"},
+            ],
+            "fasteners": [
+                {"id": "set_coupler_tube", "spec": {"type": "set_screw", "thread": "M4", "length_mm": 6},
+                 "in": ["hunter_head/ins_coupler_side", "thread"], "onto": "neck_tube", "link": "hunter_head:neck",
+                 "note": "cup-point set screw through the coupler's side insert onto the tube"},
+            ],
+        },
     })
     nd.children.append(head)
     # move the kit head/visor parts: they are already on links 'head' / 'visor'
     head_mech(head)
     lower_drive(lower)
     top_drive(middle, top)
+    for ring in (lower, middle, top):
+        done: list[str] = []
+        swap_parametric(ring.parts, done)
+        if done:
+            ring.notes.append("Parametric (mech/parts/anderson) in place of the vendored STLs: " + "; ".join(done))
+    for a_, pool in ((nd, nd.parts), (lower, lower.parts), (middle, middle.parts + top.parts)):
+        ph: list[str] = []
+        phase_gears(pool, ph)  # the top pinion rides the middle ring, its sector the top ring
+        if ph:
+            a_.notes.append("Gear phase: " + "; ".join(ph))
     hero_arm(top)
     # parts the build supersedes
     sup = {r for p in root.all_parts() for r in p.replaces}

@@ -26,6 +26,7 @@ def _mass(p):
 
 
 def to_workbench(a: Asm, variant: dict | None = None):
+    from workbench.mates import moved
     from workbench.model import Assembly, BomLine, Joint, Link, Part, Step
 
     parts = []
@@ -42,7 +43,8 @@ def to_workbench(a: Asm, variant: dict | None = None):
         parts.append(Part(id=p.id, name=p.name, cls=cls, link=p.link, mesh=m, source=src, material=p.material,
                           printed=p.printed, explode=tuple(p.explode), mass_g=mass, mass_note=note,
                           inferred=p.inferred, inferred_note=p.inferred_note, note=p.note,
-                          cad=cad, catalog=p.catalog, stretch=getattr(p, "stretch", None)))
+                          cad=cad, catalog=p.catalog, stretch=getattr(p, "stretch", None),
+                          features={k: moved(v, p.T) for k, v in (getattr(p, "features", None) or {}).items()}))
     joints = [Joint(id=j.id, name=j.name, type=j.type, parent_link=j.parent_link, child_link=j.child_link,
                     pivot=tuple(float(v) for v in j.pivot), axis=tuple(float(v) for v in j.axis),
                     limits=tuple(j.limits), unit=j.unit, profile_joint=j.profile_joint,

@@ -274,6 +274,27 @@ def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
             by_stem.setdefault(key, []).append(p.id)
     attach_guide(asms, by_stem)
 
+    # The base's four side panels come three ways in the kit (B_S_C / B_S_O / B_S_PO, each x4 in the
+    # same four slots, nested inside each other): options, not a stack. One is built.
+    panels = {"c": ("closed", "Side panels: closed (B_S_C)", True), "o": ("open", "Side panels: open (B_S_O)", False),
+              "po": ("port", "Side panels: port opening (B_S_PO)", False)}
+    for code, (vid, name, dflt) in panels.items():
+        mine = [p for p in base.parts if p.id.startswith(f"b_s_{code}_")]
+        if not mine:
+            continue
+        for p in mine:
+            base.parts.remove(p)
+            p.link = "side_panels"
+        ids = {p.id for p in mine}
+        steps = []
+        for st in base.steps:  # the guide's step for them goes with them
+            if ids & set(st.get("parts", [])):
+                steps.append(dict(st, parts=[x for x in st["parts"] if x in ids]))
+                st["parts"] = [x for x in st["parts"] if x not in ids]
+        base.children.append(Asm(id=f"base_panels_{vid}", name=name, mount_link="base",
+                                 variant={"group": "base_side_panels", "id": vid, "default": dflt},
+                                 links=[Link("side_panels", "Side panels (static)", None)], parts=mine, steps=steps))
+
     root.children = [base, lower]
     lower.children = [middle]
     middle.children = [top]

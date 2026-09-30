@@ -1,6 +1,6 @@
 # Robot profile: mech model vs `robot.json`
 
-Generated 2026-09-30T21:00:48+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-09-30T21:00:42+00:00; assemblies r3x_droid, base, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: head_r3x, randall_frame).
+Generated 2026-09-30T23:26:13+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-09-30T23:26:09+00:00; assemblies r3x_droid, base, base_panels_closed, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: base_panels_open, base_panels_port, head_r3x, randall_frame).
 
 `robot.generated.json` is NOT live. To try it: runtime `R3X_PROFILE=profiles/r3x/robot.generated.json`, sim `?profile=generated`. To adopt it: `mech/.venv/bin/python -m rigsync --apply` (backs up robot.json).
 
@@ -71,24 +71,25 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 | hero_wrist | hero_shoulder | hero_shoulder | 271.29, 685.42, 291.11 | 0.498, 0.664, 0.558 | direct - direct | SERVO_7KG | clear |
 | head_lift | torso_top | head_pan | 0, 0, 0 | 0, 1, 0 | gear - rack: 0.475 mm per servo deg | SERVO_60KG_270 | clear |
 | head_pan | head_lift | - | 0, 0, 0 | 0, 1, 0 | gear - gear 4:1 | SERVO_35KG_270 | clear |
-| head_tilt | head_pan | head_lift | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | max +31.5 |
-| head_roll | head_tilt | head_tilt | 0, 738.3, 0 | 0, 0, 1 | push_rod_pair - push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg | GOBILDA_2000_25_2 | max +18 |
+| head_tilt | head_pan | head_lift | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | max +32.5 |
+| head_roll | head_tilt | head_tilt | 0, 738.3, 0 | 0, 0, 1 | push_rod_pair - push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg | GOBILDA_2000_25_2 | max +21 |
 | visor | head_roll | head_roll | 0, 770.59, 0.881 | 1, 0, 0 | push_rod - push_rod at rest: visor_servo +0.901 servo deg per joint deg | SERVO_35KG_270 | max +33 |
 
 ## Mass properties (per link, from the CAD)
 
-Total 13.339 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
+Total 12.901 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
 
 | link | moved by | kg | COM mm | Ixx Iyy Izz kg m² |
 |---|---|---|---|---|
-| base/base | ground | 3.935 | -0, 101, -1 | 1.18e-01 1.84e-01 1.17e-01 |
+| base/base | ground | 3.187 | -0, 96, -1 | 9.63e-02 1.43e-01 9.58e-02 |
+| base_panels_closed/side_panels | ground | 0.314 | -0, 125, -0 | 8.69e-03 1.70e-02 8.63e-03 |
 | r3x_neck_drive/neck_stage | ground | 0.616 | -2, -49, 14 | 5.20e-03 9.61e-03 4.66e-03 |
 | r3x_neck_drive/turntable | head_pan | 1.081 | -16, 76, -20 | 6.25e-02 4.60e-03 6.15e-02 |
-| r3x_neck_drive/slide | head_lift | 0.411 | -2, 280, -10 | 2.74e-02 1.57e-04 2.74e-02 |
-| hunter_head/neck | head_lift | 0.064 | 0, 729, -0 | 8.95e-05 1.23e-05 9.27e-05 |
-| hunter_head/cross | head_tilt | 0.003 | 0, 738, 0 | 8.75e-07 1.03e-06 1.93e-07 |
+| r3x_neck_drive/slide | head_lift | 0.409 | -2, 279, -10 | 2.72e-02 1.56e-04 2.71e-02 |
+| hunter_head/neck | head_lift | 0.062 | 0, 730, -0 | 8.67e-05 1.12e-05 8.92e-05 |
+| hunter_head/cross | head_tilt | 0.003 | 0, 738, 0 | 8.76e-07 1.04e-06 1.96e-07 |
 | hunter_head/head | head_roll | 1.389 | 2, 783, 2 | 9.45e-03 1.47e-02 1.23e-02 |
-| hunter_head/visor | visor | 0.158 | 1, 802, 23 | 5.78e-04 1.75e-03 1.91e-03 |
+| hunter_head/visor | visor | 0.158 | 1, 802, 23 | 5.79e-04 1.75e-03 1.91e-03 |
 | morton_frame/frame | ground | 1.234 | 0, 120, 0 | 2.14e-02 1.61e-02 2.14e-02 |
 | lower_ring/lower_ring_mount | ground | 0.255 | -1, 366, -36 | 1.38e-03 2.10e-03 9.40e-04 |
 | lower_ring/lower_ring | torso_lower | 0.896 | 29, 356, -6 | 7.16e-03 1.69e-02 1.06e-02 |

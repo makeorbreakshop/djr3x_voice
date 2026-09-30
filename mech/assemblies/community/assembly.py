@@ -97,8 +97,8 @@ def morton_frame() -> Asm:
 
 def randall_frame() -> Asm:
     rf = RANDALL / "R3X_Frame/R3X_Frame"
-    a = Asm(id="randall_frame", name="Riane Randall printed frame (alternate)", mount_link="base",
-            variant={"group": "base_frame", "id": "randall", "default": False},
+    a = Asm(id="randall_frame", name="Riane Randall printed frame - reference (not engineered)", mount_link="base",
+            variant={"group": "base_frame", "id": "randall", "default": False, "reference": True},
             links=[Link("frame_randall", "Frame (static)", None)])
     T = STATIC @ ZUP
     for n in ("cagebottom", "frame_mid", "frame_top"):
