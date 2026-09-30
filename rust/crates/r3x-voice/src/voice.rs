@@ -212,8 +212,15 @@ impl Voice {
         if let Some(t) = turn.as_ref() {
             return if t.owner == owner { Ack::Accepted } else { Ack::rejected(format!("push-to-talk is held by {}", t.owner)) };
         }
+        // Talking over R3X interrupts him (barge-in): drop the line playing and everything
+        // queued, and wait (bounded) for the audio to actually stop so the mic never records him.
         if inner.speaker.is_speaking() {
-            return Ack::rejected("R3X is speaking; the mic would record R3X");
+            tracing::info!(owner, "talk over R3X: interrupting his speech");
+            inner.speaker.stop();
+            let mut speaking = inner.speaker.speaking();
+            if tokio::time::timeout(Duration::from_millis(500), speaking.wait_for(|s| !*s)).await.is_err() {
+                return Ack::rejected("R3X did not stop speaking; the mic would record R3X");
+            }
         }
         // Starting a recording engages (CantinaOS did the same): STT only connects while
         // INTERACTIVE, so ask the StageManager, then wait (bounded) for the socket below.
@@ -497,7 +504,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ptt_ownership_remote_takeover_and_speaking_refusal() {
+    async fn ptt_ownership_remote_takeover_and_barge_in() {
         let (port, dg_bytes) = mock_deepgram().await;
         let bus = Bus::default();
         bus.set(Source::System, EngagementState { engagement: Engagement::Interactive });
@@ -533,12 +540,17 @@ mod tests {
         let conv = bus.get::<ConversationState>();
         assert_eq!((conv.ptt_owner, conv.conversation_id.as_deref()), (None, Some(turn.as_str())));
 
+        // Talking over R3X interrupts him (barge-in): the line playing and the queue are dropped
+        // before the mic opens, so it never records him.
         voice.say(SpeechRequest::reply("hi", Some("t2".into()), Source::Claude));
+        voice.say(SpeechRequest::reply("and one more thing", Some("t3".into()), Source::Claude));
         voice.speaker().speaking().wait_for(|s| *s).await.unwrap();
         let ack = voice.ptt_start("panel").await;
-        assert!(!ack.is_accepted(), "mic refuses while R3X speaks: {ack:?}");
-        voice.speaker().speaking().wait_for(|s| !*s).await.unwrap();
-        assert!(voice.ptt_start("mouse").await.is_accepted(), "released on completion");
+        assert!(ack.is_accepted(), "talk interrupts R3X: {ack:?}");
+        assert!(!voice.speaker().is_speaking(), "silent before the mic opened");
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!voice.speaker().is_speaking(), "the queued line was dropped too");
+        assert!(voice.ptt_stop(Some("panel")).await.is_accepted());
     }
 
     #[tokio::test]

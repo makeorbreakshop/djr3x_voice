@@ -405,3 +405,40 @@ mod jev_looks {
         assert_eq!(said, ["My optics can't make that out."]);
     }
 }
+
+/// Talking again supersedes the last turn: its reply (and any follow-up line) is never spoken
+/// once a newer turn has started. The 2026-09-30 session: four quick presses ("Was orange.",
+/// "Alexa, stop.", "Stop.", and an empty one) each got a reply, and R3X then talked for ~40 s
+/// answering things the speaker had already moved past.
+#[tokio::test(start_paused = true)]
+async fn a_newer_turn_silences_older_replies() {
+    let dir = std::env::temp_dir().join(format!("r3x-brain-supersede-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stream = |text: &str, wait: f64, reply: &str| {
+        let req = prompt::turn_request("sys", vec![Message::user(text)], request::default_tools(), false);
+        json!({"key": ClaudeFixtures::key_for("stream", &req), "method": "stream",
+               "chunks": [{"wait": wait, "text": reply}], "final": {"content": [{"type": "text", "text": reply}]}})
+    };
+    let lines = [stream("tell me a long story", 3.0, "Once upon a time, in a cantina far away..."), stream("never mind", 0.1, "Okay!")];
+    std::fs::write(dir.join("claude.jsonl"), lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+
+    let bus = Bus::default();
+    bus.update(Source::System, |s: &mut StageState| s.brain = true);
+    stubs(&bus);
+    let rec = log(&bus);
+    let deps = BrainDeps {
+        llm: Some(LlmClient::replay(Arc::new(ClaudeFixtures::load(&dir, 1.0).unwrap()), "claude-sonnet-5-5")),
+        router: IntentRouter::new(JevClient::new("", Duration::from_millis(800)), RouterConfig::default()),
+        memory: None,
+        latency: None,
+        ptt: None,
+        chooser: random_chooser(),
+    };
+    let _brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+    let say = |t: &str| Command::Intent(IntentCommand::Say { text: t.into() });
+    assert!(bus.command(Source::Cli, None, say("tell me a long story")).await.is_accepted());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(bus.command(Source::Cli, None, say("never mind")).await.is_accepted());
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert_eq!(spoken(&rec), ["Okay!"], "the story's reply arrived after the newer turn began: dropped");
+}

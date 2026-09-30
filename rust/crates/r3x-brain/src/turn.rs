@@ -200,6 +200,12 @@ impl Brain {
 
     /// A complete reply (tags still in): strip + schedule tags, publish, remember, speak.
     pub(crate) fn emit_reply(&self, turn: &str, tagged: &str) {
+        // The speaker has started a newer turn since: this reply answers something they have
+        // moved past (2026-09-30: four quick presses got four queued replies, ~40 s of talk).
+        if self.inner.latest_turn.lock().unwrap().as_deref().is_some_and(|latest| latest != turn) {
+            tracing::info!(turn, text = %tagged.chars().take(60).collect::<String>(), "reply superseded by a newer turn; not spoken");
+            return;
+        }
         let (clean, tags, dropped) = extract_tags(tagged, Some(self.inner.catalog.taggable.clone()));
         for d in dropped {
             tracing::warn!("dropped show tag {d:?} (unknown id, not taggable, or over the limit)");

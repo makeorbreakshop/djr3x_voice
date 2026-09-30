@@ -212,6 +212,8 @@ pub(crate) struct Inner {
     pub vision: std::sync::OnceLock<Arc<dyn SceneSource>>,
     /// Frames `analyze_scene` took, per turn, for its follow-up (not on the bus: too big).
     pub looks: Mutex<HashMap<String, String>>,
+    /// The newest turn (set when listening starts): replies of older turns are not spoken.
+    pub latest_turn: Mutex<Option<String>>,
 }
 
 /// A running brain. Dropping it stops nothing; call [`Brain::shutdown`].
@@ -288,6 +290,7 @@ impl Brain {
             now_playing: Mutex::default(),
             vision: std::sync::OnceLock::new(),
             looks: Mutex::default(),
+            latest_turn: Mutex::default(),
             cfg,
         });
         tracing::info!(
@@ -462,7 +465,13 @@ impl Brain {
             let Body::Event(e) = &env.body else { continue };
             let cid = env.conversation_id.clone();
             match e {
-                Event::Conversation(ConversationEvent::ListeningStarted) => self.inner.router.turn_started(),
+                Event::Conversation(ConversationEvent::ListeningStarted) => {
+                    self.inner.router.turn_started();
+                    // Talking again supersedes every earlier turn's reply (see `emit_reply`).
+                    if let Some(c) = cid {
+                        *self.inner.latest_turn.lock().unwrap() = Some(c);
+                    }
+                }
                 Event::Conversation(ConversationEvent::Transcript { text, is_final }) => self.inner.router.partial(text, *is_final),
                 Event::Conversation(ConversationEvent::ListeningStopped { transcript }) => {
                     if !transcript.trim().is_empty() && bus.get::<StageState>().brain {
