@@ -55,6 +55,9 @@ pub struct PadControls {
     pub talking: bool,
     /// Motion outputs enabled (PS hold toggles).
     pub armed: bool,
+    /// L1+R1 held: the right stick's X rolls the head instead of turning the gaze.
+    #[serde(default)]
+    pub rolling: bool,
     /// The last thing a button did, for a moment ("Nod", "DJ mode on", "refused: ...").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

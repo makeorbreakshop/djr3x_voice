@@ -7,6 +7,7 @@
 //! | Sticks | gaze, body | same | same |
 //! | D-pad | lift / visor | bank binding | ↑↓ move, → enter |
 //! | ✕ ○ □ △ tap / hold | emote 1-4 / 5-8 | bank tap / hold | ✕ pick, ○ back |
+//! | L1+R1 held (chord) | right stick X = head roll (gaze yaw pauses) | - | - |
 //! | L2 | push-to-talk (hold) | same | same |
 //! | R2 | arm raise | same | same |
 //! | L3 / R3 | alive layers / cancel | same | same |
@@ -211,6 +212,12 @@ impl Controls {
             }
         }
 
+        // L1+R1 together: the right stick's X becomes roll (a fifth axis the puppeteer reads).
+        let rolling = down(b::L1) && down(b::R1);
+        let mut axes: Vec<f64> = (0..4).map(|i| pad.axes.get(i).copied().unwrap_or(0.0)).collect();
+        let roll = if rolling { std::mem::replace(&mut axes[2], 0.0) } else { 0.0 };
+        axes.push(roll);
+
         // The puppeteer's share: sticks and R2 always, the d-pad only when nothing else owns it.
         let mut buttons = vec![(false, 0.0); b::COUNT];
         let keep = |buttons: &mut Vec<(bool, f64)>, i: usize| {
@@ -234,9 +241,10 @@ impl Controls {
             menu: self.menu_view(menu),
             talking: down(b::L2),
             armed: self.armed,
+            rolling,
             last: None,
         };
-        Step { puppet: PadState { axes: pad.axes.clone(), buttons }, actions, view }
+        Step { puppet: PadState { axes, buttons }, actions, view }
     }
 
     fn level<'a>(root: &'a [MenuItem], path: &[usize]) -> Option<(&'a [MenuItem], Vec<String>)> {
@@ -377,8 +385,20 @@ mod tests {
             assert!(!s.puppet.buttons[i].0, "button {i} withheld");
         }
         assert!(s.puppet.buttons[b::R2].0, "R2 = arm");
-        assert_eq!(s.puppet.axes, vec![0.1, 0.0, -0.5, 0.2]);
+        assert_eq!(s.puppet.axes, vec![0.1, 0.0, -0.5, 0.2, 0.0]);
         assert!(r.at(0.01, &[]).actions.contains(&Action::Talk(false)));
+    }
+
+    #[test]
+    fn l1_r1_together_turn_the_right_stick_x_into_roll() {
+        let mut r = Run::new();
+        let s = r.at(0.01, &[b::L1, b::R1]);
+        assert_eq!(s.view.bank, None, "the chord is not a bank");
+        assert_eq!(s.puppet.axes, vec![0.1, 0.0, 0.0, 0.2, -0.5], "right X moves from gaze yaw to roll");
+        assert!(s.view.rolling);
+        let s = r.at(0.01, &[]);
+        assert_eq!(s.puppet.axes, vec![0.1, 0.0, -0.5, 0.2, 0.0], "released: gaze yaw again, roll centred");
+        assert!(!s.view.rolling);
     }
 
     #[test]

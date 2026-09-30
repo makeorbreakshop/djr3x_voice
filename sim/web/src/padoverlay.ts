@@ -31,7 +31,7 @@ type Tags = Record<'l2' | 'l1' | 'r2' | 'r1' | 'dpad' | 'face' | 'faceSub' | 'se
 const BASE: Tags = {
   l2: 'L2 Talk', l1: `L1 ${MAPPING.banks.l1.name}`, r2: 'R2 Arm', r1: `R1 ${MAPPING.banks.r1.name}`,
   dpad: 'Lift · Visor', face: 'Emotes', faceSub: 'hold: 5-8', select: 'MENU', start: 'FREEZE', ps: 'hold: arm',
-  lstick: 'Body', lclick: 'click: idle', rstick: 'Gaze', rclick: 'click: cancel',
+  lstick: 'Body', lclick: 'click: idle', rstick: 'Gaze · L1+R1 roll', rclick: 'click: cancel',
 };
 
 /** The embedded performer's own mapping (show/puppeteer.rs), when no runtime is driving. */
@@ -215,6 +215,7 @@ export class PadOverlay {
     const chips: [string, string][] = [];
     if (p) chips.push([p.mode, '']);
     if (c?.talking) chips.push(['talking', 'talk']);
+    if (c?.rolling) chips.push(['roll', '']);
     if (c && !c.armed) chips.push(['disarmed', 'warn']);
     this.chips.replaceChildren(...chips.map(([t, k]) => el('span', `padov-chip ${k}`, t)));
     this.toast.textContent = c?.last ?? '';

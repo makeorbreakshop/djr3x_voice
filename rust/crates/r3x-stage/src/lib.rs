@@ -111,6 +111,7 @@ fn apply(bus: &Bus, cfg: &StageConfig, cmd: StageCommand) -> Ack {
             next.layers.values_mut().for_each(|on| *on = false);
         }
         StageCommand::Freeze { on } => next.frozen = on,
+        StageCommand::ClaimPad { owner } => next.pad_owner = owner,
         StageCommand::SetGaze { source: GazeSource::Audio, .. } => {
             return Ack::rejected("sound-source gaze is not implemented yet")
         }
@@ -222,6 +223,20 @@ mod tests {
         assert_eq!((s.gaze, s.gaze_owner.as_deref()), (GazeSource::Viewport, Some("panel-b")));
         assert!(bus.command(Source::Cli, None, gaze(GazeSource::Off, Some("x"))).await.is_accepted());
         assert_eq!(bus.get::<StageState>().gaze_owner, None, "only the viewport has an owner");
+    }
+
+    /// A panel in Build takes the pad from the runtime's operator layer (its own jog layer
+    /// drives the workbench); `None` hands it back. The last claim wins, like the viewport gaze.
+    #[tokio::test]
+    async fn a_panel_claims_and_returns_the_pad() {
+        let bus = Bus::default();
+        spawn(&bus, cfg(), None).unwrap();
+        let claim = |owner: Option<&str>| stage(StageCommand::ClaimPad { owner: owner.map(Into::into) });
+        assert_eq!(bus.get::<StageState>().pad_owner, None);
+        assert!(bus.command(Source::Ui, None, claim(Some("panel-a"))).await.is_accepted());
+        assert_eq!(bus.get::<StageState>().pad_owner.as_deref(), Some("panel-a"));
+        assert!(bus.command(Source::Ui, None, claim(None)).await.is_accepted());
+        assert_eq!(bus.get::<StageState>().pad_owner, None);
     }
 
     #[tokio::test]

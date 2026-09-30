@@ -5,6 +5,9 @@
 //! turns the discrete part into ordinary bus commands, as the panel would send them
 //! (`Source::Ui`). A lost pad clears the feed (the sticks release) and ends push-to-talk.
 //!
+//! A panel can take the pad (`StageCommand::ClaimPad`, sent while it is in Build): the layer
+//! then stands down as if the pad were unplugged, until the claim is returned.
+//!
 //! Feedback: pad LEDs = state (1 idle, 2 engaged, 3 DJ, all four = frozen); a short rumble
 //! = done, a long one = refused. Reports `pad`: running while a pad streams.
 
@@ -77,13 +80,26 @@ pub fn start(bus: &Bus, profile: Arc<RobotProfile>, profile_path: &Path, show_di
         }
     };
     r3x_ops::report(bus, "pad", ServiceStatus::Degraded, Some("no pad; plug in a DualShock 3".into()));
+    let feed = spawn_operator(bus, profile, map, show_ids(show_dir), reader.feedback(), raw_rx);
+    Some((reader, feed))
+}
+
+/// The operator layer on its own: raw snapshots (`None` = no pad) in, the performer's feed out.
+/// `shows` = (sequences, cues) for the menu. Separate from the reader so it runs without HID.
+pub fn spawn_operator(
+    bus: &Bus,
+    profile: Arc<RobotProfile>,
+    map: PadMapping,
+    shows: (Vec<String>, Vec<String>),
+    feedback: FeedbackHandle,
+    raw: tokio::sync::watch::Receiver<Option<PadState>>,
+) -> PadFeed {
     let (feed_tx, feed_rx) = tokio::sync::watch::channel(None);
-    let shows = show_ids(show_dir);
     let op = Operator {
         bus: bus.clone(),
         profile,
         controls: Controls::new(map),
-        feedback: reader.feedback(),
+        feedback,
         last: Arc::new(Mutex::new(None)),
         saved_alive: None,
         energy: 0.0,
@@ -91,8 +107,8 @@ pub fn start(bus: &Bus, profile: Arc<RobotProfile>, profile_path: &Path, show_di
         talking: false,
         epoch: Instant::now(),
     };
-    tokio::spawn(op.run(raw_rx, feed_tx));
-    Some((reader, feed_rx))
+    tokio::spawn(op.run(raw, feed_tx));
+    feed_rx
 }
 
 /// Sequences and cues for the menu's "Shows" lists (read once; the menu is for rare use).
@@ -120,6 +136,9 @@ impl Operator {
     async fn run(mut self, mut raw: tokio::sync::watch::Receiver<Option<PadState>>, feed: tokio::sync::watch::Sender<Option<PadInput>>) {
         while raw.changed().await.is_ok() {
             let snap = raw.borrow_and_update().clone();
+            // A panel holding the pad (Build jogs the workbench with it) gets it alone: no
+            // puppet feed (the sticks release), no button actions, talk ended.
+            let snap = snap.filter(|_| self.stage().pad_owner.is_none());
             let Some(pad) = snap else {
                 if self.talking {
                     self.talking = false;

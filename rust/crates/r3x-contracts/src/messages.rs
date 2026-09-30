@@ -209,6 +209,13 @@ pub enum StageCommand {
         owner: Option<String>,
     },
     Freeze { on: bool },
+    /// A panel takes the gamepad from the runtime (`Some`, e.g. while it is in Build) or hands
+    /// it back (`None`). The last claim wins.
+    ClaimPad {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        owner: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

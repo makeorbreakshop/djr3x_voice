@@ -22,6 +22,10 @@ talking: boolean,
  */
 armed: boolean, 
 /**
+ * L1+R1 held: the right stick's X rolls the head instead of turning the gaze.
+ */
+rolling: boolean, 
+/**
  * The last thing a button did, for a moment ("Nod", "DJ mode on", "refused: ...").
  */
 last?: string, };

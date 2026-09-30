@@ -68,6 +68,11 @@ impl PadReader {
 pub struct FeedbackHandle(Arc<Mutex<Feedback>>);
 
 impl FeedbackHandle {
+    /// A handle no reader sends (tests, a runtime without a pad thread).
+    pub fn detached() -> Self {
+        FeedbackHandle(Arc::new(Mutex::new(Feedback::default())))
+    }
+
     pub fn set(&self, f: impl FnOnce(&mut Feedback)) {
         if let Ok(mut g) = self.0.lock() {
             f(&mut g);

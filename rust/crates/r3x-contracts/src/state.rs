@@ -40,6 +40,11 @@ pub struct StageState {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub gaze_owner: Option<String>,
+    /// The panel holding the gamepad (Build mode jogs the workbench with it); while set, the
+    /// runtime's pad operator layer stands down. None = the runtime drives with it.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub pad_owner: Option<String>,
 }
 
 /// The look target the head attends to in Show.

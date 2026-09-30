@@ -31,4 +31,9 @@ gaze: GazeSource,
  * With `gaze: viewport`: the panel whose 3D camera is the target (the last to select it);
  * none = whichever panel sends one.
  */
-gaze_owner?: string | null, };
+gaze_owner?: string | null, 
+/**
+ * The panel holding the gamepad (Build mode jogs the workbench with it); while set, the
+ * runtime's pad operator layer stands down. None = the runtime drives with it.
+ */
+pad_owner?: string | null, };

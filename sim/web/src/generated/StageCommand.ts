@@ -6,4 +6,4 @@ import type { OperatingMode } from "./OperatingMode";
 /**
  * Stage manager: operating mode, output and layer switches.
  */
-export type StageCommand = { "type": "set_mode", mode: OperatingMode, } | { "type": "set_engagement", engagement: Engagement, } | { "type": "set_output", output: string, enabled: boolean, } | { "type": "set_layer", layer: string, enabled: boolean, } | { "type": "set_brain", enabled: boolean, } | { "type": "set_autonomy", enabled: boolean, } | { "type": "still" } | { "type": "set_gaze", source: GazeSource, owner?: string, } | { "type": "freeze", on: boolean, };
+export type StageCommand = { "type": "set_mode", mode: OperatingMode, } | { "type": "set_engagement", engagement: Engagement, } | { "type": "set_output", output: string, enabled: boolean, } | { "type": "set_layer", layer: string, enabled: boolean, } | { "type": "set_brain", enabled: boolean, } | { "type": "set_autonomy", enabled: boolean, } | { "type": "still" } | { "type": "set_gaze", source: GazeSource, owner?: string, } | { "type": "freeze", on: boolean, } | { "type": "claim_pad", owner?: string, };

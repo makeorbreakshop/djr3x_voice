@@ -574,6 +574,7 @@ function onGatewayEvent(e: R3xEvent) {
 
 function onGatewayState(s: RetainedState) {
   gwState = s;
+  syncPadClaim();
   frozen = s.stage.frozen;
   $('sh-freeze').classList.toggle('on', frozen);
   $('btn-dj').classList.toggle('on', s.dj.active);
@@ -692,8 +693,20 @@ mountBuildPanel(workbench);
 renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too
 // One rig from the mech model (src/mechrig/): Scene > Model, servo load meters, Build pad jog.
 const mechRig = new MechRig({ scene, workbench, droid: () => droid, interact: () => post.pacer.interact() });
+/** In Build this panel holds the gamepad (its own jog layer), so the runtime's pad operator
+ * layer stands down (stage `claim_pad`); leaving Build hands it back. Checked on every state
+ * update, so a reconnect re-claims and a claim this tab left behind is returned. */
+let inBuild = false;
+function syncPadClaim() {
+  if (!connected || !gwState) return;
+  const mine = gwState.stage.pad_owner === PANEL_ID;
+  if (inBuild && !mine) void send({ class: 'stage', type: 'claim_pad', owner: PANEL_ID });
+  else if (!inBuild && mine) void send({ class: 'stage', type: 'claim_pad' });
+}
 addEventListener('r3x:mode', (e) => {
   const m = String((e as CustomEvent).detail);
+  inBuild = m === 'build';
+  syncPadClaim();
   workbench.setActive(m === 'build');
   if (m === 'build') studio.setActive(false);
   else if (connected) studio.setActive(gwState?.stage.mode === 'studio');

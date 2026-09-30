@@ -9,8 +9,9 @@
 //! Gamepad (standard mapping): left stick = body_yaw / lean, right stick = gaze, d-pad =
 //! lift / visor, RT - LT = arm_raise, LB/RB = energy down/up, A B X Y = cue slots 1-4
 //! (hold Back for 5-8), R3 = cycle mode, Start = motion.freeze toggle. The host polls the
-//! pad and hands its state to [`Puppeteer::update`]. `roll` has no pad binding yet (every
-//! DS3 control is taken by `r3x-pad`'s operator layer); UI sliders and takes drive it.
+//! pad and hands its state to [`Puppeteer::update`]. `roll` reads a fifth axis when there is
+//! one (`r3x-pad`'s operator layer: the right stick's X while L1+R1 are held), mirrored like
+//! the sticks; with a standard four-axis pad, UI sliders and takes drive it.
 
 use super::body::{get, Pose};
 use serde::{Deserialize, Serialize};
@@ -223,7 +224,9 @@ impl Puppeteer {
             self.dpad_visor,
             clamp1(val(7) - val(6)),
             self.target[ENERGY],
-            self.target[ROLL_I],
+            // A fifth axis is roll (the runtime's operator layer: right X while L1+R1 are
+            // held), mirrored like the sticks; a standard four-axis pad leaves roll to the UI.
+            if pad.axes.len() > 4 { -ax(4) } else { self.target[ROLL_I] },
         ];
         if edge(4) {
             self.target[ENERGY] = clamp1(self.target[ENERGY] - 0.25);
@@ -333,5 +336,26 @@ mod tests {
         }
         assert_eq!(p.cmd[ROLL_I], 0.0);
         assert!((p.cmd[ENERGY] - 0.5).abs() < 1e-3);
+    }
+
+    /// A fifth axis (beyond the standard four; the runtime's operator layer puts the right
+    /// stick's X there while L1+R1 are held) is roll, mirrored like the sticks: stick right
+    /// tips the crown to the operator's right, the droid's left (-roll).
+    #[test]
+    fn a_fifth_axis_is_roll_mirrored_like_the_sticks() {
+        let mut p = Puppeteer::default();
+        let pad = PadState { axes: vec![0.0, 0.0, 0.0, 0.0, 1.0], buttons: vec![(false, 0.0); 17] };
+        for _ in 0..100 {
+            p.update(0.01, Some(&pad));
+        }
+        assert!(p.cmd[ROLL_I] < -0.99, "{}", p.cmd[ROLL_I]);
+        let mut pose = Pose::new();
+        p.apply(&mut pose);
+        assert!(get(&pose, "head_roll") < -ROLL * 0.99);
+        let centred = PadState { axes: vec![0.0; 5], buttons: vec![(false, 0.0); 17] };
+        for _ in 0..100 {
+            p.update(0.01, Some(&centred));
+        }
+        assert!(p.cmd[ROLL_I].abs() < 1e-3, "a centred fifth axis rolls back: {}", p.cmd[ROLL_I]);
     }
 }

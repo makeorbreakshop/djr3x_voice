@@ -1983,6 +1983,11 @@
           ],
           "description": "The open menu, if any."
         },
+        "rolling": {
+          "default": false,
+          "description": "L1+R1 held: the right stick's X rolls the head instead of turning the gaze.",
+          "type": "boolean"
+        },
         "talking": {
           "description": "L2 held: push-to-talk.",
           "type": "boolean"
@@ -3161,6 +3166,25 @@
             "on"
           ],
           "type": "object"
+        },
+        {
+          "description": "A panel takes the gamepad from the runtime (`Some`, e.g. while it is in Build) or hands\nit back (`None`). The last claim wins.",
+          "properties": {
+            "owner": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "claim_pad",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3251,6 +3275,14 @@
           },
           "description": "Output name -> enabled. Enables gate drivers, not layers.",
           "type": "object"
+        },
+        "pad_owner": {
+          "default": null,
+          "description": "The panel holding the gamepad (Build mode jogs the workbench with it); while set, the\nruntime's pad operator layer stands down. None = the runtime drives with it.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
