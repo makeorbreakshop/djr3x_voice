@@ -1557,7 +1557,7 @@ function renderGaze(s: RetainedState | null) {
   if (!g) return;
   if (document.activeElement !== gazeSel) gazeSel.value = g;
   const owner = s.stage.gaze_owner ?? null;
-  $('gaze-owner').textContent = owner === PANEL_ID ? 'Following this view' : owner ? `Following ${owner}'s view` : 'No view owns it yet';
+  $('gaze-owner').textContent = owner === PANEL_ID ? 'This view' : owner ? `${owner}'s view` : '';
   gazeSel.title = `What R3X's head looks at in Show (Bench and Studio ignore it). This view: ${PANEL_ID}`;
   // Nobody owns the viewport: the first panel to see that claims it.
   if (g === 'viewport' && !owner && !claimed) {

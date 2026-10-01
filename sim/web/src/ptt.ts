@@ -112,21 +112,20 @@ export type PttLook = 'offline' | 'idle' | 'starting' | 'listening' | 'sending' 
 
 /** The button: a `data-state` for CSS, the label, and the hint under it. */
 export function view(s: PttState): { look: PttLook; label: string; hint: string } {
-  const hint = 'or hold Space';
-  if (!s.connected) return { look: 'offline', label: 'R3X offline', hint: 'start everything with ./r3x' };
-  if (!s.enabled) return { look: 'offline', label: 'Talking is off in this mode', hint: 'turn the brain on in Behaviour, or switch to Show' };
-  if (s.pending === 'start') return { look: 'starting', label: 'Starting the mic…', hint: s.mode === 'hold' ? 'keep holding Space' : '' };
+  if (!s.connected) return { look: 'offline', label: 'Offline', hint: './r3x' };
+  if (!s.enabled) return { look: 'offline', label: 'Talk is off in this mode', hint: '' };
+  if (s.pending === 'start') return { look: 'starting', label: 'Starting mic…', hint: '' };
   if (s.pending === 'stop') return { look: 'sending', label: 'Sending…', hint: '' };
   if (ours(s) || s.phase === 'listening') {
     if (ours(s)) {
       return s.mode === 'hold'
-        ? { look: 'listening', label: 'Listening… release Space to send', hint: '' }
-        : { look: 'listening', label: 'Listening… click to send', hint: 'or press Space' };
+        ? { look: 'listening', label: 'Listening… release to send', hint: '' }
+        : { look: 'listening', label: 'Listening… click to send', hint: '' };
     }
     const who = s.owner === 'mouse' ? 'click-anywhere' : s.owner ?? 'another client';
-    return { look: 'busy', label: `Listening (${who})`, hint: `only ${who} can stop this turn` };
+    return { look: 'busy', label: `Listening (${who})`, hint: '' };
   }
-  if (s.phase === 'thinking') return { look: 'thinking', label: 'Thinking…', hint: 'click to talk again' };
-  if (s.phase === 'speaking') return { look: 'speaking', label: 'R3X is talking', hint: 'click or hold Space to interrupt' };
-  return { look: 'idle', label: 'Click to talk', hint };
+  if (s.phase === 'thinking') return { look: 'thinking', label: 'Thinking…', hint: '' };
+  if (s.phase === 'speaking') return { look: 'speaking', label: 'R3X is talking', hint: 'click to interrupt' };
+  return { look: 'idle', label: 'Click to talk', hint: 'or hold Space' };
 }

@@ -33,7 +33,7 @@ describe('push-to-talk', () => {
     r = run([ack('stop'), server('thinking')], r.s);
     expect(view(r.s).look).toBe('thinking');
     r = run([server('speaking')], r.s);
-    expect(view(r.s)).toMatchObject({ look: 'speaking', label: 'R3X is talking', hint: 'click or hold Space to interrupt' });
+    expect(view(r.s)).toMatchObject({ look: 'speaking', label: 'R3X is talking', hint: 'click to interrupt' });
     // Talking over R3X interrupts him: the runtime stops his speech before the mic opens.
     expect(run([click], r.s).sent).toEqual(['ptt_start']);
     expect(run([down()], r.s).sent).toEqual(['ptt_start']);
@@ -46,7 +46,7 @@ describe('push-to-talk', () => {
   it('Space is hold-to-talk and ignores auto-repeat', () => {
     let r = run([down(), ack('start'), server('listening', OWNER), down(true), down(true)]);
     expect(r.sent).toEqual(['ptt_start']);
-    expect(view(r.s).label).toBe('Listening… release Space to send');
+    expect(view(r.s).label).toBe('Listening… release to send');
     r = run([up], r.s);
     expect(r.sent).toEqual(['ptt_stop']);
   });
@@ -54,7 +54,7 @@ describe('push-to-talk', () => {
   it('the start ack can arrive before the listening state: the turn is still ours', () => {
     // A state update from another domain re-sends the old phase in between.
     let r = run([down(), ack('start'), server('idle')]);
-    expect(view(r.s).label).toBe('Listening… release Space to send');
+    expect(view(r.s).label).toBe('Listening… release to send');
     r = run([up], r.s);
     expect(r.sent).toEqual(['ptt_stop']);
     r = run([click, ack('start'), server('thinking'), server('listening', OWNER)]);

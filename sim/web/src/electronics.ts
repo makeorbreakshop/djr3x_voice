@@ -425,9 +425,8 @@ export function mountElectronics(
     });
   }
   sheet.setAttribute('aria-label', `${active.label}: boards, wiring and power`);
-  sheet.innerHTML = `<div class="sheet-body"><header><h2>${esc(active.label)} <span class="support ${active.support}">${active.support}</span></h2>
+  sheet.innerHTML = `<div class="sheet-body"><header><h2 title="${esc(active.description)}">${esc(active.label)} <span class="support ${active.support}">${active.support}</span></h2>
     <button class="icon" data-sheet-close aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></header>
-    <p class="sheet-desc">${esc(active.description)}</p>
     <div id="elec-detail">${packageHtml(active)}</div></div>`;
   el.querySelector<HTMLButtonElement>('#elec-sheet-open')!.onclick = () => sheet!.showModal();
   el.querySelector<HTMLSelectElement>('#elec-select')!.onchange = (e) => selectPackage((e.target as HTMLSelectElement).value);

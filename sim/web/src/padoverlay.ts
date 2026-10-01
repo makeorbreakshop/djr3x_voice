@@ -241,7 +241,8 @@ export class PadOverlay {
 
   private render(p: PadFrame | null) {
     this.root.classList.toggle('nopad', !p);
-    this.status.textContent = p ? 'live' : 'No controller: plug in the DualShock 3 and press PS';
+    this.status.textContent = p ? 'live' : 'No controller';
+    this.status.title = p ? '' : 'Plug in the DualShock 3 (USB) and press PS';
     const c = p?.controls;
     const chips: [string, string][] = [];
     if (p) chips.push([p.mode, '']);

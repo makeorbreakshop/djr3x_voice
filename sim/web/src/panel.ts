@@ -803,8 +803,8 @@ export class ControlPanel {
     $('library').innerHTML = hits.slice(0, 200).map((t) =>
       `<li><button class="track" data-play="${esc(t)}" title="Play ${esc(t)}">${esc(t)}</button></li>`).join('');
     $('library-count').textContent = this.library.length
-      ? `${hits.length} of ${this.library.length} tracks${q && !hits.length ? ' - Play still tries a semantic search' : ''}`
-      : 'Library not loaded yet.';
+      ? q ? `${hits.length} of ${this.library.length}` : `${this.library.length} tracks`
+      : '';
   }
 
   private addCliOut(text: string, error: boolean, echo = false) {
@@ -836,8 +836,8 @@ export class ControlPanel {
       : off
         ? ''
         : h
-          ? `Vision is ${h.status}${h.detail ? `: ${h.detail}` : ''}`
-          : 'Vision was not started (run the runtime with vision on).';
+          ? `Vision ${h.status}`
+          : 'Vision not started';
     b.onclick = async () => {
       b.disabled = true;
       const ack = await this.gw.send({ class: 'intent', type: 'console', line: on ? 'vision off' : 'vision on' });
