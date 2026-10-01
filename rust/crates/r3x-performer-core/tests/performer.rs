@@ -269,7 +269,7 @@ fn a_conversation_drives_the_face_and_chest_boards_with_named_commands() {
     let mut ev = run(&mut p, 0.0, 0.2);
     p.command(Command::ListeningStarted);
     ev.extend(run(&mut p, 0.2, 1.0));
-    p.command(Command::ListeningStopped);
+    p.command(Command::ListeningStopped { heard: true });
     ev.extend(run(&mut p, 1.0, 1.5));
     p.command(Command::SpeechStarted {
         timings: None,
@@ -587,4 +587,31 @@ fn a_heard_phrase_nods_only_while_listening() {
     p.command(Command::Heard);
     let at = p.procedural.nod_started().expect("listening: nods at the phrase");
     assert!((at - 1.0).abs() < 1e-9, "{at}");
+}
+
+/// A stray tap on talk (a kid on the pad, 2026-10-01) caught no words: R3X goes back to rest,
+/// eyes and body, instead of sitting in "thinking" waiting for a reply that never comes.
+#[test]
+fn a_turn_with_no_words_returns_to_rest_not_thinking() {
+    let mut p = performer();
+    let mut ev = run(&mut p, 0.0, 0.2);
+    p.command(Command::ListeningStarted);
+    ev.extend(run(&mut p, 0.2, 0.5));
+    p.command(Command::ListeningStopped { heard: false });
+    ev.extend(run(&mut p, 0.5, 1.5));
+    let states: Vec<String> = ev
+        .iter()
+        .filter_map(|e| match e {
+            Out::FaceLine { line } if line.starts_with('S') => Some(line.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(states, vec!["SI", "SL", "SE"], "listening, then straight back to engaged");
+    assert_eq!(p.procedural.activity, r3x_performer_core::behavior::Activity::Engaged);
+}
+
+#[test]
+fn listening_stopped_without_heard_still_parses_as_heard() {
+    let c: Command = serde_json::from_str(r#"{"cmd":"listening_stopped"}"#).unwrap();
+    assert!(matches!(c, Command::ListeningStopped { heard: true }));
 }

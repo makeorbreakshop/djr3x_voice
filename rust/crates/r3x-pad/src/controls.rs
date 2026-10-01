@@ -8,7 +8,7 @@
 //! | D-pad | lift / visor | bank binding | ↑↓ move, → enter |
 //! | ✕ ○ □ △ tap / hold | emote 1-4 / 5-8 | bank tap / hold | ✕ pick, ○ back |
 //! | L1+R1 held (chord) | right stick X = head roll (gaze yaw pauses) | - | - |
-//! | L2 | push-to-talk (hold) | same | same |
+//! | L2 | push-to-talk (hold; opens after `TALK_ARM_S`) | same | same |
 //! | R2 | arm raise | same | same |
 //! | L3 / R3 | alive layers / cancel | same | same |
 //! | Start | freeze | same | same |
@@ -22,6 +22,11 @@ use r3x_contracts::{PadBinding, PadControls, PadMapping, PadMenuView};
 use r3x_performer_core::show::puppeteer::PadState;
 
 use crate::ds3::std_btn as b;
+
+/// How long L2 must be held before the mic opens. A tap shorter than this does nothing (no
+/// interrupt, no duck, no listening head): stray presses were common (2026-10-01, 10-390 ms
+/// presses with no words). Short enough that nobody has started speaking yet.
+pub const TALK_ARM_S: f64 = 0.25;
 
 const FACES: [usize; 4] = [b::CROSS, b::CIRCLE, b::SQUARE, b::TRIANGLE];
 const DPAD: [usize; 4] = [b::UP, b::RIGHT, b::DOWN, b::LEFT];
@@ -85,13 +90,15 @@ pub struct Controls {
     /// Per face button: when it went down and the bank it belongs to; `None` once fired.
     face: [Option<(f64, Option<Bank>)>; 4],
     ps_down: Option<f64>,
+    /// When L2 went down, and whether the mic is open for this hold.
+    talk_down: Option<(f64, bool)>,
     menu: Option<(Vec<usize>, usize)>,
     pub armed: bool,
 }
 
 impl Controls {
     pub fn new(map: PadMapping) -> Self {
-        Controls { map, prev: vec![], face: [None; 4], ps_down: None, menu: None, armed: true }
+        Controls { map, prev: vec![], face: [None; 4], ps_down: None, talk_down: None, menu: None, armed: true }
     }
 
     pub fn mapping(&self) -> &PadMapping {
@@ -103,6 +110,7 @@ impl Controls {
         self.prev.clear();
         self.face = [None; 4];
         self.ps_down = None;
+        self.talk_down = None;
         self.menu = None;
     }
 
@@ -152,10 +160,20 @@ impl Controls {
         let bank = self.bank(pad);
 
         if pressed(b::L2) {
-            actions.push(Action::Talk(true));
+            self.talk_down = Some((now, false));
         }
-        if released(b::L2) {
-            actions.push(Action::Talk(false));
+        match self.talk_down {
+            Some((at, false)) if down(b::L2) && now - at >= TALK_ARM_S => {
+                self.talk_down = Some((at, true));
+                actions.push(Action::Talk(true));
+            }
+            Some((_, open)) if !down(b::L2) => {
+                self.talk_down = None;
+                if open {
+                    actions.push(Action::Talk(false));
+                }
+            }
+            _ => {}
         }
         if pressed(b::L3) {
             actions.push(Action::ToggleAlive);
@@ -239,7 +257,7 @@ impl Controls {
                 Bank::R1 => "r1".into(),
             }),
             menu: self.menu_view(menu),
-            talking: down(b::L2),
+            talking: matches!(self.talk_down, Some((_, true))),
             armed: self.armed,
             rolling,
             last: None,
@@ -378,8 +396,9 @@ mod tests {
     fn talk_follows_l2_and_the_puppeteer_never_sees_discrete_buttons() {
         let mut r = Run::new();
         let s = r.at(0.01, &[b::L2, b::R2, b::START, b::CROSS, b::L1, b::R3]);
-        assert!(s.actions.contains(&Action::Talk(true)));
         assert!(s.actions.contains(&Action::ToggleFreeze) && s.actions.contains(&Action::Cancel));
+        let s = r.at(TALK_ARM_S, &[b::L2, b::R2, b::START, b::CROSS, b::L1, b::R3]);
+        assert!(s.actions.contains(&Action::Talk(true)));
         assert!(s.view.talking);
         for i in [b::L2, b::START, b::CROSS, b::L1, b::R3, b::SELECT] {
             assert!(!s.puppet.buttons[i].0, "button {i} withheld");
@@ -387,6 +406,34 @@ mod tests {
         assert!(s.puppet.buttons[b::R2].0, "R2 = arm");
         assert_eq!(s.puppet.axes, vec![0.1, 0.0, -0.5, 0.2, 0.0]);
         assert!(r.at(0.01, &[]).actions.contains(&Action::Talk(false)));
+    }
+
+    /// A tap on L2 (a kid on the pad, 2026-10-01: presses of 10-390 ms that caught nothing)
+    /// opens nothing: no interrupt, no duck, no listening head. The mic opens once L2 has been
+    /// held [`TALK_ARM_S`]; the pad buzzes then, so the operator knows to speak.
+    #[test]
+    fn a_tap_on_l2_never_opens_the_mic() {
+        let mut r = Run::new();
+        let s = r.at(0.01, &[b::L2]);
+        assert!(!s.actions.contains(&Action::Talk(true)), "not on the press");
+        assert!(!s.view.talking);
+        r.at(TALK_ARM_S * 0.5, &[b::L2]);
+        let s = r.at(0.01, &[]);
+        assert!(s.actions.iter().all(|a| !matches!(a, Action::Talk(_))), "released early: nothing at all");
+    }
+
+    #[test]
+    fn holding_l2_opens_the_mic_once_after_the_arm_time() {
+        let mut r = Run::new();
+        r.at(0.01, &[b::L2]);
+        assert!(r.at(TALK_ARM_S - 0.05, &[b::L2]).actions.is_empty());
+        let s = r.at(0.06, &[b::L2]);
+        assert_eq!(s.actions, vec![Action::Talk(true)]);
+        assert!(r.at(0.5, &[b::L2]).actions.is_empty(), "once per hold");
+        assert_eq!(r.at(0.01, &[]).actions, vec![Action::Talk(false)]);
+        r.at(0.01, &[b::L2]);
+        r.c.reset();
+        assert!(r.at(1.0, &[b::L2]).actions.is_empty(), "a reset (pad lost) forgets the press");
     }
 
     #[test]

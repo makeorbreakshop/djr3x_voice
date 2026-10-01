@@ -276,7 +276,7 @@ fn the_performer_drives_the_grnwave_emulator_from_the_face_and_chest_streams() {
     assert_eq!(p.grnwave.as_ref().unwrap().sys_state, 0);
     assert!(p.grnwave.as_ref().unwrap().diffused, "the package's windows have diffusers");
     p.command(Command::ListeningStarted);
-    p.command(Command::ListeningStopped);
+    p.command(Command::ListeningStopped { heard: true });
     let f = step(&mut p, 4.0);
     let g = p.grnwave.as_ref().unwrap();
     assert_eq!(g.mode, b'T', "listening stopped -> thinking, via the face's ST");

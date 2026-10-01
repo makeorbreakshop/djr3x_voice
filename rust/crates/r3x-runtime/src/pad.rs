@@ -219,6 +219,11 @@ impl Operator {
                 self.talking = on;
                 let c = if on { IntentCommand::PttStart } else { IntentCommand::PttStop };
                 self.send(Intent(c), on.then(|| "listening…".into()));
+                if on {
+                    // The mic opens after a short hold (a tap does nothing): a buzz says "speak".
+                    let fb = self.feedback.clone();
+                    tokio::spawn(async move { buzz(&fb, Duration::from_millis(60)).await });
+                }
             }
             Action::Emote(slot) => {
                 let name = self.profile.emotes.get(usize::from(slot)).cloned().unwrap_or_else(|| format!("emote {}", slot + 1));

@@ -573,6 +573,13 @@ impl ChestHost {
         }
     }
 
+    /// Talk released with no words: back to engaged.
+    pub fn listening_cancelled(&mut self) {
+        if self.interactive() && self.target == "SL" {
+            self.target = "SE";
+        }
+    }
+
     pub fn llm_chunk(&mut self) {
         if self.interactive() && self.target == "ST" {
             self.target = "SS";

@@ -186,6 +186,13 @@ impl CantinaHostEmulator {
         }
     }
 
+    /// Talk released with no words: no reply is coming, back to engaged.
+    pub fn listening_cancelled(&mut self) {
+        if self.interactive() && self.target_pattern == Pattern::Listening {
+            self.target_pattern = Pattern::Engaged;
+        }
+    }
+
     /// LLM_RESPONSE_CHUNK while thinking.
     pub fn llm_chunk(&mut self) {
         if self.interactive() && self.target_pattern == Pattern::Thinking {
@@ -356,6 +363,10 @@ impl DualHost {
     pub fn listening_stopped(&mut self) {
         self.face.listening_stopped();
         self.chest.listening_stopped();
+    }
+    pub fn listening_cancelled(&mut self) {
+        self.face.listening_cancelled();
+        self.chest.listening_cancelled();
     }
     pub fn llm_chunk(&mut self) {
         self.face.llm_chunk();

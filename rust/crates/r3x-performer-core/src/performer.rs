@@ -165,7 +165,12 @@ pub enum Command {
         mode: SystemMode,
     },
     ListeningStarted,
-    ListeningStopped,
+    /// Talk released. `heard` = it caught words (a reply follows); a turn with none (a stray
+    /// tap) goes straight back to rest instead of thinking. Omitted = true.
+    ListeningStopped {
+        #[serde(default = "yes")]
+        heard: bool,
+    },
     /// The guest finished a phrase (a final transcript) while R3X listens: nod.
     Heard,
     LlmChunk,
@@ -592,9 +597,13 @@ impl Performer {
                 self.set_activity(Activity::Listening);
             }
             Command::Heard => self.procedural.heard(self.now),
-            Command::ListeningStopped => {
+            Command::ListeningStopped { heard: true } => {
                 self.host.listening_stopped();
                 self.set_activity(Activity::Thinking);
+            }
+            Command::ListeningStopped { heard: false } => {
+                self.host.listening_cancelled();
+                self.set_activity(self.resting());
             }
             Command::LlmChunk => self.host.llm_chunk(),
             Command::SpeechStarted { timings, tags } => {
@@ -1392,4 +1401,8 @@ impl Performer {
             live: false,
         }
     }
+}
+
+fn yes() -> bool {
+    true
 }

@@ -361,7 +361,7 @@ impl Host {
             }
             Event::Conversation(c) => match c {
                 ConversationEvent::ListeningStarted => PCmd::ListeningStarted,
-                ConversationEvent::ListeningStopped { .. } => PCmd::ListeningStopped,
+                ConversationEvent::ListeningStopped { transcript } => PCmd::ListeningStopped { heard: !transcript.trim().is_empty() },
                 ConversationEvent::Transcript { is_final: true, .. } => PCmd::Heard,
                 ConversationEvent::ReplyDelta { .. } => PCmd::LlmChunk,
                 ConversationEvent::SpeechStarted => PCmd::SpeechStarted { timings: None, tags: vec![] },
