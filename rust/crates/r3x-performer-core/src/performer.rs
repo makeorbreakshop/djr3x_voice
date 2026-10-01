@@ -166,6 +166,8 @@ pub enum Command {
     },
     ListeningStarted,
     ListeningStopped,
+    /// The guest finished a phrase (a final transcript) while R3X listens: nod.
+    Heard,
     LlmChunk,
     /// Speech became audible. `timings[i]` = seconds after start at which character i is
     /// spoken; `tags` = (char offset, show id) to perform on the word.
@@ -589,6 +591,7 @@ impl Performer {
                 self.host.listening_started();
                 self.set_activity(Activity::Listening);
             }
+            Command::Heard => self.procedural.heard(self.now),
             Command::ListeningStopped => {
                 self.host.listening_stopped();
                 self.set_activity(Activity::Thinking);

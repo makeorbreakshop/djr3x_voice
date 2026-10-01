@@ -309,6 +309,12 @@ fn parity_procedural_layers() {
         .map(|g| joints.iter().position(|j| j == g).unwrap())
         .collect();
     let mut gaze_changed_until = f64::NEG_INFINITY;
+    // Intended difference (2026-10-01): listening stays alive (glances around the listener,
+    // 65 % alive motion instead of the 15 % freeze), so the whole pose differs while listening
+    // and the 1.5 s the gaze takes to settle back. After that only the alive damping's
+    // exponential tail differs (0.5 x `still`, tau 0.35 s), so the tolerance follows it down
+    // to ULPS (~10 s later).
+    let mut listening_end = f64::NEG_INFINITY;
     for fr in doc["frames"].as_array().unwrap() {
         let t = f(&fr["t"]);
         for (at, a) in acts.iter_mut() {
@@ -320,6 +326,9 @@ fn parity_procedural_layers() {
         if matches!(p.activity, Activity::Idle | Activity::Engaged) {
             gaze_changed_until = t + 1.2;
         }
+        if p.activity == Activity::Listening {
+            listening_end = t;
+        }
         let ctx = PerformContext {
             amplitude: f(&fr["amplitude"]),
             look: None,
@@ -327,7 +336,8 @@ fn parity_procedural_layers() {
             energy: f(&fr["energy"]),
         };
         let pose = p.update(t, f(&fr["dt"]), &ctx, &mut rng, &joints);
-        if !fr["pose"].is_null() {
+        let since = t - listening_end;
+        if !fr["pose"].is_null() && since >= 1.5 {
             let mut got: Vec<f64> = joints.iter().map(|j| pose[j]).collect();
             let mut want = fr["pose"].clone();
             if t < gaze_changed_until {
@@ -339,7 +349,7 @@ fn parity_procedural_layers() {
             worst = worst.max(assert_close(
                 &got,
                 &want,
-                ULPS,
+                ULPS.max(10.0 * (-since / 0.35).exp()),
                 &format!("behavior at t={t}"),
             ));
         }

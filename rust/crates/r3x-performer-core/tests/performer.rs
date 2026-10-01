@@ -558,3 +558,16 @@ fn gaze_rolls_toward_the_look_within_the_selected_rig() {
     assert!(f.targets.get("torso_top").copied().unwrap_or(0.0).abs() < 1e-6, "no spill into the rings");
     assert!(f.targets["head_roll"] < -3.0, "cant toward the look instead");
 }
+
+#[test]
+fn a_heard_phrase_nods_only_while_listening() {
+    let mut p = performer();
+    run(&mut p, 0.0, 0.5);
+    p.command(Command::Heard);
+    assert_eq!(p.procedural.nod_started(), None, "not listening: no nod");
+    p.command(Command::ListeningStarted);
+    run(&mut p, 0.5, 1.0);
+    p.command(Command::Heard);
+    let at = p.procedural.nod_started().expect("listening: nods at the phrase");
+    assert!((at - 1.0).abs() < 1e-9, "{at}");
+}

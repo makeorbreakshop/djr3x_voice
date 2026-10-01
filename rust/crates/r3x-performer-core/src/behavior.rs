@@ -40,6 +40,24 @@ pub enum Activity {
     Dj,
 }
 
+/// A listening nod: depth (deg, + tips the head down), length, and the least time between two.
+pub const NOD_DEG: f64 = 4.5;
+pub const NOD_S: f64 = 0.7;
+pub const NOD_GAP_S: f64 = 1.5;
+
+/// The k-th listening glance around the listener (pan, tilt), deg: golden-angle steps, so they
+/// spread without repeating, within +/-3 / +/-1.5.
+fn listen_glance(k: u32) -> (f64, f64) {
+    let a = f64::from(k) * 2.399_963;
+    (3.0 * sin(a), 1.5 * sin(1.7 * a + 0.5))
+}
+
+/// Extra seconds before the next listening glance (0..1), from the same sequence.
+fn listen_gap(k: u32) -> f64 {
+    let x = f64::from(k) * 0.618_034;
+    x - floor(x)
+}
+
 /// A centre-weighted draw in `-max..max` (one uniform, cubed): most mass near 0, rare
 /// excursions to the ends. Uses exactly one draw, like the uniform it replaced.
 pub fn centred(rng: &mut Rng, max: f64) -> f64 {
@@ -136,6 +154,10 @@ pub struct Procedural {
     /// While set and a look target exists: the gaze tracks the target plus this (pan, tilt)
     /// offset every frame, so a moving listener is followed between saccades.
     follow: Option<(f64, f64)>,
+    /// Looks taken in this listening stretch (0 = not yet oriented).
+    listen_looks: u32,
+    /// When the current listening nod began.
+    nod_at: f64,
 }
 
 impl Default for Procedural {
@@ -163,6 +185,8 @@ impl Default for Procedural {
             think_roll: 0.0,
             accent_side: 1.0,
             follow: None,
+            listen_looks: 0,
+            nod_at: f64::NEG_INFINITY,
         }
     }
 }
@@ -181,12 +205,26 @@ impl Procedural {
         self.next_saccade = t;
         self.glance_back = false;
         self.follow = None;
+        self.listen_looks = 0;
         self.think_roll = 0.0;
     }
 
     /// 0..1: how frozen the listening hold is right now.
     pub fn listening_hold(&self) -> f64 {
         self.still
+    }
+
+    /// When the latest listening nod began, if any.
+    pub fn nod_started(&self) -> Option<f64> {
+        self.nod_at.is_finite().then_some(self.nod_at)
+    }
+
+    /// The guest finished a phrase while R3X listens: nod ("mm-hm"), at most every
+    /// [`NOD_GAP_S`]. Part of the speech layer.
+    pub fn heard(&mut self, t: f64) {
+        if self.activity == Activity::Listening && self.layers.speech_bob && t - self.nod_at >= NOD_GAP_S {
+            self.nod_at = t;
+        }
     }
 
     /// New gaze target, with anticipation on big moves.
@@ -287,11 +325,16 @@ impl Procedural {
                 set(&mut pose, "visor", if calm { 0.0 } else { -3.0 });
             }
             Activity::Listening => {
-                // Orient to the listener once, then hold (Reachy's listening freeze).
+                // Orient to the listener, then stay with them: small glances around their
+                // face (Reachy's listening freeze held still, which on the robot read as
+                // switched off). Deterministic offsets, no RNG: what follows is unchanged.
                 if t >= self.next_saccade {
-                    self.look(t, look.0, look.1 - 4.0);
-                    self.follow = ctx.look.map(|_| (0.0, -4.0));
-                    self.next_saccade = f64::INFINITY;
+                    let k = self.listen_looks;
+                    let (dp, dt) = if k == 0 { (0.0, 0.0) } else { listen_glance(k) };
+                    self.look(t, look.0 + dp, look.1 - 4.0 + dt);
+                    self.follow = ctx.look.map(|_| (dp, -4.0 + dt));
+                    self.listen_looks += 1;
+                    self.next_saccade = if saccades { t + 1.4 + listen_gap(k) } else { f64::INFINITY };
                 }
                 set(&mut pose, "visor", -8.0); // brow up: attentive
                 set(&mut pose, "head_lift", 6.0);
@@ -451,15 +494,16 @@ impl Procedural {
             0.0
         };
         self.still += (listening - self.still) * (1.0 - exp(-dt / 0.35));
-        let alive = (1.0 - 0.85 * self.still) * energy;
+        // Listening keeps 65 % of the alive motion (it was 15 %: the freeze).
+        let alive = (1.0 - 0.35 * self.still) * energy;
 
         // ---------------------------------------------------------------- head roll
         let (cant, tau) = match self.activity {
             // Curious cant, crown toward the listener (+pan = the droid's left = -roll): 4 deg
-            // straight ahead, 8 at 30 deg off-axis.
+            // straight ahead, 8 at 30 deg off-axis. Off the listener, not the glances around them.
             Activity::Listening if saccades => {
-                let side = if self.gaze.pan > 0.0 { -1.0 } else { 1.0 };
-                (side * (4.0 + 4.0 * (self.gaze.pan.abs() / 30.0).min(1.0)), 0.7)
+                let side = if look.0 > 0.0 { -1.0 } else { 1.0 };
+                (side * (4.0 + 4.0 * (look.0.abs() / 30.0).min(1.0)), 0.7)
             }
             Activity::Thinking if saccades => (self.think_roll, 0.4),
             _ => (0.0, 0.5),
@@ -471,6 +515,12 @@ impl Procedural {
             roll += drift * alive.min(1.6);
         }
         set(&mut pose, "head_roll", roll);
+        // Listening nod: the head tips down and back over NOD_S ("mm-hm").
+        let x = (t - self.nod_at) / NOD_S;
+        if (0.0..1.0).contains(&x) {
+            let v = get(&pose, "head_tilt") + NOD_DEG * sin(PI * x);
+            set(&mut pose, "head_tilt", v);
+        }
         if lay.breathing {
             let breath = sin(2.0 * PI * 0.25 * t);
             let v = get(&pose, "head_lift") + breath * 1.5 * alive;
@@ -523,6 +573,73 @@ mod tests {
         let mut p = Procedural::default();
         let r = run(&mut p, Activity::Listening, 4.0, ctx(None, 1.0));
         assert!((r.last().unwrap() - 4.0).abs() < 0.1);
+    }
+
+    /// Run `act` for `secs` at 60 Hz (looking at `look`), calling `hook(p, t)` each frame;
+    /// returns (t, head_pan, head_tilt, head_lift) per frame.
+    fn track(p: &mut Procedural, act: Activity, secs: f64, look: Option<(f64, f64)>, rng: &mut Rng, mut hook: impl FnMut(&mut Procedural, f64)) -> Vec<(f64, f64, f64, f64)> {
+        let joints: Vec<String> = ["head_pan", "head_tilt", "head_lift"].iter().map(|s| s.to_string()).collect();
+        let t0 = p.since.max(0.0) + 0.01;
+        p.set_activity(act, t0);
+        (1..=(secs * 60.0) as usize)
+            .map(|i| {
+                let t = t0 + i as f64 / 60.0;
+                hook(p, t);
+                let pose = p.update(t, 1.0 / 60.0, &ctx(look, 1.0), rng, &joints);
+                (t, pose["head_pan"], pose["head_tilt"], pose["head_lift"])
+            })
+            .collect()
+    }
+
+    fn range(v: impl Iterator<Item = f64>) -> f64 {
+        let v: Vec<f64> = v.collect();
+        v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
+    }
+
+    /// Holding talk used to freeze R3X (Reachy's listening freeze: one look, then still, the
+    /// alive layers at 15%), which on the robot read as switched off (2026-10-01). Listening
+    /// is active now: small glances that stay on the listener, and breathing.
+    #[test]
+    fn listening_stays_alive_and_on_the_listener() {
+        let mut p = Procedural::default();
+        let r = track(&mut p, Activity::Listening, 8.0, Some((10.0, 0.0)), &mut Rng::new(3), |_, _| {});
+        let settled = &r[90..]; // after the first orienting look
+        let pan = range(settled.iter().map(|f| f.1));
+        assert!(pan > 1.0, "glances: pan moves {pan:.2} deg");
+        assert!(settled.iter().all(|f| (f.1 - 10.0).abs() < 7.0), "stays on the listener at 10 deg");
+        let lift = range(settled.iter().map(|f| f.3));
+        assert!(lift > 1.0, "breathing: lift moves {lift:.2}");
+    }
+
+    /// A finished phrase from the guest (`heard`) gets a small nod - "mm-hm".
+    #[test]
+    fn a_heard_phrase_gets_a_nod() {
+        let quiet = track(&mut Procedural::default(), Activity::Listening, 4.0, None, &mut Rng::new(3), |_, _| {});
+        let nodded = track(&mut Procedural::default(), Activity::Listening, 4.0, None, &mut Rng::new(3), |p, t| {
+            if (t - 2.0).abs() < 0.5 / 60.0 {
+                p.heard(t);
+            }
+        });
+        let dip = quiet.iter().zip(&nodded).filter(|(q, _)| q.0 > 2.0 && q.0 < 2.8).map(|(q, n)| n.2 - q.2).fold(0.0, f64::max);
+        assert!(dip > 2.5, "the head tips down to nod: {dip:.2} deg");
+        let after = quiet.iter().zip(&nodded).filter(|(q, _)| q.0 > 3.4).map(|(q, n)| (n.2 - q.2).abs()).fold(0.0, f64::max);
+        assert!(after < 0.3, "and comes back: {after:.2}");
+    }
+
+    /// Listening's motion draws nothing from the RNG, so every later glance (and the parity
+    /// replay after a listening stretch) is unchanged.
+    #[test]
+    fn listening_draws_nothing_from_the_rng() {
+        let mut used = Rng::new(9);
+        let mut p = Procedural::default();
+        // Orient first (that look is deterministic too), then listen a while.
+        track(&mut p, Activity::Listening, 10.0, Some((5.0, 0.0)), &mut used, |p, t| {
+            if (t - 4.0).abs() < 0.5 / 60.0 {
+                p.heard(t);
+            }
+        });
+        let mut fresh = Rng::new(9);
+        assert_eq!(used.next_f64(), fresh.next_f64());
     }
 
     #[test]
