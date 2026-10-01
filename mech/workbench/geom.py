@@ -7,6 +7,7 @@ import hashlib
 import re
 import math
 import pickle
+import threading
 from pathlib import Path
 
 import logging
@@ -262,6 +263,12 @@ def cluster(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
     return best
 
 
+# fast_simplification (trimesh's quadric decimation) is the Forstmann simplifier, whose vertex and
+# triangle arrays are process globals: two threads decimating at once (build.py writes the display
+# GLBs on a thread pool) swap each other's meshes - the base skirt B_B_1 was written with a B_SM's.
+_SIMPLIFY_LOCK = threading.Lock()
+
+
 def decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
     """A display copy of `mesh` with about `target` faces (quadric decimation). A vendor STEP mesh is
     often many disjoint solids that will not decimate as one: then each connected component gets a
@@ -272,7 +279,8 @@ def decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
 
     def one(m, t):
         try:
-            out = m.simplify_quadric_decimation(face_count=max(4, int(t)))
+            with _SIMPLIFY_LOCK:  # fast_simplification keeps its mesh in C++ globals: one call at a time
+                out = m.simplify_quadric_decimation(face_count=max(4, int(t)))
             if len(out.faces) > 0 and len(out.faces) <= 1.5 * t:
                 return out
         except Exception:

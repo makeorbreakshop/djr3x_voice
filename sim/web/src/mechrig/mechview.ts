@@ -159,7 +159,8 @@ export class MechView {
     const gearOf = new Map<string, MGear>();
     for (const g of asm.gears ?? []) for (const id of [...g.parts, ...(g.fasteners ?? [])]) gearOf.set(id, g);
     const buckets = new Map<string, { geos: THREE.BufferGeometry[]; cls: PartClass; link?: string; lk?: MLinkage; role?: 'horn' | 'rod'; gear?: MGear }>();
-    await Promise.all(asm.parts.filter((p) => !hide.has(p.id)).map(async (p) => {
+    // a part the build replaces (`replaced_by`, SCHEMA.md) is not on the droid
+    await Promise.all(asm.parts.filter((p) => !hide.has(p.id) && !p.replaced_by).map(async (p) => {
       const g = (await geo(joinUrl(base, p.mesh))).clone();
       const q = p.transform.q ?? [0, 0, 0, 1];
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...p.transform.t), new THREE.Quaternion(...q), new THREE.Vector3(1, 1, 1)));

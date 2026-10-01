@@ -92,7 +92,7 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
                     seen_links.add(name)
         # a jointless link that is a joint's parent still maps to the parent link (handled above)
         pmap = {}
-        dropped = [p.id for p in a.parts if "superseded" in (p.note or "")]
+        dropped = [p.id for p in a.parts if p.replaced_by or "superseded" in (p.note or "")]
         info["superseded"] += [f"{a.id}/{x}" for x in dropped]
         for p in a.parts:
             if p.id in dropped:

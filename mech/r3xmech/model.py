@@ -37,6 +37,7 @@ class Part:
     note: str = ""
     evidence: str = ""
     replaces: list[str] = field(default_factory=list)   # kit parts this build part supersedes
+    replaced_by: str | None = None  # "<assembly id>/<part id>" that supersedes this one (manifest `replaced_by`)
     generator: Callable | None = None                     # makes a trimesh when file is None
     cad: str = "mesh"             # mesh (a reference mesh) | vendor | parametric (ours) | placeholder
     catalog: str | None = None    # mech/parts/catalog.json id
@@ -181,6 +182,8 @@ class Asm:
                  "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note}
             if p.replaces:
                 d["replaces"] = p.replaces
+            if p.replaced_by:
+                d["replaced_by"] = p.replaced_by
             d.update(mesh_info.get(p.id, {}))
             return d
 

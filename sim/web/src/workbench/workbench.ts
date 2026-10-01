@@ -1171,6 +1171,9 @@ export class Workbench {
       const shell = p.class === 'shell';
       let visible = !hideV.has(id) && !this.hidden.has(id) && (!this.isolated || this.isolated.has(id)) && !this.variantHidden.has(po.node);
       const inScope = !scope || scope.has(id);
+      // a part our build replaces (the kit's hero elbow under Anderson's arm) is out of the build; a library
+      // design (the kit as published) still shows it
+      if (p.replaced_by && !(inScope && this.scope?.kind === 'library')) visible = false;
       // the look: Exterior is the shells, Mechanism what is inside them, Inspect both (shells ghosted)
       const outside = exposed(p);
       if (look === 'exterior' && !outside) visible = false;

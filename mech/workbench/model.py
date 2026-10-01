@@ -80,6 +80,7 @@ class Part:
     catalog: Optional[str] = None  # parts catalog id ("gobilda:2913-0004-0241")
     stretch: Optional[dict] = None  # {"joint", "axis", "anchor", "rest_mm"}: scaled by a prismatic joint (SCHEMA.md)
     exposed: Optional[bool] = None  # seen from outside the droid (a shell is by default; SCHEMA.md "Part")
+    replaced_by: Optional[str] = None  # "<assembly id>/<part id>" that supersedes it: not drawn, not in the suite
 
     def __post_init__(self):
         assert self.cls in CLASSES, self.cls

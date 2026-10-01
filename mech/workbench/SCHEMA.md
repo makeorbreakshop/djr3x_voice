@@ -149,8 +149,15 @@ A rigid body. Every part rides on exactly one link.
   // by (rest_mm + joint value) / rest_mm. Readers without it draw the part rigid at rest.
   "stretch": {"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, 608.5, 0], "rest_mm": 55},
   // optional: seen from outside the droid (true) or hidden (false). Omitted = a shell is, nothing else is.
-  // Set on the non-shell parts you see on the finished droid (the neck post, the visor, the hero arm).
-  "exposed": true
+  // Set on the non-shell parts you see on the finished droid (the neck post, the visor, the hero arm), and
+  // false on shells that sit inside it (the kit's logic-panel diffusers and LED boards).
+  "exposed": true,
+  // optional: another part of the build supersedes this one ("<assembly id>/<part id>"): the kit's hero
+  // elbow, forearm and wrist under Anderson's arm. It stays in the manifest (the kit as published, a
+  // library design, still shows it) but is not part of our build: readers do not draw it in the build's
+  // model, and the whole-droid suite and BOM leave it out. The replacing part may list what it replaces
+  // in `replaces: ["ha_eb_1", ...]` (informational).
+  "replaced_by": "top_ring/hero_servomount"
 }
 ```
 
@@ -377,4 +384,5 @@ The assembly carries its connections (workbench/mates.py):
   `mates`, test checks and the `explained` status (all optional).
 - v1 (2026-10-01): `gears` (optional) and `drive.servo_deg_per_unit` (optional): gear and direct
   drives connected the way push rods are (a joint turns its pinions; a servo maps to its joint). Same
-  day: part `exposed`, joint `drive.variants`, root `designs` and `ground` (all optional).
+  day: part `exposed`, joint `drive.variants`, root `designs` and `ground` (all optional). Same day: part
+  `replaced_by` (optional; a reader that does not know it draws a replaced part, as before).

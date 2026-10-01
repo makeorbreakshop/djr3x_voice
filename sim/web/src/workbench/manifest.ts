@@ -43,6 +43,9 @@ export interface MPart {
   exposed?: boolean;
   /** Scaled along +Y about `anchor` by (rest_mm + joint value) / rest_mm (the neck spring with head_lift). */
   stretch?: { joint: string; axis?: Vec3; anchor: Vec3; rest_mm: number };
+  /** "<assembly id>/<part id>" that supersedes this part in our build: not drawn (only a library design,
+   * the published kit as it ships, still shows it). */
+  replaced_by?: string;
 }
 
 export interface MJoint {

@@ -75,6 +75,12 @@ LINK_SUBTREE_YAW = {  # which rest yaw applies to a link's kit geometry
 
 MATERIAL_RULES = [(r"_DNP$|\(DNP\)|^TR_RR_Full$", "rubber")]
 
+# Kit shells that sit inside the droid, behind the logic panels: the light diffusers (MS_DB, MS_DB_M, MS_L),
+# the LED board (LED_B) and its mounts (MS_LPI). The kit exports one of each of the repeated ones (x4..x9 in
+# the file name) in one slot, so drawn on the Exterior they read as stray pieces in one window. Not exposed
+# (manifest `exposed: false`), as the sim's Original model leaves them out (sim/model/build_r3x.py SKIP).
+INTERIOR = r"^(MS_DB|MS_L_|MS_LPI_|LED_B_)"
+
 
 def pid(stem: str, k: int | None = None) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
@@ -128,6 +134,7 @@ def kit_parts() -> list[Part]:
                 cls="shell", link=link, T=T, file=f, origin="kit", placement="kit",
                 material=mat, printed=(mat == "PLA"),
                 note=("print qty in the file name: " + m.group(0)) if (m and copies == 1) else "",
+                exposed=False if re.search(INTERIOR, clean) else None,
             ))
     return parts
 

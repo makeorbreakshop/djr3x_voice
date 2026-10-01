@@ -133,7 +133,8 @@ def _clean(d: dict) -> dict:
     return {k: _jsonable(v) for k, v in d.items() if not _empty(v) or k in ("link",)}
 
 
-EXPORT_VERSION = 3  # bump when the export format changes: every file is rewritten (3: LOD + quantized GLBs)
+EXPORT_VERSION = 4  # bump when the export format changes: every file is rewritten (3: LOD + quantized GLBs;
+# 4: rewrite every display mesh decimated before the simplifier lock, geom.decimate)
 
 
 class _Sigs:
@@ -236,6 +237,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "triangles": {"display": n_disp, "source": int(len(m.faces))},
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
             "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch, "exposed": p.exposed,
+            "replaced_by": p.replaced_by,
         }))
     fast = []
     written = set()

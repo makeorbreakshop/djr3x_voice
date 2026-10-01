@@ -229,6 +229,8 @@ def load(manifest_path: Path) -> Tree:
         for lk in node.get("linkages") or []:
             tree.linkages[q(lk["id"])] = Linkage(q(lk["id"]), aid, lk, T, q(lk["horn"]["link"]), q(lk["ground"]["link"]))
         for p in node.get("parts") or []:
+            if p.get("replaced_by"):  # superseded by another part of the build (SCHEMA.md): not on the droid
+                continue
             tree.parts.append(Part(aid, p, base, T @ xform(p.get("transform")), q(p["link"])))
         for c in node.get("children") or []:
             if not _variant_ok(c.get("mount")):

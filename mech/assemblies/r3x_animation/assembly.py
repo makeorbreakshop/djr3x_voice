@@ -678,7 +678,7 @@ def hero_arm(top: Asm):
     top.parts += [
         P("hero_servomount", "servomount (the elbow's C-channel)", "mech", "top_ring", W("servomount"),
           f("hero", "servomount"), placement="fitted", evidence=ev,
-          replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4", "ha_le_1", "ha_re_1"]),
+          replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4"]),
         servo_part("hero_shoulder_servo", "DS3218_DUAL", "top_ring", W("servo"), f("hero", "servo"),
                    evidence="its shafts on the hinge, the ears spanning the channel (hero_arm.py)", placement="fitted"),
         P("hero_elbow_tube", "bodytube (into the body, square to the hinge)", "mech", "top_ring", W("bodytube"),
@@ -687,9 +687,9 @@ def hero_arm(top: Asm):
           A("mainarm"), f("hero", "mainarm"), placement="fitted", replaces=["ha_sb_1", "ha_sp_1", "ha_sp_2"],
           evidence=ev + "; the hinge 38.5 mm below the foot"),
         P("hero_elbow_cover_l", "elbow cover (Anderson's copy of the kit disc HA_LE_1)", "shell", "hero_arm",
-          A("elbow_cover_a"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev),
+          A("elbow_cover_a"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_le_1"]),
         P("hero_elbow_cover_r", "elbow cover (Anderson's copy of the kit disc HA_RE_1)", "shell", "hero_arm",
-          A("elbow_cover_b"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev),
+          A("elbow_cover_b"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_re_1"]),
         P("hero_wrist_body", "wrist", "mech", "hero_arm", A("wrist"), f("wrist", "wrist"), placement="fitted",
           replaces=["ha_w_2"], evidence=ev),
         # his STL names are swapped: the STLs' "Part 1 (1)" is the cap, "Part 1" the wrist servo
@@ -805,11 +805,20 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, d
         phase_gears(pool, ph)  # the top pinion rides the middle ring, its sector the top ring
         if ph:
             a_.notes.append("Gear phase: " + "; ".join(ph))
-    # parts the build supersedes
-    sup = {r for p in root.all_parts() for r in p.replaces}
+    # parts the build supersedes: `replaced_by` (manifest, SCHEMA.md "Part") - not drawn, not in the suite.
+    # Anderson's arm replaces the kit's elbow (HA_EB_1..4 brackets: his servomount + body tube; HA_LE_1 /
+    # HA_RE_1 discs: his elbow covers), its forearm (HA_SB_1, HA_SP_1, HA_SP_2: his main arm) and its wrist
+    # (HA_W_2: his wrist; HA_W_1: his hand). The kit's fingers (HA_LF/RF/TF) ride his hand and the faux
+    # piston (HA_PJ_1, HA_P_1, HA_PS_1, HA_PL_1/2) clamps his main arm where it clamped the kit's forearm
+    # (the main arm is on the kit forearm's axis): both stay.
+    def owner(pid):
+        return next(a.id for a in root.walk() if any(q.id == pid for q in a.parts))
+
+    by = {r: f"{owner(p.id)}/{p.id}" for p in root.all_parts() for r in p.replaces}
     for p in root.all_parts():
-        if p.id in sup:
-            p.note = (p.note + "; " if p.note else "") + "superseded by the R-3X build (excluded from mass and checks)"
+        if p.id in by:
+            p.replaced_by = by[p.id]
+            p.note = (p.note + "; " if p.note else "") + f"replaced by {by[p.id]} (not drawn, not in the suite)"
     root.notes.append("Profile joints with no mechanism in the R-3X build: torso_middle (not motorised), poker_* / "
                       "throttle_* arms (poseable kit joints only), all claws (rigid).")
     # the internals variant: Anderson's static ring-drive parts and the neck guide's outer race
