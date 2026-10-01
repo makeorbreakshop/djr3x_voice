@@ -189,6 +189,8 @@ class Step:
     # The step as the Instructions read it: one or two plain imperative sentences, in our words
     # (never the kit guide's text; SCHEMA.md "Step").
     text: str = ""
+    # Grouped by workbench/steps.py from the structure, not written by anyone.
+    derived: bool = False
 
 
 @dataclass

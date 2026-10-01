@@ -1,8 +1,6 @@
-// Instructions (src/workbench/guide.ts): the copy rules - one or two plain sentences, hardware by part number.
+// Instructions (src/workbench/guide.ts): what the text column lists - hardware by part number, parts by kind.
 import { describe, expect, it } from 'vitest';
-import {
-  baseName, byLine, hardwareLabel, hardwareLines, listPhrase, partGroups, partNumber, partPhrase, stepLabel, stepSentence,
-} from '../src/workbench/guide';
+import { baseName, byLine, hardwareLabel, hardwareLines, partGroups, partNumber } from '../src/workbench/guide';
 import type { MFastener } from '../src/workbench/manifest';
 
 const names: Record<string, string> = {
@@ -15,12 +13,9 @@ const fast = (id: string, spec: MFastener['spec'], key = `${spec.type}-${spec.th
   ({ id, spec, key, joins: [], link: 'l', placed: true, step: 's' });
 
 describe('guide copy', () => {
-  it('names parts for a sentence: kit codes as they are, ours short with "the"', () => {
-    expect(partPhrase('TR_SR_Full')).toBe('TR_SR_Full');
-    expect(partPhrase('Column top plate, 6 mm 6061')).toBe('the column top plate');
-    expect(partPhrase('V-wheel', 8)).toBe('eight V-wheels');
+  it('names a kind of part without its side or index', () => {
     expect(baseName('Servo hub 1906, 25T (L)')).toBe('Servo hub 1906');
-    expect(listPhrase(['a', 'b', 'c'])).toBe('a, b and c');
+    expect(baseName('V-wheel (OpenBuilds solid), front left lower')).toBe('V-wheel');
   });
 
   it('groups a step\'s parts by kind ("8 x V-wheel")', () => {
@@ -38,27 +33,6 @@ describe('guide copy', () => {
     ]);
     expect(hardwareLabel({ type: 'insert', thread: 'M4', length_mm: 6 })).toBe('M4 heat-set insert');
     expect(partNumber({ type: 'x', mcmaster: '92125A130' })).toBe('92125A130');
-  });
-
-  it('uses the authored sentence when there is one', () => {
-    expect(stepSentence({ title: 'Top plate', text: 'Close the column with the top plate.', parts: ['top'] }, nameOf, [])).toBe('Close the column with the top plate.');
-  });
-
-  it('generates one plain sentence from the parts and hardware otherwise', () => {
-    const hw = hardwareLines([fast('a', { type: 'shcs', thread: 'M5', length_mm: 12 }), fast('b', { type: 'shcs', thread: 'M5', length_mm: 12 })]);
-    expect(stepSentence({ title: 'Top plate', parts: ['top'], derived: true }, nameOf, hw)).toBe('Fit the column top plate with 2 screws.');
-    expect(stepSentence({ title: 'Step 3', parts: ['sr'], targets: ['rr'] }, nameOf, [])).toBe('Fit TR_SR_Full to TR_RR_Full.');
-    const ins = hardwareLines([], [{ key: 'k', spec: { type: '', mcmaster: '93365A240', desc: '10-32 tapered heat-set insert' }, count: 12 }]);
-    expect(stepSentence({ title: 'Step 1', parts: [], targets: ['rr'] }, nameOf, ins)).toBe('Heat-set 12 inserts into TR_RR_Full.');
-  });
-
-  it('labels a step in the contents by its title, or its sentence cut at a word', () => {
-    expect(stepLabel({ title: 'Top plate' }, 'Close the column.')).toBe('Top plate');
-    expect(stepLabel({ title: 'Step 1' }, 'Heat-set 12 inserts into TR_RR_Full.')).toBe('Heat-set 12 inserts into TR_RR_Full');
-    const long = 'Press the two bearings into the top plate, then slide the hub in from above and clamp the collar under it.';
-    const label = stepLabel({ title: long.slice(0, 80), text: long }, long);
-    expect(label.endsWith('…')).toBe(true);
-    expect(label.length).toBeLessThanOrEqual(73);
   });
 
   it('reads a design author as a by-line', () => {

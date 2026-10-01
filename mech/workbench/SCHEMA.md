@@ -306,9 +306,19 @@ Unplaced fasteners omit `transform`/`mesh`; the panel lists them under their ste
   "joint": "head_tilt",                 // a step that sets a joint's zero (servo centring)
   "pose": {"head_tilt": 0},             // pose to show the step in (optional)
   "guide_page": 64,                     // page in the source guide (optional)
-  "inferred": true, "inferred_note": "order not stated by the source"
+  "inferred": true, "inferred_note": "order not stated by the source",
+  "derived": true                       // grouped by workbench/steps.py, not authored (below)
 }
 ```
+
+Every assembly's `steps` cover it: each part (not `replaced_by`) is in exactly one step's `parts` and
+each fastener in exactly one step's `fasteners`. An assembly's own steps come first, in order (a part
+an authored step names again moves to that step's `context`); what they leave out is grouped by
+`workbench/steps.py` into `derived` steps titled after the group - like parts together (a left/right
+pair, a row of posts), a servo with its gear, horn and mount, small parts with what they sit on - in
+build order: the frame, then outward by contact, each moving link after the one it hangs on, each
+derived group right after the authored step that placed what it touches. Fasteners go with the step
+that places the last part they join.
 
 ## BomLine
 

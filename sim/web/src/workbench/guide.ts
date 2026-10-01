@@ -1,16 +1,16 @@
 /**
  * Instructions: Build's assembly guide, full screen. Modelled on the kit's printed guide - a title
- * page per sub-assembly, then steps: the model large, what the step adds in red with dashed paths to
- * where it seats, one or two plain sentences and the hardware by part number - but driven by the
- * real model, so the builder can orbit, step, and investigate any part.
+ * page per sub-assembly, then steps: the model large, what the step adds in the accent with dashed
+ * paths to where it seats, the step's name and the hardware by part number - but driven by the real
+ * model, so each step plays (parts in one at a time, then their screws driven in: sequence.ts), and
+ * the builder can orbit, scrub, and investigate any part.
  *
  * The page: the 3D view is the picture (workbench.ts draws the section alone, frames it in the area
  * this page leaves), a text column on the right (below the model on narrow screens), a slim bar
  * under the model (previous, the scrubber with a tick per section, next), Contents on the left.
  *
- * Copy: a step's `text` (SCHEMA.md "Step": ours, or the kit transcription's own paraphrase, read
- * from the gitignored build output at run time). A step without it gets one generated sentence
- * from its parts and hardware, and a step derived from the structure says so in a small mark.
+ * Copy: no sentences yet - each step is its title (the manifest's: authored, or named by
+ * mech/workbench/steps.py after the group it adds, marked derived), its hardware and its parts.
  * Nothing here quotes the kit guide.
  */
 
@@ -41,36 +41,10 @@ interface Stop { sec: number; step: number }
 
 // ------------------------------------------------------------------ copy (pure; tested)
 
-/** A part's name for a sentence: a kit code as it is (TR_SR_Full), anything else short, lower case, with "the". */
-export function partPhrase(name: string, n = 1): string {
-  const base = baseName(name);
-  if (isCode(base)) return n > 1 ? `${n} × ${base}` : base;
-  const low = /^[A-Z][a-z]/.test(base) ? base.charAt(0).toLowerCase() + base.slice(1) : base;
-  return n > 1 ? `${numberWord(n)} ${plural(low)}` : `the ${low}`;
-}
-
 /** "V-wheel (OpenBuilds solid), front left lower" -> "V-wheel"; "Servo hub 1906, 25T (L)" -> "Servo hub 1906". */
 export function baseName(name: string): string {
   return name.replace(/\s*\([^)]*\)\s*/g, ' ').split(/\s*,\s*/)[0].replace(/\s*#\d+$/, '').replace(/\s+-\s*x\d+$/i, '')
     .replace(/\s+(L|R)$/, '').replace(/\s+/g, ' ').trim() || name;
-}
-
-const isCode = (s: string) => /^[A-Z0-9]+(_[A-Za-z0-9]+)+$/.test(s);
-const numberWord = (n: number) => ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'][n] ?? String(n);
-function plural(s: string) {
-  const words = s.split(' ');
-  // "servo hub 1906" -> "servo hubs 1906": the noun is the last word that is not a number or a size
-  let k = words.length - 1;
-  while (k > 0 && /\d/.test(words[k])) k--;
-  const w = words[k];
-  words[k] = /(s|x|ch|sh)$/.test(w) ? `${w}es` : /[^aeiou]y$/.test(w) ? `${w.slice(0, -1)}ies` : `${w}s`;
-  return words.join(' ');
-}
-
-/** "a, b and c". */
-export function listPhrase(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? '';
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
 /** What a piece of hardware is, in a word, and the verb that puts it in. */
@@ -140,40 +114,6 @@ export function partGroups(ids: string[], nameOf: (id: string) => string): { nam
     (by.get(k) ?? by.set(k, []).get(k)!).push(id);
   }
   return [...by].map(([name, ids2]) => ({ name, ids: ids2 }));
-}
-
-/**
- * The step in one or two sentences: its own `text`, else one generated from what it does -
- * "Fit the column top plate with four M5 screws." / "Heat-set 12 inserts into TR_RR_Full."
- */
-export function stepSentence(s: Pick<AStep, 'text' | 'parts' | 'targets' | 'title' | 'derived'>, nameOf: (id: string) => string, hw: HwLine[]): string {
-  if (s.text?.trim()) return s.text.trim();
-  const parts = partGroups(s.parts ?? [], nameOf).map((g) => partPhrase(g.name, g.ids.length));
-  const targets = partGroups(s.targets ?? [], nameOf).map((g) => partPhrase(g.name, 1));
-  const main = hw.filter((h) => h.qty !== 0);
-  const kind = main[0] ? hardwareNoun(main[0].spec) : null;
-  const many = (h: HwLine) => {
-    const { noun } = hardwareNoun(h.spec);
-    return h.qty && h.qty > 1 ? `${h.qty} ${noun}s` : h.qty === 1 ? `one ${noun}` : `${noun}s`;
-  };
-  const hwPhrase = listPhrase(main.slice(0, 2).map(many));
-  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-  if (parts.length) {
-    const onto = targets.length ? ` to ${listPhrase(targets)}` : '';
-    return cap(`fit ${listPhrase(parts)}${onto}${hwPhrase ? ` with ${hwPhrase}` : ''}.`);
-  }
-  if (kind && targets.length) return `${kind.verb} ${hwPhrase} into ${listPhrase(targets)}.`;
-  if (kind) return `${kind.verb} ${hwPhrase}.`;
-  return s.title.endsWith('.') ? s.title : `${s.title}.`;
-}
-
-/** A short name for the contents list: the authored title, else the sentence cut at a word. */
-export function stepLabel(s: Pick<AStep, 'title' | 'text'>, sentence: string, max = 72): string {
-  const generic = /^Step \d+$/i.test(s.title) || (!!s.text && s.text.startsWith(s.title.slice(0, 40)));
-  const t = generic ? sentence : s.title;
-  if (t.length <= max) return t.replace(/\.$/, '');
-  const cut = t.slice(0, max).replace(/\s+\S*$/, '');
-  return `${cut.replace(/[,;:]$/, '')}…`;
 }
 
 /** "Ours (after Jason Charlton's lift and pan)" -> "Ours, after Jason Charlton's lift and pan". */
@@ -370,6 +310,7 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
     if (inspecting) body.innerHTML = inspectHtml(inspecting, sec, st);
     else if (st.step < 0) body.innerHTML = titleHtml(sec);
     else body.innerHTML = stepHtml(sec, st.step);
+    syncPlay();
     hydrateThumbs();
     if (!toc.hidden) renderToc();
   }
@@ -383,14 +324,14 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
   }
 
   function titleHtml(sec: Section) {
-    const sentences = sec.steps.map((s) => stepLabel(s, stepSentence(s, nameOf, hwOf(s))));
+    const titles = sec.steps.map((s) => s.title);
     return `<div class="gd-title">
       <h1>${esc(sec.title)}</h1>
       ${sec.by ? `<p class="gd-by">${esc(sec.by)}</p>` : ''}
       ${sec.source ? `<p class="gd-src">${esc(sec.source)}</p>` : ''}
       <p class="gd-facts">${sec.steps.length} step${sec.steps.length === 1 ? '' : 's'} · ${sec.parts} parts${sec.fasteners ? ` · ${sec.fasteners} fasteners` : ''}</p>
       <button class="gd-start" data-gd="next">Start</button>
-      <ol class="gd-steps">${sentences.map((t, k) => `<li><button data-gd="step" data-i="${k}"><span>${k + 1}</span>${esc(t)}</button></li>`).join('')}</ol>
+      <ol class="gd-steps">${titles.map((t, k) => `<li><button data-gd="step" data-i="${k}"><span>${k + 1}</span>${esc(t)}</button></li>`).join('')}</ol>
     </div>`;
   }
 
@@ -401,8 +342,6 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
   function stepHtml(sec: Section, k: number) {
     const s = sec.steps[k];
     const hw = hwOf(s);
-    const text = stepSentence(s, nameOf, hw);
-    const notes = (s.notes ?? []).filter((t) => t.trim() && !text.includes(t.trim()) && !/^also uses \(other sub-assembly\)/.test(t));
     const groups = partGroups(s.parts ?? [], nameOf);
     const tray = [
       ...groups.map((g) => ({ ids: g.ids, label: g.name, qty: g.ids.length })),
@@ -412,15 +351,41 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
     const inferred = !s.derived && s.inferred ? `<span class="gd-derived" title="${esc(s.inferred_note || 'Not confirmed by the source')}">unconfirmed</span>` : '';
     return `<div class="gd-step">
       <p class="gd-num"><b>${k + 1}</b><span>of ${sec.steps.length}</span>${derived}${inferred}</p>
-      <p class="gd-text">${esc(text)}</p>
+      <h1 class="gd-text">${esc(s.title)}</h1>
+      <div class="gd-play" role="group" aria-label="This step's animation">
+        <button class="gd-pb" data-gd="play" aria-label="Play">${PLAY}</button>
+        <input id="gd-seq" type="range" min="0" max="1000" step="1" value="0" aria-label="Through this step">
+        <button class="gd-pb" data-gd="replay" aria-label="Replay this step" title="Replay (R)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.6M3 2.5V5h2.5"/></svg></button>
+        <button class="gd-sp" data-gd="speed" aria-label="Speed" title="Speed">1×</button>
+      </div>
       ${hw.length ? `<h2 class="gd-h">Hardware</h2><ul class="gd-hw">${hw.map((h) => `<li${h.ids.length ? ` data-ids="${esc(h.ids.join(' '))}"` : ''}>
         <span class="q">${h.qty ? `${h.qty} ×` : ''}</span><span class="l">${esc(h.label)}</span><span class="pn">${esc(h.partNo)}</span></li>`).join('')}</ul>` : ''}
-      ${s.tools?.length ? `<p class="gd-tools"><span>Tools</span> ${s.tools.map(esc).join(' · ')}</p>` : ''}
       ${tray.length ? `<h2 class="gd-h">In this step</h2><ul class="gd-tray">${tray.map((t) => `<li><button data-gd="inspect" data-ids="${esc(t.ids.join(' '))}" title="${esc(t.label)}">
         <img data-thumb="${esc(t.ids[0])}" alt="" width="64" height="64"><span class="tq">${t.qty > 1 ? `${t.qty} ×` : ''}</span><span class="tl">${esc(t.label)}</span></button></li>`).join('')}</ul>` : ''}
-      ${notes.length ? `<details class="gd-notes"><summary>Notes</summary><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
     </div>`;
   }
+
+  /** The transport follows the step playing (every frame while it runs: only these few attributes change). */
+  function syncPlay() {
+    const q = wb.seqState;
+    const bar = body.querySelector<HTMLElement>('.gd-play');
+    if (!bar) return;
+    bar.hidden = !q || q.items === 0;
+    if (!q) return;
+    const b = bar.querySelector<HTMLButtonElement>('[data-gd="play"]')!;
+    const want = q.playing ? 'Pause' : 'Play';
+    if (b.getAttribute('aria-label') !== want) {
+      b.setAttribute('aria-label', want);
+      b.innerHTML = q.playing ? PAUSE : PLAY;
+    }
+    const r = bar.querySelector<HTMLInputElement>('#gd-seq')!;
+    if (document.activeElement !== r) r.value = String(Math.round(q.total ? (q.t / q.total) * 1000 : 1000));
+    r.setAttribute('aria-valuetext', `${Math.round(q.total ? (q.t / q.total) * 100 : 100)}%`);
+    const sp = bar.querySelector<HTMLButtonElement>('[data-gd="speed"]')!;
+    sp.textContent = `${q.speed}×`;
+    sp.setAttribute('aria-pressed', String(q.speed > 1));
+  }
+  wb.onSeq(syncPlay);
 
   // ---------------------------------------------------------------- inspect
   function inspectHtml(id: string, sec: Section, st: Stop) {
@@ -556,7 +521,7 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
         <ol>
           <li><button data-gd="goto" data-i="${first}" ${here && st.step < 0 ? 'aria-current="step"' : ''}><span></span>Overview</button></li>
           ${sec.steps.map((s, k) => `<li><button data-gd="goto" data-i="${first + 1 + k}" ${here && st.step === k ? 'aria-current="step"' : ''}>
-            <span>${k + 1}</span>${esc(stepLabel(s, stepSentence(s, nameOf, hwOf(s))))}${s.derived ? ' <i class="gd-d" title="Derived from the structure">derived</i>' : ''}</button></li>`).join('')}
+            <span>${k + 1}</span>${esc(s.title)}${s.derived ? ' <i class="gd-d" title="Derived from the structure">derived</i>' : ''}</button></li>`).join('')}
         </ol></details>`;
     }).join('');
     tocList.querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'center' });
@@ -605,12 +570,19 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
       case 'step': go(at + 1 + Number(el.dataset.i)); break;
       case 'goto': closeToc(); go(Number(el.dataset.i)); break;
       case 'inspect': inspect(el.dataset.ids!.split(' ')); break;
+      case 'play': wb.seqPlay(!wb.seqState?.playing); break;
+      case 'replay': wb.seqReplay(); break;
+      case 'speed': wb.setSeqSpeed(wb.seqSpeed > 1 ? 1 : 2); break;
       case 'uninspect': uninspect(); break;
       case 'toc-close': closeToc(); tocBtn.focus(); break;
     }
   });
   tocBtn.addEventListener('click', () => (toc.hidden ? openToc() : closeToc()));
   scrub.addEventListener('input', () => go(Number(scrub.value), false));
+  body.addEventListener('input', (e) => {
+    const r = e.target as HTMLInputElement;
+    if (r.id === 'gd-seq') wb.seqScrub(Number(r.value) / 1000);
+  });
   // tray and hardware rows: the pointer on one marks it in the model
   const hoverIds = (e: Event) => (e.target as HTMLElement).closest<HTMLElement>('[data-ids]')?.dataset.ids?.split(' ').filter(Boolean) ?? null;
   body.addEventListener('pointerover', (e) => { if (!inspecting) wb.setGuideHover(hoverIds(e)); });
@@ -631,7 +603,13 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
       else close();
     } else if (t === scrub && (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End')) {
       used = false; // the slider moves itself (its input event steps)
-    } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || (e.key === ' ' && t.tagName !== 'BUTTON')) go(at + 1);
+    } else if (t.id === 'gd-seq' && e.key.startsWith('Arrow')) {
+      used = false; // the step's own slider
+    } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      wb.seqFinish(); // the step as it ends, then the next
+      go(at + 1);
+    } else if (e.key === ' ' && t.tagName !== 'BUTTON') wb.seqPlay(!wb.seqState?.playing);
+    else if (e.key === 'r' || e.key === 'R') wb.seqReplay();
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') go(at - 1);
     else if (e.key === 'Home') go(stops.findIndex((s) => s.sec === stops[at].sec));
     else if (e.key === 'f' || e.key === 'F') wb.frameGuide(true);
@@ -669,3 +647,5 @@ export function mountGuide(wb: Workbench, opts: { onClose?: () => void } = {}): 
   };
 }
 
+const PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z" fill="currentColor" stroke="none"/></svg>';
+const PAUSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9M11 3.5v9" stroke-width="2.2"/></svg>';

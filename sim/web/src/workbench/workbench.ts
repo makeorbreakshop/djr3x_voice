@@ -24,6 +24,7 @@ import {
   assemblyLabel, exposed, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
+import { fastenerPose, fastenerTravel, itemU, planSequence, type SeqFastener, type SeqItem, type SeqPart } from './sequence';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type MGear, type MJoint, type Manifest, type MLinkage, type MPart, type MStep,
@@ -133,8 +134,8 @@ export const GUIDE_COLOR = { add: 0x1f6fe5, focus: 0x1f6fe5 };
 const GUIDE_BG = 0xe4e2de;
 /** The guide floats the section over the floor, like the kit guide's renders: room for a part to come in from below. */
 const GUIDE_LIFT = 0.12;
-/** How far a step's new parts sit out from their seats (x their arrival distance), and fasteners out of their holes (mm). */
-const GUIDE_PULL = { part: 0.55, fastener: 26 };
+/** How far a step's new parts start out from their seats (x their arrival distance). Fasteners: sequence.ts. */
+const GUIDE_PULL = { part: 0.55 };
 
 /** The guide's view of a section: its own parts (not its child assemblies'), framed in the model area. */
 export interface GuideState {
@@ -212,8 +213,12 @@ export class Workbench {
   guide: GuideState | null = null;
   /** The screen the model gets in the guide: what the text column (right) or sheet (bottom) and the bars leave. */
   guideRect = { right: 0, bottom: 0, top: 0 };
-  /** A step's arrival: new parts ease in to their pulled-out place, the dashed paths fade in. */
-  private guideAnim: { from: number; dur: number } | null = null;
+  /** The step playing (sequence.ts): its items, the time into it (s), whether it runs. `force`: every item
+   *  out (1) for framing, else null. */
+  private seq: { items: SeqItem[]; total: number; t: number; playing: boolean; of: Map<string, SeqItem>; force: number | null } | null = null;
+  /** Playback speed (1 or 2), kept from step to step. */
+  seqSpeed = 1;
+  private readonly seqListeners = new Set<() => void>();
   private readonly guideLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({
     color: GUIDE_COLOR.add, dashSize: 0.0035, gapSize: 0.0025, transparent: true, depthTest: false, depthWrite: false,
   }));
@@ -1123,11 +1128,14 @@ export class Workbench {
       const nf = (n.asm.fasteners ?? []).filter((f) => f.placed && f.joins.some((p) => inScope(p)));
       for (const st of n.asm.steps ?? []) {
         const parts = (st.parts ?? []).filter((p) => inScope(p) && !placed.has(p));
-        const targets = (st.parts ?? []).filter((p) => inScope(p) && placed.has(p));
+        // (the manifest names a part once in `parts`, where it is placed; a later step that works on it has it in `context`)
+        const targets = [...new Set([...(st.parts ?? []), ...(st.context ?? [])])].filter((p) => inScope(p) && placed.has(p));
         const fs = (st.fasteners ?? []).filter((f) => nf.some((x) => x.id === f) && !fast.has(f));
         // a step that only adds hardware, glue or a check to parts already in place still counts (the
         // kit's inserts and magnets), as long as it works on something in focus
-        const work = targets.length > 0 && (!!st.unplaced?.length || !!st.text || !!st.notes?.length || !!st.tools?.length);
+        // (or, with the whole assembly in focus, hardware it names nowhere else: the kit's magnets)
+        const whole = mine.length === n.asm.parts.filter((p) => !p.replaced_by).length;
+        const work = (targets.length > 0 || whole) && (!!st.unplaced?.length || !!st.text || !!st.notes?.length || !!st.tools?.length);
         if (!parts.length && !fs.length && !work) continue;
         parts.forEach((p) => placed.add(p));
         fs.forEach((f) => fast.set(f, list.length));
@@ -1352,7 +1360,7 @@ export class Workbench {
   setGuide(node: AsmNode | null) {
     this.stopDemo();
     this.sweep = null;
-    this.guideAnim = null;
+    this.seq = null;
     this.hover = null;
     this.check = null;
     this.contact = null;
@@ -1424,10 +1432,101 @@ export class Workbench {
       node.pose = { ...node.pose, ...s.pose };
       this.pose();
     }
-    this.guideAnim = s && animate && !reducedMotion() ? { from: performance.now(), dur: 650 } : null;
     this.guideArrivals(s);
+    this.seq = null;
+    if (s) {
+      const { items, total } = this.planStep(s);
+      const of = new Map<string, SeqItem>();
+      for (const it of items) for (const id of it.ids) of.set(id, it);
+      const still = !animate || reducedMotion();
+      this.seq = { items, total, t: still ? total : 0, playing: !still, of, force: null };
+      this.seqLast = performance.now();
+    }
     this.refresh();
     this.emit();
+    this.seqEmit();
+  }
+
+  /** The step's sequence from its parts and fasteners, positions in the section's frame. */
+  private planStep(s: AStep) {
+    this.root.updateMatrixWorld(true);
+    const first = this.stepIndex();
+    const parts: SeqPart[] = [];
+    for (const id of s.parts ?? []) {
+      const po = this.parts.get(id);
+      if (!po) continue;
+      parts.push({ id, group: partStem(id), at: (po.sBase ?? po.base).clone() });
+    }
+    const fasteners: SeqFastener[] = [];
+    for (const fid of s.fasteners ?? []) {
+      const fo = this.fast.get(fid);
+      if (!fo) continue;
+      const at = new THREE.Vector3().setFromMatrixPosition(fo.base);
+      const axis = new THREE.Vector3(0, 0, 1).transformDirection(fo.base);
+      fasteners.push({ id: fid, spec: fo.f.spec, joins: fo.f.joins, at, axis });
+    }
+    return planSequence(parts, fasteners, (id) => (first.get(id) ?? -1) < this.step);
+  }
+
+  // ---- the step's playback (guide.ts's transport)
+  private seqLast = 0;
+  onSeq(fn: () => void) {
+    this.seqListeners.add(fn);
+    return () => this.seqListeners.delete(fn);
+  }
+  private seqEmit() {
+    for (const f of this.seqListeners) f();
+  }
+  get seqState() {
+    const q = this.seq;
+    return q ? { t: q.t, total: q.total, playing: q.playing, speed: this.seqSpeed, items: q.items.length } : null;
+  }
+  seqPlay(on: boolean) {
+    const q = this.seq;
+    if (!q) return;
+    if (on && q.t >= q.total) q.t = 0;
+    q.playing = on && !reducedMotion();
+    if (!q.playing && on) q.t = q.total;
+    this.seqLast = performance.now();
+    this.applyOffsets(0);
+    this.seqEmit();
+    this.host.interact();
+  }
+  seqReplay() {
+    if (!this.seq) return;
+    this.seq.t = 0;
+    this.seqPlay(true);
+  }
+  /** To a point in the step (0..1), paused. */
+  seqScrub(frac: number) {
+    const q = this.seq;
+    if (!q) return;
+    q.playing = false;
+    q.t = Math.min(1, Math.max(0, frac)) * q.total;
+    this.applyOffsets(0);
+    this.seqEmit();
+    this.host.interact();
+  }
+  /** Everything in: the step as it ends. */
+  seqFinish() {
+    const q = this.seq;
+    if (!q) return;
+    q.t = q.total;
+    q.playing = false;
+    this.applyOffsets(0);
+    this.seqEmit();
+  }
+  setSeqSpeed(v: number) {
+    this.seqSpeed = v;
+    this.seqEmit();
+  }
+  /** How far out an id is (1 out, 0 seated) in the step playing; 0 for anything not in it. */
+  private seqU(id: string): number {
+    const q = this.seq;
+    if (!q) return 0;
+    const it = q.of.get(id);
+    if (!it) return 0;
+    return q.force ?? itemU(it, q.t);
   }
 
   /** Where each of a step's new parts comes from (link frame, mm): straight out from what is already built -
@@ -1467,6 +1566,22 @@ export class Workbench {
     }
     const inv = new THREE.Matrix4();
     const unit = (v: THREE.Vector3) => (v.length() < 0.002 ? v.set(0, 0, 0) : v.normalize());
+    // built: placed in an earlier step, or earlier in this one (a bearing goes into the U-joint put on just before)
+    const order = st.parts;
+    const before = (id: string, me?: string) => {
+      const f = first.get(id);
+      if (f !== undefined && f < this.step) return true;
+      return !!me && order.includes(id) && order.indexOf(id) < order.indexOf(me);
+    };
+    // each built part's box: a way in that runs through fewer of them is the way in
+    const builtBoxes: THREE.Box3[] = [];
+    for (const id of g.parts) {
+      const po = this.parts.get(id);
+      if (po && before(id)) {
+        const b = seatBox(po);
+        if (b) builtBoxes.push(b);
+      }
+    }
     for (const [id, b] of boxes) {
       const po = this.parts.get(id)!;
       const c = b.getCenter(new THREE.Vector3());
@@ -1477,7 +1592,22 @@ export class Workbench {
         if (away.length() < 0.002) away.copy(c).sub(built.getCenter(new THREE.Vector3()));
       }
       const apart = boxes.size > 1 ? c.clone().sub(fresh.getCenter(new THREE.Vector3())) : new THREE.Vector3();
-      const d = unit(away).multiplyScalar(0.7).add(unit(apart));
+      let d = unit(away.clone()).multiplyScalar(0.7).add(unit(apart.clone()));
+      // ... but along the way it goes on when the data says: its mate's axis with something already built (a body
+      // sliding down a post, a bearing into its bore), else the screws that hold it to something built (a servo
+      // drops into its pocket), signed to come from outside
+      const ax = this.insertAxis(po, (x) => before(x, id));
+      if (ax) {
+        ax.transformDirection(po.mesh.parent!.matrixWorld);
+        const out = away.lengthSq() > 1e-10 ? away : apart.lengthSq() > 1e-10 ? apart : new THREE.Vector3(0, 1, 0);
+        // which end of the axis: the one whose way out runs through fewer built parts (the U-joint comes down
+        // the free end of its post, not up through the hub), else away from what is built
+        const len = Math.min(120, Math.max(50, b.getSize(new THREE.Vector3()).length() * 1000 * 0.7)) * GUIDE_PULL.part / 1000;
+        const hits = (sg: number) => builtBoxes.filter((bb) => [0.35, 0.7, 1].some((f) => b.clone().translate(ax.clone().multiplyScalar(sg * len * f)).intersectsBox(bb))).length;
+        const up = hits(1);
+        const dn = hits(-1);
+        d = ax.multiplyScalar(up !== dn ? (up < dn ? 1 : -1) : ax.dot(out) < 0 ? -1 : 1);
+      }
       if (d.length() < 0.05) d.set(0, 1, 0);
       // into the part's link frame (a direction: no translation; the mm scale is undone by normalising)
       inv.copy(po.mesh.parent!.matrixWorld).invert();
@@ -1485,6 +1615,27 @@ export class Workbench {
       const size = b.getSize(new THREE.Vector3()).length() * 1000; // mm
       this.guideFrom.set(id, d.multiplyScalar(Math.min(120, Math.max(50, size * 0.7))));
     }
+  }
+
+  /** The axis a part goes on along (its link frame), from a mate with a part already built, else from the
+   *  fasteners that join it to one; null when the data says nothing. */
+  private insertAxis(po: PartObj, built: (id: string) => boolean): THREE.Vector3 | null {
+    const feats = (po.part as MPart & { features?: Record<string, { type?: string; d?: number[]; n?: number[] }> }).features ?? {};
+    const mates = (po.node.asm as MAssembly & { mates?: { type: string; a: { part: string; feature: string }; b: { part: string; feature: string } }[] }).mates ?? [];
+    const dirOf = (f?: { d?: number[]; n?: number[] }) => (f?.d ?? f?.n) ? new THREE.Vector3(...((f.d ?? f.n) as [number, number, number])).normalize() : null;
+    const id = po.part.id;
+    for (const m of mates) {
+      const mine = m.a.part === id ? m.a : m.b.part === id ? m.b : null;
+      const other = mine === m.a ? m.b : m.a;
+      if (!mine || !built(other.part)) continue;
+      const d = dirOf(feats[mine.feature]);
+      if (d && feats[mine.feature]?.type !== 'point') return d;
+    }
+    for (const fo of this.fast.values()) {
+      if (fo.node !== po.node || !fo.f.joins.includes(id) || !fo.f.joins.some((j) => j !== id && built(j))) continue;
+      return new THREE.Vector3(0, 0, 1).transformDirection(fo.base);
+    }
+    return null;
   }
 
   /** Tray hover: mark these parts or fasteners (null clears). */
@@ -1500,12 +1651,14 @@ export class Workbench {
   frameGuide(animate = true) {
     const g = this.guide;
     if (!g) return;
-    // framed where the step settles (its parts at their pulled-out place), not where they arrive from
-    this.applyOffsets(0, 1);
+    // framed with everything the step adds still out (where it comes from) and its seat
+    if (this.seq) this.seq.force = 1;
+    this.applyOffsets(0);
     try {
       this.frameGuideNow(g, animate);
     } finally {
-      this.applyOffsets(0, this.guideK());
+      if (this.seq) this.seq.force = null;
+      this.applyOffsets(0);
     }
   }
 
@@ -1535,10 +1688,10 @@ export class Workbench {
   }
 
   /** The guide's dashed insertion paths: each new part's centre and each new fastener back to its seat. */
-  private updateGuidePaths(k: number) {
+  private updateGuidePaths() {
     const g = this.guide;
     const cur = g && !g.title && this.step >= 0 ? this.steps[this.step] : null;
-    if (!cur || k <= 0 || this.isolated) {
+    if (!cur || this.isolated) {
       this.guideLines.visible = false;
       return;
     }
@@ -1574,7 +1727,7 @@ export class Workbench {
     this.guideLines.geometry.dispose();
     this.guideLines.geometry = geo;
     this.guideLines.computeLineDistances();
-    (this.guideLines.material as THREE.LineDashedMaterial).opacity = 0.95 * k;
+    (this.guideLines.material as THREE.LineDashedMaterial).opacity = 0.95;
     this.guideLines.visible = pts.length > 0;
   }
 
@@ -1894,12 +2047,15 @@ export class Workbench {
     if (this.guide) {
       this.holdGuideView();
       this.guideBackdrop(true);
-      if (this.guideAnim) {
-        const k = this.guideK(now);
-        this.applyOffsets(0, k);
-        if (k >= 1) this.guideAnim = null;
+      const q = this.seq;
+      if (q?.playing) {
+        q.t = Math.min(q.total, q.t + ((now - this.seqLast) / 1000) * this.seqSpeed);
+        if (q.t >= q.total) q.playing = false;
+        this.applyOffsets(0);
+        this.seqEmit();
         moving = true;
       }
+      this.seqLast = now;
     }
     if (moving) this.host.interact();
   }
@@ -1936,6 +2092,7 @@ export class Workbench {
     if (sel) for (const id of [sel.a, sel.b]) pairParts.add(this.pid(id));
     const hover = this.hover;
     const g = this.guide;
+    const insideShells = !!g && !!cur && (cur.parts ?? []).length > 0 && (cur.parts ?? []).every((id) => this.parts.get(id)?.part.class !== 'shell');
 
     // 1. The look: one finish and opacity per part from the look, the focus and the mode (steps)
     //    alone. 2. Overlays: a rim on top (withRim), never a change of colour, opacity or side.
@@ -1984,6 +2141,12 @@ export class Workbench {
       if (toCome) {
         finish = GHOST_FINISH;
         opacity = Math.min(opacity, ctx.has(id) ? 0.22 : 0.06);
+      }
+      // the guide on a step that works inside the shells (a mechanism under the kit's head): the shells already on
+      // fade back, as X-ray would, so what goes in stays in sight
+      if (g && cur && !g.title && shell && !inStep.has(id) && insideShells && !this.isolated) {
+        finish = GHOST_FINISH;
+        opacity = Math.min(opacity, GHOST.inspectShell);
       }
       // the guide's tray under the pointer: what it names stays, the rest of the section fades back
       if (g?.hover && !g.hover.has(id)) {
@@ -2050,13 +2213,7 @@ export class Workbench {
     this.applyOffsets(0);
   }
 
-  /** The guide's arrival: 0 at a step's entry, 1 when settled. */
-  private guideK(now = performance.now()) {
-    const a = this.guideAnim;
-    if (!a) return 1;
-    const k = Math.min(1, (now - a.from) / a.dur);
-    return 1 - (1 - k) ** 3;
-  }
+
 
   // ------------------------------------------------------------------ explode
 
@@ -2209,17 +2366,17 @@ export class Workbench {
 
   /** Explode offsets, plus the insertion animation of the current step (`insert` 1 -> 0). Fasteners ride
    *  the part they hold and back out along their own axis, out of their holes. */
-  private applyOffsets(insert: number, guideK = this.guideK()) {
+  private applyOffsets(insert: number) {
     const cur = this.step >= 0 ? this.steps[this.step] : null;
     const inStep = new Set(cur?.parts ?? []);
     const fastIn = new Set(cur?.fasteners ?? []);
-    // Instructions: a step's new parts and fasteners sit pulled out along their way in (the guide's exploded
-    // hardware), easing in from further out as the step arrives
-    const g = this.guide && !this.guide.title && cur ? 1 + 0.9 * (1 - guideK) : 0;
+    // Instructions: the step plays (sequence.ts) - each new part comes in along its way from where it starts out
+    const g = !!this.guide && !this.guide.title && !!cur;
     for (const po of this.parts.values()) {
+      const u = g && inStep.has(po.part.id) ? this.seqU(po.part.id) : 0;
       // a step's new parts come in from where the explode would take them (at least 50 mm out)
-      const step = inStep.has(po.part.id) && (g || insert > 0)
-        ? (g ? (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * g) : this.arrival(po).multiplyScalar(insert)) : null;
+      const step = inStep.has(po.part.id) && (u > 0 || (!g && insert > 0))
+        ? (g ? (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u) : this.arrival(po).multiplyScalar(insert)) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);
     }
@@ -2227,9 +2384,27 @@ export class Workbench {
     for (const fo of this.fast.values()) {
       const owner = this.parts.get(fo.f.joins[0]);
       const mine = !scope || fo.f.joins.some((p) => scope.has(p));
-      // a nut or a washer comes in from the far side, against its screw
-      const far = g && /nut|washer/.test(fo.f.spec.type) && !/t_nut|insert/.test(fo.f.spec.type) ? -1 : 1;
-      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? (g ? GUIDE_PULL.fastener * g * far : insert * 40) : 0); // driven in along its axis
+      if (g) {
+        // the guide: only ever along its own axis from its seat (never a part's offset), spinning on
+        if (!fastIn.has(fo.f.id)) {
+          fo.obj.matrix.copy(fo.base);
+          continue;
+        }
+        // waiting clear of a part it goes through that is still coming in: as far again out along its own axis
+        const side = fastenerTravel(fo.f.spec).side;
+        const outDir = new THREE.Vector3(0, 0, -side).transformDirection(fo.base);
+        let clear = 0;
+        for (const j of fo.f.joins) {
+          const po = this.parts.get(j);
+          const u = inStep.has(j) ? this.seqU(j) : 0;
+          if (!po || u <= 0) continue;
+          const o = (this.guideFrom.get(j)?.clone() ?? new THREE.Vector3()).multiplyScalar(GUIDE_PULL.part * u);
+          clear = Math.max(clear, o.dot(outDir) + 4);
+        }
+        fo.obj.matrix.copy(fastenerPose(fo.base, fo.f.spec, this.seqU(fo.f.id), undefined, clear));
+        continue;
+      }
+      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 40 : 0); // driven in along its axis
       const m = fo.base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -back));
       if (owner && mine) {
         const d = this.offsetOf(owner, this.explode);
@@ -2238,7 +2413,7 @@ export class Workbench {
       fo.obj.matrix.copy(m);
     }
     this.root.updateMatrixWorld(true);
-    this.updateGuidePaths(this.guide ? guideK : 0);
+    this.updateGuidePaths();
     this.updateMarkers();
     this.markShadow();
     this.host.interact();
@@ -2450,5 +2625,15 @@ function reducedMotion() {
     return matchMedia('(prefers-reduced-motion: reduce)').matches;
   } catch {
     return false;
+  }
+}
+
+/** A part id without its index or side (morton_post_low_3 -> morton_post_low), as mech/workbench/steps.py groups like parts. */
+export function partStem(id: string): string {
+  let s = id.toLowerCase();
+  for (;;) {
+    const t = s.replace(/_(\d+|l|r|m|left|right|full)$/, '');
+    if (t === s || !t) return s;
+    s = t;
   }
 }

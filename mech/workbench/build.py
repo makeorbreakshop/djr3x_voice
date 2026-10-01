@@ -15,6 +15,7 @@ import numpy as np
 import trimesh
 
 from . import geom
+from .steps import plan as plan_steps
 from .model import SCHEMA, VERSION, Assembly, Transform, rollup, vec
 
 MECH = Path(__file__).resolve().parents[1]
@@ -309,7 +310,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "inferred": g.inferred, "inferred_note": g.inferred_note,
         }) for g in asm.gears],
         "fasteners": fast,
-        "steps": [_clean({**s.__dict__, "n": i + 1}) for i, s in enumerate(asm.steps)],
+        "steps": [_clean({**s.__dict__, "n": i + 1}) for i, s in enumerate(plan_steps(asm))],
         "bom": [_clean(b.__dict__) for b in asm.bom],
         "bom_rollup": [_clean(b.__dict__) for b in rollup(asm, loaded_children)],
         "checks": [_clean(c.__dict__) for c in asm.checks] + [_clean(c.__dict__) for c in asm.tests],
