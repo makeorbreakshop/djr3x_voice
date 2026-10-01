@@ -1,8 +1,8 @@
 {
   "id": "r3x_native",
-  "label": "R3X native (face + chest Nanos, RP2040 servo controller)",
+  "label": "R3X native (face + chest Nanos, Teensy 4.1 servo controller)",
   "vendor": "this repo",
-  "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an 8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 chest logic-panel pixels (rex_chest_v1); our RP2040 controller (firmware/servo) runs the 18 servo channels.",
+  "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an 8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 chest logic-panel pixels (rex_chest_v1); our Teensy 4.1 controller (firmware/servo/teensy41) runs the 18 servo channels.",
   "support": "driven",
   "emulator": "native",
   "boards": [
@@ -277,12 +277,12 @@
     },
     {
       "id": "servo_ctl",
-      "model": "Raspberry Pi Pico (RP2040) + INA219 + rail MOSFET",
-      "role": "18 servo channels (16 PWM + 2 PIO), goals at event time",
-      "url": "https://www.raspberrypi.com/products/raspberry-pi-pico/",
+      "model": "Teensy 4.1 + 3 x 74AHCT245 + INA219 + rail MOSFET",
+      "role": "18 servo channels (FlexPWM + QuadTimer, 50 Hz, 0.43 us), goals at event time",
+      "url": "https://www.pjrc.com/store/teensy41.html",
       "dims_mm": [
-        51.0,
-        21.0,
+        61.0,
+        18.0,
         4.0
       ],
       "mount": {
@@ -312,23 +312,41 @@
             "D+",
             "GND"
           ],
-          "note": "CDC, R3X_SERVO_PORT"
+          "note": "CDC 16c0:0483 'r3x-servo', R3X_SERVO_PORT"
         },
         {
           "id": "servo",
           "kind": "servo_3p_2.54 x18",
           "pins": [
-            "GPIO0..GPIO17",
+            "ch0 pin2",
+            "ch1 pin3",
+            "ch2 pin4",
+            "ch3 pin5",
+            "ch4 pin6",
+            "ch5 pin9",
+            "ch6 pin10",
+            "ch7 pin11",
+            "ch8 pin12",
+            "ch9 pin22",
+            "ch10 pin23",
+            "ch11 pin24",
+            "ch12 pin25",
+            "ch13 pin28",
+            "ch14 pin29",
+            "ch15 pin33",
+            "ch16 pin36",
+            "ch17 pin37",
             "6V",
             "GND"
-          ]
+          ],
+          "note": "3.3 V pulses through 74AHCT245 buffers to 5 V; channel -> pin per firmware/servo/teensy41/README.md"
         },
         {
           "id": "i2c",
           "kind": "dupont_4p_2.54",
           "pins": [
-            "GPIO20 SDA",
-            "GPIO21 SCL",
+            "pin18 SDA",
+            "pin19 SCL",
             "3V3",
             "GND"
           ],
@@ -338,9 +356,20 @@
           "id": "rail_en",
           "kind": "dupont_1p",
           "pins": [
-            "GPIO22"
+            "pin30"
           ],
-          "note": "servo rail enable (active high)"
+          "note": "servo rail MOSFET gate (active high, 10 k pull-down)"
+        },
+        {
+          "id": "spare_serial",
+          "kind": "dupont_4p_2.54",
+          "pins": [
+            "pin0 RX1",
+            "pin1 TX1",
+            "pin7 RX2",
+            "pin8 TX2"
+          ],
+          "note": "kept free for bus servos (Feetech STS / Dynamixel)"
         }
       ],
       "volts": 5.0,
@@ -349,7 +378,7 @@
         "typical_ma": 30,
         "max_ma": 50
       },
-      "firmware": "firmware/servo",
+      "firmware": "firmware/servo/teensy41",
       "driver": "driver.servo",
       "support": "driven"
     }
@@ -1541,14 +1570,14 @@
       "board": "servo_ctl",
       "driver": "r3x_servo",
       "support": "driven",
-      "note": "Every profile actuator with driver r3x_servo (channel = GPIO)."
+      "note": "Every profile actuator with driver r3x_servo (channel n = TEENSY_SERVO_PINS[n])."
     }
   ],
   "power": [
     {
       "name": "5V logic + LEDs",
       "volts": 5.0,
-      "max_ma": 3430.0,
+      "max_ma": 3480.0,
       "typical_ma": 600,
       "loads": [
         "face_nano",
@@ -1558,21 +1587,33 @@
         "chest_strip",
         "servo_ctl"
       ],
-      "psu": "5 V 4 A regulated (UBEC or bench supply); LED boards at brightness 128 stay under 2 A",
-      "psu_amps": 4.0,
-      "note": "Full white is 3.3 A at brightness 255; both Nanos cap at 128, so ~1.7 A worst case. USB alone is not enough for the LEDs."
+      "psu": "5 V 5 A buck from the 12 V supply (e.g. Pololu D36V50F5); LED boards at brightness 128 stay under 2 A",
+      "psu_amps": 5.0,
+      "note": "Full white is 3.3 A at brightness 255; both Nanos cap at 128, so ~1.7 A worst case. Cut the Teensy's VUSB-VIN pad."
     },
     {
-      "name": "6V servo rail",
+      "name": "6V heavy servo rail",
       "volts": 6.0,
-      "max_ma": 6000,
-      "typical_ma": 1500,
+      "max_ma": 20000,
+      "typical_ma": 3000,
       "loads": [
         "servo_ctl"
       ],
-      "psu": "6 V 10 A (servo PSU), switched by the controller's rail MOSFET",
+      "psu": "BEC A, 6.0 V 20 A (e.g. Castle BEC 2.0) from 12 V: head, rings, hero arm",
+      "psu_amps": 20.0,
+      "note": "12 V side: fuse 25 A, E-stop, rail MOSFET, INA219 (reads ~0.55x the 6 V current; the stall trip is set in 12 V terms). See docs/electronics/servo-wiring-teensy.md."
+    },
+    {
+      "name": "6V arm servo rail",
+      "volts": 6.0,
+      "max_ma": 10000,
+      "typical_ma": 800,
+      "loads": [
+        "servo_ctl"
+      ],
+      "psu": "BEC B, 6.0 V 10 A UBEC from 12 V (after the same MOSFET): arms and claws",
       "psu_amps": 10.0,
-      "note": "The controller trips at 6 A for 300 ms (INA219), so 6 A is the rail's effective max. Typical is inferred."
+      "note": "Micro servos (MG90S, SG90) off the heavy rail's noise."
     }
   ],
   "wiring": [
@@ -1622,7 +1663,7 @@
       "awg": 28
     },
     {
-      "from": "5 V 4 A supply",
+      "from": "5 V 5 A buck (Pololu D36V50F5)",
       "to": "eye_jewels.din",
       "signal": "5V/GND",
       "connector": "dupont_3p_2.54",
@@ -1630,18 +1671,48 @@
       "note": "LED power in at the jewels, not through the Nano"
     },
     {
-      "from": "5 V 4 A supply",
+      "from": "5 V 5 A buck (Pololu D36V50F5)",
       "to": "chest_strip.din",
       "signal": "5V/GND",
       "connector": "dupont_3p_2.54",
       "awg": 20
     },
     {
-      "from": "6 V 10 A supply",
-      "to": "servo_ctl.servo",
-      "signal": "6V/GND servo rail",
-      "connector": "XT30 -> servo bus",
+      "from": "12 V 29 A supply (Mean Well LRS-350-12)",
+      "to": "BEC 6.0 V 20 A (Castle BEC 2.0)",
+      "signal": "12V/GND via 25 A fuse, E-stop, rail MOSFET, INA219",
+      "connector": "XT60",
       "awg": 14
+    },
+    {
+      "from": "12 V 29 A supply (Mean Well LRS-350-12)",
+      "to": "UBEC 6.0 V 10 A",
+      "signal": "12V/GND after the same MOSFET and INA219",
+      "connector": "XT30",
+      "awg": 16
+    },
+    {
+      "from": "12 V 29 A supply (Mean Well LRS-350-12)",
+      "to": "5 V 5 A buck (Pololu D36V50F5)",
+      "signal": "12V/GND via 5 A fuse (not switched: logic stays up when disarmed)",
+      "connector": "XT30",
+      "awg": 18
+    },
+    {
+      "from": "BEC 6.0 V 20 A (Castle BEC 2.0)",
+      "to": "servo_ctl.servo",
+      "signal": "6V/GND heavy rail (head, rings, hero arm)",
+      "connector": "Wago 221 -> servo leads",
+      "awg": 14,
+      "note": "2200 uF at the output, 470 uF at the head and ring clusters"
+    },
+    {
+      "from": "UBEC 6.0 V 10 A",
+      "to": "servo_ctl.servo",
+      "signal": "6V/GND arm rail (arms, claws)",
+      "connector": "Wago 221 -> servo leads",
+      "awg": 16,
+      "note": "2200 uF at the output"
     }
   ],
   "bom": [
@@ -1666,11 +1737,17 @@
       "note": "1 m reel"
     },
     {
-      "item": "Raspberry Pi Pico",
+      "item": "Teensy 4.1",
       "qty": 1,
       "category": "board",
-      "url": "https://www.raspberrypi.com/products/raspberry-pi-pico/",
-      "unit_usd": 4.0
+      "url": "https://www.pjrc.com/store/teensy41.html",
+      "unit_usd": 31.5
+    },
+    {
+      "item": "74AHCT245 octal buffer",
+      "qty": 3,
+      "category": "board",
+      "unit_usd": 1.0
     },
     {
       "item": "INA219 breakout",
@@ -1680,14 +1757,46 @@
       "unit_usd": 9.95
     },
     {
-      "item": "5 V 4 A supply",
+      "item": "12 V 29 A supply (Mean Well LRS-350-12)",
       "qty": 1,
-      "category": "power"
+      "category": "power",
+      "unit_usd": 40.0
     },
     {
-      "item": "6 V 10 A supply",
+      "item": "BEC 6.0 V 20 A (Castle BEC 2.0)",
       "qty": 1,
-      "category": "power"
+      "category": "power",
+      "unit_usd": 40.0
+    },
+    {
+      "item": "UBEC 6.0 V 10 A",
+      "qty": 1,
+      "category": "power",
+      "unit_usd": 20.0
+    },
+    {
+      "item": "5 V 5 A buck (Pololu D36V50F5)",
+      "qty": 1,
+      "category": "power",
+      "unit_usd": 25.0
+    },
+    {
+      "item": "Logic-level N-MOSFET module, 30 A",
+      "qty": 1,
+      "category": "power",
+      "unit_usd": 8.0
+    },
+    {
+      "item": "Latching E-stop, 30 A DC (or driving a 40 A relay)",
+      "qty": 1,
+      "category": "power",
+      "unit_usd": 20.0
+    },
+    {
+      "item": "Blade fuse holders + 25 A and 5 A fuses",
+      "qty": 2,
+      "category": "power",
+      "unit_usd": 5.0
     },
     {
       "item": "330 R resistor",
@@ -1697,6 +1806,16 @@
     {
       "item": "1000 uF 10 V capacitor",
       "qty": 2,
+      "category": "hardware"
+    },
+    {
+      "item": "2200 uF 16 V low-ESR capacitor",
+      "qty": 2,
+      "category": "hardware"
+    },
+    {
+      "item": "470 uF 16 V capacitor",
+      "qty": 3,
       "category": "hardware"
     },
     {
