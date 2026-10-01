@@ -13,8 +13,9 @@
 //! A pool names clips or cues of tier `free` or `cheap` (intentions fire from Jev and Claude).
 //!
 //! The pick ([`Picker`]): uniform over the pool minus the last picks (up to two, never the
-//! whole pool), intensity x0.8-1.05, speed x0.9-1.12, and nothing while the intention is
-//! inside its cooldown (default [`DEFAULT_COOLDOWN_S`]).
+//! whole pool), intensity x[`PICK_INTENSITY`], speed x[`PICK_SPEED`], and nothing while the
+//! intention is inside its cooldown (default [`DEFAULT_COOLDOWN_S`]). The performer also
+//! scales the intensity by the expressiveness (the puppeteer's energy, 0.4-1.6x).
 
 use std::collections::{HashMap, VecDeque};
 
@@ -26,6 +27,11 @@ use crate::rng::Rng;
 pub const DEFAULT_COOLDOWN_S: f64 = 1.5;
 /// How many recent picks a pool avoids (fewer when the pool is small).
 pub const AVOID_RECENT: usize = 2;
+/// A pick's intensity range (x the requested intensity). 2026-10-01: was 0.8-1.05, which
+/// made the average reaction smaller than authored ("the animations feel subdued").
+pub const PICK_INTENSITY: (f64, f64) = (0.9, 1.15);
+/// A pick's speed range.
+pub const PICK_SPEED: (f64, f64) = (0.9, 1.12);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -122,8 +128,8 @@ impl Picker {
         recent.push_front(item.clone());
         recent.truncate(AVOID_RECENT);
         self.last_at.insert(intent.id.clone(), now);
-        let intensity = intensity * (0.8 + 0.25 * rng.next_f64());
-        let speed = 0.9 + 0.22 * rng.next_f64();
+        let intensity = intensity * (PICK_INTENSITY.0 + (PICK_INTENSITY.1 - PICK_INTENSITY.0) * rng.next_f64());
+        let speed = PICK_SPEED.0 + (PICK_SPEED.1 - PICK_SPEED.0) * rng.next_f64();
         Some(Pick { item, intensity, speed })
     }
 }
@@ -169,7 +175,7 @@ mod tests {
         let mut rng = Rng::new(3);
         let i = intent(&["a", "b"], None);
         let first = p.pick(&i, 10.0, 0.6, &mut rng, |_| true).unwrap();
-        assert!((0.48..=0.63).contains(&first.intensity) && (0.9..=1.12).contains(&first.speed), "{first:?}");
+        assert!((0.6 * PICK_INTENSITY.0..=0.6 * PICK_INTENSITY.1).contains(&first.intensity) && (PICK_SPEED.0..=PICK_SPEED.1).contains(&first.speed), "{first:?}");
         assert!(p.pick(&i, 10.0 + DEFAULT_COOLDOWN_S - 0.1, 1.0, &mut rng, |_| true).is_none(), "cooling down");
         assert!(p.pick(&i, 10.0 + DEFAULT_COOLDOWN_S + 0.1, 1.0, &mut rng, |_| true).is_some());
         assert_eq!(p.pick(&i, 20.0, 1.0, &mut rng, |x| x == "b").unwrap().item, "b");

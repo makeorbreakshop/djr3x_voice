@@ -941,6 +941,9 @@ impl Performer {
         let intent = self.catalog.intentions.get(id)?.clone();
         let cat = self.catalog.clone();
         let playable = |p: &str| cat.get(p).is_some_and(|it| crate::show::types::tier_allows(it.tier, source));
+        // Expressiveness: the puppeteer's energy (pad DJ layer / menu, 0.4-1.6x) scales every
+        // intention, so the whole character can be turned up or down.
+        let intensity = intensity * self.puppet.energy_gain();
         let pick = self.intents.pick(&intent, self.now, intensity, &mut self.intent_rng, playable)?;
         let params = Params { intensity: Some(pick.intensity), speed: Some(pick.speed) };
         self.perform(&pick.item, source, params, None)
