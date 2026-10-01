@@ -144,7 +144,8 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
             out.steps.append(Step(f"{a.id}:{st.id}", st.title, [pmap.get(x, x) for x in st.parts],
                                   [pmap.get(x, x) for x in st.fasteners], st.unplaced, st.tools, st.notes,
                                   [pmap.get(x, x) for x in st.context], f"{a.id}:{st.joint}" if st.joint else None,
-                                  {f"{a.id}:{k}": v for k, v in (st.pose or {}).items()}, st.guide_page))
+                                  {f"{a.id}:{k}": v for k, v in (st.pose or {}).items()}, st.guide_page,
+                                  text=st.text))
         for f in out.fasteners[len(out.fasteners) - len(a.fasteners):]:
             f.step = f"{a.id}:{f.step}" if f.step else f.step
         for bl in a.bom:

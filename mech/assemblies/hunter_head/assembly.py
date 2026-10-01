@@ -996,6 +996,38 @@ def add_steps(asm: Assembly):
                     "The mouth glues to Hunter's head bottom (our shim goes under it only if the gap is over 0.5 mm).",
                     "Headband over the top, as the kit's goes on."]),
     ]
+    for s in asm.steps:
+        s.text = _STEP_TEXT.get(s.id, "")
+
+
+# The Instructions' sentence per step (SCHEMA.md "Step" `text`): imperative, one or two sentences.
+_STEP_TEXT = {
+    "s01": "Heat-set every insert before anything else: six M4 in the head bottom's bosses, eight M3 in the plate's "
+           "servo bosses. Press them straight and stop flush.",
+    "s02": "Heat-set an M4 insert in the neck coupler's side hole and press an M4 nut into each hex pocket under "
+           "its hub plate.",
+    "s03": "Screw the thru-hole sonic hub to the coupler, push the hex shaft fully in and clamp it with two M4 screws.",
+    "s04": "Slide the U-joint down the hex shaft onto the hub and bolt it through to the coupler's trapped nuts with "
+           "four M4.",
+    "s04b": "Pivot the cross in the U-joint's bearings, a washer each side. It must swing freely with no end play.",
+    "s05": "Bolt the two pillow blocks to the cross, then the mount plate down onto them. Check the plate rolls "
+           "freely.",
+    "s06": "Clamp the threaded sonic hub on top of the post, one pattern hole toward each servo.",
+    "s07": "Screw both servos into the plate, splines up toward the back corners, with eight M3.",
+    "s08": "Centre both servos at 1500 µs, then fit each hub and control arm with the plate held level. This sets "
+           "tilt and roll zero.",
+    "s09": "Feed the servo leads through the neck, then screw the head bottom to the plate with six M4. The side "
+           "screws also clamp the visor brackets.",
+    "s10": "Set both push rods to 74.3 mm between ball centres and fit them from each horn to the top hub. The "
+           "plate must sit level with both servos centred.",
+    "s11": "Centre the visor servo, fit its horn along the lever and mount the servo in its cradle.",
+    "s12a": "Glue the visor brow to its side arms, then screw a hub to each arm's inboard face.",
+    "s12": "Slide the stub axles through the bearings into the visor hubs and pin the push rod between the tab and "
+           "the horn. Glue the axle ends over the arms.",
+    "s13": "Dry-fit both sides and the top, then sweep tilt and roll by hand to check for rubbing.",
+    "s13b": "Glue the kit's ears over the visor axle ends.",
+    "s13c": "Glue the eyes and mic into the face plate and the plate into the head. Fit the mouth and the headband.",
+}
 
 
 # ------------------------------------------------------------------ BOM (the PDF, plus what the geometry adds)

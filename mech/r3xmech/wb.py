@@ -53,7 +53,7 @@ def to_workbench(a: Asm, variant: dict | None = None):
                     inferred=j.inferred, inferred_note=j.inferred_note) for j in a.joints]
     steps = [Step(id=s["id"], title=s["title"], parts=s.get("parts", []), unplaced=s.get("unplaced", []),
                   notes=s.get("notes", []), guide_page=s.get("guide_page"), inferred=s.get("inferred", False),
-                  inferred_note=s.get("inferred_note", "")) for s in a.steps]
+                  inferred_note=s.get("inferred_note", ""), text=s.get("text", "")) for s in a.steps]
     bom = [BomLine(key=b["key"], item=b.get("item", ""), qty=b.get("qty") or 0, category=b.get("category", "hardware"),
                    spec=b.get("spec", {}), source=b.get("source", ""), inferred=b.get("inferred", False),
                    inferred_note=b.get("inferred_note", "")) for b in a.bom]

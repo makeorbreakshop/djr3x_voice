@@ -240,6 +240,8 @@ def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
                 "notes": [x for x in [st.get("notes")] + [f"consumables: {', '.join(st['consumables'])}"
                                                           if st.get("consumables") else None]
                           + [f"also uses (other sub-assembly): {', '.join(foreign)}" if foreign else None] if x],
+                # the transcription's own short paraphrase (licensed, read here at build time, never committed)
+                "text": st.get("notes") or "",
                 "guide_page": st.get("page"), "subassembly": st.get("subassembly"),
                 "inferred": False, "inferred_note": "",
             })

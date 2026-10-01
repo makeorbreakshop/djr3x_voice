@@ -159,6 +159,8 @@ export interface MStep {
   joint?: string;
   pose?: Record<string, number>;
   guide_page?: number;
+  /** The Instructions' copy: one or two imperative sentences (absent: generated from the parts and hardware). */
+  text?: string;
   inferred?: boolean;
   inferred_note?: string;
 }

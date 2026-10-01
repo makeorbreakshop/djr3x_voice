@@ -830,12 +830,12 @@ def _steps(asm: Assembly):
              notes=["Build this drive on the bench (bracket, servo, hub, pinion: s07-s08) and bolt it to the back posts "
                     "as a unit: the pinion's screws go in from below."]),
         Step("s08", "Lower ring pinion (centred servo)", ["col_lower_hub", "col_lower_pinion"], F("col_scr_lpin"),
-             tools=["servo tester (1500 us)", "3 mm hex key"],
+             tools=["servo tester (1500 µs)", "3 mm hex key"],
              notes=["Centre the servo, then mesh the pinion with Anderson's sector with the lower ring at its zero."]),
         Step("s09", "Top ring drive: bracket and servo", ["col_top_bracket", "col_top_servo"],
              F("col_tnut_top", "col_scr_topbrk", "col_scr_topfl", "col_nut_topfl"), tools=["3 mm hex key", "2.5 mm hex key"]),
         Step("s10", "Top ring pinion (centred servo)", ["col_top_hub", "col_top_pinion"], F("col_scr_tpin"),
-             tools=["servo tester (1500 us)", "3 mm hex key"]),
+             tools=["servo tester (1500 µs)", "3 mm hex key"]),
         Step("s11", "Sled box: four grid plates on the bottom plate, the bearing housing in the top",
              plates + ["col_sled_top", "col_brg_lo", "col_brg_up", "col_neck_hub", "col_collar"], [],
              unplaced=[{"key": "bhcs-M4x8", "spec": {"type": "bhcs", "thread": "M4", "length_mm": 8}, "count": 24,
@@ -855,7 +855,7 @@ def _steps(asm: Assembly):
              unplaced=[{"key": "shcs-M4x12", "spec": {"type": "shcs", "thread": "M4", "length_mm": 12}, "count": 4,
                         "note": "the hanger's arms to the right side plate and the bottom plate (into heat-set inserts "
                                 "in the printed hanger)"}],
-             tools=["servo tester (1500 us)", "3 mm hex key", "2.5 mm hex key"], joint="head_pan",
+             tools=["servo tester (1500 µs)", "3 mm hex key", "2.5 mm hex key"], joint="head_pan",
              notes=["Centre the pan servo; its 1906 hub, then the coupler (four M4 down into the hub) with the head "
                     "facing the front: head_pan = 0.",
                     "The brass lift gear goes on its spline once the sled is in the column (s14), the lift servo at its "
@@ -881,6 +881,37 @@ def _steps(asm: Assembly):
                     "pan and lift servos' leads and the clock spring's ribbon (both servos ride the sled)."]),
         Step("s21", "Neck spring (cosmetic)", ["neck_spring"], []),
     ]
+    for s in asm.steps:
+        s.text = _STEP_TEXT.get(s.id, "")
+
+
+# The Instructions' sentence per step (SCHEMA.md "Step" `text`): imperative, one or two sentences.
+_STEP_TEXT = {
+    "s00": "Screw the lift rack to the back-right post with two M3 screws into drop-in T-nuts, teeth toward the "
+           "axis. Do it on the bench: once the column is up, these screws are out of reach.",
+    "s01": "Screw the other three posts to the foot plate from below, one M5 flat head each. Tap the post ends M5 "
+           "first, and turn each post so a V slot faces the axis.",
+    "s03": "Bolt the foot plate to the Gil plate with four M5 screws, lock nuts underneath.",
+    "s04": "Fit the shell support ring round the foot of the column, four M4 screws into T-nuts. Set its top flush "
+           "with the skirt's top edge.",
+    "s07": "Bolt the lower ring servo into its bracket, then the bracket to the back posts. Build it on the bench "
+           "and fit it as one unit.",
+    "s08": "Centre the servo, then fit the hub and the lower ring pinion with four M4 screws.",
+    "s09": "Bolt the top ring servo into its bracket, then the bracket to the back posts.",
+    "s10": "Centre the servo, then fit the hub and the top ring pinion with four M4 screws.",
+    "s11": "Build the sled box from the four grid plates on the bottom plate. Press both 6806 bearings into the "
+           "top plate, then the bearing hub and the collar.",
+    "s12": "Hang the pan servo under the bottom plate, spline up on the axis, with four M3 screws and lock nuts.",
+    "s13": "Hang the lift servo on its hanger. Centre the pan servo, fit its hub and the coupler with the head "
+           "facing front, then the brass lift gear.",
+    "s14": "Mount the eight V-wheels on their eccentric spacers and slide the sled down between the posts. Turn "
+           "the spacers until no wheel slips and nothing binds.",
+    "s16": "Push the neck tube down through the bearing hub into the coupler and bolt it across with one M4.",
+    "s17": "Stand the clock-spring cassette on its four standoffs. Wind the ribbon loosely with the head at pan 0.",
+    "s18": "Close the column with the top plate, four M5 screws into the posts.",
+    "s20": "Run the service cable up the front opening to the sled's bottom-plate tab and tie it off.",
+    "s21": "Slip the cosmetic neck spring over the tube.",
+}
 
 
 def _bom(asm: Assembly):

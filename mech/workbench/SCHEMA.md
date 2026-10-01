@@ -294,6 +294,9 @@ Unplaced fasteners omit `transform`/`mesh`; the panel lists them under their ste
 {
   "id": "s03", "n": 3,
   "title": "Bolt the mount plate to the head bottom",
+  "text": "Bolt the mount plate to the head bottom with four M3.",  // the Instructions' copy: one or two
+                                        // imperative sentences in our own words (optional; the viewer
+                                        // generates one from the parts and hardware when absent)
   "parts": ["head_mount_plate"],        // parts that arrive in this step
   "context": ["head_bottom"],           // parts to show solid as context (optional)
   "fasteners": ["f_plate_shell_1"],     // placed fasteners used here

@@ -186,6 +186,9 @@ class Step:
     guide_page: Optional[int] = None
     inferred: bool = False
     inferred_note: str = ""
+    # The step as the Instructions read it: one or two plain imperative sentences, in our words
+    # (never the kit guide's text; SCHEMA.md "Step").
+    text: str = ""
 
 
 @dataclass

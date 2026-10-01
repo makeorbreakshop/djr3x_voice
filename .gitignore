@@ -145,3 +145,6 @@ mech/assemblies/kit/_guide/
 
 # mech/parts is our parts library (the Python template above ignores parts/)
 !mech/parts/
+
+# ui-design runs: screenshots can show the kit's licensed meshes; keep them local
+.codex/design-runs/*/screenshots/

@@ -148,31 +148,6 @@ dl.facts a { color: var(--accent-2); margin-right: 10px; }
 .jlive { font-size: 11.5px; line-height: 1.5; font-variant-numeric: tabular-nums; color: var(--muted); margin-top: 2px; }
 .jlive[hidden] { display: none; }
 
-/* Steps */
-.step-nav { display: grid; grid-template-columns: auto auto auto 1fr auto; align-items: center; gap: 4px 6px; }
-.step-nav .step-n { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); min-width: 3.4em; text-align: center; }
-.step-title { font-size: 14px; color: var(--text); margin: 0 0 0 4px; font-weight: 650; }
-.step-page { font-size: 11px; color: var(--muted); }
-.zero-line { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-.zero-line b { color: var(--text); font-weight: 600; }
-#bp-step h4 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 12px 0 4px; }
-ul.plain, ul.callouts, ul.notes { margin: 0; padding: 0; list-style: none; font-size: 12px; }
-ul.plain li { padding: 1px 0; }
-ul.plain button.link { margin: 0; font-size: 12px; color: var(--text); text-align: left; white-space: normal; }
-ul.plain button.link:hover { color: var(--accent); }
-ul.callouts li { display: grid; grid-template-columns: 30px 1fr; gap: 0 6px; padding: 2px 0; }
-ul.callouts li b { color: var(--accent-2); font: 600 12px ui-monospace, Menlo, monospace; }
-ul.notes li { position: relative; padding: 2px 0 2px 12px; line-height: 1.45; }
-ul.notes li::before { content: ""; position: absolute; left: 2px; top: .75em; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); }
-#bp-steps-all { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--line); }
-#bp-steps-all[hidden] { display: none; }
-.step-list { list-style: none; margin: 6px 0 0; padding: 0; }
-.step-list button { width: 100%; display: flex; gap: 8px; text-align: left; background: none; border-color: transparent; padding: 3px 6px;
-  font-size: 12px; white-space: normal; }
-.step-list button span { color: #5b6170; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 1.6em; }
-.step-list button:hover { background: #1d2029; }
-.step-list button.on { border-color: var(--accent-2); color: var(--text); }
-
 /* Checks: status + one-line title, cause -> fix in two short lines, the rest behind Details */
 .st { font: 600 11px/1 system-ui, sans-serif; }
 .st.pass { color: #57d38c; }
@@ -274,27 +249,12 @@ body:not([data-mode="build"]) .bb-labels { display: none; }
 .intf .intf-sel { margin: 2px 0 6px 22px; font-size: 12px; color: var(--text); line-height: 1.4; }
 .intf .intf-sel .link { font-size: 12px; color: var(--accent-2); padding: 0; }
 
-/* Assemble: transport, the step, the list */
-.as-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
-.as-bar button.ic svg { width: 14px; height: 14px; }
-.as-bar .as-play svg { fill: currentColor; stroke: none; width: 12px; height: 12px; }
-.as-bar input[type=range] { flex: 1; min-width: 0; margin: 0 6px; }
-.as-bar .step-n { min-width: 4.2em; text-align: right; }
-#bp-step .step-title { margin: 0; font-size: 14px; }
-.as-asm, .as-note, .as-tools { margin: 3px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
-.as-note { color: var(--text); }
-.as-tools::before { content: "Tools "; color: #5b6170; }
-#bp-step ul.callouts { margin-top: 8px; }
-#bp-step ul.callouts .link { font-size: 12px; color: var(--text); text-align: left; padding: 0; white-space: normal; }
-#bp-step ul.callouts .link:hover { color: var(--accent); }
-#bp-steplist { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); max-height: 42vh; overflow: auto; }
-#bp-steplist li.as-grp { list-style: none; margin: 8px 0 2px; font-size: 11px; color: var(--muted); font-weight: 600; }
-#bp-steplist li.as-grp:first-child { margin-top: 0; }
-#bp-steplist .as-d { font-style: normal; color: #5b6170; margin-left: 4px; }
-.as-faint { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--muted); }
 .bv-hint { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
-#bp-step ul.callouts li { align-items: baseline; }
-#bp-step ul.callouts .link { justify-self: start; width: auto; display: inline; flex: none; }
-#bp-step ul.callouts li { display: flex; gap: 6px; }
-#bp-step ul.callouts li b { flex: 0 0 26px; }
-#bp-step ul.callouts button.link, .intf .intf-sel button.link { margin-left: 0; }
+.intf .intf-sel button.link { margin-left: 0; }
+
+/* The view bar's Instructions (guide.ts): the way into the assembly guide */
+.bb-guide { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px;
+  background: rgba(14,16,21,.82); border: 1px solid var(--line); font-size: 12.5px; backdrop-filter: blur(6px); }
+.bb-guide svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.bb-guide:hover { border-color: #444a58; }
+.bh-title .bh-guide { flex: 0 0 auto; font-size: 12px; font-weight: 500; color: var(--accent-2); padding: 0 2px; margin-left: auto; }

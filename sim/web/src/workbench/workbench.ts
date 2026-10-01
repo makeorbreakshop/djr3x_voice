@@ -79,8 +79,13 @@ interface PartObj {
   fullState?: 'loading' | 'done';
 }
 
-/** A build step as Assemble shows it: the manifest's (limited to the focus) or derived from the structure. */
-export type AStep = MStep & { derived?: boolean; node?: AsmNode; assembly?: string };
+/** A build step as Instructions show it: the manifest's (limited to the focus) or derived from the structure. */
+export type AStep = MStep & {
+  derived?: boolean; node?: AsmNode; assembly?: string;
+  /** Parts placed earlier that this step works on (hardware into them, glue): the step's own `parts`
+   *  minus those already placed. */
+  targets?: string[];
+};
 
 export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
 
@@ -121,6 +126,25 @@ const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff3b30, warn: 0x
 const GHOST = { color: 0x7f858e, mech: 0.1, shell: 0.065, inspectShell: 0.1 };
 const GHOST_FINISH: Finish = { color: GHOST.color, metalness: 0, roughness: 1 };
 const KEY_DIR = new THREE.Vector3(0.9, 1.7, 1.3).normalize();
+/** Instructions (guide.ts): what a step adds, in one accent - blue, the one hue no paint on the droid is near (the
+ *  kit guide's red sits on top of the orange) - and what the pointer is on, in the same hue with the rest faded. */
+export const GUIDE_COLOR = { add: 0x1f6fe5, focus: 0x1f6fe5 };
+/** The guide's ground: a light warm grey, close to the page's paper once tone-mapped. */
+const GUIDE_BG = 0xe4e2de;
+/** The guide floats the section over the floor, like the kit guide's renders: room for a part to come in from below. */
+const GUIDE_LIFT = 0.12;
+/** How far a step's new parts sit out from their seats (x their arrival distance), and fasteners out of their holes (mm). */
+const GUIDE_PULL = { part: 0.55, fastener: 26 };
+
+/** The guide's view of a section: its own parts (not its child assemblies'), framed in the model area. */
+export interface GuideState {
+  node: AsmNode;
+  parts: Set<string>;
+  /** The section's title card: the finished sub-assembly, nothing marked. */
+  title: boolean;
+  /** Parts or fasteners under the pointer in the tray: marked in blue. */
+  hover: Set<string> | null;
+}
 
 export class Workbench {
   readonly root = new THREE.Group();
@@ -148,7 +172,7 @@ export class Workbench {
   hidden = new Set<string>();
   isolated: Set<string> | null = null;
   variants: Record<string, string> = {};
-  /** Steps tab: the current step's index, or -1. */
+  /** Instructions: the current step's index in the section, or -1 (its title card). */
   step = -1;
   /** A check being shown: its parts are marked, the pose applied. */
   check: MCheck | null = null;
@@ -182,9 +206,17 @@ export class Workbench {
   private fly: { p0: THREE.Vector3; t0: THREE.Vector3; p1: THREE.Vector3; t1: THREE.Vector3; start: number; dur: number } | null = null;
   private readonly edgeGeo = new WeakMap<THREE.BufferGeometry, THREE.EdgesGeometry>();
   private saved: { pos: THREE.Vector3; target: THREE.Vector3; min: number; max: number; polar: [number, number]; az: [number, number] } | null = null;
-  private anim: { from: number; dur: number; step: number } | null = null;
   private sweep: { node: AsmNode; joint: string; t0: number; path: [number, number][]; contact: number | null } | null = null;
   private picking = { x: 0, y: 0, down: false };
+  /** Instructions open on a section (null: Build as usual). */
+  guide: GuideState | null = null;
+  /** The screen the model gets in the guide: what the text column (right) or sheet (bottom) and the bars leave. */
+  guideRect = { right: 0, bottom: 0, top: 0 };
+  /** A step's arrival: new parts ease in to their pulled-out place, the dashed paths fade in. */
+  private guideAnim: { from: number; dur: number } | null = null;
+  private readonly guideLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({
+    color: GUIDE_COLOR.add, dashSize: 0.0035, gapSize: 0.0025, transparent: true, depthTest: false, depthWrite: false,
+  }));
 
   constructor(private host: BuildHost) {
     this.root.name = 'build';
@@ -209,6 +241,12 @@ export class Workbench {
     this.lights.add(hemi, key, key.target, fill, fill.target, rim, rim.target);
     this.lights.visible = false;
     host.scene.add(this.lights);
+    this.guideLines.name = 'guide_paths';
+    this.guideLines.renderOrder = 40;
+    this.guideLines.frustumCulled = false;
+    this.guideLines.visible = false;
+    this.guideLines.raycast = () => {};
+    host.scene.add(this.guideLines);
     const el = host.renderer.domElement;
     el.addEventListener('pointerdown', (e) => {
       this.picking = { x: e.clientX, y: e.clientY, down: e.button === 0 };
@@ -600,6 +638,8 @@ export class Workbench {
     this.step = -1;
     this.check = null;
     this.contact = null;
+    this.guide = null;
+    this.guideLines.visible = false;
   }
 
   private async buildNode(asm: MAssembly, parent: AsmNode | null, geometry: (u: string) => Promise<THREE.BufferGeometry>,
@@ -868,7 +908,7 @@ export class Workbench {
     // the floor where the picked internals put it (the model rises so its ground stands on y = 0)
     const g = groundFor(this.top.asm, this.variants);
     const mt = this.top.asm.mount?.transform?.t ?? [0, 0, 0];
-    this.root.position.set(mt[0] / 1000, (mt[1] - (g ?? 0)) / 1000, mt[2] / 1000);
+    this.root.position.set(mt[0] / 1000, (mt[1] - (g ?? 0)) / 1000 + (this.guide ? GUIDE_LIFT : 0), mt[2] / 1000);
     const hidden = hiddenAssemblies(this.top.asm, this.variants);
     this.forEachNode((n) => {
       if (hidden.has(n.asm)) this.variantHidden.add(n);
@@ -1058,17 +1098,17 @@ export class Workbench {
   private asmCache: { sig: string; list: AStep[]; fast: Map<string, number> } | null = null;
 
   /**
-   * Assemble: the build order of what is in focus (the whole droid without a focus). Each assembly's
+   * Instructions: the build order of what is in focus (the whole droid without a focus). Each assembly's
    * own `steps` (SCHEMA.md "Step") in tree order, limited to the focus's parts; where an assembly has
    * none (or leaves parts out), steps derived from its structure - the fixed frame first, then each
    * moving group as it hangs on the one before, its fasteners with the step that places their last
    * part - marked `derived`. `fast` is each fastener's step.
    */
-  assembly(): { list: AStep[]; fast: Map<string, number> } {
+  assembly(sc: Pick<Scope, 'kind' | 'id' | 'parts'> | null = this.scope): { list: AStep[]; fast: Map<string, number> } {
     if (!this.top) return { list: [], fast: new Map() };
-    const sc = this.scope;
     const sig = `${this.loadSeq}|${JSON.stringify(this.variants)}|${sc ? `${sc.kind}:${sc.id}` : ''}`;
     if (this.asmCache?.sig === sig) return this.asmCache;
+    const other = sc !== this.scope;
     const inScope = (id: string) => {
       const po = this.parts.get(id);
       return !!po && !this.variantHidden.has(po.node) && !po.part.replaced_by && (!sc || sc.parts.has(id));
@@ -1083,11 +1123,15 @@ export class Workbench {
       const nf = (n.asm.fasteners ?? []).filter((f) => f.placed && f.joins.some((p) => inScope(p)));
       for (const st of n.asm.steps ?? []) {
         const parts = (st.parts ?? []).filter((p) => inScope(p) && !placed.has(p));
+        const targets = (st.parts ?? []).filter((p) => inScope(p) && placed.has(p));
         const fs = (st.fasteners ?? []).filter((f) => nf.some((x) => x.id === f) && !fast.has(f));
-        if (!parts.length && !fs.length) continue;
+        // a step that only adds hardware, glue or a check to parts already in place still counts (the
+        // kit's inserts and magnets), as long as it works on something in focus
+        const work = targets.length > 0 && (!!st.unplaced?.length || !!st.text || !!st.notes?.length || !!st.tools?.length);
+        if (!parts.length && !fs.length && !work) continue;
         parts.forEach((p) => placed.add(p));
         fs.forEach((f) => fast.set(f, list.length));
-        list.push({ ...st, parts, fasteners: fs, context: (st.context ?? []).filter((p) => inScope(p)), node: n, assembly: assemblyLabel(n.asm.name) });
+        list.push({ ...st, parts, targets, fasteners: fs, context: (st.context ?? []).filter((p) => inScope(p)), node: n, assembly: assemblyLabel(n.asm.name) });
       }
       // what the steps leave out: the frame, then each moving group in the order it hangs
       const left = mine.filter((p) => !placed.has(p.id));
@@ -1123,21 +1167,9 @@ export class Workbench {
       }
     });
     list.forEach((st, i) => (st.n = i + 1));
+    if (other) return { list, fast };
     this.asmCache = { sig, list, fast };
     return this.asmCache;
-  }
-
-  /** Assemble: parts still to come drawn very faint instead of hidden. */
-  stepFaint = false;
-  /** Assemble: advancing by itself. */
-  playing = false;
-  private stepAt = 0;
-
-  setPlaying(on: boolean) {
-    this.playing = on;
-    if (on && this.step >= this.steps.length - 1) this.setStep(0);
-    this.stepAt = performance.now();
-    this.emit();
   }
 
   // ------------------------------------------------------------------ pose
@@ -1234,7 +1266,38 @@ export class Workbench {
     this.isolated = ids ? new Set(ids) : null;
     this.refresh();
     this.emit();
-    if (this.active) this.frame(true);
+    if (this.active && this.guide && this.isolated) this.frameIsolated();
+    else if (this.active && !this.guide) this.frame(true);
+  }
+
+  /** The guide's inspector: frame the isolated parts and fasteners, keeping the view direction. */
+  private frameIsolated() {
+    const ids = this.isolated;
+    if (!ids) return;
+    const box = this.bounds(true, ids);
+    for (const id of ids) {
+      const fo = this.fast.get(id);
+      if (!fo?.obj.visible) continue;
+      if (!fo.obj.geometry.boundingBox) fo.obj.geometry.computeBoundingBox();
+      box.union(fo.obj.geometry.boundingBox!.clone().applyMatrix4(fo.obj.matrixWorld));
+    }
+    if (box.isEmpty()) return;
+    // a lone screw still reads at a sensible size
+    const sz = box.getSize(new THREE.Vector3()).length();
+    if (sz < 0.04) box.expandByScalar((0.04 - sz) / 2);
+    this.frameBox(box, true, true);
+  }
+
+  /** The camera as it is (the guide puts Build's view back on Done). */
+  cameraState() {
+    return { pos: this.host.camera.position.clone(), target: this.host.controls.target.clone() };
+  }
+
+  setCameraState(s: { pos: THREE.Vector3; target: THREE.Vector3 }) {
+    this.fly = null;
+    this.host.camera.position.copy(s.pos);
+    this.host.controls.target.copy(s.target);
+    this.host.interact();
   }
 
   /** Focus an assembly's subtree (the root: the whole build). */
@@ -1258,27 +1321,6 @@ export class Workbench {
     }
   }
 
-  /** Steps tab: go to step `i` of the focused assembly (-1 leaves step mode). */
-  setStep(i: number) {
-    const steps = this.steps;
-    const prev = this.step;
-    this.step = Math.max(-1, Math.min(steps.length - 1, i));
-    this.check = null;
-    if (this.step >= 0) {
-      const s = steps[this.step];
-      const node = s.node ?? this.focus;
-      if (s.pose && node) {
-        node.pose = { ...node.pose, ...s.pose };
-        this.pose();
-      }
-      if (this.step > prev && !reducedMotion()) this.anim = { from: performance.now(), dur: 950, step: this.step };
-      this.stepAt = performance.now();
-    } else this.playing = false;
-    this.refresh();
-    if (this.active && this.step >= 0) this.frameStep();
-    this.emit();
-  }
-
   /** Checks tab: pose the model to show a check (null clears). */
   showCheck(c: MCheck | null, node = this.focus) {
     this.check = c;
@@ -1290,6 +1332,359 @@ export class Workbench {
     }
     this.refresh();
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ instructions (guide.ts)
+
+  /** A section's own parts: its assembly's, in the model under the current picks, not replaced. */
+  sectionParts(node: AsmNode): Set<string> {
+    const out = new Set<string>();
+    if (!this.nodeShown(node)) return out;
+    for (const p of node.asm.parts) {
+      const po = this.parts.get(p.id);
+      if (po && po.node === node && !po.part.replaced_by) out.add(p.id);
+    }
+    return out;
+  }
+
+  /** Open the guide on a section (null: back to Build). The section becomes the scope (its own parts),
+   *  so `steps` are the section's, numbered from 1, and the explode plan its own. */
+  setGuide(node: AsmNode | null) {
+    this.stopDemo();
+    this.sweep = null;
+    this.guideAnim = null;
+    this.hover = null;
+    this.check = null;
+    this.contact = null;
+    this.isolated = null;
+    this.selected = null;
+    this.guideBackdrop(!!node);
+    if (!node) {
+      const was = !!this.guide;
+      this.guide = null;
+      this.guideLines.visible = false;
+      this.step = -1;
+      if (was) {
+        this.applyVariantNodes(); // back down on the floor
+        this.pose();
+        this.fitShadow();
+      }
+      this.refresh();
+      this.emit();
+      return;
+    }
+    const parts = this.sectionParts(node);
+    this.guide = { node, parts, title: true, hover: null };
+    this.applyVariantNodes(); // the root's height: lifted off the floor (GUIDE_LIFT)
+    this.fitShadow();
+    this.scope = { kind: 'assembly', id: `guide:${node.key}`, label: assemblyLabel(node.asm.name), parts, owner: node, joints: [], drive: new Set() };
+    this.focus = node;
+    this.buildPlan();
+    this.step = -1;
+    this.upgrade(parts);
+    this.refresh();
+    this.emit();
+  }
+
+  /** The guide's page: a plain light ground, the floor fading into it (the set's own put back after). */
+  private savedBackdrop: { bg: THREE.Scene['background']; fog: THREE.Scene['fog'] } | null = null;
+  private readonly guideBg = new THREE.Color(GUIDE_BG);
+  private readonly guideFog = new THREE.Fog(GUIDE_BG, 1.6, 5);
+  private guideBackdrop(on: boolean) {
+    const sc = this.host.scene;
+    if (on && !this.savedBackdrop) {
+      this.savedBackdrop = { bg: sc.background, fog: sc.fog };
+      sc.background = this.guideBg;
+      sc.fog = this.guideFog;
+    } else if (on && (sc.background !== this.guideBg || sc.fog !== this.guideFog)) {
+      // the set re-lit itself meanwhile (a backdrop pick, the booth's bake): keep its newest, show ours
+      this.savedBackdrop = { bg: sc.background, fog: sc.fog };
+      sc.background = this.guideBg;
+      sc.fog = this.guideFog;
+      this.host.interact();
+    } else if (!on && this.savedBackdrop) {
+      sc.background = this.savedBackdrop.bg;
+      sc.fog = this.savedBackdrop.fog;
+      this.savedBackdrop = null;
+    }
+  }
+
+  /** In the guide: the title card (-1) or step `i` of the section. */
+  setGuideStep(i: number, animate = true) {
+    const g = this.guide;
+    if (!g) return;
+    const steps = this.steps;
+    this.step = Math.max(-1, Math.min(steps.length - 1, i));
+    g.title = this.step < 0;
+    this.selected = null;
+    this.isolated = null;
+    const s = this.step >= 0 ? steps[this.step] : null;
+    const node = s?.node ?? this.focus;
+    if (s?.pose && node) {
+      node.pose = { ...node.pose, ...s.pose };
+      this.pose();
+    }
+    this.guideAnim = s && animate && !reducedMotion() ? { from: performance.now(), dur: 650 } : null;
+    this.guideArrivals(s);
+    this.refresh();
+    this.emit();
+  }
+
+  /** Where each of a step's new parts comes from (link frame, mm): straight out from what is already built -
+   *  from the nearest face of its bounds (a plate under the foot plate comes from below), or from its centre
+   *  when the part sits inside it - as far as the part is big, 50-120 mm. */
+  private guideFrom = new Map<string, THREE.Vector3>();
+  private guideArrivals(st: AStep | null) {
+    this.guideFrom.clear();
+    const g = this.guide;
+    if (!g || !st?.parts?.length) return;
+    this.root.updateMatrixWorld(true);
+    const first = this.stepIndex();
+    const seatBox = (po: PartObj) => {
+      const geo = po.mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      if (geo.boundingBox!.isEmpty() || !po.mesh.parent) return null;
+      return geo.boundingBox!.clone().translate(po.sBase ?? po.base).applyMatrix4(po.mesh.parent.matrixWorld);
+    };
+    const built = new THREE.Box3();
+    for (const id of g.parts) {
+      const f = first.get(id);
+      const po = this.parts.get(id);
+      if (po && f !== undefined && f < this.step) {
+        const b = seatBox(po);
+        if (b) built.union(b);
+      }
+    }
+    const fresh = new THREE.Box3();
+    const boxes = new Map<string, THREE.Box3>();
+    for (const id of st.parts) {
+      const po = this.parts.get(id);
+      const b = po && seatBox(po);
+      if (b) {
+        boxes.set(id, b);
+        fresh.union(b);
+      }
+    }
+    const inv = new THREE.Matrix4();
+    const unit = (v: THREE.Vector3) => (v.length() < 0.002 ? v.set(0, 0, 0) : v.normalize());
+    for (const [id, b] of boxes) {
+      const po = this.parts.get(id)!;
+      const c = b.getCenter(new THREE.Vector3());
+      // away from what is built (its nearest face, else its centre), and apart from the step's other new parts
+      const away = new THREE.Vector3();
+      if (!built.isEmpty()) {
+        away.copy(c).sub(built.clampPoint(c, new THREE.Vector3()));
+        if (away.length() < 0.002) away.copy(c).sub(built.getCenter(new THREE.Vector3()));
+      }
+      const apart = boxes.size > 1 ? c.clone().sub(fresh.getCenter(new THREE.Vector3())) : new THREE.Vector3();
+      const d = unit(away).multiplyScalar(0.7).add(unit(apart));
+      if (d.length() < 0.05) d.set(0, 1, 0);
+      // into the part's link frame (a direction: no translation; the mm scale is undone by normalising)
+      inv.copy(po.mesh.parent!.matrixWorld).invert();
+      d.transformDirection(inv);
+      const size = b.getSize(new THREE.Vector3()).length() * 1000; // mm
+      this.guideFrom.set(id, d.multiplyScalar(Math.min(120, Math.max(50, size * 0.7))));
+    }
+  }
+
+  /** Tray hover: mark these parts or fasteners (null clears). */
+  setGuideHover(ids: Iterable<string> | null) {
+    if (!this.guide) return;
+    this.guide.hover = ids ? new Set(ids) : null;
+    this.refresh();
+    this.host.interact();
+  }
+
+  /** Frame the guide's page: the finished section from 3/4 front on its title card, else the step's new
+   *  parts with what they go onto, keeping the view direction the builder left it at. */
+  frameGuide(animate = true) {
+    const g = this.guide;
+    if (!g) return;
+    // framed where the step settles (its parts at their pulled-out place), not where they arrive from
+    this.applyOffsets(0, 1);
+    try {
+      this.frameGuideNow(g, animate);
+    } finally {
+      this.applyOffsets(0, this.guideK());
+    }
+  }
+
+  private frameGuideNow(g: GuideState, animate: boolean) {
+    if (g.title || this.step < 0) {
+      const box = this.bounds(true, g.parts);
+      if (!box.isEmpty()) this.frameBox(box, false, animate);
+      return;
+    }
+    const s = this.steps[this.step];
+    // the new parts (where they sit pulled out) and the parts they go onto; the fasteners' holes
+    const ids = new Set([...(s.parts ?? []), ...(s.targets ?? []), ...(s.context ?? [])]);
+    const box = this.bounds(true, ids);
+    for (const fid of s.fasteners ?? []) {
+      const fo = this.fast.get(fid);
+      if (fo?.obj.visible) box.expandByPoint(new THREE.Vector3().setFromMatrixPosition(fo.obj.matrixWorld));
+    }
+    // a small addition reads in place: at least a third of the section around it
+    const all = this.bounds(true, g.parts);
+    if (!all.isEmpty() && !box.isEmpty()) {
+      const want = all.getSize(new THREE.Vector3()).length() / 3;
+      const have = box.getSize(new THREE.Vector3()).length();
+      if (have < want) box.expandByScalar((want - have) / 2);
+    }
+    if (!box.isEmpty()) this.frameBox(box, true, animate);
+    else if (!all.isEmpty()) this.frameBox(all, true, animate);
+  }
+
+  /** The guide's dashed insertion paths: each new part's centre and each new fastener back to its seat. */
+  private updateGuidePaths(k: number) {
+    const g = this.guide;
+    const cur = g && !g.title && this.step >= 0 ? this.steps[this.step] : null;
+    if (!cur || k <= 0 || this.isolated) {
+      this.guideLines.visible = false;
+      return;
+    }
+    const pts: number[] = [];
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const push = () => {
+      if (a.distanceToSquared(b) > 1e-8) pts.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    };
+    const hv = g?.hover ?? null;
+    const shown = (id: string) => !hv || hv.has(id);
+    for (const id of cur.parts ?? []) {
+      const po = this.parts.get(id);
+      if (!po?.mesh.visible || !po.mesh.parent || !shown(id)) continue;
+      const geo = po.mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      if (geo.boundingBox!.isEmpty()) continue;
+      const c = geo.boundingBox!.getCenter(new THREE.Vector3());
+      const pm = po.mesh.parent.matrixWorld;
+      a.copy(c).add(po.mesh.position).applyMatrix4(pm);
+      b.copy(c).add(po.sBase ?? po.base).applyMatrix4(pm);
+      push();
+    }
+    for (const fid of cur.fasteners ?? []) {
+      const fo = this.fast.get(fid);
+      if (!fo?.obj.visible || !fo.obj.parent || !shown(fid)) continue;
+      a.setFromMatrixPosition(fo.obj.matrixWorld);
+      b.setFromMatrixPosition(fo.base).applyMatrix4(fo.obj.parent.matrixWorld);
+      push();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    this.guideLines.geometry.dispose();
+    this.guideLines.geometry = geo;
+    this.guideLines.computeLineDistances();
+    (this.guideLines.material as THREE.LineDashedMaterial).opacity = 0.95 * k;
+    this.guideLines.visible = pts.length > 0;
+  }
+
+  /** The guide's model area as a share of the canvas, and the view offset that centres it (px). */
+  private guideArea() {
+    const el = this.host.renderer.domElement;
+    const w = el.clientWidth || innerWidth;
+    const h = el.clientHeight || innerHeight;
+    const r = this.guideRect;
+    const aw = Math.max(120, w - r.right);
+    const ah = Math.max(120, h - r.bottom - r.top);
+    return { w, h, sx: aw / w, sy: ah / h, ox: r.right / 2, oy: (r.bottom - r.top) / 2 };
+  }
+
+  /** Keep the camera's view offset on the guide's model area (main.ts fits it between the panels). */
+  private holdGuideView() {
+    const cam = this.host.camera;
+    const { w, h, ox, oy } = this.guideArea();
+    const v = cam.view;
+    if (v && v.enabled && v.fullWidth === w && v.fullHeight === h && Math.abs(v.offsetX - ox) < 0.5 && Math.abs(v.offsetY - oy) < 0.5 && cam.zoom === 1) return;
+    cam.aspect = w / h;
+    cam.setViewOffset(w, h, ox, oy, w, h);
+    cam.zoom = 1;
+    cam.updateProjectionMatrix();
+    this.host.interact();
+  }
+
+  /** A small picture of one part or fastener, as the current look draws it, from the 3/4 front (data URL). */
+  private thumbs = new Map<string, string>();
+  private thumbKit: { scene: THREE.Scene; cam: THREE.PerspectiveCamera; rt: THREE.WebGLRenderTarget; mat: THREE.MeshStandardMaterial; mesh: THREE.Mesh } | null = null;
+  thumbnail(id: string, px = 96): string | null {
+    const po = this.parts.get(id);
+    const fo = po ? null : this.fast.get(id);
+    const obj = po?.mesh ?? fo?.obj;
+    if (!obj) return null;
+    const geo = obj.geometry;
+    if (!geo.attributes.position?.count) return null;
+    const finish = po ? (this.look === 'exterior' ? exteriorFinish(po.part) : mechanismFinish(po.part)) : MATERIAL.fastener;
+    const key = `${id}|${geo.uuid}|${finish.color}|${px}`;
+    const hit = this.thumbs.get(key);
+    if (hit) return hit;
+    const r = this.host.renderer;
+    const S = px * 2; // drawn at twice the size, then scaled down: smooth edges without MSAA
+    if (!this.thumbKit) {
+      const scene = new THREE.Scene();
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x5a5a5a, 1.6));
+      const key2 = new THREE.DirectionalLight(0xffffff, 2.2);
+      key2.position.set(0.9, 1.7, 1.3);
+      const fill = new THREE.DirectionalLight(0xffffff, 0.7);
+      fill.position.set(-1.4, 0.4, 0.8);
+      scene.add(key2, fill);
+      const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+      scene.add(mesh);
+      const rt = new THREE.WebGLRenderTarget(S, S);
+      rt.texture.colorSpace = THREE.SRGBColorSpace;
+      this.thumbKit = { scene, cam: new THREE.PerspectiveCamera(24, 1, 0.1, 1e5), rt, mat, mesh };
+    }
+    const k = this.thumbKit;
+    if (k.rt.width !== S) k.rt.setSize(S, S);
+    k.mat.color.setHex(finish.color);
+    k.mat.metalness = Math.min(0.5, finish.metalness);
+    k.mat.roughness = Math.max(0.45, finish.roughness);
+    k.mesh.geometry = geo;
+    // as it sits in the model (its link's turn), centred
+    const q = new THREE.Quaternion();
+    obj.updateWorldMatrix(true, false);
+    obj.matrixWorld.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+    k.mesh.quaternion.copy(q);
+    k.mesh.position.set(0, 0, 0);
+    k.mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(k.mesh);
+    const c = box.getCenter(new THREE.Vector3());
+    k.mesh.position.sub(c);
+    k.mesh.updateMatrixWorld(true);
+    const rad = Math.max(1e-3, box.getSize(new THREE.Vector3()).length() / 2);
+    const dist = rad / Math.sin((k.cam.fov * Math.PI) / 360) * 1.02;
+    k.cam.position.copy(new THREE.Vector3(0.62, 0.38, 1).normalize().multiplyScalar(dist));
+    k.cam.near = dist / 50;
+    k.cam.far = dist * 4;
+    k.cam.lookAt(0, 0, 0);
+    k.cam.updateProjectionMatrix();
+    const prevRT = r.getRenderTarget();
+    const prevClear = r.getClearColor(new THREE.Color());
+    const prevAlpha = r.getClearAlpha();
+    const prevClip = r.localClippingEnabled;
+    r.localClippingEnabled = false;
+    r.setRenderTarget(k.rt);
+    r.setClearColor(0x000000, 0);
+    r.clear();
+    r.render(k.scene, k.cam);
+    const buf = new Uint8Array(S * S * 4);
+    r.readRenderTargetPixels(k.rt, 0, 0, S, S, buf);
+    r.setRenderTarget(prevRT);
+    r.setClearColor(prevClear, prevAlpha);
+    r.localClippingEnabled = prevClip;
+    // flip (GL rows run bottom up) and scale down
+    const big = document.createElement('canvas');
+    big.width = big.height = S;
+    const img = new ImageData(S, S);
+    for (let y = 0; y < S; y++) img.data.set(buf.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
+    big.getContext('2d')!.putImageData(img, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = out.height = px;
+    const cx = out.getContext('2d')!;
+    cx.imageSmoothingQuality = 'high';
+    cx.drawImage(big, 0, 0, px, px);
+    const url = out.toDataURL('image/png');
+    this.thumbs.set(key, url);
+    return url;
   }
 
   // ------------------------------------------------------------------ how it works
@@ -1496,15 +1891,15 @@ export class Workbench {
     }
     if ((this.host.quality?.() ?? 'balanced') !== this.shadowQ) this.fitShadow();
     this.detailByView(now);
-    if (this.playing && this.step >= 0 && !this.anim && now - this.stepAt > 2600) {
-      if (this.step < this.steps.length - 1) this.setStep(this.step + 1);
-      else this.setPlaying(false);
-    }
-    if (this.anim) {
-      const k = Math.min(1, (now - this.anim.from) / this.anim.dur);
-      this.applyOffsets(1 - k);
-      if (k >= 1) this.anim = null;
-      moving = true;
+    if (this.guide) {
+      this.holdGuideView();
+      this.guideBackdrop(true);
+      if (this.guideAnim) {
+        const k = this.guideK(now);
+        this.applyOffsets(0, k);
+        if (k >= 1) this.guideAnim = null;
+        moving = true;
+      }
     }
     if (moving) this.host.interact();
   }
@@ -1540,6 +1935,7 @@ export class Workbench {
     const sel = this.pairSel !== null && this.interferenceOn ? this.interference[this.pairSel] : null;
     if (sel) for (const id of [sel.a, sel.b]) pairParts.add(this.pid(id));
     const hover = this.hover;
+    const g = this.guide;
 
     // 1. The look: one finish and opacity per part from the look, the focus and the mode (steps)
     //    alone. 2. Overlays: a rim on top (withRim), never a change of colour, opacity or side.
@@ -1557,10 +1953,16 @@ export class Workbench {
       if (look === 'exterior' && !outside) visible = false;
       if (look === 'mechanism' && shell && !scope) visible = false;
       if (!inScope && !ghosts) visible = false;
-      // Assemble: what is still to come is hidden (or very faint); the step's context lightly ghosted
+      // a step: what is still to come is hidden; the step's context lightly ghosted
       const f = first.get(id);
       const toCome = !!cur && f !== undefined && f > this.step;
-      if (toCome && !ctx.has(id) && !this.stepFaint) visible = false;
+      if (toCome && !ctx.has(id)) visible = false;
+      // Instructions: the section alone - all of it on its title card, else what is placed so far (and the
+      // step's context), whatever the look (a look changes how parts are drawn, not which)
+      if (g) {
+        visible = g.parts.has(id) && !hideV.has(id) && !this.variantHidden.has(po.node) && (!this.isolated || this.isolated.has(id))
+          && (g.title || !cur || (f !== undefined && f <= this.step) || ctx.has(id));
+      }
       po.holder.visible = visible;
       po.mesh.visible = visible;
       const m = po.mat;
@@ -1572,7 +1974,8 @@ export class Workbench {
         opacity = shell ? GHOST.shell : GHOST.mech;
       } else if (look === 'exterior') {
         finish = exteriorFinish(p); // its paint; bare metal its material; a missing paint, MISSING_FINISH
-      } else if (shell) {
+      } else if (shell && !(g && (look === 'mechanism' || (!g.title && inStep.has(id)) || this.isolated?.has(id)))) {
+        // (the guide's X-ray ghosts the shells around what the step adds, never the new part itself)
         finish = GHOST_FINISH;
         opacity = look === 'inspect' ? GHOST.inspectShell : GHOST.shell;
       } else {
@@ -1582,7 +1985,21 @@ export class Workbench {
         finish = GHOST_FINISH;
         opacity = Math.min(opacity, ctx.has(id) ? 0.22 : 0.06);
       }
+      // the guide's tray under the pointer: what it names stays, the rest of the section fades back
+      if (g?.hover && !g.hover.has(id)) {
+        finish = GHOST_FINISH;
+        opacity = Math.min(opacity, 0.12);
+      }
       m.color.setHex(finish.color);
+      // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
+      // aluminium a pale one) - never mixed with its paint, which turns the orange shells purple. A part being
+      // inspected shows as it is, not as new.
+      const adds = !!g && !g.title && !!cur && inStep.has(id) && !(g.hover && !g.hover.has(id)) && !this.isolated;
+      if (adds) {
+        const own = m.color.getHSL({ h: 0, s: 0, l: 0 }).l;
+        const acc = new THREE.Color(GUIDE_COLOR.add).getHSL({ h: 0, s: 0, l: 0 });
+        m.color.setHSL(acc.h, acc.s * 0.9, Math.min(0.62, Math.max(0.3, own)));
+      }
       m.metalness = finish.metalness;
       m.roughness = finish.roughness;
       m.emissive.setHex(0x000000);
@@ -1593,7 +2010,11 @@ export class Workbench {
       if (edges) edges.visible = opacity >= 0.99;
       // overlays, strongest first; a ghost (the look made it faint) is not lit up
       let mark: [number, number] | null = null;
-      if (this.selected === id) mark = [HIGHLIGHT.selected, 0.9];
+      if (g) {
+        // inspecting (isolated): the part alone, as it is; hovering the tray: what it names, outlined
+        if (g.hover?.has(id) || (this.selected === id && !this.isolated)) mark = [GUIDE_COLOR.focus, 0.8];
+        else if (adds) mark = [GUIDE_COLOR.add, 0.45];
+      } else if (this.selected === id) mark = [HIGHLIGHT.selected, 0.9];
       else if (this.check && checkParts.has(id)) mark = [this.check.status === 'fail' ? HIGHLIGHT.fail : this.check.status === 'warn' ? HIGHLIGHT.warn : HIGHLIGHT.step, 0.8];
       else if (contact.has(id)) mark = [this.contact?.status === 'fail' ? HIGHLIGHT.fail : HIGHLIGHT.warn, 0.8];
       else if (pairParts.has(id)) mark = [sel!.explained ? HIGHLIGHT.warn : HIGHLIGHT.fail, 0.7];
@@ -1611,17 +2032,30 @@ export class Workbench {
     for (const [id, fo] of this.fast) {
       const joinsVisible = fo.f.joins.some((p) => this.parts.get(p)?.mesh.visible && (!scope || scope.has(p)));
       let visible = this.fasteners && look !== 'exterior' && joinsVisible && !this.hidden.has(id);
+      // Instructions: the hardware is part of the build in any look (the guide shows every screw)
+      if (g) visible = (joinsVisible || !!this.isolated?.has(id)) && !this.hidden.has(id) && (!g.hover || g.hover.has(id))
+        && (!this.isolated || this.isolated.has(id)); // inspecting: only what is inspected
       if (cur && (fastAt.get(id) ?? -1) > this.step) visible = false;
-      if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p))) visible = false;
+      if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p)) && !this.isolated.has(id)) visible = false;
       fo.obj.visible = visible;
-      fo.mat.color.setHex(MATERIAL.fastener.color);
+      const addsF = !!g && !g.title && !!cur && fastIn.has(id) && !this.isolated;
+      fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : MATERIAL.fastener.color);
       fo.mat.emissive.setHex(0);
       setLook(fo.mat, 1, clip);
-      rim(fo.mat, this.selected === id ? HIGHLIGHT.selected : HIGHLIGHT.step, this.selected === id ? 0.9 : cur && fastIn.has(id) ? 0.7 : 0);
+      if (g) rim(fo.mat, GUIDE_COLOR.focus, g.hover?.has(id) || (this.selected === id && !this.isolated) ? 0.8 : 0);
+      else rim(fo.mat, this.selected === id ? HIGHLIGHT.selected : HIGHLIGHT.step, this.selected === id ? 0.9 : cur && fastIn.has(id) ? 0.7 : 0);
       fo.obj.castShadow = visible;
     }
     this.updateMarkers();
-    this.applyOffsets(this.anim ? 1 - Math.min(1, (performance.now() - this.anim.from) / this.anim.dur) : 0);
+    this.applyOffsets(0);
+  }
+
+  /** The guide's arrival: 0 at a step's entry, 1 when settled. */
+  private guideK(now = performance.now()) {
+    const a = this.guideAnim;
+    if (!a) return 1;
+    const k = Math.min(1, (now - a.from) / a.dur);
+    return 1 - (1 - k) ** 3;
   }
 
   // ------------------------------------------------------------------ explode
@@ -1755,7 +2189,7 @@ export class Workbench {
     this.plan = plan;
   }
 
-  /** Where a part arrives from in Assemble (link frame): its explode direction, 50-120 mm out. */
+  /** Where a part arrives from in a step (link frame): its explode direction, 50-120 mm out. */
   private arrival(po: PartObj): THREE.Vector3 {
     const o = this.plan?.get(po.part.id)?.clone() ?? new THREE.Vector3(...(po.part.explode ?? [0, 1, 0]));
     if (o.lengthSq() < 1e-6) o.set(0, 1, 0);
@@ -1775,13 +2209,17 @@ export class Workbench {
 
   /** Explode offsets, plus the insertion animation of the current step (`insert` 1 -> 0). Fasteners ride
    *  the part they hold and back out along their own axis, out of their holes. */
-  private applyOffsets(insert: number) {
+  private applyOffsets(insert: number, guideK = this.guideK()) {
     const cur = this.step >= 0 ? this.steps[this.step] : null;
     const inStep = new Set(cur?.parts ?? []);
     const fastIn = new Set(cur?.fasteners ?? []);
+    // Instructions: a step's new parts and fasteners sit pulled out along their way in (the guide's exploded
+    // hardware), easing in from further out as the step arrives
+    const g = this.guide && !this.guide.title && cur ? 1 + 0.9 * (1 - guideK) : 0;
     for (const po of this.parts.values()) {
       // a step's new parts come in from where the explode would take them (at least 50 mm out)
-      const step = inStep.has(po.part.id) && insert > 0 ? this.arrival(po).multiplyScalar(insert) : null;
+      const step = inStep.has(po.part.id) && (g || insert > 0)
+        ? (g ? (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * g) : this.arrival(po).multiplyScalar(insert)) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);
     }
@@ -1789,7 +2227,9 @@ export class Workbench {
     for (const fo of this.fast.values()) {
       const owner = this.parts.get(fo.f.joins[0]);
       const mine = !scope || fo.f.joins.some((p) => scope.has(p));
-      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 40 : 0); // driven in along its axis
+      // a nut or a washer comes in from the far side, against its screw
+      const far = g && /nut|washer/.test(fo.f.spec.type) && !/t_nut|insert/.test(fo.f.spec.type) ? -1 : 1;
+      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? (g ? GUIDE_PULL.fastener * g * far : insert * 40) : 0); // driven in along its axis
       const m = fo.base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -back));
       if (owner && mine) {
         const d = this.offsetOf(owner, this.explode);
@@ -1798,6 +2238,7 @@ export class Workbench {
       fo.obj.matrix.copy(m);
     }
     this.root.updateMatrixWorld(true);
+    this.updateGuidePaths(this.guide ? guideK : 0);
     this.updateMarkers();
     this.markShadow();
     this.host.interact();
@@ -1882,7 +2323,15 @@ export class Workbench {
     // fits it between the panels (zoom < 1 widens it), with a margin
     const tanV = Math.tan((cam.fov * Math.PI) / 360) / Math.max(0.2, cam.zoom);
     const halfW = Math.hypot(size.x, size.z) / 2;
-    const dist = Math.max(size.y / 2 / tanV, halfW / (tanV * 0.95)) * 1.12 + halfW;
+    let dist = Math.max(size.y / 2 / tanV, halfW / (tanV * 0.95)) * 1.12 + halfW;
+    if (this.guide) {
+      // the guide's model area (beside the text column), the box's sphere in it with a margin
+      const a = this.guideArea();
+      const r = size.length() / 2;
+      const tanY = tanV * a.sy;
+      const tanX = tanV * (a.w / a.h) * a.sx;
+      dist = (r / Math.min(tanY, tanX)) * 0.92;
+    }
     const p1 = c.clone().addScaledVector(dir, dist);
     if (animate && this.active && !reducedMotion()) {
       this.fly = { p0: cam.position.clone(), t0: this.host.controls.target.clone(), p1, t1: c, start: performance.now(), dur: 520 };
@@ -1892,21 +2341,6 @@ export class Workbench {
       cam.position.copy(p1);
     }
     this.host.interact();
-  }
-
-  /** Frame the current step's parts and their context, keeping the view direction. */
-  private frameStep() {
-    const s = this.steps[this.step];
-    const ids = new Set([...(s?.parts ?? []), ...(s?.context ?? [])]);
-    const box = new THREE.Box3();
-    this.root.updateMatrixWorld(true);
-    for (const id of ids) {
-      const po = this.parts.get(id);
-      if (!po) continue;
-      if (!po.mesh.geometry.boundingBox) po.mesh.geometry.computeBoundingBox();
-      box.union(po.mesh.geometry.boundingBox!.clone().applyMatrix4(po.mesh.matrixWorld));
-    }
-    if (!box.isEmpty()) this.frameBox(box, true, true);
   }
 
   private pick(x: number, y: number) {

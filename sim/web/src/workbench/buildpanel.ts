@@ -2,15 +2,16 @@
  * Build mode's panels. Scene (left) gets the view controls - explode, shell solid/x-ray/
  * hidden, section plane, fasteners - which never change the model. The R3X panel's Build
  * tabs are the builder: Parts (tree, visibility, isolate, what a picked part is), Joints
- * (sliders within limits, Home, sweep to the first contact), Steps (the assembly
- * instructions, one at a time), Checks (click to pose the problem) and BOM. Every joint names
+ * (sliders within limits, Home, sweep to the first contact), Checks (click to pose the problem)
+ * and BOM. The assembly sequence is Instructions (guide.ts), full screen, from the view bar. Every joint names
  * the profile joint it is (`head_tilt` in Bench/Studio/Show), or says it is not in the profile.
  */
 
 import './build.css';
-import type { AsmNode, AStep, Look, Workbench } from './workbench';
+import type { AsmNode, Look, Workbench } from './workbench';
+import { mountGuide } from './guide';
 import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, printList, subtreeParts, type MotionSystem } from './systems';
-import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MFastener } from './manifest';
+import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -83,8 +84,8 @@ const FILTERS: [Filter, string, (p: MPart) => boolean][] = [
  *
  * Left (Scene panel, titled Build): the navigator - search, systems, assemblies, parts, and the
  * view controls that never change the model. Right (R3X panel): the inspector for what is in
- * focus (Inspect), every check result (Checks, with a count), BOM; Steps and Electronics under
- * More. The look (Exterior / Mechanism / X-ray) is the viewport bar's (index.html).
+ * focus (Inspect), every check result (Checks, with a count), BOM; Electronics under More. The
+ * look (Exterior / Mechanism / X-ray) is the viewport bar's (index.html), and so is Instructions.
  */
 export function injectBuildDom() {
   if (document.getElementById('sc-build')) return;
@@ -149,10 +150,12 @@ export function injectBuildDom() {
     const rail = sel === '.rail-modes';
     box.prepend(html(`<button role="radio" aria-checked="false" data-stage-mode="build" ${rail ? 'aria-label="Build" ' : ''}title="Build: inspect and assemble the mechanics. Sim only - never drives hardware">${rail ? 'Bu' : 'Build'}</button>`));
   }
-  // Tabs + bodies: Inspect, Checks, BOM; Steps (and Electronics, index.html) under More.
+  // The view bar: Instructions (the assembly guide, full screen), Build only.
+  document.getElementById('view-bar')!.append(html(`<button id="bb-guide" class="bb-guide" data-build title="Step-by-step assembly, full screen">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h4a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 0-1.5-1.5h-4zM13.5 3.5h-4A1.5 1.5 0 0 0 8 5v8a1.5 1.5 0 0 1 1.5-1.5h4z"/></svg>Instructions</button>`));
+  // Tabs + bodies: Inspect, Checks, BOM (and Electronics, index.html, under More).
   const tabs = document.querySelector('#panel .tabs')!;
   tabs.prepend(html(`<button role="tab" data-tab="inspect" data-modes="build">Inspect</button>
-    <button role="tab" data-tab="steps" data-modes="build">Assemble</button>
     <button role="tab" data-tab="checks" data-modes="build">Checks <span id="bp-check-badge" class="count" hidden></span></button>
     <button role="tab" data-tab="bom" data-modes="build">BOM</button>`));
   const bodies = html(`
@@ -163,18 +166,6 @@ export function injectBuildDom() {
         <button class="bp-small" data-bp="home" title="Every joint to 0, the rest pose. Moves the model only, never the robot">Home</button></div>
       <div id="bp-joints"></div>
       <details id="bp-load" class="bp-load"><summary>Servo load</summary></details>
-    </div>
-    <div class="tab-body" data-body="steps" role="tabpanel" hidden>
-      <div class="as-bar">
-        <button class="ic" data-bp="prev" aria-label="Previous step" title="Previous (←)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
-        <button class="ic as-play" data-bp="play" aria-pressed="false" aria-label="Play" title="Play: one step after another"></button>
-        <button class="ic" data-bp="next" aria-label="Next step" title="Next (→)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
-        <input id="as-scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Step">
-        <output id="as-n" class="step-n"></output>
-      </div>
-      <div id="bp-step"></div>
-      <ol id="bp-steplist" class="step-list"></ol>
-      <label class="as-faint"><input id="as-faint" type="checkbox"> Show what is to come, faint</label>
     </div>
     <div class="tab-body" data-body="checks" role="tabpanel" hidden>
       <p id="bp-check-sum" class="bp-sum"></p>
@@ -195,6 +186,10 @@ export function injectBuildDom() {
 
 export function mountBuildPanel(wb: Workbench) {
   const st = load();
+  // Instructions: the guide opens on what is in focus (its section), else at the start
+  const guide = mountGuide(wb, { onClose: () => document.getElementById('bb-guide')?.focus() });
+  const openGuide = () => guide.open(wb.scope?.owner ?? null);
+  $('bb-guide').onclick = openGuide;
   let index: IndexEntry[] = [];
   /** The manifest open: our build, or a standalone design from the library. */
   let openAsm = OUR_BUILD;
@@ -465,10 +460,7 @@ export function mountBuildPanel(wb: Workbench) {
       case 'scope-out': wb.setScope(null); break;
       case 'home': wb.home(); jointsDirty = true; break;
       case 'sweep': if (node) wb.startSweep(node, d.joint!); break;
-      case 'step': wb.setStep(Number(d.i)); break;
-      case 'prev': wb.setStep(Math.max(0, wb.step - 1)); break;
-      case 'next': wb.setStep(wb.step + 1); break;
-      case 'play': wb.setPlaying(!wb.playing); break;
+      case 'guide': openGuide(); break;
       case 'check': {
         const chk = node?.asm.checks?.find((c) => c.id === d.id) ?? null;
         wb.showCheck(wb.check?.id === d.id ? null : chk, node ?? undefined);
@@ -533,38 +525,13 @@ export function mountBuildPanel(wb: Workbench) {
     }
   });
 
-  // Steps: arrow keys while the Steps tab is open.
-  addEventListener('keydown', (e) => {
-    if (!wb.active || document.querySelector<HTMLElement>('[data-body="steps"]')?.hidden !== false) return;
-    const t = e.target as HTMLElement;
-    if (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown') wb.setStep(wb.step + 1);
-    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') wb.setStep(Math.max(0, wb.step - 1));
-    else return;
-    e.preventDefault();
-  });
-
-  // Entering and leaving the Steps / Checks tabs.
+  // Entering and leaving the Checks tab.
   document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => onTab(b.dataset.tab!)));
   function onTab(tab: string) {
-    // Assemble opens on its first step in Mechanism (the default there; any look still works)
-    if (tab === 'steps' && wb.step < 0 && wb.steps.length) {
-      if (wb.look === 'exterior') wb.setLook('mechanism');
-      wb.setStep(0);
-    }
-    if (tab !== 'steps' && wb.step >= 0) {
-      wb.setPlaying(false);
-      wb.setStep(-1);
-    }
     if (tab !== 'checks' && wb.check) wb.showCheck(null);
     wb.setMarkers(tab === 'checks'); // the overlap markers are the Checks tab's, not a look's
   }
 
-  $<HTMLInputElement>('as-scrub').addEventListener('input', (e) => wb.setStep(Number((e.target as HTMLInputElement).value)));
-  $<HTMLInputElement>('as-faint').addEventListener('change', (e) => {
-    wb.stepFaint = (e.target as HTMLInputElement).checked;
-    wb.refresh();
-  });
 
   wb.onChange(() => render());
 
@@ -578,7 +545,6 @@ export function mountBuildPanel(wb: Workbench) {
     renderHead();
     renderParts();
     renderJoints();
-    renderSteps();
     renderChecks();
     renderBom();
   }
@@ -727,7 +693,8 @@ export function mountBuildPanel(wb: Workbench) {
     const title = sc ? sc.label : openAsm === OUR_BUILD ? '' : assemblyLabel(m?.root.name ?? openAsm);
     const sub = sc?.kind === 'library' ? sc.item?.by ?? '' : '';
     $('bp-title').hidden = !title;
-    $('bp-title').innerHTML = !title ? '' : `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
+    const steps = sc ? ` <button class="link bh-guide" data-bp="guide" title="Step-by-step assembly of ${esc(title)}, full screen">Instructions</button>` : '';
+    $('bp-title').innerHTML = !title ? '' : `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${steps}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
   }
 
   /** Parts of the focus: the scope's, else everything fitted under the focused node. */
@@ -920,77 +887,6 @@ export function mountBuildPanel(wb: Workbench) {
       if (wb.sweeping === j.id && wb.contact) bits.push(`<span class="${wb.contact.status === 'fail' ? 'bad' : 'meh'}">touching ${wb.contact.parts.map(esc).join(' × ')}</span>`);
       live.innerHTML = bits.join(' · ');
       live.hidden = !bits.length;
-    }
-  }
-
-  // ---------------------------------------------------------------- Steps
-  function renderSteps() {
-    const steps = wb.steps;
-    const body = $('bp-step');
-    const list = $('bp-steplist');
-    const i = Math.max(0, wb.step);
-    const scrub = $<HTMLInputElement>('as-scrub');
-    scrub.max = String(Math.max(0, steps.length - 1));
-    if (document.activeElement !== scrub) scrub.value = String(i);
-    $('as-n').textContent = steps.length ? `${i + 1} / ${steps.length}` : '';
-    const play = document.querySelector<HTMLButtonElement>('[data-bp="play"]')!;
-    play.innerHTML = wb.playing ? STOP : PLAY;
-    play.setAttribute('aria-pressed', String(wb.playing));
-    play.setAttribute('aria-label', wb.playing ? 'Pause' : 'Play');
-    document.querySelector<HTMLButtonElement>('.as-bar [data-bp="prev"]')!.disabled = i === 0;
-    document.querySelector<HTMLButtonElement>('.as-bar [data-bp="next"]')!.disabled = i >= steps.length - 1;
-    if (!steps.length) {
-      body.innerHTML = '<p class="empty">Nothing to assemble here.</p>';
-      list.innerHTML = '';
-      return;
-    }
-    const s = steps[i];
-    // fasteners as callouts: count x size and type
-    const fastOf = (id: string) => {
-      let f: MFastener | undefined;
-      wb.forEachNode((n) => { f ??= n.asm.fasteners?.find((x) => x.id === id); });
-      return f;
-    };
-    const callouts = new Map<string, { label: string; n: number; inferred: boolean; joins: Set<string> }>();
-    for (const fid of s.fasteners ?? []) {
-      const f = fastOf(fid);
-      if (!f) continue;
-      const c = callouts.get(f.key) ?? { label: fastLabel(f.spec), n: 0, inferred: false, joins: new Set<string>() };
-      c.n++;
-      c.inferred ||= !!f.inferred;
-      f.joins.forEach((p) => c.joins.add(p));
-      callouts.set(f.key, c);
-    }
-    const name = (id: string) => shortName(wb.partInfo(id)?.part.name ?? id);
-    // the step's parts with counts (four identical wheels read as "4x V-wheel")
-    const counts = new Map<string, { n: number; id: string }>();
-    for (const p of s.parts ?? []) {
-      // one line per kind: "V-wheel (OpenBuilds solid), front left lower" -> "V-wheel"
-      const k = bare(name(p)).split(/\s*,\s*/)[0].replace(/\s*#\d+$/, '').replace(/\s*-\s*x\d+$/, '').replace(/\s+\(?[LR]\)?$/, '');
-      const c = counts.get(k) ?? { n: 0, id: p };
-      c.n++;
-      counts.set(k, c);
-    }
-    const tag = s.derived ? ' <span class="ptag none" title="No build step in the manifest for this: ordered from the structure (frame first, then what hangs on it)">derived</span>'
-      : s.inferred ? ` <sup class="inf" title="Inferred: ${esc(s.inferred_note || 'confirm this step')}">?</sup>` : '';
-    body.innerHTML = `<h3 class="step-title">${esc(s.title)}${tag}</h3>
-      ${s.assembly ? `<p class="as-asm">${esc(s.assembly)}${s.guide_page ? ` · guide p. ${s.guide_page}` : ''}</p>` : ''}
-      ${s.notes?.length ? `<p class="as-note">${esc(s.notes[0])}</p>` : ''}
-      ${counts.size ? `<ul class="callouts">${[...counts].map(([k, c]) => `<li><b>${c.n > 1 ? `${c.n}×` : ''}</b><button class="link" data-bp="select" data-id="${esc(c.id)}">${esc(k)}</button></li>`).join('')}</ul>` : ''}
-      ${callouts.size ? `<ul class="callouts">${[...callouts.values()].map((c) =>
-        `<li><b>${c.n}×</b><span title="${esc([...c.joins].map(name).join(' · '))}">${esc(c.label)}${c.inferred ? '<sup class="inf" title="Inferred">?</sup>' : ''}</span></li>`).join('')}</ul>` : ''}
-      ${s.tools?.length ? `<p class="as-tools">${s.tools.map(esc).join(' · ')}</p>` : ''}
-      ${s.notes && s.notes.length > 1 ? `<details class="bp-disc"><summary>Notes</summary><ul class="notes">${s.notes.slice(1).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}`;
-    const sig = steps.map((x) => x.id).join() + '#' + i;
-    if (list.dataset.sig !== sig) {
-      list.dataset.sig = sig;
-      let lastAsm = '';
-      list.innerHTML = steps.map((x: AStep, k) => {
-        const head = x.assembly && x.assembly !== lastAsm ? `<li class="as-grp">${esc((lastAsm = x.assembly))}</li>` : '';
-        return `${head}<li><button class="${k === i ? 'on' : ''}" data-bp="step" data-i="${k}" aria-current="${k === i ? 'step' : 'false'}">
-        <span>${k + 1}</span>${esc(x.title)}${x.derived ? '<i class="as-d" title="Derived from the structure">·</i>' : ''}</button></li>`;
-      }).join('');
-      list.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
     }
   }
 
