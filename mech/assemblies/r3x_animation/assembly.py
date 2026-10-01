@@ -155,6 +155,14 @@ PARAMETRIC = {
     "lower-ring-servo-mount": "parts.anderson.ring_servo_mount",
     "top-ring-servo-mount-main": ("parts.anderson.ring_servo_mount", "MAIN"),
     "top-ring-servo-mount-spacer": ("parts.anderson.ring_servo_mount", "SPACER"),
+    # the hero arm (Anderson's mods + new wrist)
+    "mainarm": "parts.anderson.mainarm",
+    "bodytube": "parts.anderson.bodytube",
+    "servomount": "parts.anderson.servomount",
+    "wrist": "parts.anderson.wrist",
+    "Part 1": "parts.anderson.wrist_cap",
+    "hand-arm-side": "parts.anderson.hand_arm_side",
+    "hand-finger-side": "parts.anderson.hand_finger_side",
 }
 FRAME_TOL_MM = 0.5  # parametric vs vendored STL bounds: past this, the frames differ and the swap is refused
 
@@ -244,6 +252,42 @@ def phase_gears(parts: list, report: list):
         if deg:
             P_.T = turned(deg) @ P_.T
         report.append(f"{pid} turned {deg:g} deg on its axis: shared with {gid} {v0:.0f} -> {v1:.0f} mm3")
+
+
+def relief(target, cutter, grow: float = 0.5, why: str = ""):
+    """A clearance cut in a vendored part (its STL untouched): the cutter part, grown `grow` mm,
+    subtracted in the target's own frame; the target then builds from the cut mesh. Cached."""
+    import manifold3d as mf
+
+    from r3xmech.meshes import load_file, part_mesh
+    from workbench.geom import _cache_key, cached
+
+    def man(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32), tri_verts=np.asarray(m.faces, np.uint32)))
+
+    tgt = load_file(str(target.file)) if target.file is not None else target.generator()
+    cut = part_mesh(cutter).copy()
+    cut.apply_transform(np.linalg.inv(target.T))
+    key = _cache_key("relief", str(target.file), np.round(target.T, 4).tolist(), len(tgt.faces),
+                     np.round(cut.bounds, 3).tolist(), len(cut.faces), grow)
+
+    def run():
+        c = man(cut)
+        if grow:
+            c = c.minkowski_sum(mf.Manifold.sphere(grow, 8)) if hasattr(c, "minkowski_sum") and len(cut.faces) < 4000 \
+                else man(trimesh.Trimesh(cut.vertices + cut.vertex_normals * grow, cut.faces))
+        mm = (man(tgt) - c).to_mesh()
+        return np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts), float(tgt.volume)
+
+    v, f, vol0 = cached(key, run)
+    out = trimesh.Trimesh(v, f, process=False)
+    ref = target.file.name if target.file is not None else target.id
+    target.generator = lambda m=out: m.copy()
+    target.file = None
+    target.kind = "generated"
+    target.note = (target.note + "; " if target.note else "") + (
+        f"relief cut for {cutter.id} (+{grow} mm), {vol0 - float(out.volume):.0f} mm3 removed from {ref}"
+        + (f": {why}" if why else ""))
 
 
 SPRING_Y, SPRING_H = 608.5, 55.0  # the sim's spring: on the top cap (TR_N), 55 mm at head lift 0
@@ -611,6 +655,7 @@ def hero_arm(top: Asm):
     T_hs = trans(pivot) @ T_hs
     Tm = basis(x_hat, a_hat, d_hat, origin_to=foot, origin_from=(-26, -30, 0))
     on_axis = lambda s: basis(x_hat, a_hat, d_hat, origin_to=foot + d_hat * s)  # noqa: E731
+    T_tube = trans(pivot) @ basis(x_hat, -a_hat, -d_hat) @ trans(0, -25, 0)
     top.parts += [
         servo_part("hero_shoulder_servo", "DS3218_DUAL", "top_ring", T_hs, f("hero", "servo"),
                    evidence="output shafts (Y) on the kit hinge-disc axis HA_LE_1-HA_RE_1"),
@@ -632,8 +677,12 @@ def hero_arm(top: Asm):
         P("hero_hand_finger_side", "hand-finger-side (turns; carries the fingers)", "mech", "hero_hand", on_axis(229),
           f("wrist", "hand-finger-side"), placement="fitted", replaces=["ha_w_1"],
           evidence="shares the hand-arm-side frame (z -5..7.8 | 7.8..44); finger pin holes on X"),
+        # Anderson's elbow (servomount C-channel + body tube + the dual-shaft servo) replaces the kit's
+        # elbow blocks and elbow disc (coordinator, 2026-09-30). His servomount is not placed: its
+        # frame relative to the servo is not in his files, and the collar-on-tube reading overlapped
+        # the servo and the main arm by 35 cm3 at any roll (reported for the parametric agent).
         P("hero_elbow_tube", "bodytube (32 mm, along the hinge axis)", "mech", "top_ring",
-          trans(pivot) @ basis(x_hat, -a_hat, -d_hat) @ trans(0, -25, 0), f("hero", "bodytube"),
+          T_tube, f("hero", "bodytube"), replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4", "ha_le_1"],
           placement="inferred", inferred=True, inferred_note="axle housing toward the body (assembly PNG 03)"),
     ]
     js = Joint("hero_shoulder", "Hero arm shoulder (20 kg dual-shaft servo in the elbow disc)", "revolute",
@@ -693,17 +742,26 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm):
     head_mech(head)
     lower_drive(lower)
     top_drive(middle, top)
+    hero_arm(top)
     for ring in (lower, middle, top):
         done: list[str] = []
         swap_parametric(ring.parts, done)
         if done:
             ring.notes.append("Parametric (mech/parts/anderson) in place of the vendored STLs: " + "; ".join(done))
+    # the upper neck guide's outer race against the kit top ring's neck ring: Anderson's files give no
+    # height for it (PNG 01/03 show the ring under the elbow disc's centre; its height here is
+    # inferred), so a relief in the kit ring, as decided (2026-09-30)
+    ring = next((p for p in top.parts if p.id == "neck_guide_ring_outer"), None)
+    if ring is not None:
+        for kid in ("tr_nr_full", "tr_rr_full"):
+            kp = next((p for p in top.parts if p.id == kid), None)
+            if kp is not None:
+                relief(kp, ring, 0.5, "the neck guide's height is inferred (Anderson's files do not fix it)")
     for a_, pool in ((nd, nd.parts), (lower, lower.parts), (middle, middle.parts + top.parts)):
         ph: list[str] = []
         phase_gears(pool, ph)  # the top pinion rides the middle ring, its sector the top ring
         if ph:
             a_.notes.append("Gear phase: " + "; ".join(ph))
-    hero_arm(top)
     # parts the build supersedes
     sup = {r for p in root.all_parts() for r in p.replaces}
     for p in root.all_parts():

@@ -289,7 +289,8 @@ def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
         steps = []
         for st in base.steps:  # the guide's step for them goes with them
             if ids & set(st.get("parts", [])):
-                steps.append(dict(st, parts=[x for x in st["parts"] if x in ids]))
+                steps.append(dict(st, id=f"{st['id']}_{vid}", parts=[x for x in st["parts"] if x in ids], unplaced=[],
+                                  title=f"{st.get('title', '')} ({name})"))
                 st["parts"] = [x for x in st["parts"] if x not in ids]
         base.children.append(Asm(id=f"base_panels_{vid}", name=name, mount_link="base",
                                  variant={"group": "base_side_panels", "id": vid, "default": dflt},
