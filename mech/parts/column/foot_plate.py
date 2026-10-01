@@ -1,8 +1,7 @@
 """The column's foot plate: 6.35 mm 6061, 150 x 150, on the Gil plate.
 
 Holes: the four posts' M5 flat heads from below (countersunk, flush: the plate sits on the Gil
-plate), four M5 clearance holes on to the Gil plate, four M4 tapped holes for the lift servo's
-bracket, a cable hole for the carriage's service cable.
+plate), four M5 clearance holes on to the Gil plate, a cable hole for the carriage's service cable.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from . import _layout as L
 from ._cad import box, clearance_hole, cyl, tapped_hole, cyl_y
 
 DEFAULTS = dict(y0=L.Y_GIL_TOP, t=L.FOOT["t"], half=L.FOOT["half"], post=L.POST_C, bolt_at=L.FOOT["bolt_at"],
-                bracket=((-14.0, -1.0), (14.0, -1.0), (-14.0, 9.0), (14.0, 9.0)), cable=(0.0, 36.0, 7.0))
+                cable=(0.0, 36.0, 7.0))
 
 
 def make(params: dict | None = None, **kw):
@@ -33,8 +32,6 @@ def make(params: dict | None = None, **kw):
     b = P["bolt_at"]
     for i, (x, z) in enumerate([(sx * b, sz * b) for sx in (-1, 1) for sz in (-1, 1)]):
         body = clearance_hole(body, feats, f"gil{i + 1}", (x, y1, z), (0, -1, 0), "M5", t)
-    for i, (x, z) in enumerate(P["bracket"]):
-        body = tapped_hole(body, feats, f"brk{i + 1}", (x, y1, z), (0, -1, 0), "M4", t)
     cx, cz, cr = P["cable"]
     body = body - cyl_y(cx, cz, cr, y0 - 1, y1 + 1)
     return finish(body, label="Column foot plate", params=P, features=feats, reference="",

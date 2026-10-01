@@ -27,9 +27,9 @@ describe('mech model (robot.generated.json)', () => {
   });
 
   it('carries the profile limits the generator derived', () => {
-    // the column's pan: +-90 in the droid (hard), the animation range pulled inside it
+    // the column's pan: its full +-135 (1:1 on the servo), the animation range pulled inside it
     const pan = GENERATED.joints.find((j) => j.name === 'head_pan')!;
-    expect(MECH.joints.head_pan.mech_limits.max).toBe(90);
+    expect(MECH.joints.head_pan.mech_limits.max).toBe(135);
     expect(pan.animation.max).toBeLessThan(MECH.joints.head_pan.mech_limits.max);
     expect(pan.animation.max).toBeGreaterThan(34); // wider than the old 4:1 neck gear
     expect(MECH.joints.head_lift.mech_limits).toEqual({ min: -37, max: 45 });

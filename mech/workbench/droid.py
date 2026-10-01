@@ -279,7 +279,7 @@ def explained_placement(info, flat) -> list[dict]:
     ids = {p.id for p in flat.parts}
     gears = [x for x in ("pan_pinion", "pan_sector", "lift_pinion", "lift_rack", "lower_pinion", "lower_sector",
                          "top_pinion", "top_sector", "col_lower_pinion", "col_top_pinion", "col_pan_pinion",
-                         "col_pan_gear") if x in ids]
+                         "col_pan_gear", "col_lift_pinion", "col_lift_rack") if x in ids]
     if gears:
         out.append({"test": "clearance", "parts": gears,
                     "cause": "a pinion and its sector/rack: the model turns the ring (or slides the rack) but not the "

@@ -21,7 +21,7 @@ from parts.column import PARTS, _layout as L  # noqa: E402
 CASES = [(m, {}) for m in sorted(PARTS)] + [("parts.column.pan_gear", {"kind": "pinion"}),
                                              ("parts.column.ring_pinion", {"ring": "top"}),
                                              ("parts.column.drive_bracket", {"ring": "top"})]
-CASES += [("parts.column.purchased", {"kind": k}) for k in ("rail", "block", "tnut", "idler", "collar")]
+CASES += [("parts.column.purchased", {"kind": k}) for k in ("rail", "block", "tnut", "collar")]
 
 
 @pytest.mark.parametrize("mod,params", CASES)
@@ -33,7 +33,7 @@ def test_builds_closed_with_features(mod, params):
     assert m.volume > 0
     assert feats, f"{mod}: no mate features"
     for k, f in feats.items():
-        assert f["type"] in ("axis", "plane"), k
+        assert f["type"] in ("axis", "plane", "spline"), k
         if f["type"] == "axis":
             assert abs(np.linalg.norm(f["d"]) - 1) < 1e-6
 
@@ -47,6 +47,7 @@ def test_column_clears_the_pedestal():
 
 
 def test_lift_travel_and_ratio():
+    assert L.PAN == (-135.0, 135.0)
     assert L.LIFT[0] <= -37.0 and L.LIFT[1] >= 37.0
     servo_deg = max(abs(v) for v in L.LIFT) / L.LIFT_MM_PER_DEG
     assert servo_deg <= 135.0 + 1e-6

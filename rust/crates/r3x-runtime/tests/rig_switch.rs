@@ -1,6 +1,6 @@
 //! The rig choice on the real bus: `stage.set_rig` swaps the performer's profile (stop runs,
 //! Home, reload), so the same jog clamps to the Physical rig's neck range (the mech model's: the
-//! central column's pan, +-90 in the droid) and back to robot.json's when switched back.
+//! central column's pan, +-135) and back to robot.json's when switched back.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -40,11 +40,11 @@ async fn rig_switch_reloads_the_performer() {
     performer::spawn(&bus, cfg).unwrap();
     let cmd = |c| bus.command(Source::Ui, None, c);
     assert_eq!(cmd(Command::Stage(StageCommand::SetMode { mode: OperatingMode::Bench })).await, Ack::Accepted);
-    let jog = || Command::Perf(PerfCommand::Puppet { channels: BTreeMap::from([("head_pan".to_string(), 120.0)]) });
+    let jog = || Command::Perf(PerfCommand::Puppet { channels: BTreeMap::from([("head_pan".to_string(), 180.0)]) });
 
     assert_eq!(cmd(jog()).await, Ack::Accepted);
     let orig = pan_after(&mut frames, Duration::from_millis(2500)).await;
-    // 120 deg is past both rigs' pan ranges: each clamps the jog at its own
+    // 180 deg is past both rigs' pan ranges: each clamps the jog at its own
     assert!((orig - pan_max(&profile)).abs() < 0.5, "Original clamps at robot.json's range ({orig})");
 
     assert_eq!(cmd(Command::Stage(StageCommand::SetRig { rig: Rig::Physical })).await, Ack::Accepted);

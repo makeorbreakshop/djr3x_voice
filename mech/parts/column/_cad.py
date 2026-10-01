@@ -95,3 +95,33 @@ def at_angle(r, deg):
     """(x, z) on a circle about the body axis: deg from +Z (front) toward +X (the droid's left)."""
     a = math.radians(deg)
     return r * math.sin(a), r * math.cos(a)
+
+
+def involute_outline(teeth: int, module: float, pa_deg: float = 20.0, n_flank: int = 8):
+    """A standard external involute spur gear's outline (addendum m, dedendum 1.25 m, no profile
+    shift; the root drawn as an arc): [(x, y)] counter-clockwise, a tooth centred on +X."""
+    rp = module * teeth / 2
+    a = math.radians(pa_deg)
+    rb = rp * math.cos(a)
+    ra, rf = rp + module, rp - 1.25 * module
+    inv = lambda x: math.tan(x) - x  # noqa: E731
+    psi_p = math.pi / (2 * teeth) + inv(a)            # half tooth angle at the base-involute reference
+
+    def half(r):
+        r = max(r, rb)
+        return psi_p - inv(math.acos(min(1.0, rb / r)))
+
+    pts = []
+    rs = np.linspace(max(rf, rb), ra, n_flank)
+    for k in range(teeth):
+        c = 2 * math.pi * k / teeth
+        flank_l = [(r, c - half(r)) for r in rs]
+        flank_r = [(r, c + half(r)) for r in rs[::-1]]
+        if rf < rb:
+            flank_l = [(rf, c - half(rb))] + flank_l
+            flank_r = flank_r + [(rf, c + half(rb))]
+        tip = [(ra, c - half(ra) + t * 2 * half(ra)) for t in np.linspace(0.2, 0.8, 3)]
+        nxt = 2 * math.pi * (k + 1) / teeth
+        root = [(rf, c + half(max(rf, rb)) + t * (nxt - c - 2 * half(max(rf, rb)))) for t in np.linspace(0.25, 0.75, 3)]
+        pts += flank_l + tip + flank_r + root
+    return [(r * math.cos(t), r * math.sin(t)) for r, t in pts]

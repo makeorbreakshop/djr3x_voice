@@ -7,11 +7,15 @@ the assembly's transform for a part is the identity and a parameter change moves
 What each group is, and where its numbers come from (`inferred` = not stated by any source; the
 evidence follows):
 
-* Gil plate: David Ferreira's aluminium base plate. Its outline is not in any file we hold (the
-  Morton "Gil-Drive-with-Base-Plate_Electronics stack v8.stl" is a 170 mm electronics stack, not
-  the plate). inferred: a 1/4 in (6.35) disc whose edge is flush with the kit skirt's foot (B_B
-  r 227.4 at y -54.3), its top at the skirt's underside (the skirt sits on it, Morton photo
-  20250810_165424), three Gil-drive wheel slots as in Morton's Fusion screenshot (2025-08-10).
+* Gil plate: David Ferreira's Gil drive base plate, measured from Morton's
+  "Gil-Drive-with-Base-Plate_Electronics stack v8.stl" (2026-10-01): a 169.7 x 169.7 x 8.0 mm plate,
+  corners R 17.25, eight 6.0 mm holes at (+-80, +-64) and (+-64, +-80); the file also carries the
+  electronics stack's four 50 x 7 x 44.7 uprights (at +-62.85..69.85 on the plate's edges), which a
+  column at the centre replaces (the electronics move out onto the skid plate round it). Its sibling
+  "SkidPlate Outer.stl" (5 mm, ~237 x 233) has a 171.7 mm square window - the Gil plate's outline +
+  1 mm a side - with eight 3.5 mm holes at (+-112, +-64) / (+-64, +-112). inferred: only the height.
+  The Gil file is in its own frame (y -275.7); the skid plate is in the kit frame at y -53..-48 and
+  Morton's 2020 posts stand at y -48, so the Gil plate's top is put at -48.0, in the skid's window.
 * Column: four 2020 posts on a 100 x 100 square. The square is set by the kit: the pedestal's
   back grille pocket comes in to r 59.7 at y 165-265 (P_M_1/P_M_2/P_G_1, measured) and the rest of
   the pedestal wall is at r 86-88, so a 100 mm square (faces at 50, corners at r 70.7) clears both
@@ -29,12 +33,13 @@ from __future__ import annotations
 import math
 
 # ------------------------------------------------------------------ base
-GIL = dict(top_y=-54.3, t=6.35, r=227.5,                 # inferred: see the module doc
-           slots=((0.0, 120.0, 240.0), 140.0, 205.0, 64.0),   # wheel slots: angles, r from/to, width (inferred)
+GIL = dict(top_y=-48.0, t=8.0, half=169.7 / 2, corner_r=17.25,     # measured (Morton's Gil STL); top_y inferred
+           holes=((80.0, 64.0), (64.0, 80.0)), hole_d=6.0,          # x8 by symmetry (measured)
            foot_bolt="M5")
+SKID = dict(top_y=-48.0, window=171.7 / 2, holes_at=((112.0, 64.0), (64.0, 112.0)), hole_d=3.5, t=5.0)   # Morton's (not modelled)
 FOOT = dict(t=6.35, half=75.0, bolt_at=62.0)              # 1/4 in 6061 foot plate, 150 x 150 (ours)
 Y_GIL_TOP = GIL["top_y"]
-Y_FOOT_TOP = Y_GIL_TOP + FOOT["t"]                        # -47.95
+Y_FOOT_TOP = Y_GIL_TOP + FOOT["t"]                        # -41.65
 
 # ------------------------------------------------------------------ column
 POST_C = 40.0          # post centres at (+-40, +-40): 2020 on a 100 mm square
@@ -46,15 +51,22 @@ POST_LEN = Y_POST_TOP - Y_FOOT_TOP
 # 2020 (5 series) slot, in the post's own frame (face at 10 from its centre): opening, lips, T cavity
 SLOT = dict(open_half=3.1, lip_in=8.2, cav_half=5.5, cav_floor=6.2, taper_half=3.2, taper_floor=4.8)
 
-# ------------------------------------------------------------------ lift (GT2 belt from the column foot)
-BELT = dict(pitch=2.0, width=6.0, thick=1.38, tooth_pd_off=0.254, z=-40.0)   # GT2 6 mm (2GT) belt plane z = -40
-DRIVE_T, IDLER_T = 60, 20
-R_DRIVE = DRIVE_T * BELT["pitch"] / (2 * math.pi)        # 19.10 pitch radius
-R_IDLER = IDLER_T * BELT["pitch"] / (2 * math.pi)        # 6.37
-DRIVE_C = (0.0, -15.0)                                    # drive pulley centre (x, y) in the belt plane
-IDLER_C = (-R_DRIVE + R_IDLER, 562.0)                     # tangent to the same vertical line x = -R_DRIVE (the clamped run)
-LIFT_MM_PER_DEG = R_DRIVE * math.pi / 180.0               # 0.3333 mm per servo degree
+# ------------------------------------------------------------------ lift (a rack climber, after Jason Charlton)
+# The lift servo rides the carriage (beside the pan servo); its brass Mod 0.8 servo gear climbs a
+# fixed vertical rack on the back-right post's inner face (x -40, the droid's right) (Charlton's build: "the lifting servo is
+# attached behind the grid plate; the brass servo gear meshes with a long vertical gear rack attached
+# to the rear of the structure", 2026-10-01). 48 teeth: pitch radius 19.2, 0.335 mm per servo degree,
+# so the servo's +-135 deg is +-45.2 mm.
+RACK = dict(module=0.8, x=-40.0, face=10.0, z_base=-30.0, pitch_z=-22.0, y0=350.0, y1=482.0, teeth_y=(362.0, 470.0),
+            screws_y=(356.0, 476.0), cb_floor=4.0)
+LIFT_PINION = dict(teeth=48, thick=6.0)
+R_LIFT = RACK["module"] * LIFT_PINION["teeth"] / 2                     # 19.2
+LIFT_MM_PER_DEG = R_LIFT * math.pi / 180.0                             # 0.3351 mm per servo degree
+LIFT_PINION_C = (RACK["x"], 412.0, RACK["pitch_z"] + R_LIFT)          # (x mid-plane, y, z) at rest
 LIFT = (-37.0, 45.0)    # travel: down as today's (the mouth meets the top cap's collars below that), up +45 (free)
+# the lift servo: spline along +X into the pinion (its boss on the pinion's -X face), long side down
+LIFT_SPLINE = (RACK["x"] - LIFT_PINION["thick"] / 2 + 4.1, LIFT_PINION_C[1], LIFT_PINION_C[2])
+HANGER = dict(t=8.0, y_top=446.0, arm_y=(438.0, 446.0), arm_x1=-23.0, half_z=15.0)
 
 # ------------------------------------------------------------------ servos (goBILDA 2000-0025-0002, vendor STEP)
 SPLINE_ABOVE_BOSS = 4.1      # spline top above the case boss (vendor STEP)
@@ -68,9 +80,9 @@ CASE_BOTTOM = -44.1
 G0 = 480.0             # the pan gears' plane (bottom); everything on the carriage hangs off it
 PAN_GEAR = dict(module=2.0, teeth=25, thick=8.0)          # 1:1, centre distance 50
 PAN_CD = PAN_GEAR["module"] * PAN_GEAR["teeth"]          # 50
-PAN = (-90.0, 90.0)    # the mechanism turns +-135 (1:1, the servo's +-135 rule); the droid allows +-90: with the head
-                       # low and the hero arm raised (+45), the head's right ear meets the arm's HA_PS_1 past pan +120
-                       # relative to the top ring (measured 2026-10-01, workbench suite scan), and the top ring turns +-25.5
+PAN = (-135.0, 135.0)  # the full mechanism: 1:1 on a goBILDA 2000 (+-150 standard mode), the suite's +-135 servo
+                       # rule; the clock spring allows +-200. Past ~+120 relative to the top ring the low head's
+                       # right ear meets the raised hero arm: a coupled limit to add (pan vs the arm and the top ring)
 BRG = dict(id=30.0, od=42.0, w=7.0)                       # 6806-2RS (30 x 42 x 7), two
 HUB = dict(r=15.0, flange_r=21.5, flange_t=4.0, bore_r=13.05, y0=423.0, top=500.0, screw_r=19.0)
 Y_FLANGE = (G0 - HUB["flange_t"], G0)                     # 476..480
@@ -91,7 +103,6 @@ FRONT = dict(z0=RAIL["z0"] + BLOCK["h"], t=8.0, half=53.5, y0=YC - 25.0, y1=YC +
 WEB = dict(half=22.0, z0=20.0, y0=438.0, y1=462.0)
 PAN_SERVO_SPLINE = (PAN_CD, G0 - (HUB_H - SPLINE_ABOVE_BOSS), 0.0)   # spline top: (50, 478.6, 0)
 CRADLE = dict(t=8.0, x0=20.0, x1=92.0, half_z=12.0)
-CLAMP = dict(y0=436.0, y1=452.0, x0=-24.0, x1=-8.0, z0=-46.0, z1=-34.0)
 COIL = dict(x=0.0, z=36.0, r=6.0, wire_r=2.0)             # retractile service cable (inside the column, front)
 
 # ------------------------------------------------------------------ ring drives (Anderson's sectors, our servos)

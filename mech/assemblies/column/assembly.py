@@ -5,9 +5,10 @@
 
 Design (parts/column/_layout.py has every number and its evidence):
 
-* **Base.** The column's 1/4 in aluminium foot plate bolts to the Gil plate (Ferreira's aluminium
-  base, outline inferred) with four M5 + lock nuts; the plate outside the foot (r 106..208) is left
-  for the electronics and the battery.
+* **Base.** The column's 1/4 in aluminium foot plate bolts to the Gil plate (Ferreira's Gil drive
+  plate, 169.7 x 169.7 x 8, measured from Morton's file) with four M5 + lock nuts inside the plate's
+  own eight holes. The electronics and the battery sit round it on Morton's skid plate (its 171.7 mm
+  window takes the Gil plate) and in the base up to the shell ring.
 * **Column.** Four 2020 posts on a 100 mm square, fixed (not rotating), from the foot plate to an
   aluminium top plate under the top cap. 100 mm is the largest square the kit's pedestal allows (its
   back grille pocket at r 59.7; >= 9.7 mm clear). Stiff and simple: four extrusions tied at both
@@ -16,22 +17,25 @@ Design (parts/column/_layout.py has every number and its evidence):
   hangs a goBILDA 2000 spline-down, a 1906 hub and a pinion with Anderson's teeth exactly where
   Anderson's pinion was, so his sectors on the rings are unchanged. Shell support: a Morton/Hunter
   ring round the pedestal's foot, bolted to the posts, under the kit's base top.
-* **Lift.** A carriage on two MGN12H blocks on MGN12 rails on the front posts' faces, driven from
-  the column foot by a goBILDA 2000 turning a GT2 60T pulley (0.333 mm/deg): a 6 mm GT2 belt up to a
-  20T idler under the top plate; the carriage clamps the belt's left run. -37..+45 mm (the servo's
-  +-135 deg is +-45 mm; down is limited by the head's mouth on the top cap, as today). Wiring:
-  a retractile service cable from the foot plate to the carriage, inside the column.
+* **Lift.** A carriage on two MGN12H blocks on MGN12 rails on the front posts' faces that climbs a
+  fixed rack (Jason Charlton's lift, confirmed by him 2026-10-01): a goBILDA 2000 rides the carriage
+  beside the pan servo, its brass Mod 0.8 48T servo gear on a Mod 0.8 rack on the back-right post's
+  front face; 0.335 mm/deg, -37..+45 mm (the servo's +-135 deg is +-45.2 mm; down is limited by the
+  head's mouth on the top cap, as today). Stiffer than a belt; no tension, no idler. Wiring: both
+  servos ride the carriage, so a retractile service cable from the foot plate to the carriage
+  carries both (and the clock spring's ribbon out).
 * **Pan.** On the carriage (Ferreira: the rotate unit rides the lift): a turned aluminium hub in two
   6806-2RS in the carriage's housing, a 25T module-2 gear pair 1:1 to a goBILDA 2000 on the
-  carriage. The mechanism turns +-135 (1:1); the droid is limited to +-90 because past ~+120 relative to the
-  top ring the head's right ear meets the raised hero arm (measured). The head's cables cross the joint in a clock-spring cassette (ribbon 250 mm:
+  carriage, +-135 (1:1). Past ~+120 relative to the top ring, with the head low and the hero arm raised,
+  the head's right ear meets the arm: a coupled limit to add later (pan vs the arm and the top
+  ring), not a clamp. The head's cables cross the joint in a clock-spring cassette (ribbon 250 mm:
   +-200 deg). The short neck (26 x 1.5 aluminium, 266 mm instead of 744) rises from the hub into
   Hunter's coupler, its top on the coupler's bore stop: the head sits where it does today.
 
 Fastening (workbench/fastening.py): screws into metal (post ends, tapped plates, hubs, MGN blocks,
 standoffs, T-nuts) or through-bolts with lock nuts (servo flanges: the case is 4 mm from each hole,
-too close for an insert's wall; the Gil plate; the pivots: idler axle, cross bolt); two heat-set
-inserts where a printed part takes a screw (the idler bracket).
+too close for an insert's wall; the Gil plate; the pan's cross bolt, in shear). No screw goes into a
+printed part, so no heat-set inserts are needed.
 """
 
 from __future__ import annotations
@@ -60,6 +64,11 @@ EXPLAINED = [
      "cause": "the retractile service cable stretches with the lift (manifest `stretch`); the suite moves the "
               "carriage into it as a rigid coil",
      "fix": "none: on the droid the coil compresses as the carriage comes down"},
+    {"test": "clearance", "parts": ["col_lift_pinion", "col_lift_rack"],
+     "cause": "the lift's pinion and its rack: the suite slides the carriage (head_lift) but does not turn the pinion "
+              "with it (a rack ratio, not a joint), so their teeth pass through each other in the sweep; at rest they "
+              "are phased to mesh",
+     "fix": "none on the parts (the mesh is checked at rest)"},
     {"test": "clearance", "parts": ["col_pan_gear", "col_pan_pinion"],
      "cause": "the pan gear and its pinion: the suite turns the hub (head_pan) but not the servo's pinion with it "
               "(a 1:1 gear ratio, not a joint), so their teeth pass through each other in the sweep; at rest they "
@@ -247,14 +256,15 @@ def phase(mod, params, other_mesh, teeth, key):
 def build_column(mount_link: str = "base", variant: dict | None = None, in_droid: bool = False) -> Assembly:
     asm = Assembly(
         id=ID, name="Central column internals (default)",
-        description="Fixed 2020 column on the Gil plate; lift carriage on MGN12 rails, GT2 belt from a servo at the "
-                    "column foot; head pan on the carriage (hub in two 6806, 1:1 gears, +-90 deg in the droid); ring drives on "
+        description="Fixed 2020 column on the Gil plate; lift carriage on MGN12 rails climbing a rack with its own servo "
+                    "(Charlton's); head pan on the carriage (hub in two 6806, 1:1 gears, +-135 deg); ring drives on "
                     "brackets on the column; shell support ring round the pedestal's foot.",
         frame_note="Body frame (show/SPEC.md): mm, +Y up, +Z front, +X droid's left; rest pose. Every part is "
                    "modelled in it (parts/column/_layout.py).",
         mount={"parent_link": mount_link, "transform": {"t": [0, 0, 0]}, "inferred": False,
                "rests_on": ["b_b_1", "b_b_2"],
-               "rests_on_note": "the kit's skirt (B_B) stands on the Gil plate (Morton photo 20250810_165424)",
+               "rests_on_note": "the kit's skirt (B_B) and the Gil plate both stand on Morton's skid plate / the Gil "
+                                "drive (not modelled)",
                **({"variant": variant} if variant else {})},
     )
     asm.links = [Link("column", "Column (fixed: posts, plates, ring drives, lift drive)", None),
@@ -278,11 +288,12 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
 
     ALU = "aluminium (6061-T6)"
     # ---------------------------------------------------------- base and column
-    ours("col_gil_plate", "Gil base plate (Ferreira; outline inferred)", "hardware", "column", "parts.column.gil_plate",
+    ours("col_gil_plate", "Gil base plate (Ferreira's, measured)", "hardware", "column", "parts.column.gil_plate",
          material=ALU, printed=False, explode=(0, -1, 0),
-         inferred_note="No file holds the Gil plate's outline (Morton's 'Gil-Drive-with-Base-Plate_Electronics stack v8' "
-                       "is a 170 mm electronics stack). Assumed: 1/4 in disc, r 227.5 = the kit skirt's foot, top at the "
-                       "skirt's underside (y -54.3), three wheel slots after Morton's screenshot. Confirm with Ferreira's DXF.")
+         inferred_note="Outline, thickness and holes measured from Morton's Gil STL; its height is inferred: top at "
+                       "y -48, in the 171.7 mm window of his skid plate (the kit frame), where his 2020 posts stand",
+         note="The file's electronics-stack uprights (on the plate's edges) give way to the column; the electronics "
+              "and battery go on Morton's skid plate round it (r ~86-165, y -48) and in the base up to the shell ring.")
     ours("col_foot_plate", "Column foot plate, 1/4 in 6061", "hardware", "column", "parts.column.foot_plate",
          material=ALU, printed=False, explode=(0, -1, 0))
     posts = []
@@ -293,7 +304,8 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
         f = {"bore_bot": dict(axis((x, L.Y_FOOT_TOP, z), UP, 2.1), depth=L.POST_THREAD),
              "bore_top": dict(axis((x, L.Y_POST_TOP, z), -UP, 2.1), depth=L.POST_THREAD),
              "bottom": plane((x, L.Y_FOOT_TOP, z), -UP), "top": plane((x, L.Y_POST_TOP, z), UP),
-             "face_front": plane((x, 300.0, z + 10 * sz), (0, 0, sz))}
+             "face_front": plane((x, 300.0, z + 10 * sz), (0, 0, sz)),
+             "face_in_z": plane((x, 300.0, z - 10 * sz), (0, 0, -sz))}
         pid = f"col_post_{'bf'[sz > 0]}{'rl'[sx > 0]}"
         posts.append(pid)
         add(pid, f"2020 extrusion {L.POST_LEN:.1f} mm (column post, {'front' if sz > 0 else 'back'} "
@@ -318,14 +330,14 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
             {"kind": "parametric", "model": "parts/column/purchased.py:block", "placement": "on its rail"}, "steel", False,
             {k: moved(v, mb) for k, v in bfe.items()}, mass=45.0, mass_note="catalogue", catalog="amazon:amzn-15GBPV3",
             inferred_note="MGN12H thread depth taken as 4 mm (Hiwin lists M3 x 3.5-4)")
-    # ---------------------------------------------------------- lift drive
-    ours("col_lift_bracket", "Lift servo bracket", "mech", "column", "parts.column.lift_bracket")
-    from parts.column.lift_bracket import SPLINE_Z
-
+    # ---------------------------------------------------------- the lift's rack (on the back-right post)
+    ours("col_lift_rack", f"Lift rack, Mod 0.8, {L.RACK['y1'] - L.RACK['y0']:.0f} mm (aluminium, to spec)", "hardware", "column",
+         "parts.column.lift_rack", material="aluminium (6061)", printed=False,
+         inferred_note="goBILDA-style Mod 0.8 aluminium gear rack, modelled to spec; part number to confirm")
     servo = lib_part("gobilda", "2000-0025-0002")
     hub = lib_part("gobilda", "1906-0025-0032")
 
-    def servo_at(pid, label, link, xw, yw, o, back_entry):
+    def servo_at(pid, label, link, xw, yw, o, back_entry, with_hub=True):
         m = frame(xw, yw, o)
         xw_, yw_, zw_ = m[:3, 0], m[:3, 1], m[:3, 2]
         f = {"spline": spline(o, yw_, 25), "boss": plane(np.asarray(o) - yw_ * L.SPLINE_ABOVE_BOSS, yw_)}
@@ -345,6 +357,9 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
                 False, nf, mass=70.0, mass_note="catalogue ~70 g", cad=servo.status, catalog="gobilda:2000-0025-0002",
                 note="25.2 kg-cm stall at 6 V, 300 deg (standard mode); 25T spline.")
         p._nutfaces = {k: v for k, v in f.items() if k.startswith("nutface")}
+        p.features["out_thr"] = dict(axis(o, -yw_, 1.25), depth=5.0)   # the output's M3 centre-screw thread (inferred depth)
+        if not with_hub:
+            return p, None
         # its 1906 hub: servo face on the boss, the same clocking as the servo
         boss = np.asarray(o) - yw_ * L.SPLINE_ABOVE_BOSS
         mh = frame(xw_, yw_, boss)
@@ -359,24 +374,7 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
                  cad=hub.status, catalog="gobilda:1906-0025-0032")
         return p, hp
 
-    lift_servo, lift_hub = servo_at("col_lift_servo", "lift", "column", (0, 1, 0), (0, 0, -1),
-                                    (L.DRIVE_C[0], L.DRIVE_C[1], SPLINE_Z), back_entry=False)
-    ours("col_drive_pulley", "GT2 60T drive pulley", "mech", "column", "parts.column.drive_pulley")
-    ours("col_idler_bracket", "Belt idler bracket", "mech", "column", "parts.column.idler_bracket")
-    imesh, ife, _ = parametric_mesh("parts.column.purchased", {"kind": "idler"})
-    mi = frame((1, 0, 0), (0, 1, 0), (L.IDLER_C[0], L.IDLER_C[1], L.BELT["z"]))
-    add("col_idler", "GT2 20T idler, 5 mm bore, 6 mm belt", "hardware", "column", placed(imesh, mi),
-        {"kind": "parametric", "model": "parts/column/purchased.py:idler", "placement": "on its axle"}, "aluminium", False,
-        {k: moved(v, mi) for k, v in ife.items()}, mass=10.0, mass_note="catalogue (typical)")
-    belt = _belt_mesh()
-    loop = _belt_loop()
-    bfeat = {"inner_d": axis((L.DRIVE_C[0], L.DRIVE_C[1], L.BELT["z"] - 3), (0, 0, 1), L.R_DRIVE - L.BELT["tooth_pd_off"]),
-             "inner_i": axis((L.IDLER_C[0], L.IDLER_C[1], L.BELT["z"] - 3), (0, 0, 1), L.R_IDLER - L.BELT["tooth_pd_off"]),
-             "run": plane((-(L.R_DRIVE - L.BELT["tooth_pd_off"]), 440.0, L.BELT["z"]), (1, 0, 0))}
-    add("col_belt", f"GT2 belt 6 mm, {loop:.0f} mm loop (open, both ends in the carriage's clamp)", "hardware", "column",
-        belt, {"kind": "generated", "placement": "round the pulleys"}, "rubber (glass-cord GT2)", False, bfeat,
-        mass=round(loop * 0.007, 1), mass_note="7 g/m",
-        note="The belt moves with the carriage; drawn still (its teeth are not modelled).")
+
     # ---------------------------------------------------------- ring drives
     ring = {}
     for key in ("lower", "top"):
@@ -391,6 +389,16 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     ours("col_carriage", "Lift carriage", "mech", "carriage", "parts.column.carriage")
     pan_servo, pan_hub = servo_at("col_pan_servo", "pan", "carriage", (1, 0, 0), (0, 1, 0), L.PAN_SERVO_SPLINE,
                                   back_entry=False)
+    # the lift servo rides the carriage beside the pan servo (Charlton's): long side down, spline +X into its pinion
+    lift_servo, _ = servo_at("col_lift_servo", "lift", "carriage", (0, -1, 0), (1, 0, 0), L.LIFT_SPLINE,
+                             back_entry=False, with_hub=False)
+    rk, _, _ = parametric_mesh("parts.column.lift_rack", {})
+    t_lift, _ = phase("parts.column.lift_pinion", {}, rk, L.LIFT_PINION["teeth"], "lift")
+    ours("col_lift_pinion", f"Lift pinion: brass servo gear, Mod 0.8, {L.LIFT_PINION['teeth']}T, 25T spline", "hardware",
+         "carriage", "parts.column.lift_pinion", {"turn": t_lift}, material="brass", printed=False,
+         inferred_note="goBILDA brass servo gear (Mod 0.8, 25T spline) modelled to spec; the 48T size and the part "
+                       "number to confirm against goBILDA's range",
+         note=f"Phased {t_lift:g} deg to mesh the rack at rest; {L.LIFT_MM_PER_DEG:.4f} mm of lift per servo degree.")
     brg = spec_part("bearing", {"type": "deep_groove", "id_mm": L.BRG["id"], "od_mm": L.BRG["od"], "width_mm": L.BRG["w"]})
     for s, (y0, y1) in (("lo", L.Y_BRG_LO), ("up", L.Y_BRG_UP)):
         m = frame((1, 0, 0), (0, 0, -1), (0, (y0 + y1) / 2, 0))   # canonical Z (axis) -> body +Y
@@ -442,7 +450,7 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     ours("col_clockspring", "Clock-spring cassette (head cables across the pan)", "mech", "carriage",
          "parts.column.clockspring_case",
          note=f"Ribbon 250 mm between r 15 and r 26: {ribbon_turns(250.0):.2f} turns of travel "
-              f"(+-{ribbon_turns(250.0) * 180:.0f} deg) for the mechanism's +-135 (the droid uses +-90).")
+              f"(+-{ribbon_turns(250.0) * 180:.0f} deg) for the pan's +-135.")
     # the service cable and the cosmetic neck spring: they stretch with the lift (manifest `stretch`)
     h = L.WEB["y0"] - L.Y_FOOT_TOP - 2 * L.COIL["wire_r"]
     from assemblies.r3x_animation.assembly import coil_generator
@@ -450,14 +458,14 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     coil = coil_generator(r=L.COIL["r"], wire_r=L.COIL["wire_r"], h=h, turns=h / 9.0, n=int(h / 9.0 * 16), sides=8)()
     y_c0 = L.Y_FOOT_TOP + L.COIL["wire_r"]
     coil.apply_translation([L.COIL["x"], y_c0, L.COIL["z"]])
-    add("col_coil_cable", f"Retractile service cable, 8-core, {h:.0f} mm coil at rest", "hardware", "column", coil,
+    add("col_coil_cable", f"Retractile service cable, 12-core, {h:.0f} mm coil at rest", "hardware", "column", coil,
         {"kind": "generated", "placement": "from the foot plate's cable hole to the carriage's web"}, "rubber (PU jacket)",
         False, {"bottom": plane((L.COIL["x"], L.Y_FOOT_TOP, L.COIL["z"] + L.COIL["r"]), -UP),
                 "top": plane((L.COIL["x"], L.WEB["y0"], L.COIL["z"] + L.COIL["r"]), UP)},
-        mass=80.0, mass_note="inferred (8-core coiled cord)",
+        mass=100.0, mass_note="inferred (12-core coiled cord)",
         stretch={"joint": "head_lift", "axis": [0, 1, 0], "anchor": [L.COIL["x"], y_c0, L.COIL["z"]], "rest_mm": h},
-        inferred_note="Cable route inferred: the pan servo's and the head's leads (via the clock spring) down to the "
-                      "electronics on the Gil plate, coiled so it follows the lift's 82 mm",
+        inferred_note="Cable route inferred: the pan and lift servos' and the head's leads (via the clock spring) to the "
+                      "electronics round the Gil plate, coiled so it follows the lift's 82 mm",
         note="It stretches with head_lift (manifest stretch); zip-tied at both ends.")
     from assemblies.r3x_animation.assembly import SPRING_H, SPRING_Y
 
@@ -472,7 +480,7 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
 
     asm.parts = list(P.values())
     hw = Hw(P)
-    _hardware(hw, P, posts, lift_servo, lift_hub, pan_servo, pan_hub, ring)
+    _hardware(hw, P, posts, lift_servo, pan_servo, pan_hub, ring)
     asm.fasteners, asm.mates = hw.fast, hw.mates
     asm.joints = _joints()
     _steps(asm)
@@ -483,28 +491,6 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     asm.notes = _notes()
     asm.children.append(_head_ref())
     return asm
-
-
-def _belt_loop():
-    from shapely.geometry import Point
-    from shapely.ops import unary_union
-
-    hull = unary_union([Point(*L.DRIVE_C).buffer(L.R_DRIVE, resolution=64),
-                        Point(*L.IDLER_C).buffer(L.R_IDLER, resolution=32)]).convex_hull
-    return hull.exterior.length
-
-
-def _belt_mesh():
-    from shapely.geometry import Point
-    from shapely.ops import unary_union
-
-    def hull(off):
-        return unary_union([Point(*L.DRIVE_C).buffer(L.R_DRIVE - L.BELT["tooth_pd_off"] + off, resolution=64),
-                            Point(*L.IDLER_C).buffer(L.R_IDLER - L.BELT["tooth_pd_off"] + off, resolution=32)]).convex_hull
-
-    m = trimesh.creation.extrude_polygon(hull(L.BELT["thick"]).difference(hull(0.0)), L.BELT["width"])
-    m.apply_translation([0, 0, L.BELT["z"] - L.BELT["width"] / 2])
-    return m
 
 
 def _anderson_sector(key):
@@ -526,22 +512,22 @@ def _anderson_sector(key):
 
 def _joints():
     return [
-        Joint("head_lift", "Head lift (carriage on MGN12 rails, GT2 belt from the column foot)", "prismatic", "column",
+        Joint("head_lift", "Head lift (the carriage climbs a fixed rack with its own servo)", "prismatic", "column",
               "carriage", (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), L.LIFT, "mm", "head_lift", None,
               {"kind": "gear", "servos": ["col_lift_servo"], "mm_per_servo_deg": round(L.LIFT_MM_PER_DEG, 4),
-               "pulley_pitch_radius_mm": round(L.R_DRIVE, 3),
-               "note": f"goBILDA 2000 at the column foot, GT2 {L.DRIVE_T}T pulley (pitch r {L.R_DRIVE:.2f}), 6 mm belt "
-                       f"over a {L.IDLER_T}T idler under the top plate; the carriage clamps the left run. "
-                       f"{L.LIFT_MM_PER_DEG:.4f} mm per servo deg: +-135 deg = +-45 mm."},
+               "pinion_pitch_radius_mm": round(L.R_LIFT, 3),
+               "note": f"goBILDA 2000 on the carriage, brass Mod 0.8 {L.LIFT_PINION['teeth']}T servo gear (pitch r "
+                       f"{L.R_LIFT:.1f}) climbing a Mod 0.8 rack on the back-right post (Charlton's lift). "
+                       f"{L.LIFT_MM_PER_DEG:.4f} mm per servo deg: +-135 deg = +-{135 * L.LIFT_MM_PER_DEG:.1f} mm."},
               {"how": "servo at its centre pulse (1500 us) with the head at today's height (tube top on the coupler's "
-                      "bore stop at y 696.3); clamp the belt there", "step": "s19"}),
+                      "bore stop at y 696.3); fit the brass gear on the rack there", "step": "s13"}),
         Joint("head_pan", "Head pan (hub in two 6806 on the carriage, 1:1 gears)", "revolute", "carriage", "neck",
               (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), L.PAN, "deg", "head_pan", None,
               {"kind": "gear", "servos": ["col_pan_servo"], "gear_ratio": 1.0, "servo_deg_per_joint_deg": 1.0,
                "note": "goBILDA 2000 on the carriage, 25T module-2 pinion on its 1906 hub into a 25T gear on the hub: "
-                       "1:1. The mechanism turns +-135 (servo standard mode +-150); limited to +-90: past ~+120 relative to "
-                       "the top ring (which turns +-25.5) the low head's right ear meets the raised hero arm. The "
-                       "head's cables in a clock-spring cassette "
+                       "1:1, +-135 (servo standard mode +-150). Past ~+120 relative to the top ring the low head's right ear "
+                       "meets the raised hero arm: a coupled limit to add (not a clamp). The head's "
+                       "cables in a clock-spring cassette "
                        "(+-200 deg of ribbon)"},
               {"how": "servo at its centre pulse with the head facing the front; fit the pinion there", "step": "s13"}),
     ]
@@ -549,7 +535,7 @@ def _joints():
 
 # ------------------------------------------------------------------ the hardware, from the parts' features
 
-def _hardware(hw: Hw, P, posts, lift_servo, lift_hub, pan_servo, pan_hub, ring):
+def _hardware(hw: Hw, P, posts, lift_servo, pan_servo, pan_hub, ring):
     F = lambda pid: P[pid].features  # noqa: E731
     # -- posts on the foot plate (M5 flat heads from below into the posts' tapped ends) and the top plate
     for i, pid in enumerate(posts):
@@ -606,38 +592,22 @@ def _hardware(hw: Hw, P, posts, lift_servo, lift_hub, pan_servo, pan_hub, ring):
                  "s04", "column", thread="M4")
         P[post].features[f"face_ring{i + 1}"] = plane((p[0], p[1], np.sign(p[2]) * L.HALF), (0, 0, np.sign(p[2])))
         hw.mate("seated", ("col_base_ring", f"seat{i + 1}"), (post, f"face_ring{i + 1}"))
-    # -- lift drive: bracket on the foot plate, servo on the bracket, hub, pulley
-    for i in range(4):
-        h = F("col_lift_bracket")[f"hole_base{i + 1}"]
-        th = _near(F("col_foot_plate"), "brk", h["p"])
-        hw.screw(f"col_scr_liftbrk_{i + 1}", h["p"], -UP, [("col_lift_bracket", f"base{i + 1}")],
-                 ("col_foot_plate", f"hole_{th}", "metal", L.FOOT["t"]), "s05", "column", thread="M4")
-    hw.mate("seated", ("col_lift_bracket", "bottom"), ("col_foot_plate", "top"))
-    _servo_bolts(hw, P, lift_servo, "col_lift_bracket", "fl", "s05", "column", "lift")
-    hw.mate("seated", (lift_servo.id, "flange_back"), ("col_lift_bracket", "face"))
-    _hub_on(hw, lift_servo, lift_hub, "s06")
-    _on_hub(hw, P, "col_drive_pulley", lift_hub, "hub", "s06", "column", "pulley")
-    hw.mate("seated", ("col_drive_pulley", "hub_face"), (lift_hub.id, "top"))
-    # -- idler: inserts in its bracket, the top plate's screws, the axle through-bolt
-    for i in range(2):
-        iid = hw.insert(f"col_ins_idler_{i + 1}", "col_idler_bracket", f"ins{i + 1}", "s18", "column", L.INSERT_M4)
-        h = F("col_idler_bracket")[f"hole_ins{i + 1}"]
-        th = _near(F("col_top_plate"), "idler", h["p"])
-        hw.screw(f"col_scr_idler_{i + 1}", F("col_top_plate")[f"hole_{th}"]["p"], -UP, [("col_top_plate", th)],
-                 (iid, "thread", "insert", L.INSERT_M4["length_mm"] + 1.0), "s18", "column", thread="M4")
-    hw.mate("seated", ("col_idler_bracket", "top"), ("col_top_plate", "bottom"))
-    ax = F("col_idler_bracket")["hole_axle"]
-    far = np.asarray(ax["p"]) + unit(ax["d"]) * ax["depth"]
-    nid, nt = hw.nut("col_nut_idler", far, ax["d"], "s18", "column", thread="M5", reason="pivot", joins=["col_idler_bracket"])
-    hw.screw("col_bolt_idler", ax["p"], ax["d"], [("col_idler_bracket", "axle")], (nid, "thread", "nut", nt), "s18",
-             "column", thread="M5", note="The idler's axle: a through-bolt with a lock nut (pivot).")
-    F("col_idler")["hole_axle"] = axis(F("col_idler")["bore"]["p"], (0, 0, 1), 2.55)
-    hw.mate("concentric", ("col_bolt_idler", "shank"), ("col_idler", "hole_axle"))
-    # -- belt: on both pulleys, its left run through the carriage's clamp
-    hw.mate("press", ("col_belt", "inner_d"), ("col_drive_pulley", "band"), gap_mm=0.0, note="GT2 teeth in mesh")
-    hw.mate("press", ("col_belt", "inner_i"), ("col_idler", "bore"), gap_mm=0.0, note="on the idler's teeth")
-    hw.mate("press", ("col_belt", "run"), ("col_carriage", "clamp_slot"), gap_mm=0.0,
-            note="both belt ends pressed into the clamp's toothed slot and zip-tied")
+    # -- the lift: the rack on the back-right post (M3 into T-nuts at its ends), the servo on the carriage's
+    #    hanger, its brass pinion on the spline with the servo's centre screw
+    hw.mate("seated", ("col_lift_rack", "base"), ("col_post_br", "face_in_z"))
+    for i in range(len(L.RACK["screws_y"])):
+        h = F("col_lift_rack")[f"hole_s{i + 1}"]
+        tid = tnut_on("col_post_br", (0, 0, 1), h["p"][1], "M3", "s00", f"col_tnut_rack_{i + 1}")
+        hw.screw(f"col_scr_rack_{i + 1}", h["p"], h["d"], [("col_lift_rack", f"s{i + 1}")], (tid, "thread", "metal", L.TNUT_THREAD),
+                 "s00", "column", thread="M3")
+    _servo_bolts(hw, P, lift_servo, "col_carriage", "lh", "s10", "carriage", "lift")
+    hw.mate("seated", (lift_servo.id, "flange_back"), ("col_carriage", "hanger_face"))
+    hw.mate("spline", ("col_lift_pinion", "spline"), (lift_servo.id, "spline"), teeth=25,
+            note="fitted at the servo's centre pulse with the head at today's height")
+    hw.mate("seated", ("col_lift_pinion", "seat"), (lift_servo.id, "boss"))
+    hc = F("col_lift_pinion")["hole_c"]
+    hw.screw("col_scr_liftgear", hc["p"], hc["d"], [("col_lift_pinion", "c")], (lift_servo.id, "out_thr", "metal", 5.0),
+             "s13", "carriage", thread="M3", note="The servo's own centre screw through the brass gear.")
     # -- ring drives: brackets on the back posts, servos hung spline-down, hubs, pinions
     for key, (sv, hb) in ring.items():
         bid = f"col_{key}_bracket"
@@ -763,23 +733,24 @@ def _steps(asm: Assembly):
         return [f.id for f in asm.fasteners if f.id.startswith(prefixes)]
 
     asm.steps = [
-        Step("s01", "Column: four posts on the foot plate", ["col_foot_plate", "col_post_bl", "col_post_br", "col_post_fl",
+        Step("s00", "The lift rack on the back-right post (on the bench)", ["col_post_br", "col_lift_rack"],
+             F("col_tnut_rack", "col_scr_rack"), tools=["2.5 mm hex key"],
+             notes=["Two M3 into drop-in T-nuts in the post's front slot (the face toward the axis), teeth toward the "
+                    "axis, before the column goes together: the screws are driven from the column's inside."]),
+        Step("s01", "Column: four posts on the foot plate", ["col_foot_plate", "col_post_bl", "col_post_fl",
              "col_post_fr"], F("col_scr_post_bot"), tools=["3 mm hex key (M5 flat heads)", "M5 tap for the post ends"],
              notes=["Tap both ends of each post M5 (the 4.2 mm centre bore is the tap drill).",
                     "Flat heads from under the foot plate: they sit flush, the plate then lies flat on the Gil plate."]),
-        Step("s02", "MGN12 rails on the front posts' front faces", ["col_rail_l", "col_rail_r"], F("col_tnut_rail", "col_scr_rail"),
+        Step("s02", "MGN12 rails on the front posts' front faces",
+             ["col_rail_l", "col_rail_r"], F("col_tnut_rail", "col_scr_rail"),
              tools=["2.5 mm hex key", "a straightedge"],
              notes=["Drop-in M3 T-nuts in each front post's front slot; rails from y 365, both at the same height.",
-                    "Align the two rails parallel with the straightedge before tightening (the carriage spans them)."]),
+                    "Align the two rails parallel with the straightedge before tightening (the carriage spans them), "
+                    "and parallel to the lift rack."]),
         Step("s03", "Foot plate on the Gil plate", ["col_gil_plate"], F("col_scr_gil", "col_nut_gil"),
              tools=["4 mm hex key", "8 mm spanner"], notes=["Four M5 through both plates, lock nuts underneath."]),
         Step("s04", "Shell support ring round the pedestal's foot", ["col_base_ring"], F("col_tnut_ring", "col_scr_ring"),
              tools=["3 mm hex key"], notes=["Its top carries the kit's base top (B_T); set it flush with the skirt's top edge."]),
-        Step("s05", "Lift servo and its bracket", ["col_lift_bracket", "col_lift_servo"],
-             F("col_scr_liftbrk", "col_scr_liftfl", "col_nut_liftfl"), tools=["3 mm hex key", "2.5 mm hex key", "5.5 mm spanner"]),
-        Step("s06", "Centre the lift servo, then its hub and the drive pulley", ["col_lift_hub", "col_drive_pulley"],
-             F("col_scr_pulley"), tools=["servo tester or the r3x bench (1500 us)", "3 mm hex key"], joint="head_lift",
-             notes=["Send the centre pulse before fitting the hub: that is head_lift = 0."]),
         Step("s07", "Lower ring drive: bracket and servo", ["col_lower_bracket", "col_lower_servo"],
              F("col_tnut_lower", "col_scr_lowerbrk", "col_scr_lowerfl", "col_nut_lowerfl"), tools=["3 mm hex key", "2.5 mm hex key"],
              notes=["Build this drive on the bench (bracket, servo, hub, pinion: s07-s08) and bolt it to the back posts "
@@ -791,16 +762,23 @@ def _steps(asm: Assembly):
              F("col_tnut_top", "col_scr_topbrk", "col_scr_topfl", "col_nut_topfl"), tools=["3 mm hex key", "2.5 mm hex key"]),
         Step("s10", "Top ring pinion (centred servo)", ["col_top_hub", "col_top_pinion"], F("col_scr_tpin"),
              tools=["servo tester (1500 us)", "3 mm hex key"]),
-        Step("s11", "Carriage on the bench: bearings, pan hub, collar, pan gear",
-             ["col_carriage", "col_brg_lo", "col_brg_up", "col_neck_hub", "col_collar", "col_pan_gear"], F("col_scr_gear"),
+        Step("s10", "Carriage on the bench: the lift servo on its hanger", ["col_carriage", "col_lift_servo"],
+             F("col_scr_liftfl", "col_nut_liftfl"), tools=["2.5 mm hex key", "5.5 mm spanner"],
+             notes=["Long side down, spline toward the axis; four M3 through the flange and the hanger into lock nuts "
+                    "(before the pan hub goes in: its screws are driven toward the axis)."]),
+        Step("s11", "Carriage: bearings, pan hub, collar, pan gear",
+             ["col_brg_lo", "col_brg_up", "col_neck_hub", "col_collar", "col_pan_gear"], F("col_scr_gear"),
              tools=["arbor press or a bench vice", "2.5 mm hex key"],
              notes=["Press both 6806 into the housing against their shoulders; the hub in from the top; the collar "
                     "tight under the lower inner race with no end play.", "Pan gear on the flange, three M3."]),
         Step("s12", "Pan servo in the cradle", ["col_pan_servo"], F("col_scr_panfl", "col_nut_panfl"),
              tools=["2.5 mm hex key", "5.5 mm spanner"]),
-        Step("s13", "Centre the pan servo, then its hub and pinion", ["col_pan_hub", "col_pan_pinion"], F("col_scr_ppin"),
-             tools=["servo tester (1500 us)", "3 mm hex key"], joint="head_pan",
-             notes=["Hub gear turned so the head will face front; mesh the pinion there: head_pan = 0."]),
+        Step("s13", "Centre the pan and lift servos, then their gears", ["col_pan_hub", "col_pan_pinion", "col_lift_pinion"],
+             F("col_scr_ppin", "col_scr_liftgear"), tools=["servo tester (1500 us)", "3 mm hex key", "2.5 mm hex key"],
+             joint="head_pan",
+             notes=["Hub gear turned so the head will face front; mesh the pan pinion there: head_pan = 0.",
+                    "The brass lift gear goes on its spline once the carriage is on the rails (s14), the lift servo at "
+                    "its centre pulse with the head at today's height: head_lift = 0."]),
         Step("s14", "Blocks on the carriage, then the carriage onto the rails", ["col_block_l", "col_block_r"],
              F("col_scr_block"), tools=["2.5 mm hex key"],
              notes=["Bolt the blocks to the front plate on the bench; slide them onto the rails from the top before the "
@@ -812,15 +790,10 @@ def _steps(asm: Assembly):
              "col_clockspring"], F("col_scr_so"), tools=["3 mm hex key"],
              notes=["Wind the ribbon (250 mm) loosely on the tube with the head at pan 0, its outer end through the "
                     "case's slot to the service cable."]),
-        Step("s18", "Top plate, idler bracket, idler", ["col_top_plate", "col_idler_bracket", "col_idler"],
-             F("col_ins_idler", "col_scr_idler", "col_scr_post_top", "col_bolt_idler", "col_nut_idler"),
-             tools=["soldering iron (M4 inserts)", "3 mm and 4 mm hex keys", "8 mm spanner"]),
-        Step("s19", "Belt", ["col_belt"], [], tools=["zip ties"], joint="head_lift",
-             notes=[f"GT2 6 mm, open-ended, {_belt_loop():.0f} mm loop: round the drive pulley and the idler, both ends "
-                    "into the carriage's toothed slot with the lift servo centred and the head at today's height, "
-                    "taut (adjust by re-seating a tooth), zip-tied."]),
+        Step("s18", "Top plate", ["col_top_plate"], F("col_scr_post_top"), tools=["4 mm hex key"]),
         Step("s20", "Service cable", ["col_coil_cable"], [], tools=["zip ties"],
-             notes=["From the foot plate's cable hole up the inside front of the column to the carriage's web."]),
+             notes=["From the foot plate's cable hole up the inside front of the column to the carriage's web: the pan "
+                    "and lift servos' leads and the clock spring's ribbon (both servos ride the carriage)."]),
         Step("s21", "Neck spring (cosmetic)", ["neck_spring"], []),
     ]
 
@@ -833,9 +806,13 @@ def _bom(asm: Assembly):
         BomLine("gobilda-2000-servo", "Servo goBILDA 2000-0025-0002 (Dual Mode, 25-2 Torque)", 4, "servo",
                 source=GOBILDA + "2000-series-dual-mode-servo-25-2-torque/",
                 parts=["col_lift_servo", "col_pan_servo", "col_lower_servo", "col_top_servo"]),
-        BomLine("gobilda-1906-hub", "Servo hub goBILDA 1906, 25T, 32 mm", 4, "hardware",
+        BomLine("gobilda-1906-hub", "Servo hub goBILDA 1906, 25T, 32 mm", 3, "hardware",
                 source=GOBILDA + "1906-series-lightweight-servo-hub-25-tooth-spline-32mm-diameter/",
-                parts=["col_lift_hub", "col_pan_hub", "col_lower_hub", "col_top_hub"]),
+                parts=["col_pan_hub", "col_lower_hub", "col_top_hub"]),
+        BomLine("gear-brass-m08-48", "Brass servo gear, Mod 0.8, 48T, 25T spline (goBILDA brass servo gear range)", 1,
+                "hardware", parts=["col_lift_pinion"], inferred=True, inferred_note="tooth count / part number to confirm"),
+        BomLine("rack-m08", f"Gear rack, Mod 0.8, {L.RACK['y1'] - L.RACK['y0']:.0f} mm (cut)", 1, "hardware",
+                parts=["col_lift_rack"], inferred=True, inferred_note="goBILDA-style rack, part number to confirm"),
         BomLine("misumi-HFS5-2020", f"2020 extrusion (5 series), 4 x {L.POST_LEN:.1f} mm, ends tapped M5", 4, "hardware",
                 parts=[f"col_post_{x}" for x in ("bl", "br", "fl", "fr")]),
         BomLine("mgn12-rail-mgn12h", f"MGN12 rail + MGN12H carriage (cut to {L.RAIL['length']:g} mm)", 2, "hardware",
@@ -843,21 +820,19 @@ def _bom(asm: Assembly):
         BomLine("bearing-6806-2rs", "Ball bearing 6806-2RS, 30 x 42 x 7", 2, "bearing", parts=["col_brg_lo", "col_brg_up"]),
         BomLine("collar-30", "Clamp collar, one-piece, 30 mm bore, 45 x 13 (e.g. Ruland MSP-30-F)", 1, "hardware",
                 parts=["col_collar"]),
-        BomLine("gt2-belt-6", f"GT2 timing belt, 6 mm, open, {_belt_loop() + 60:.0f} mm (loop + clamp ends)", 1, "hardware",
-                parts=["col_belt"]),
-        BomLine("gt2-idler-20t", "GT2 20T toothed idler, 5 mm bore, 6 mm belt", 1, "hardware", parts=["col_idler"]),
         BomLine("standoff-92871A317", "Round standoff, 6 mm, M4 female, 24 mm (McMaster 92871A317)", 3, "hardware",
                 parts=[f"col_standoff_{i}" for i in (1, 2, 3)]),
         BomLine("tube-26x1.5", f"6061 tube 26 x 1.5, {L.TUBE['top'] - L.TUBE['y0']:.0f} mm (the neck)", 1, "hardware",
                 parts=["col_neck_tube"]),
-        BomLine("plate-gil", "Gil base plate (Ferreira's; 1/4 in aluminium)", 1, "hardware", parts=["col_gil_plate"],
-                inferred=True, inferred_note="outline inferred (see the part)"),
+        BomLine("plate-gil", "Gil base plate (Ferreira's Gil drive; 169.7 x 169.7 x 8; four 5.5 mm holes added "
+                "for the column's foot)", 1, "hardware", parts=["col_gil_plate"]),
         BomLine("plate-foot", "Column foot plate, 1/4 in 6061, 150 x 150 (waterjet, tapped)", 1, "hardware",
                 parts=["col_foot_plate"]),
         BomLine("plate-top", "Column top plate, 6 mm 6061, 100 x 100 (waterjet)", 1, "hardware", parts=["col_top_plate"]),
         BomLine("hub-pan", "Pan hub, turned 6061 (journal 30, flange 43, bore 26.1)", 1, "hardware", parts=["col_neck_hub"]),
-        BomLine("cable-coil-8", "Retractile cable, 8-core, ~490 mm coil", 1, "electronics", parts=["col_coil_cable"],
-                inferred=True, inferred_note="core count: pan servo (3) + clock-spring ribbon out (head servos, eyes)"),
+        BomLine("cable-coil-12", "Retractile cable, 12-core, ~480 mm coil", 1, "electronics", parts=["col_coil_cable"],
+                inferred=True, inferred_note="core count: pan + lift servos (6) + the clock spring's ribbon out (head "
+                                             "servos, eyes)"),
         BomLine("ribbon-ffc", "Flat ribbon / FFC for the clock spring, 250 mm", 1, "electronics", inferred=True,
                 inferred_note="conductor count follows the head's wiring"),
         BomLine("neck-spring", "Neck coil spring (cosmetic)", 1, "hardware", parts=["neck_spring"]),

@@ -401,7 +401,7 @@
         "min": -33.72,
         "max": 41.72
       },
-      "v_max": 70.0,
+      "v_max": 70.4,
       "a_max": 300,
       "j_max": 4000,
       "extended": false
@@ -412,16 +412,16 @@
       "unit": "deg",
       "parent": "head_lift",
       "hard": {
-        "min": -90.0,
-        "max": 90.0
+        "min": -135.0,
+        "max": 135.0
       },
       "soft": {
-        "min": -82.8,
-        "max": 82.8
+        "min": -124.2,
+        "max": 124.2
       },
       "animation": {
-        "min": -82.8,
-        "max": 82.8
+        "min": -124.2,
+        "max": 124.2
       },
       "v_max": 210.0,
       "a_max": 600,
@@ -536,7 +536,7 @@
         "pulse_max_us": 2500,
         "range_deg": 270,
         "status": "assumed",
-        "mm_per_deg": 0.3333
+        "mm_per_deg": 0.3351
       },
       "extended": false,
       "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = rest (0 mm), 800-2200 us = +/-20 mm."
@@ -944,10 +944,10 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-10-01T05:01:26+00:00",
+    "generated_at": "2026-10-01T11:38:55+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-10-01T05:01:19+00:00",
+      "generated_at": "2026-10-01T11:38:29+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
@@ -1382,10 +1382,10 @@
           "servo_model": "GOBILDA_2000_25_2",
           "servo_model_source": "part col_lift_servo name",
           "servo_deg_per_unit": null,
-          "mm_per_servo_deg": 0.3333,
+          "mm_per_servo_deg": 0.3351,
           "eta": 0.85,
           "linkages": [],
-          "how": "rack: 0.3333 mm per servo deg",
+          "how": "rack: 0.3351 mm per servo deg",
           "jacobian_at_rest": null
         },
         "first_contact": {
@@ -1412,8 +1412,8 @@
         ],
         "child_link": "column_internals/neck",
         "mech_limits": {
-          "min": -90.0,
-          "max": 90.0
+          "min": -135.0,
+          "max": 135.0
         },
         "drive": {
           "kind": "gear",
@@ -1645,7 +1645,7 @@
         ],
         "linkage": null,
         "servo_deg_per_unit": null,
-        "mm_per_servo_deg": 0.3333,
+        "mm_per_servo_deg": 0.3351,
         "eta": 0.85,
         "stall_nm": 2.4713,
         "no_load_dps": 300.0
@@ -1762,43 +1762,43 @@
         "id": "column_internals/column",
         "name": "Column (fixed: posts, plates, ring drives, lift drive)",
         "joint": null,
-        "kg": 5.9479,
+        "kg": 3.8894,
         "com": [
-          -0.14,
-          110.73,
-          -1.09
+          -0.42,
+          200.73,
+          -1.01
         ],
         "inertia": [
-          0.311,
-          0.08656,
-          0.3091,
-          0.0002974,
-          -5.696e-05,
-          0.002093
+          0.1875,
+          0.02381,
+          0.1856,
+          0.0003538,
+          -7.24e-05,
+          0.00165
         ],
-        "parts": 27,
-        "catalogue_parts": 16
+        "parts": 21,
+        "catalogue_parts": 12
       },
       {
         "id": "column_internals/carriage",
         "name": "Lift carriage (rides the rails)",
         "joint": "head_lift",
-        "kg": 0.3507,
+        "kg": 0.4883,
         "com": [
-          15.44,
-          458.4,
-          25.25
+          -4.14,
+          443.9,
+          17.59
         ],
         "inertia": [
-          0.0004387,
-          0.0008047,
-          0.0005547,
-          -4.267e-06,
-          0.000136,
-          3.275e-05
+          0.0008031,
+          0.001382,
+          0.001341,
+          -0.0003617,
+          -5.532e-05,
+          -0.0001099
         ],
-        "parts": 12,
-        "catalogue_parts": 9
+        "parts": 14,
+        "catalogue_parts": 10
       },
       {
         "id": "column_internals/neck",
@@ -2563,6 +2563,6 @@
         "note": "head_tilt's range as a function of head_lift (head_roll swept to its ends): outside it the arm comes within 1.0 mm of the body"
       }
     ],
-    "total_kg": 15.655
+    "total_kg": 13.734
   }
 }

@@ -1,6 +1,6 @@
 # Robot profile: mech model vs `robot.json`
 
-Generated 2026-10-01T05:01:26+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-01T05:01:19+00:00; assemblies r3x_droid, base, base_panels_closed, column_internals, hunter_head, lower_ring, middle_ring, top_ring; not fitted: base_panels_open, base_panels_port, internals_anderson, r3x_neck_guide_race, r3x_top_drive, r3x_lower_drive).
+Generated 2026-10-01T11:38:55+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-01T11:38:29+00:00; assemblies r3x_droid, base, base_panels_closed, column_internals, hunter_head, lower_ring, middle_ring, top_ring; not fitted: base_panels_open, base_panels_port, internals_anderson, r3x_neck_guide_race, r3x_top_drive, r3x_lower_drive).
 
 `robot.generated.json` is NOT live. To try it: runtime `R3X_PROFILE=profiles/r3x/robot.generated.json`, sim `?profile=generated`. To adopt it: `mech/.venv/bin/python -m rigsync --apply` (backs up robot.json).
 
@@ -32,12 +32,12 @@ Generated 2026-10-01T05:01:26+00:00 by `mech/.venv/bin/python -m rigsync` from `
 |  | head_lift | hard | -20 .. 20 | -37 .. 45 |  |
 |  | head_lift | soft | -19 .. 19 | -33.72 .. 41.72 |  |
 |  | head_lift | animation | -19 .. 19 | -33.72 .. 41.72 |  |
-|  | head_lift | v_max | 40 | 70 |  |
-| ⚠ | head_lift | actuator headlift.mm_per_deg | 0.21 | 0.3333 | servo pulse per mm changes: the same clip moves the lift a different distance on hardware |
+|  | head_lift | v_max | 40 | 70.4 |  |
+| ⚠ | head_lift | actuator headlift.mm_per_deg | 0.21 | 0.3351 | servo pulse per mm changes: the same clip moves the lift a different distance on hardware |
 |  | head_lift | actuator headlift.servo | SERVO_60KG_270 | GOBILDA_2000_25_2 |  |
-|  | head_pan | hard | -70 .. 70 | -90 .. 90 |  |
-|  | head_pan | soft | -66 .. 66 | -82.8 .. 82.8 |  |
-|  | head_pan | animation | -66 .. 66 | -82.8 .. 82.8 |  |
+|  | head_pan | hard | -70 .. 70 | -135 .. 135 |  |
+|  | head_pan | soft | -66 .. 66 | -124.2 .. 124.2 |  |
+|  | head_pan | animation | -66 .. 66 | -124.2 .. 124.2 |  |
 |  | head_pan | v_max | 150 | 210 |  |
 | ⚠ | head_pan | actuator neck.gear | 1.5 | 1 | servo pulse per joint degree changes (hardware only; the sim is unaffected) |
 |  | head_pan | actuator neck.servo | SERVO_35KG_270 | GOBILDA_2000_25_2 |  |
@@ -71,7 +71,7 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 | torso_top | torso_middle | torso_middle | 0, 0, 0 | 0, 1, 0 | gear - gear 4.25:1 | GOBILDA_2000_25_2 | clear |
 | hero_shoulder | torso_top | torso_top | 158.1, 528.4, 168.53 | -0.746, 0, 0.666 | direct - direct | DS3218_DUAL | clear |
 | hero_wrist | hero_shoulder | hero_shoulder | 283.27, 695.44, 308.82 | 0.498, 0.664, 0.558 | direct - direct | SERVO_7KG | clear |
-| head_lift | torso_top | - | 0, 0, 0 | 0, 1, 0 | gear - rack: 0.3333 mm per servo deg | GOBILDA_2000_25_2 | clear |
+| head_lift | torso_top | - | 0, 0, 0 | 0, 1, 0 | gear - rack: 0.3351 mm per servo deg | GOBILDA_2000_25_2 | clear |
 | head_pan | head_lift | head_lift | 0, 0, 0 | 0, 1, 0 | gear - gear 1:1 | GOBILDA_2000_25_2 | clear |
 | head_tilt | head_pan | head_pan | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | max +31.5 |
 | head_roll | head_tilt | head_tilt | 0, 738.3, 0 | 0, 0, 1 | push_rod_pair - push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg | GOBILDA_2000_25_2 | max +21 |
@@ -79,14 +79,14 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 
 ## Mass properties (per link, from the CAD)
 
-Total 15.655 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
+Total 13.734 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
 
 | link | moved by | kg | COM mm | Ixx Iyy Izz kg m² |
 |---|---|---|---|---|
 | base/base | ground | 3.187 | -0, 96, -1 | 9.63e-02 1.43e-01 9.58e-02 |
 | base_panels_closed/side_panels | ground | 0.314 | -0, 125, -0 | 8.69e-03 1.70e-02 8.63e-03 |
-| column_internals/column | ground | 5.948 | -0, 111, -1 | 3.11e-01 8.66e-02 3.09e-01 |
-| column_internals/carriage | head_lift | 0.351 | 15, 458, 25 | 4.39e-04 8.05e-04 5.55e-04 |
+| column_internals/column | ground | 3.889 | -0, 201, -1 | 1.88e-01 2.38e-02 1.86e-01 |
+| column_internals/carriage | head_lift | 0.488 | -4, 444, 18 | 8.03e-04 1.38e-03 1.34e-03 |
 | column_internals/neck | head_pan | 0.165 | -0, 508, -0 | 1.06e-03 3.70e-05 1.06e-03 |
 | hunter_head/neck | head_pan | 0.063 | 0, 730, -0 | 8.70e-05 1.13e-05 8.95e-05 |
 | hunter_head/cross | head_tilt | 0.003 | 0, 738, 0 | 8.76e-07 1.04e-06 1.96e-07 |
@@ -112,7 +112,7 @@ Total 15.655 kg. Printed parts: volume x density x fill; purchased parts: catalo
 | col_top_servo | GOBILDA_2000_25_2 | torso_top | 4.25:1 | 2.4713 | 300.0 |
 | hero_shoulder_servo | DS3218_DUAL | hero_shoulder | 1.0:1 | 1.9995 | 403.0 |
 | hero_wrist_servo | SERVO_7KG | hero_wrist | 1.0:1 | 0.6865 | 600.0 |
-| col_lift_servo | GOBILDA_2000_25_2 | head_lift | 0.3333 mm/servo deg | 2.4713 | 300.0 |
+| col_lift_servo | GOBILDA_2000_25_2 | head_lift | 0.3351 mm/servo deg | 2.4713 | 300.0 |
 | col_pan_servo | GOBILDA_2000_25_2 | head_pan | 1.0:1 | 2.4713 | 300.0 |
 | servo_l | GOBILDA_2000_25_2 | head_roll, head_tilt | linkage (live Jacobian) | 2.4713 | 300.0 |
 | servo_r | GOBILDA_2000_25_2 | head_roll, head_tilt | linkage (live Jacobian) | 2.4713 | 300.0 |

@@ -6,8 +6,9 @@
 * a web from the housing to the front plate, through the gap between the front posts;
 * a cradle on the +X side for the pan servo (goBILDA 2000, spline up), its flange on the cradle,
   four M3 into lock nuts under it;
-* a belt clamp on the back-left: the belt's clamped run passes through a slot the width and
-  thickness of the belt (toothed in print; the teeth are not modelled);
+* a hanger on the -X side for the lift servo (goBILDA 2000, spline +X into its brass pinion on the
+  rack, long side down): an arm off the housing's bottom out past the back-right post, a plate the
+  servo's flange bolts to (four M3 through the flange and the plate into lock nuts outside);
 * three ears on top of the housing for the clock-spring cassette's standoffs.
 """
 
@@ -19,7 +20,7 @@ from . import _layout as L
 from ._cad import at_angle, box, clearance_hole, cyl_y
 
 DEFAULTS = dict(housing=L.HOUSING, ear=L.EAR, standoff=L.STANDOFF, front=L.FRONT, web=L.WEB, cradle=L.CRADLE,
-                clamp=L.CLAMP, rail_x=L.RAIL["x"], block_holes=L.BLOCK["holes"], yc=L.YC)
+                hanger=L.HANGER, rail_x=L.RAIL["x"], block_holes=L.BLOCK["holes"], yc=L.YC)
 
 
 def cradle_y(P=None):
@@ -33,15 +34,21 @@ def pan_flange_holes():
     return [(sx + cl, sz + cz) for cl, cz in L.FLANGE_HOLES]
 
 
-def belt_x():
-    """(outer, inner) faces of the clamped run (x)."""
-    inner = -(L.R_DRIVE - L.BELT["tooth_pd_off"])
-    return inner - L.BELT["thick"], inner
+def lift_flange_holes():
+    """The lift servo's flange holes: (y, z); its long side runs down (-Y), across is +Z."""
+    _, y, z = L.LIFT_SPLINE
+    return [(y - cl, z + cw) for cl, cw in L.FLANGE_HOLES]
+
+
+def lift_flange_x():
+    """(back face, spline-side face) x of the lift servo's flange."""
+    x = L.LIFT_SPLINE[0]
+    return x + L.FLANGE_Y[0], x + L.FLANGE_Y[1]
 
 
 def make(params: dict | None = None, **kw):
     P = {**DEFAULTS, **(params or {}), **kw}
-    H, E, S, F, W, C, K = P["housing"], P["ear"], P["standoff"], P["front"], P["web"], P["cradle"], P["clamp"]
+    H, E, S, F, W, C, K = P["housing"], P["ear"], P["standoff"], P["front"], P["web"], P["cradle"], P["hanger"]
     feats: dict = {}
     # housing: bearing seats at both ends, a smaller bore between (the races' shoulders)
     body = cyl_y(0, 0, H["r"], H["y0"], H["y1"])
@@ -85,17 +92,20 @@ def make(params: dict | None = None, **kw):
     feats["cradle_top"] = plane((sx_, c1, sz_), (0, 1, 0))
     for i, (x, z) in enumerate(pan_flange_holes()):
         body = clearance_hole(body, feats, f"cr{i + 1}", (x, c1, z), (0, -1, 0), "M3", C["t"])
-    # belt clamp: a block round the clamped run, the belt through a slot its own size
-    bo, bi = belt_x()
-    zb, bw = L.BELT["z"], L.BELT["width"]
-    body = body + box(K["x0"], K["x1"], K["y0"], K["y1"], K["z0"], K["z1"])
-    body = body + box(-16.0, K["x1"], max(K["y0"], H["y0"]), K["y1"], K["z1"] - 0.01, -20.0)
-    body = body - box(bo, bi, K["y0"] - 1, K["y1"] + 1, zb - bw / 2, zb + bw / 2)
-    # the housing's bores last (the web, the cradle and the clamp's bridge reach into its wall)
+    # the lift servo's hanger: an arm off the housing's bottom, a plate behind the servo's flange
+    xb, _ = lift_flange_x()
+    _, ys, zs = L.LIFT_SPLINE
+    px0, px1 = xb - K["t"], xb
+    body = body + box(px0, K["arm_x1"], K["arm_y"][0], K["arm_y"][1], zs - 10.0, zs + 10.0)
+    body = body + box(px0, px1, ys - 44.0, K["y_top"], zs - K["half_z"], zs + K["half_z"])
+    body = body - box(px0 - 1, px1 + 1, ys - 30.5, ys + 10.5, zs - 10.5, zs + 10.5)
+    feats["hanger_face"] = plane((px1, ys, zs), (1, 0, 0))
+    for i, (y, z) in enumerate(lift_flange_holes()):
+        body = clearance_hole(body, feats, f"lh{i + 1}", (px1, y, z), (-1, 0, 0), "M3", K["t"])
+    # the housing's bores last (the web, the cradle and the hanger's arm reach into its wall)
     body = body - cyl_y(0, 0, H["seat_r"], H["y0"] - 1, lo[1]) - cyl_y(0, 0, H["seat_r"], up[0], H["y1"] + 1)
     body = body - cyl_y(0, 0, H["mid_r"], H["y0"] - 1, H["y1"] + 1)
-    feats["clamp_slot"] = plane((bi, (K["y0"] + K["y1"]) / 2, zb), (-1, 0, 0))   # the slot's inner wall (the belt's back)
     return finish(body, label="Lift carriage", params=P, features=feats, reference="",
                   printability=Print("front plate down", "front_back", True,
                                      "front plate on the bed, the housing standing up; supports under the cradle and "
-                                     "the clamp (or print the cradle and the clamp as separate bolted pieces)"))
+                                     "the hanger's arm (or print the cradle and the hanger as separate bolted pieces)"))

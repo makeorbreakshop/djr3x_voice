@@ -107,14 +107,14 @@ describe.skipIf(!built)('wasm performer', () => {
 
   it('lints against the Physical rig: a look past the column\'s pan range is caught', async () => {
     const w = await load();
-    // the central column pans +-90 (animation +-82.8): the committed looks (+-35) fit it ...
+    // the central column pans +-135 (animation +-124.2): the committed looks (+-35) fit it ...
     const errs = JSON.parse(w.lintShow(JSON.stringify(PHYSICAL), showFiles())).errors as string[];
     expect(errs.filter((e) => e.includes('head_pan'))).toEqual([]);
     // ... and a look past it is an error on the Physical rig
     const far = {
       ...(SHOW['../../../show/clips/look_around.json'] as Record<string, unknown>),
       id: 'look_far', title: 'Look far',
-      tracks: { head_pan: { mode: 'additive', keys: [[0, 0], [1, -100], [2, 100], [3, 0]] } },
+      tracks: { head_pan: { mode: 'additive', keys: [[0, 0], [1, -160], [2, 160], [3, 0]] } },
     };
     const files = JSON.stringify({ ...JSON.parse(showFiles()), 'show/clips/look_far.json': far });
     const farErrs = JSON.parse(w.lintShow(JSON.stringify(PHYSICAL), files)).errors as string[];

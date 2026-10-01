@@ -10,8 +10,6 @@ dimensions (cad = parametric), each in its own canonical frame. The assembly pla
                                        x, depth s = z (the post's face at s = 10, its centre at 0),
                                        along the slot = y (10 long); filling the T cavity up
                                        through the lips (thread 5 mm, drawn at the tap drill)
-    make(kind="idler")                 GT2 20T toothed idler, 5 mm bore (bearing inside), 6 mm belt:
-                                       axis +Z, centred, flanges r 9
     make(kind="collar")                one-piece clamp collar, 30 mm bore, 45 OD x 13 (its clamp
                                        screw belongs to it): axis +Y from 0
 """
@@ -63,13 +61,6 @@ def make(params: dict | None = None, **kw):
         feats["thread"] = axis((0, 0, 9.9), (0, 0, -1), tap, depth=9.9 - 4.9)
         feats["seat"] = plane((0, 0, 8.15), (0, 0, 1))
         label = f"Drop-in T-nut {P['thread']} (2020)"
-    elif k == "idler":
-        body = cyl((0, 0, -4.25), (0, 0, 1), 9.0, 1.0) + cyl((0, 0, -3.25), (0, 0, 1), L.R_IDLER - L.BELT["tooth_pd_off"], 6.5) \
-            + cyl((0, 0, 3.25), (0, 0, 1), 9.0, 1.0)
-        body = body - cyl((0, 0, -5), (0, 0, 1), 2.55, 10)
-        feats["bore"] = axis((0, 0, -4.25), (0, 0, 1), 2.55)
-        feats["face_b"] = plane((0, 0, -4.25), (0, 0, -1))
-        label = "GT2 20T idler, 5 mm bore"
     elif k == "collar":
         body = cyl((0, 0, 0), (0, 1, 0), 22.5, 13.0) - cyl((0, -1, 0), (0, 1, 0), 15.0, 15.0)
         body = body - box(-0.5, 0.5, -1, 14, 15.0 - 0.5, 23)                  # the clamp slit
