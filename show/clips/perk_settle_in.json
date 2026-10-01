@@ -1,0 +1,15 @@
+{
+  "id": "perk_settle_in",
+  "kind": "clip",
+  "title": "Settle in",
+  "description": "Listening perk: rises a little and settles in to hear more",
+  "tags": ["perk", "listen", "settle", "backchannel"],
+  "tier": "free",
+  "duration": 1.2,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, 2.5], [0.75, 1.5], [1.2, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -2], [0.75, -1], [1.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -3], [1.2, 0]]}
+  }
+}

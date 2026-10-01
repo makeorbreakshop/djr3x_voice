@@ -1,0 +1,16 @@
+{
+  "id": "ponder_left",
+  "kind": "clip",
+  "title": "Ponder (left)",
+  "description": "Thinking: gaze drifts up and to his left, visor half shut",
+  "tags": ["thinking", "hmm", "ponder", "let me see"],
+  "tier": "free",
+  "duration": 2.4,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.7, 12], [1.8, 12], [2.4, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, -7], [1.8, -7], [2.4, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.7, 4], [1.8, 4], [2.4, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.8, 5], [2.4, 0]]}
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "huh_pull_back",
+  "kind": "clip",
+  "title": "Huh? (pull back)",
+  "description": "Huh?: pulls back with a jolt, chin up, visor wide",
+  "tags": ["confused", "huh", "what", "say again"],
+  "tier": "free",
+  "duration": 1.5,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, -4], [1.0, -4], [1.5, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.32, -5], [1.0, -5], [1.5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.24, -6.5], [1.0, -6.5], [1.5, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.4, 4], [1.0, 4], [1.5, 0]]}
+  }
+}

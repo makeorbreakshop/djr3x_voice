@@ -6,8 +6,13 @@
    "kind": "mood",
    "description": "finds it funny, a laugh",
    "pool": [
-    "beat_bop",
+    "chuckle_bob",
+    "ha_ha",
+    "head_shake_laugh",
+    "giggle_bounce",
+    "laugh_back",
     "visor_flutter",
+    "beat_bop",
     "head_cant"
    ]
   },
@@ -17,9 +22,13 @@
    "description": "fired up, let's go",
    "pool": [
     "excited",
+    "lets_go",
     "fist_pump",
     "beat_headbang",
-    "arm_throw"
+    "arm_throw",
+    "hype_bounce",
+    "power_nod",
+    "hype_shimmy"
    ]
   },
   {
@@ -29,7 +38,12 @@
    "pool": [
     "tilt_curious",
     "head_cant",
-    "lean_in"
+    "lean_in",
+    "peer_left",
+    "peer_right",
+    "squint_in",
+    "lean_in_left",
+    "lean_in_right"
    ]
   },
   {
@@ -39,7 +53,11 @@
    "pool": [
     "huh",
     "head_cant",
-    "shrug"
+    "shrug",
+    "double_cant",
+    "confused_scan",
+    "confused_squint",
+    "huh_pull_back"
    ]
   },
   {
@@ -49,7 +67,11 @@
    "pool": [
     "visor_flip",
     "double_take",
-    "lean_in"
+    "lean_in",
+    "whoa",
+    "impressed_whoa",
+    "impressed_nod",
+    "impressed_lean_back"
    ]
   },
   {
@@ -58,7 +80,12 @@
    "description": "sorry to hear it, feels for them",
    "pool": [
     "sad_droop",
-    "droop"
+    "droop",
+    "aww",
+    "sympathy_tilt",
+    "sympathy_nod",
+    "sympathy_glance_down",
+    "sympathy_sigh"
    ]
   },
   {
@@ -68,7 +95,12 @@
    "pool": [
     "recoil",
     "visor_flip",
-    "double_take"
+    "double_take",
+    "startle_jolt",
+    "surprised_blink",
+    "whoa_snap_left",
+    "whoa_snap_right",
+    "huh_pull_back"
    ]
   },
   {
@@ -77,7 +109,12 @@
    "description": "pondering, let me see",
    "pool": [
     "thinking",
-    "look_up_think"
+    "look_up_think",
+    "hmm",
+    "ponder_left",
+    "ponder_right",
+    "chin_tap",
+    "compute_ticks"
    ]
   },
   {
@@ -86,7 +123,11 @@
    "description": "pleased with himself, showing off",
    "pool": [
     "visor_flip",
-    "power_up"
+    "power_up",
+    "smug_lean_back",
+    "smug_slow_nod",
+    "head_toss",
+    "shoulder_brush"
    ]
   },
   {
@@ -95,7 +136,11 @@
    "description": "not having it, unimpressed",
    "pool": [
     "head_shake",
-    "no"
+    "no",
+    "eye_roll",
+    "turn_away_left",
+    "turn_away_right",
+    "annoyed_sigh"
    ]
   },
   {
@@ -105,7 +150,12 @@
    "pool": [
     "visor_flutter",
     "glitch_twitch",
-    "glitch_small"
+    "glitch_small",
+    "blush",
+    "glance_away_left",
+    "glance_away_right",
+    "shrink",
+    "fluster_twitch"
    ]
   },
   {
@@ -114,7 +164,12 @@
    "description": "warm towards the person",
    "pool": [
     "nod",
-    "bow"
+    "bow",
+    "fond_tilt",
+    "fond_lean",
+    "fond_sway",
+    "nod_tilted_left",
+    "nod_tilted_right"
    ]
   },
   {
@@ -124,7 +179,9 @@
    "pool": [
     "nod",
     "double_nod",
-    "yes"
+    "yes",
+    "firm_nod",
+    "nod_small"
    ]
   },
   {
@@ -133,7 +190,9 @@
    "description": "shakes his head no",
    "pool": [
     "head_shake",
-    "no"
+    "no",
+    "no_small_shake",
+    "finger_wag"
    ]
   },
   {
@@ -141,7 +200,9 @@
    "kind": "gesture",
    "description": "who knows",
    "pool": [
-    "shrug"
+    "shrug",
+    "shrug_small",
+    "shrug_hand_out"
    ]
   },
   {
@@ -149,7 +210,9 @@
    "kind": "gesture",
    "description": "points out at someone or something",
    "pool": [
-    "point_forward"
+    "point_forward",
+    "point_small",
+    "point_jab"
    ]
   },
   {
@@ -157,7 +220,9 @@
    "kind": "gesture",
    "description": "a wave of the arm",
    "pool": [
-    "arm_wave"
+    "arm_wave",
+    "wave_small",
+    "salute_flick"
    ]
   },
   {
@@ -166,7 +231,10 @@
    "description": "a greeting (once, at the start)",
    "pool": [
     "greet",
-    "arm_wave"
+    "arm_wave",
+    "wave_small",
+    "hello_perk",
+    "salute_flick"
    ]
   },
   {
@@ -175,7 +243,10 @@
    "description": "a farewell",
    "pool": [
     "arm_wave",
-    "bow"
+    "bow",
+    "wave_small",
+    "salute_flick",
+    "bow_small"
    ]
   },
   {
@@ -183,7 +254,10 @@
    "kind": "gesture",
    "description": "leans in to listen or confide",
    "pool": [
-    "lean_in"
+    "lean_in",
+    "lean_in_left",
+    "lean_in_right",
+    "squint_in"
    ]
   },
   {
@@ -191,7 +265,9 @@
    "kind": "gesture",
    "description": "pumps his arm, yes!",
    "pool": [
-    "fist_pump"
+    "fist_pump",
+    "fist_pump_single",
+    "fist_raise"
    ]
   },
   {
@@ -200,7 +276,9 @@
    "description": "takes a bow",
    "pool": [
     "bow",
-    "applause_thanks"
+    "applause_thanks",
+    "bow_small",
+    "bow_flourish"
    ]
   },
   {
@@ -209,7 +287,9 @@
    "description": "the energy builds, anticipation",
    "pool": [
     "ring_sweep",
-    "lean_in"
+    "lean_in",
+    "build_rise",
+    "build_bob_accel"
    ]
   },
   {
@@ -219,7 +299,8 @@
    "pool": [
     "hype_drop",
     "beat_drop",
-    "arm_throw"
+    "arm_throw",
+    "drop_slam"
    ]
   },
   {
@@ -229,7 +310,12 @@
    "pool": [
     "excited",
     "fist_pump",
-    "beat_headbang"
+    "beat_headbang",
+    "lets_go",
+    "hype_bounce",
+    "power_nod",
+    "hype_shimmy",
+    "fist_raise"
    ]
   },
   {
@@ -238,7 +324,9 @@
    "description": "bringing it down, chill",
    "pool": [
     "idle_still",
-    "droop"
+    "droop",
+    "wind_down_sway",
+    "settle_down"
    ]
   },
   {
@@ -246,7 +334,9 @@
    "kind": "look",
    "description": "glance down at his decks",
    "pool": [
-    "tinker_decks"
+    "tinker_decks",
+    "decks_glance",
+    "decks_nod"
    ]
   },
   {
@@ -255,7 +345,9 @@
    "description": "look out across the crowd",
    "pool": [
     "ring_sweep",
-    "look_around"
+    "look_around",
+    "crowd_scan_left",
+    "crowd_scan_right"
    ]
   },
   {
@@ -265,7 +357,9 @@
    "pool": [
     "look_around",
     "glance_left",
-    "glance_right"
+    "glance_right",
+    "crowd_scan_left",
+    "crowd_scan_right"
    ]
   },
   {
@@ -273,7 +367,11 @@
    "kind": "listen",
    "description": "the guest starts talking: he perks up",
    "pool": [
-    "beat_bop"
+    "perk_up",
+    "perk_visor_pop",
+    "perk_settle_in",
+    "perk_turn_left",
+    "perk_turn_right"
    ],
    "cooldown_s": 2.5
   },
@@ -282,7 +380,11 @@
    "kind": "listen",
    "description": "a phrase lands: mm-hm",
    "pool": [
-    "nod"
+    "mm_hm",
+    "nod_small",
+    "nod_blink",
+    "nod_tilted_left",
+    "nod_tilted_right"
    ],
    "cooldown_s": 1.5
   },
@@ -291,8 +393,12 @@
    "kind": "listen",
    "description": "the guest pauses: go on?",
    "pool": [
-    "head_cant",
-    "tilt_curious"
+    "go_on_left",
+    "go_on_right",
+    "go_on_chin",
+    "go_on_visor",
+    "cock_left",
+    "cock_right"
    ],
    "cooldown_s": 3.0
   },
@@ -301,8 +407,11 @@
    "kind": "listen",
    "description": "the guest's voice rises: a question",
    "pool": [
-    "huh",
-    "head_cant"
+    "brow_raise",
+    "cock_left",
+    "cock_right",
+    "lean_peek",
+    "go_on_chin"
    ],
    "cooldown_s": 3.0
   },
@@ -311,8 +420,10 @@
    "kind": "listen",
    "description": "something funny while listening",
    "pool": [
-    "beat_bop",
-    "visor_flutter"
+    "chuckle_tiny",
+    "visor_giggle",
+    "amused_waggle",
+    "snort"
    ],
    "cooldown_s": 3.0
   },
@@ -321,8 +432,10 @@
    "kind": "listen",
    "description": "something sad while listening",
    "pool": [
-    "sad_droop",
-    "droop"
+    "concern_soften",
+    "concern_tilt",
+    "concern_sink",
+    "concern_slow_nod"
    ],
    "cooldown_s": 5.0
   },
@@ -331,8 +444,11 @@
    "kind": "listen",
    "description": "something surprising while listening",
    "pool": [
-    "double_take",
-    "visor_flip"
+    "wow_perk",
+    "wow_blink",
+    "wow_pull_back",
+    "wow_double_blink",
+    "perk_visor_pop"
    ],
    "cooldown_s": 4.0
   }

@@ -1,0 +1,16 @@
+{
+  "id": "sympathy_glance_down",
+  "kind": "clip",
+  "title": "Glance down",
+  "description": "Sympathetic: looks down and aside, arm sags a little",
+  "tags": ["sad", "sorry", "oh no", "down"],
+  "tier": "free",
+  "duration": 2.4,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.7, -8], [1.8, -8], [2.4, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, 8], [1.8, 8], [2.4, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 8], [1.8, 8], [2.4, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.8, -8], [1.8, -8], [2.4, 0]]}
+  }
+}

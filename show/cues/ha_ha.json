@@ -1,0 +1,13 @@
+{
+  "id": "ha_ha",
+  "kind": "cue",
+  "title": "Ha ha",
+  "description": "Chuckles: lift bobs and visor flutters, eyes flash, chest pulses",
+  "tags": ["laugh", "amused", "ha", "funny"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "chuckle_bob"},
+    {"at": 0, "do": "eyes", "pattern": "flash", "duration": 0.5},
+    {"at": 0, "do": "chest", "command": "SF"}
+  ]
+}

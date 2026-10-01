@@ -1,0 +1,14 @@
+{
+  "id": "wow_double_blink",
+  "kind": "clip",
+  "title": "Double blink",
+  "description": "Listening, wow: two quick blinks, did I hear that?",
+  "tags": ["wow", "listen", "surprised", "blink", "backchannel"],
+  "tier": "free",
+  "duration": 1.15,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.22, 4], [0.46, -2], [0.7, 4], [0.94, -2], [1.15, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 1.5], [1.15, 0]]}
+  }
+}

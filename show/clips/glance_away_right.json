@@ -1,0 +1,16 @@
+{
+  "id": "glance_away_right",
+  "kind": "clip",
+  "title": "Bashful (right)",
+  "description": "Embarrassed: visor drops, glances away to his right, a twitch",
+  "tags": ["embarrassed", "oops", "bashful", "flustered"],
+  "tier": "free",
+  "duration": 2.1,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 9], [1.5, 9], [2.1, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.45, -14], [0.9, -14], [1.1, -11], [1.3, -14], [1.6, -14], [2.1, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.45, 6], [1.6, 6], [2.1, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.5, -3], [1.6, -3], [2.1, 0]]}
+  }
+}

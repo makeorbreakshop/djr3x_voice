@@ -1,0 +1,15 @@
+{
+  "id": "power_nod",
+  "kind": "clip",
+  "title": "Power nod",
+  "description": "Hard approving nods, like the track just dropped",
+  "tags": ["hype", "yeah", "nod", "groove"],
+  "tier": "free",
+  "duration": 2.2,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -3], [0.8, 6], [1.2, -2], [1.65, 6], [2.2, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.8, -3], [1.2, 0], [1.65, -3], [2.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -6], [1.65, -5], [2.2, 0]]}
+  }
+}

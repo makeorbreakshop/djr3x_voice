@@ -1,0 +1,13 @@
+{
+  "id": "aww",
+  "kind": "cue",
+  "title": "Aww",
+  "description": "Sympathetic 'aww': a slow head tilt, eyes soften, chest dims",
+  "tags": ["sad", "sorry", "aww", "sympathy"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "sympathy_tilt"},
+    {"at": 0, "do": "eyes", "pattern": "idle", "duration": 2.2},
+    {"at": 0, "do": "chest", "command": "X2", "hold": 2.2}
+  ]
+}

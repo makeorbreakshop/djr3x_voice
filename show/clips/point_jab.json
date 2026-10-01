@@ -1,0 +1,16 @@
+{
+  "id": "point_jab",
+  "kind": "clip",
+  "title": "Point jab",
+  "description": "Points and jabs twice: you, yes you",
+  "tags": ["point", "you", "yes you", "jab"],
+  "tier": "free",
+  "duration": 2.3,
+  "interruptible_after": 0.6,
+  "tracks": {
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.65, 26], [1.0, 20], [1.35, 26], [1.7, 20], [2.3, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -20], [1.7, -20], [2.3, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.65, -3], [1.0, 1], [1.35, -3], [1.7, 1], [2.3, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, -5], [1.7, -5], [2.3, 0]]}
+  }
+}

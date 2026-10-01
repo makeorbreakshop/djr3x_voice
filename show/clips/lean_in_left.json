@@ -1,0 +1,17 @@
+{
+  "id": "lean_in_left",
+  "kind": "clip",
+  "title": "Lean in (left)",
+  "description": "Leans in from his left, ear first, to listen or confide",
+  "tags": ["lean", "listen", "secret", "tell me"],
+  "tier": "free",
+  "duration": 2.4,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.8, 5], [2.4, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.6, 8], [1.8, 8], [2.4, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.8, 5], [2.4, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 2], [1.8, 2], [2.4, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [0.8, 4], [1.8, 4], [2.4, 0]]}
+  }
+}

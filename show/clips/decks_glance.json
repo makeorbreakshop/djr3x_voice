@@ -1,0 +1,15 @@
+{
+  "id": "decks_glance",
+  "kind": "clip",
+  "title": "Glance at decks",
+  "description": "Glances down at his decks and back up",
+  "tags": ["decks", "look down", "check"],
+  "tier": "free",
+  "duration": 1.6,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.45, 10], [1.0, 10], [1.6, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.45, -8], [1.0, -8], [1.6, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.4, 4], [1.0, 4], [1.6, 0]]}
+  }
+}

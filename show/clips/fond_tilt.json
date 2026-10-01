@@ -1,0 +1,15 @@
+{
+  "id": "fond_tilt",
+  "kind": "clip",
+  "title": "Fond tilt",
+  "description": "Fond: a warm head tilt and a slow soft nod",
+  "tags": ["fond", "warm", "aww", "friend"],
+  "tier": "free",
+  "duration": 2.2,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.6, 5], [2.2, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 2], [1.0, 5], [1.4, 2], [2.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 4], [1.6, 4], [2.2, 0]]}
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "lean_peek",
+  "kind": "clip",
+  "title": "Lean and peek",
+  "description": "Listening, a question: leans a touch closer, chin up, visor open",
+  "tags": ["question", "listen", "curious", "lean", "backchannel"],
+  "tier": "free",
+  "duration": 1.2,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 3], [0.8, 3], [1.2, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -2], [0.8, -2], [1.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -3], [0.8, -3], [1.2, 0]]}
+  }
+}

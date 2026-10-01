@@ -1,0 +1,13 @@
+{
+  "id": "lets_go",
+  "kind": "cue",
+  "title": "Let's go",
+  "description": "Fired up: bounces and pumps the arm, eyes flash, chest chases",
+  "tags": ["hype", "yeah", "lets go", "excited"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "hype_bounce"},
+    {"at": 0, "do": "eyes", "pattern": "flash", "duration": 0.6},
+    {"at": 0, "do": "chest", "command": "B180", "hold": 1.8}
+  ]
+}

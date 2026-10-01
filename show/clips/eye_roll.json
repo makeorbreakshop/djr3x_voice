@@ -1,0 +1,16 @@
+{
+  "id": "eye_roll",
+  "kind": "clip",
+  "title": "Eye roll",
+  "description": "Annoyed: the visor rolls up and the head swings round, ugh",
+  "tags": ["annoyed", "eye roll", "ugh", "whatever"],
+  "tier": "free",
+  "duration": 1.9,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -8], [1.0, -8], [1.4, 4], [1.9, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -6], [1.0, -6], [1.4, 2], [1.9, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.4, -6], [1.0, 6], [1.4, 6], [1.9, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.5, 4], [1.0, -4], [1.4, -4], [1.9, 0]]}
+  }
+}

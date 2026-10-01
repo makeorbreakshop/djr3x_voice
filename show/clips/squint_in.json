@@ -1,0 +1,15 @@
+{
+  "id": "squint_in",
+  "kind": "clip",
+  "title": "Squint in",
+  "description": "Leans in and squints, then the visor pops open: go on",
+  "tags": ["curious", "squint", "tell me more", "lean"],
+  "tier": "free",
+  "duration": 2.2,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 6], [1.75, 6], [2.2, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 3], [1.1, 3], [1.45, -2], [1.75, -2], [2.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 7], [1.1, 7], [1.45, -6], [1.75, -6], [2.2, 0]]}
+  }
+}

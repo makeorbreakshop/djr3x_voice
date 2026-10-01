@@ -1,0 +1,15 @@
+{
+  "id": "settle_down",
+  "kind": "clip",
+  "title": "Settle down",
+  "description": "Winding down: settles lower with a long breath out",
+  "tags": ["chill", "wind down", "settle", "relax"],
+  "tier": "free",
+  "duration": 2.5,
+  "interruptible_after": 0.6,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 2], [1.6, -5], [2.0, -5], [2.5, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [1.6, 4], [2.0, 4], [2.5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [1.4, 7], [2.0, 7], [2.5, 0]]}
+  }
+}

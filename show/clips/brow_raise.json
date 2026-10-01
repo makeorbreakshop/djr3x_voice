@@ -1,0 +1,14 @@
+{
+  "id": "brow_raise",
+  "kind": "clip",
+  "title": "Brow raise",
+  "description": "Listening, a question: visor flicks up with a small rise",
+  "tags": ["question", "listen", "curious", "brows", "backchannel"],
+  "tier": "free",
+  "duration": 0.8,
+  "interruptible_after": 0.15,
+  "tracks": {
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.2, -3], [0.5, -3], [0.8, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, 1.5], [0.8, 0]]}
+  }
+}

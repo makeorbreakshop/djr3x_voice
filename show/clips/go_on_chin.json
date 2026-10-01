@@ -1,0 +1,14 @@
+{
+  "id": "go_on_chin",
+  "kind": "clip",
+  "title": "Go on (chin)",
+  "description": "Listening 'go on?': chin lifts and lift rises a touch, waiting",
+  "tags": ["go on", "listen", "chin", "backchannel"],
+  "tier": "free",
+  "duration": 1.0,
+  "interruptible_after": 0.25,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -2.5], [0.65, -2.5], [1.0, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, 1.5], [0.65, 1.5], [1.0, 0]]}
+  }
+}

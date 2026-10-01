@@ -1,0 +1,16 @@
+{
+  "id": "sympathy_tilt",
+  "kind": "clip",
+  "title": "Sympathy tilt",
+  "description": "Sympathetic: a slow tilt of the head, chin down, visor soft",
+  "tags": ["sad", "sorry", "aww", "sympathy"],
+  "tier": "free",
+  "duration": 2.4,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.7, 6], [1.8, 6], [2.4, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, 5], [1.8, 5], [2.4, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 7], [1.8, 7], [2.4, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.8, -3], [1.8, -3], [2.4, 0]]}
+  }
+}

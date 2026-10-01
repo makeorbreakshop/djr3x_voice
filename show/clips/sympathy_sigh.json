@@ -1,0 +1,15 @@
+{
+  "id": "sympathy_sigh",
+  "kind": "clip",
+  "title": "Sigh",
+  "description": "Sympathetic sigh: rises, then sinks lower, visor drifts down",
+  "tags": ["sad", "sigh", "aww", "sorry"],
+  "tier": "free",
+  "duration": 2.5,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.5, 2.5], [1.3, -5], [2.0, -5], [2.5, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, -2], [1.3, 5], [2.0, 5], [2.5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [1.2, 7], [2.0, 7], [2.5, 0]]}
+  }
+}

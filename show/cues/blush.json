@@ -1,0 +1,13 @@
+{
+  "id": "blush",
+  "kind": "cue",
+  "title": "Blush",
+  "description": "Embarrassed: glances away with the visor dropped, eyes flicker, chest fault blip",
+  "tags": ["embarrassed", "oops", "bashful", "flustered"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "glance_away_right"},
+    {"at": 0, "do": "eyes", "pattern": "thinking", "duration": 0.7},
+    {"at": 0.05, "do": "chest", "command": "X3", "hold": 0.3}
+  ]
+}

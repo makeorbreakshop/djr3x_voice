@@ -1,0 +1,16 @@
+{
+  "id": "fist_pump_single",
+  "kind": "clip",
+  "title": "Single pump",
+  "description": "One quick fist pump, yes!",
+  "tags": ["yeah", "yes", "pump", "nice"],
+  "tier": "free",
+  "duration": 1.7,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.65, 24], [1.05, 16], [1.7, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -25], [1.05, -25], [1.7, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.65, 4], [1.05, 1], [1.7, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.65, -3], [1.05, 2], [1.7, 0]]}
+  }
+}

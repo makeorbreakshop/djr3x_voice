@@ -1,0 +1,13 @@
+{
+  "id": "hmm",
+  "kind": "cue",
+  "title": "Hmm",
+  "description": "Ponders: gaze drifts up and aside, thinking eyes, chest thinks",
+  "tags": ["thinking", "hmm", "ponder", "let me see"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "ponder_left"},
+    {"at": 0, "do": "eyes", "pattern": "thinking", "duration": 2.0},
+    {"at": 0, "do": "chest", "command": "ST", "hold": 2.0}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "nod_blink",
+  "kind": "clip",
+  "title": "Blink nod",
+  "description": "Listening nod: chin dips as the visor half-blinks",
+  "tags": ["nod", "listen", "blink", "backchannel"],
+  "tier": "free",
+  "duration": 0.9,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, 2.5], [0.9, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 4], [0.9, 0]]}
+  }
+}

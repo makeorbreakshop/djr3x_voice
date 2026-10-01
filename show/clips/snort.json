@@ -1,0 +1,15 @@
+{
+  "id": "snort",
+  "kind": "clip",
+  "title": "Snort",
+  "description": "Listening, amused: a quick snort, chin flicks up then down",
+  "tags": ["laugh", "listen", "amused", "snort", "backchannel"],
+  "tier": "free",
+  "duration": 0.75,
+  "interruptible_after": 0.15,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.22, -2], [0.48, 1], [0.75, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.22, -3], [0.75, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.26, 1], [0.75, 0]]}
+  }
+}

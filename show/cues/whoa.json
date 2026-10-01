@@ -1,0 +1,13 @@
+{
+  "id": "whoa",
+  "kind": "cue",
+  "title": "Whoa",
+  "description": "Impressed 'whoa': rises, chin back, visor wide, eyes flash, then a slow nod",
+  "tags": ["impressed", "whoa", "wow", "nice"],
+  "tier": "free",
+  "actions": [
+    {"at": 0, "do": "clip", "id": "impressed_whoa"},
+    {"at": 0.1, "do": "eyes", "pattern": "flash", "duration": 0.6},
+    {"at": 0.1, "do": "chest", "command": "SF"}
+  ]
+}

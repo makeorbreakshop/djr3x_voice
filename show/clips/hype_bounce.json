@@ -1,0 +1,16 @@
+{
+  "id": "hype_bounce",
+  "kind": "clip",
+  "title": "Hype bounce",
+  "description": "Fired up: bounces on the lift, chin up, arm pumps with it",
+  "tags": ["hype", "yeah", "lets go", "bounce"],
+  "tier": "free",
+  "duration": 1.8,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, 4.5], [0.7, 0.5], [1.05, 4.5], [1.4, 0.5], [1.8, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -4], [0.7, 1], [1.05, -4], [1.4, 1], [1.8, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, -7], [1.4, -5], [1.8, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.4, 10], [0.75, 3], [1.1, 10], [1.8, 0]]}
+  }
+}

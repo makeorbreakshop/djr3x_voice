@@ -1,0 +1,15 @@
+{
+  "id": "double_cant",
+  "kind": "clip",
+  "title": "Double cant",
+  "description": "Confused: cants one way, then the other, can't make it out",
+  "tags": ["confused", "huh", "what", "cant"],
+  "tier": "free",
+  "duration": 2.2,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.45, 5], [0.95, 5], [1.4, -5], [1.8, -5], [2.2, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.45, 4], [0.95, 4], [1.4, -4], [1.8, -4], [2.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.35, -5], [1.8, -5], [2.2, 0]]}
+  }
+}

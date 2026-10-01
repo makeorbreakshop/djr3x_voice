@@ -1,0 +1,15 @@
+{
+  "id": "perk_up",
+  "kind": "clip",
+  "title": "Perk up",
+  "description": "Listening perk: lifts a touch, visor opens, chin up",
+  "tags": ["perk", "listen", "attentive", "backchannel"],
+  "tier": "free",
+  "duration": 0.9,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.32, 2.5], [0.9, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.24, -3], [0.9, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -1.5], [0.9, 0]]}
+  }
+}

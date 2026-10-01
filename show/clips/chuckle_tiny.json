@@ -1,0 +1,14 @@
+{
+  "id": "chuckle_tiny",
+  "kind": "clip",
+  "title": "Tiny chuckle",
+  "description": "Listening, amused: two little lift bounces, visor squints",
+  "tags": ["laugh", "listen", "amused", "chuckle", "backchannel"],
+  "tier": "free",
+  "duration": 1.0,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.25, 1.5], [0.5, 0], [0.75, 1.5], [1.0, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, 3], [0.75, 3], [1.0, 0]]}
+  }
+}

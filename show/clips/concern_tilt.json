@@ -1,0 +1,15 @@
+{
+  "id": "concern_tilt",
+  "kind": "clip",
+  "title": "Concerned tilt",
+  "description": "Listening, sad news: a slow, gentle head tilt, chin down",
+  "tags": ["sad", "listen", "concern", "aww", "backchannel"],
+  "tier": "free",
+  "duration": 1.2,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.5, -1.5], [0.8, -1.5], [1.2, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, 2], [0.8, 2], [1.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.45, 3], [0.8, 3], [1.2, 0]]}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "concern_slow_nod",
+  "kind": "clip",
+  "title": "Slow nod",
+  "description": "Listening, sad news: one slow, understanding nod",
+  "tags": ["sad", "listen", "concern", "nod", "backchannel"],
+  "tier": "free",
+  "duration": 1.2,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.55, 3.5], [1.2, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 2.5], [1.2, 0]]}
+  }
+}

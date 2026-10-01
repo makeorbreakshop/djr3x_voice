@@ -1,0 +1,16 @@
+{
+  "id": "head_shake_laugh",
+  "kind": "clip",
+  "title": "Head-shake laugh",
+  "description": "Laughs, shaking his head: oh, that's good",
+  "tags": ["laugh", "amused", "no way", "ha"],
+  "tier": "free",
+  "duration": 2.0,
+  "interruptible_after": 0.4,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.35, 4.5], [0.7, -4.5], [1.05, 4], [1.4, -2.5], [2.0, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -5], [1.4, -4], [2.0, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 5], [1.4, 5], [2.0, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.45, 2], [1.4, 2], [2.0, 0]]}
+  }
+}

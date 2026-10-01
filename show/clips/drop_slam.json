@@ -1,0 +1,16 @@
+{
+  "id": "drop_slam",
+  "kind": "clip",
+  "title": "Drop slam",
+  "description": "The drop: head slams down with the beat, then whips back up",
+  "tags": ["drop", "bass", "slam", "hit"],
+  "tier": "free",
+  "duration": 1.8,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -3], [0.85, 10], [1.2, 8], [1.8, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, 3], [0.85, -5], [1.2, -4], [1.8, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.35, -8], [0.85, 5], [1.2, 5], [1.8, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.45, 12], [0.95, -4], [1.8, 0]]}
+  }
+}

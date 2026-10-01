@@ -1,0 +1,17 @@
+{
+  "id": "shrug_hand_out",
+  "kind": "clip",
+  "title": "Hand-out shrug",
+  "description": "Shrug: head tips aside and the hand turns out, who knows",
+  "tags": ["dunno", "who knows", "shrug", "beats me"],
+  "tier": "free",
+  "duration": 2.0,
+  "interruptible_after": 0.5,
+  "tracks": {
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.6, 15], [1.4, 15], [2.0, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -40], [1.4, -40], [2.0, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.5, -5], [1.4, -5], [2.0, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, 3], [1.4, 3], [2.0, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.4, -5], [1.4, -5], [2.0, 0]]}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "perk_visor_pop",
+  "kind": "clip",
+  "title": "Visor pop",
+  "description": "Listening perk: a quick blink and the visor pops open, like raised brows",
+  "tags": ["perk", "listen", "brows", "backchannel"],
+  "tier": "free",
+  "duration": 0.6,
+  "interruptible_after": 0.1,
+  "tracks": {
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.15, 2.5], [0.38, -3], [0.6, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.28, -1], [0.6, 0]]}
+  }
+}

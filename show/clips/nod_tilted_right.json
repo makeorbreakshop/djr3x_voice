@@ -1,0 +1,15 @@
+{
+  "id": "nod_tilted_right",
+  "kind": "clip",
+  "title": "Tilted nod right",
+  "description": "Listening nod with a slight lean of the head to his right",
+  "tags": ["nod", "listen", "warm", "backchannel"],
+  "tier": "free",
+  "duration": 1.0,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, 3], [1.0, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.4, -1.5], [1.0, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.4, -1.5], [1.0, 0]]}
+  }
+}

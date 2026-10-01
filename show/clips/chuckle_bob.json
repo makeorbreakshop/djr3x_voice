@@ -1,0 +1,15 @@
+{
+  "id": "chuckle_bob",
+  "kind": "clip",
+  "title": "Chuckle bob",
+  "description": "Chuckles: three quick lift bobs while the visor flutters",
+  "tags": ["laugh", "amused", "chuckle", "ha"],
+  "tier": "free",
+  "duration": 1.6,
+  "interruptible_after": 0.3,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, 2.5], [0.55, 0.5], [0.8, 2.5], [1.05, 0.5], [1.3, 2], [1.6, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.22, -5], [0.44, 0], [0.66, -5], [0.88, 0], [1.1, -4], [1.6, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -3], [1.2, -3], [1.6, 0]]}
+  }
+}

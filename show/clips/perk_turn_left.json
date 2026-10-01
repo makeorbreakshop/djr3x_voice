@@ -1,0 +1,15 @@
+{
+  "id": "perk_turn_left",
+  "kind": "clip",
+  "title": "Perk, turn left",
+  "description": "Listening perk: an ear turns a few degrees to his left",
+  "tags": ["perk", "listen", "ear", "backchannel"],
+  "tier": "free",
+  "duration": 1.0,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.3, 4], [1.0, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.32, 1.5], [1.0, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, -3], [1.0, 0]]}
+  }
+}

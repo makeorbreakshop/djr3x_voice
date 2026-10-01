@@ -1,0 +1,15 @@
+{
+  "id": "firm_nod",
+  "kind": "clip",
+  "title": "Firm nod",
+  "description": "Firm yes: one decisive nod with a lift",
+  "tags": ["yes", "agree", "absolutely", "nod"],
+  "tier": "free",
+  "duration": 1.25,
+  "interruptible_after": 0.35,
+  "tracks": {
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -2.5], [0.75, 7], [1.25, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, 1.5], [0.75, -2], [1.25, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 4], [1.25, 0]]}
+  }
+}

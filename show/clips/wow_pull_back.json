@@ -1,0 +1,15 @@
+{
+  "id": "wow_pull_back",
+  "kind": "clip",
+  "title": "Wow pull-back",
+  "description": "Listening, wow: a small pull back, chin up, visor open",
+  "tags": ["wow", "listen", "surprised", "whoa", "backchannel"],
+  "tier": "free",
+  "duration": 1.0,
+  "interruptible_after": 0.2,
+  "tracks": {
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.32, -2.5], [0.6, -2.5], [1.0, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -3], [0.6, -3], [1.0, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.24, -3], [0.6, -3], [1.0, 0]]}
+  }
+}
