@@ -42,7 +42,10 @@ await ev(`localStorage.clear(); 0`);
 const t0 = await ev(`performance.now()`);
 await ev(`document.querySelector('[data-stage-mode=build]').click(); 0`);
 for (let i = 0; i < 100 && !(await ev(`!!document.querySelector('#bp-assembly option[value=${ASM}]')`)); i++) await sleep(100);
-await ev(`(()=>{const s=document.querySelector('#bp-assembly'); globalThis.__r3xBuildLoaded=null; s.value='${ASM}'; s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+// Build opens on our build (r3x_droid) by itself; any other assembly is picked by its manifest id
+if (!(await ev(`(globalThis.__r3x?.build?.url ?? '').includes('/${ASM}/')`))) {
+  await ev(`(()=>{const s=document.querySelector('#bp-assembly'); globalThis.__r3xBuildLoaded=null; s.value='${ASM}'; s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+}
 let done = null;
 for (let i = 0; i < 1800 && !done; i++) { done = await ev(`(()=>{const d=globalThis.__r3xBuildLoaded; return d && d.url.includes('${ASM}/') ? d.at : null})()`); if (!done) await sleep(100); }
 const res = await ev(`(()=>{const r=performance.getEntriesByType('resource').filter(e=>e.name.includes('/mech/out/')); return r.length ? {first: Math.min(...r.map(e=>e.startTime)), last: Math.max(...r.map(e=>e.responseEnd)), n: r.length} : null})()`);

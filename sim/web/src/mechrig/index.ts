@@ -43,6 +43,7 @@ export class MechRig {
   private mode: PageMode = 'show';
   private pick: Record<string, ModelView> = {};
   private buildTorque = new TorqueModel();
+  private scopeKey = '';
 
   constructor(private readonly host: MechRigHost) {
     this.view = new MechView(host.scene);
@@ -123,6 +124,11 @@ export class MechRig {
     }
     this.meter.visible = this.mode === 'bench' || this.mode === 'studio' || this.mode === 'build';
     this.meter.el.classList.toggle('overlay', this.mode === 'studio');
+    // Build: docked in the Joints tab (a collapsible strip there), never over the model
+    const dock = build ? document.getElementById('bp-load') : null;
+    const home = dock ?? document.body;
+    if (this.meter.el.parentElement !== home) home.appendChild(this.meter.el);
+    this.meter.el.classList.toggle('docked', !!dock);
   }
 
   /** Per drawn frame: pose the mech from the performer's joints and update the loads. In Build,
@@ -139,7 +145,16 @@ export class MechRig {
       if (this.meter.visible && wb.top) {
         const pose: Record<string, number> = {};
         for (const n of fittedNodes(wb)) for (const j of n.asm.joints) if (j.profile_joint) pose[j.profile_joint] = n.pose[j.id] ?? 0;
-        this.meter.update(this.buildTorque.update(pose, t), live ? 'puppet' : 'build');
+        const loads = this.buildTorque.update(pose, t);
+        // in a scope: only the servos that drive its joints
+        const sc = wb.scope;
+        const scKey = sc ? `${sc.kind}:${sc.id}` : '';
+        if (scKey !== this.scopeKey) {
+          this.scopeKey = scKey; // a new focus starts its own peak
+          this.meter.resetPeak();
+        }
+        const mine = sc && new Set(sc.joints.map((x) => x.joint.profile_joint ?? x.joint.id));
+        this.meter.update(mine ? loads.filter((l) => l.joints.some((j) => mine.has(j))) : loads, live ? 'puppet' : 'build');
       }
       return;
     }

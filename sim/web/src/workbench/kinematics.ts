@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import type { MJoint, MLink, MLinkage } from './manifest';
+import type { MGear, MJoint, MLink, MLinkage } from './manifest';
 
 export type Pose = Record<string, number>;
 
@@ -109,4 +109,14 @@ export function rodMatrix(a0: THREE.Vector3, b0: THREE.Vector3, a: THREE.Vector3
     .makeTranslation(a.x, a.y, a.z)
     .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
     .multiply(new THREE.Matrix4().makeTranslation(-a0.x, -a0.y, -a0.z));
+}
+
+/** A gear's turn about its own axle, in its link's frame (SCHEMA.md "Gear"; Python `gear_matrix`
+ *  is the link matrix times this): T(pivot) R(axis, deg_per_unit x value) T(-pivot). */
+export function gearMatrix(g: MGear, value: number, out = new THREE.Matrix4()): THREE.Matrix4 {
+  const p = new THREE.Vector3(...g.pivot);
+  return out
+    .makeTranslation(p.x, p.y, p.z)
+    .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(...g.axis).normalize(), g.deg_per_unit * value * DEG))
+    .multiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z));
 }

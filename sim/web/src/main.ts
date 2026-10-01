@@ -718,9 +718,12 @@ const workbench = new Workbench({
   interact: () => post.pacer.interact(),
   setDroidVisible(on) {
     if (droid) droid.visible = on;
-    // The booth would wall the parts in: Build stands them on Studio grey (the pick is kept).
-    sceneLook?.standIn(on || !sceneLook.showingBooth ? null : 'grey');
+    // The booth would wall the parts in: Build stands them on the light studio ground, where the
+    // charcoal paint and the dark printed parts read (the pick is kept).
+    sceneLook?.standIn(on || !sceneLook.showingBooth ? null : 'light');
   },
+  quality: () => post.currentQuality,
+  setCleanImage: (on) => post.setClean(on),
 });
 mountBuildPanel(workbench);
 renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too

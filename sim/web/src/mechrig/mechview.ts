@@ -16,8 +16,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tameHighlights } from '../look';
-import { hornMatrix, linkMatrices, rodMatrix, solveRod } from '../workbench/kinematics';
-import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, meshGeometry, MECH_BASE, type MAssembly, type MLinkage, type PartClass } from '../workbench/manifest';
+import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod } from '../workbench/kinematics';
+import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, meshGeometry, MECH_BASE, type MAssembly, type MGear, type MLinkage, type PartClass } from '../workbench/manifest';
 
 export type ModelView = 'visual' | 'mechanical' | 'xray';
 
@@ -39,6 +39,8 @@ interface Node {
   pose: Record<string, number>;
   rodZero: Map<string, { a: THREE.Vector3; b: THREE.Vector3 }>;
   holders: { lk: MLinkage; role: 'horn' | 'rod'; obj: THREE.Object3D }[];
+  /** Gear parts (pinions, splines), turned about their axle by their joint (SCHEMA.md "Gear"). */
+  gears: { gear: MGear; obj: THREE.Object3D }[];
 }
 
 export class MechView {
@@ -140,7 +142,7 @@ export class MechView {
       if (mt.q) group.quaternion.set(...mt.q);
     }
     const node: Node = {
-      asm, group, links: new Map(), pose: {}, rodZero: new Map(), holders: [],
+      asm, group, links: new Map(), pose: {}, rodZero: new Map(), holders: [], gears: [],
       byProfile: new Map(asm.joints.filter((j) => j.profile_joint).map((j) => [j.profile_joint!, j.id])),
     };
     this.nodes.push(node);
@@ -153,16 +155,19 @@ export class MechView {
     }
     const hide = hiddenByVariants(asm, defaultVariants(asm));
     const base = asm.base ?? '/';
-    // Static parts: one merged mesh per (link, class). Linkage parts: per (linkage, role).
-    const buckets = new Map<string, { geos: THREE.BufferGeometry[]; cls: PartClass; link?: string; lk?: MLinkage; role?: 'horn' | 'rod' }>();
+    // Static parts: one merged mesh per (link, class). Linkage parts: per (linkage, role). Gear parts: per gear.
+    const gearOf = new Map<string, MGear>();
+    for (const g of asm.gears ?? []) for (const id of [...g.parts, ...(g.fasteners ?? [])]) gearOf.set(id, g);
+    const buckets = new Map<string, { geos: THREE.BufferGeometry[]; cls: PartClass; link?: string; lk?: MLinkage; role?: 'horn' | 'rod'; gear?: MGear }>();
     await Promise.all(asm.parts.filter((p) => !hide.has(p.id)).map(async (p) => {
       const g = (await geo(joinUrl(base, p.mesh))).clone();
       const q = p.transform.q ?? [0, 0, 0, 1];
       g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...p.transform.t), new THREE.Quaternion(...q), new THREE.Vector3(1, 1, 1)));
       const lk = p.linkage ? asm.linkages?.find((x) => x.id === p.linkage) : undefined;
       const role = lk ? (p.role === 'horn' ? 'horn' : 'rod') : undefined;
-      const key = lk ? `lk:${lk.id}:${role}:${p.class}` : `l:${p.link}:${p.class}`;
-      if (!buckets.has(key)) buckets.set(key, { geos: [], cls: p.class, link: lk ? undefined : p.link, lk, role });
+      const gear = lk ? undefined : gearOf.get(p.id);
+      const key = lk ? `lk:${lk.id}:${role}:${p.class}` : gear ? `g:${gear.id}:${p.class}` : `l:${p.link}:${p.class}`;
+      if (!buckets.has(key)) buckets.set(key, { geos: [], cls: p.class, link: lk ? undefined : gear?.link ?? p.link, lk, role, gear });
       buckets.get(key)!.geos.push(g);
       this.stats.parts++;
     }));
@@ -180,18 +185,25 @@ export class MechView {
         h.add(mesh);
         group.add(h);
         node.holders.push({ lk: b.lk, role: b.role!, obj: h });
+      } else if (b.gear) {
+        const h = new THREE.Group();
+        h.matrixAutoUpdate = false;
+        h.add(mesh);
+        (node.links.get(b.link!) ?? group).add(h);
+        node.gears.push({ gear: b.gear, obj: h });
       } else {
         (node.links.get(b.link!) ?? group).add(mesh);
       }
     }
     // Fasteners: instanced per (link or linkage role, mesh).
-    const fb = new Map<string, { url: string; ms: THREE.Matrix4[]; link?: string; lk?: MLinkage; role?: 'horn' | 'rod' }>();
+    const fb = new Map<string, { url: string; ms: THREE.Matrix4[]; link?: string; lk?: MLinkage; role?: 'horn' | 'rod'; gear?: MGear }>();
     for (const f of asm.fasteners ?? []) {
       if (!f.placed || !f.mesh || !f.transform || !f.joins.every((p) => !hide.has(p))) continue;
       const lk = f.linkage ? asm.linkages?.find((x) => x.id === f.linkage) : undefined;
       const role = lk ? (f.role === 'horn' ? 'horn' : 'rod') : undefined;
-      const key = `${lk ? `lk:${lk.id}:${role}` : `l:${f.link}`}|${f.mesh}`;
-      if (!fb.has(key)) fb.set(key, { url: joinUrl(base, f.mesh), ms: [], link: lk ? undefined : f.link, lk, role });
+      const gear = lk ? undefined : gearOf.get(f.id);
+      const key = `${lk ? `lk:${lk.id}:${role}` : gear ? `g:${gear.id}` : `l:${f.link}`}|${f.mesh}`;
+      if (!fb.has(key)) fb.set(key, { url: joinUrl(base, f.mesh), ms: [], link: lk ? undefined : gear?.link ?? f.link, lk, role, gear });
       const q = f.transform.q ?? [0, 0, 0, 1];
       fb.get(key)!.ms.push(new THREE.Matrix4().compose(new THREE.Vector3(...f.transform.t), new THREE.Quaternion(...q), new THREE.Vector3(1, 1, 1)));
       this.stats.fasteners++;
@@ -210,6 +222,12 @@ export class MechView {
         h.add(im);
         group.add(h);
         node.holders.push({ lk: b.lk, role: b.role!, obj: h });
+      } else if (b.gear) {
+        const h = new THREE.Group();
+        h.matrixAutoUpdate = false;
+        h.add(im);
+        (node.links.get(b.link!) ?? group).add(h);
+        node.gears.push({ gear: b.gear, obj: h });
       } else {
         (node.links.get(b.link!) ?? group).add(im);
       }
@@ -250,6 +268,13 @@ export class MechView {
         const z = n.rodZero.get(h.lk.id);
         h.obj.matrix.copy(h.role === 'horn' ? hornMatrix(h.lk, ms.get(h.lk.horn.link)!, s.servoDeg)
           : z ? rodMatrix(z.a, z.b, s.a, s.b) : new THREE.Matrix4());
+      }
+    }
+    // gears turn with their joint, which may be another assembly's (the column's ring pinions)
+    for (const n of this.nodes) {
+      for (const { gear, obj } of n.gears) {
+        const src = gear.joint_assembly ? this.nodes.find((x) => x.asm.id === gear.joint_assembly) : n;
+        gearMatrix(gear, src?.pose[gear.joint] ?? 0, obj.matrix);
       }
     }
     this.unreachable = [...new Set(bad)];

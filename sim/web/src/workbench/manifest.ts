@@ -55,7 +55,13 @@ export interface MJoint {
   limits: { min: number; max: number };
   profile_joint: string | null;
   profile_limits?: { min: number; max: number };
-  drive?: { kind?: string; servos?: string[]; linkages?: string[]; gear_ratio?: number | null; note?: string };
+  drive?: {
+    kind?: string; servos?: string[]; linkages?: string[]; gear_ratio?: number | null; note?: string;
+    /** Servo deg per joint unit (deg or mm), signed: servo -> joint = servo deg / this. */
+    servo_deg_per_unit?: number;
+    /** The gear entries this joint turns, as "<assembly id>/<gear id>". */
+    gears?: string[];
+  };
   zero?: { how?: string; step?: string };
   inferred?: boolean;
   inferred_note?: string;
@@ -72,6 +78,26 @@ export interface MLinkage {
   parts: string[];
   inferred?: boolean;
   inferred_note?: string;
+}
+
+/** Parts a joint turns about their own axle through a ratio (SCHEMA.md "Gear"): pinions, splines. */
+export interface MGear {
+  id: string;
+  kind?: string;
+  joint: string;
+  /** The assembly (id) that declares `joint`, when not this one (the column's ring pinions). */
+  joint_assembly?: string;
+  link: string;
+  pivot: Vec3;
+  axis: Vec3;
+  deg_per_unit: number;
+  servo?: string;
+  servo_deg_per_unit?: number;
+  parts: string[];
+  fasteners?: string[];
+  mesh_with?: string;
+  note?: string;
+  inferred?: boolean;
 }
 
 export interface MSpec { type: string; thread?: string; length_mm?: number; standard?: string; mcmaster?: string; [k: string]: unknown }
@@ -179,6 +205,7 @@ export interface MAssembly {
   parts: MPart[];
   joints: MJoint[];
   linkages?: MLinkage[];
+  gears?: MGear[];
   fasteners?: MFastener[];
   steps?: MStep[];
   bom?: MBomLine[];

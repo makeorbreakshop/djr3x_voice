@@ -7,15 +7,61 @@ body[data-mode="build"] #scene-panel .rail :is([data-scene-open="sc-view"], [dat
 body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .state-badge[data-state="build"]::before { background: #57d38c; }
 
-#sc-build .kv { margin: 8px 0 4px; }
+#sc-build .kv { margin: 12px 0 4px; }
 #sc-build select { width: auto; flex: 1; margin: 0; padding: 5px 6px; }
 #sc-build .row button.icon { width: 32px; height: auto; }
+#sc-build .bv-src { margin-bottom: 2px; }
+#sc-build .bv-src button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+#sc-build [role="tabpanel"][hidden], #bv-inspect[hidden] { display: none; }
+
+/* Systems, assemblies, library: one row each, the name and a short fact */
+.bv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.bv-list li { padding-left: calc(var(--d, 0) * 12px); }
+.bv-list button { width: 100%; display: flex; align-items: baseline; gap: 8px; text-align: left; background: none;
+  border-color: transparent; padding: 5px 8px; font-size: 12.5px; }
+.bv-list button:hover { background: #1a1d25; border-color: transparent; }
+.bv-list button span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bv-list button small { flex: 0 0 auto; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.bv-list button[aria-pressed="true"] { background: rgba(232,118,42,.12); border-color: transparent; color: var(--accent); }
+.bv-list button[aria-pressed="true"] small { color: inherit; opacity: .8; }
+.bv-list .empty { padding: 4px 8px; }
+.bv-tree li.var { padding-top: 2px; padding-bottom: 2px; }
+.bv-tree .bp-var { grid-template-columns: 74px minmax(0, 1fr); padding-left: 8px; }
+.bv-tree .bp-var select { padding: 3px 6px; font-size: 12px; }
+#sc-build .bv-section { margin-top: 10px; }
+#sc-build .bv-section[open] > summary { margin-bottom: 6px; }
+#sc-build #bv-inspect { margin-top: 10px; }
+
+/* The viewport bar: breadcrumb (Esc steps out) and the look, centred over the model */
+.build-bar { position: fixed; top: 12px; left: calc(var(--scene-space, 12px) + 150px); right: calc(var(--panel-space, 404px) + 12px);
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 12px; pointer-events: none; z-index: 5; }
+.build-bar > * { pointer-events: auto; }
+.bb-crumbs { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 8px; background: rgba(14,16,21,.82);
+  border: 1px solid var(--line); font-size: 12.5px; backdrop-filter: blur(6px); }
+.bb-crumbs button { flex: 0 0 auto; background: none; border-color: transparent; padding: 3px 8px; color: var(--muted); }
+.bb-crumbs button:hover:not(:disabled) { color: var(--text); border-color: transparent; background: #1d2029; }
+.bb-crumbs button:disabled { opacity: 1; color: var(--text); cursor: default; }
+.bb-crumbs span { color: #5b6170; }
+.bb-crumbs[hidden] { display: none; }
+.bb-crumbs b { font-weight: 600; padding: 3px 8px 3px 2px; }
+.bb-looks { display: flex; gap: 0; margin: 0; padding: 3px; border-radius: 8px; background: rgba(14,16,21,.82);
+  border: 1px solid var(--line); backdrop-filter: blur(6px); }
+.bb-looks button { flex: 0 0 auto; background: none; border-color: transparent; padding: 4px 12px; font-size: 12.5px; color: var(--muted); }
+.bb-looks button:hover { color: var(--text); border-color: transparent; }
+.bb-looks button[aria-checked="true"] { background: #262a35; color: var(--text); border-color: #3a404d; }
 
 /* head: assembly picker (+ rebuild), sub-assembly picker, status only when there is one */
 .build-head { padding: 10px 0 0; display: grid; gap: 6px; }
 .bh-row { display: flex; gap: 6px; }
 .bh-row select { flex: 1; min-width: 0; margin: 0; }
-.bh-row button.icon { width: 32px; height: auto; }
+.bh-row button.icon { width: 32px; height: 32px; }
+.bh-title { flex: 1; min-width: 0; margin: 0; color: var(--text); display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+.bh-title small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.bh-title button.ic { margin-left: -2px; }
+.bp-load { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.bp-load > summary { cursor: pointer; color: var(--muted); font-size: 12px; width: max-content; }
+.bp-load > summary:hover { color: var(--text); }
+.joint.fixed { opacity: .55; }
 .build-head > select { margin: 0; }
 .bh-status { margin: 0; font-size: 12px; color: var(--muted); }
 .bh-status.err { color: #ff8a8a; }
@@ -170,17 +216,20 @@ table.bom td.exp a { margin-left: 6px; font: 11px ui-monospace, Menlo, monospace
 table.bom tr.grp th { text-align: left; padding: 12px 4px 3px; color: var(--text); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
 table.bom tr.grp th span { color: #5b6170; font: 400 11px ui-monospace, Menlo, monospace; margin-left: 4px; }
 table.bom tr.grp:first-child th { padding-top: 0; }
-#bp-variants { display: grid; gap: 4px; margin-bottom: 8px; }
 .bp-var { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .bp-var select { margin: 0; padding: 3px 6px; min-width: 0; }
-#bp-variants[hidden] { display: none; }
 
 /* Interference overlay list (Scene > Build view > Overlays) */
 #sc-build .intf { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow: auto; }
 #sc-build .intf button { display: flex; width: 100%; justify-content: space-between; gap: 8px; text-align: left;
   font-size: 12px; padding: 4px 6px; background: none; border: 0; border-left: 3px solid transparent; }
-#sc-build .intf li.hot button { border-left-color: #ff2a1a; }
-#sc-build .intf li.known button { border-left-color: #ffa21a; opacity: 0.8; }
+#sc-build .intf li.hot button { border-left-color: #ff3b30; }
+#sc-build .intf li.known button { border-left-color: #f2c230; opacity: 0.8; }
 #sc-build .intf button span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sc-build .intf .d { font-variant-numeric: tabular-nums; flex: none; }
 #bv-intf .n { font-variant-numeric: tabular-nums; opacity: 0.8; margin-left: 4px; }
+.bh-row select[hidden] { display: none; }
+@media (max-width: 720px) {
+  /* phones: under the badge, beside the Scene rail, above the R3X sheet */
+  .build-bar { top: 46px; left: 66px; right: 8px; justify-content: flex-start; }
+}

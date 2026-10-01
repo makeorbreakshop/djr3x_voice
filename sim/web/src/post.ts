@@ -515,6 +515,25 @@ export class PostPipeline {
     this.pacer.touch();
   }
 
+  private filmSaved: { grain: number; vignette: number; aberration: number } | null = null;
+
+  /** Inspection (Build): no grain or lens fringing, a light vignette; off restores the film. */
+  setClean(on: boolean) {
+    const u = this.film.uniforms;
+    if (on && !this.filmSaved) {
+      this.filmSaved = { grain: u.uGrain.value, vignette: u.uVignette.value, aberration: u.uAberration.value };
+      u.uGrain.value = 0;
+      u.uAberration.value = 0;
+      u.uVignette.value = 0.12;
+    } else if (!on && this.filmSaved) {
+      u.uGrain.value = this.filmSaved.grain;
+      u.uVignette.value = this.filmSaved.vignette;
+      u.uAberration.value = this.filmSaved.aberration;
+      this.filmSaved = null;
+    }
+    this.pacer.touch();
+  }
+
   /** Frames drawn since load. */
   get frames() {
     return this.pacer.frames;

@@ -38,3 +38,8 @@
 
 .model-note { color: var(--muted); font-size: 11px; line-height: 1.35; margin: 4px 0 0; }
 .model-note.err { color: var(--warn); }
+.load-meter footer[hidden], .load-meter .row[hidden] { display: none; }
+/* Build: docked in the Joints tab's Servo load strip */
+.load-meter.docked { position: static; width: auto; padding: 4px 0 2px; background: none; border: 0; border-radius: 0; z-index: auto; }
+.load-meter.docked h3 { display: none; }
+.load-meter.docked { pointer-events: auto; }

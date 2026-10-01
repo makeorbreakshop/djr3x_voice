@@ -51,6 +51,8 @@ export class LoadMeter {
   update(loads: ServoLoad[], context = '') {
     if (this.el.hidden) return;
     const box = this.el.querySelector('.rows')!;
+    const seen = new Set(loads.map((l) => l.servo));
+    for (const [servo, r] of this.rows) r.row.hidden = !seen.has(servo);
     for (const l of loads) {
       let r = this.rows.get(l.servo);
       if (!r) {
@@ -77,8 +79,10 @@ export class LoadMeter {
       r.row.classList.toggle('warn', v > 0.5 && v <= RULE);
     }
     this.title.textContent = context;
+    // Only an alert takes a line; how it is computed is the tooltip.
     this.foot.innerHTML = this.worst > RULE
-      ? `<b>Over the 70 % rule:</b> ${LABEL[this.worstServo] ?? this.worstServo} peaked ${Math.round(this.worst * 100)} %`
-      : `Peak ${Math.round(this.worst * 100)} %${this.worstServo ? ` (${LABEL[this.worstServo] ?? this.worstServo})` : ''}. CAD masses, gravity + inertia; line = 70 %.`;
+      ? `<b>Over the 70 % rule:</b> ${LABEL[this.worstServo] ?? this.worstServo} peaked ${Math.round(this.worst * 100)} %` : '';
+    this.foot.hidden = !this.foot.innerHTML;
+    this.el.title = `Peak ${Math.round(this.worst * 100)} %${this.worstServo ? ` (${LABEL[this.worstServo] ?? this.worstServo})` : ''}. CAD masses, gravity + inertia; the line is the 70 % rule, the dark tick the holding part.`;
   }
 }

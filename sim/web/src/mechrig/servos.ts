@@ -59,6 +59,8 @@ export function actuators(nodes: AsmNode[]): Actuator[] {
       if (!d || !d.servos?.length || j.type === 'fixed' || !(j.limits.max > j.limits.min)) continue;
       const half = (PROFILE_RANGE.get(j.profile_joint ?? '') ?? 270) / 2;
       const drive = d as typeof d & { servo_deg_per_joint_deg?: number; mm_per_servo_deg?: number };
+      // signed servo deg per joint unit (SCHEMA.md drive.servo_deg_per_unit) wins over the older unsigned keys
+      const sdpu = d.servo_deg_per_unit;
       if (d.kind === 'push_rod_pair') {
         const lks = (d.linkages ?? []).map((id) => node.asm.linkages!.find((l) => l.id === id)!).filter(Boolean);
         const joints = node.asm.joints.filter((x) => x.drive?.kind === 'push_rod_pair' && (x.drive.linkages ?? []).join() === (d.linkages ?? []).join());
@@ -77,9 +79,9 @@ export function actuators(nodes: AsmNode[]): Actuator[] {
         if (!lk) continue;
         out.push({ servo, node, kind: 'rod', joints: [j], linkage: lk, ratio: 1, range: (lk.servo_range_deg as [number, number]) ?? [-135, 135] });
       } else if (j.type === 'prismatic') {
-        out.push({ servo, node, kind: 'rack', joints: [j], ratio: drive.mm_per_servo_deg ?? 1, range: [-half, half] });
+        out.push({ servo, node, kind: 'rack', joints: [j], ratio: sdpu ? 1 / sdpu : drive.mm_per_servo_deg ?? 1, range: [-half, half] });
       } else {
-        const ratio = drive.servo_deg_per_joint_deg ?? (d.gear_ratio ? 1 / d.gear_ratio : 1);
+        const ratio = sdpu ?? drive.servo_deg_per_joint_deg ?? (d.gear_ratio ? 1 / d.gear_ratio : 1);
         out.push({ servo, node, kind: d.kind === 'direct' ? 'direct' : 'gear', joints: [j], ratio, range: [-half, half] });
       }
     }
@@ -220,12 +222,15 @@ export class ServoView {
   render() {
     if (!this.wb.active || !this.mount() || !this.on || !this.body) return;
     const nodes = fittedNodes(this.wb);
-    const sig = nodes.map((n) => n.asm.id).join('|');
+    const sc = this.wb.scope;
+    const sig = nodes.map((n) => n.key).join('|') + (sc ? `#${sc.kind}:${sc.id}` : '');
     if (sig !== this.sig) {
       this.sig = sig;
-      this.acts = actuators(nodes);
+      // in a scope: only the actuators of its joints
+      const mine = sc && new Set(sc.joints.map((x) => `${x.node.key}:${x.joint.id}`));
+      this.acts = actuators(nodes).filter((a) => !mine || a.joints.some((j) => mine.has(`${a.node.key}:${j.id}`)));
       this.body.innerHTML = this.acts.map((a) => `<div class="joint servo-row">
-          <div class="jhead"><b title="${esc(a.servo)} · ${a.kind}${a.kind === 'rack' ? ` ${a.ratio} mm/°` : a.kind === 'gear' || a.kind === 'direct' ? ` ${a.ratio.toFixed(2)}:1` : ''}">${esc(LABEL[a.servo] ?? a.servo)}</b>
+          <div class="jhead"><b title="${esc(a.servo)} · ${a.kind}${a.kind === 'rack' ? ` ${a.ratio.toFixed(3)} mm/°` : a.kind === 'gear' || a.kind === 'direct' ? ` ${a.ratio.toFixed(2)}:1` : ''}">${esc(LABEL[a.servo] ?? a.servo)}</b>
             <output data-sout="${esc(a.servo)}"></output></div>
           <input type="range" data-servo="${esc(a.servo)}" min="${a.range[0]}" max="${a.range[1]}" step="0.5" aria-label="${esc(LABEL[a.servo] ?? a.servo)} servo angle">
           <div class="jlive" data-slive="${esc(a.servo)}"></div></div>`).join('') || '<p class="empty">No actuators in this assembly.</p>';
