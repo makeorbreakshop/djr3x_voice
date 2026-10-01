@@ -1505,6 +1505,13 @@ export class Workbench {
       this.host.scene.add(this.catcher);
     }
     if (this.catcher) this.catcher.visible = on;
+    // a stronger key and rim: dark parts need their edges lit
+    for (const l of this.lights.children as THREE.Light[]) {
+      if (!l.isLight) continue;
+      l.userData.i0 ??= l.intensity;
+      const k = !on ? 1 : l.name === 'build_key' ? 1.35 : l.name === 'build_rim' ? 2.2 : l.name === 'build_fill' ? 1.25 : 1;
+      l.intensity = l.userData.i0 * k;
+    }
     // the set (the booth, the droid's lights) out of the picture: only the section, its lights and the floor
     const sc = this.host.scene;
     if (on) {
@@ -1527,16 +1534,80 @@ export class Workbench {
       const it = q?.of.get(id);
       return !it || q!.force !== null || q!.t >= it.start;
     };
+    // what is moving in a warm accent while it travels, settling to its own colour as it seats
+    const warm = new THREE.Color(0xf09a3e);
+    const tint = (m: THREE.MeshStandardMaterial, id: string) => {
+      if (m.userData.base === undefined) return;
+      m.color.setHex(m.userData.base);
+      const u = q?.of.has(id) ? this.seqU(id) : 0;
+      if (u > 0) m.color.lerp(warm, Math.min(1, u * 1.6) * 0.85);
+    };
     for (const po of this.parts.values()) {
       const v = !!po.mesh.userData.vis && (!inStep.has(po.part.id) || started(po.part.id));
       po.mesh.visible = v;
       po.holder.visible = v;
+      if (!v) continue;
+      tint(po.mat, po.part.id);
+      // the shells see-through (the mechanism working under them), or as they are
+      if (po.part.class === 'shell') {
+        setLook(po.mat, this.videoShellAlpha < 1 ? this.videoShellAlpha : 1, null);
+        po.mesh.renderOrder = this.videoShellAlpha < 1 ? 2 : 0;
+        const e = po.mesh.getObjectByName('edges');
+        if (e) e.visible = this.videoShellAlpha >= 1;
+      }
     }
     for (const fo of this.fast.values()) {
       const own = fo.f.joins.filter((j) => this.parts.has(j));
       const ok = fastIn.has(fo.f.id) ? started(fo.f.id) : own.every((j) => !inStep.has(j) || started(j));
       fo.obj.visible = !!fo.obj.userData.vis && ok && own.some((j) => this.parts.get(j)?.mesh.visible);
+      if (fo.obj.visible) tint(fo.mat, fo.f.id);
     }
+  }
+
+  /** The video: shells at this opacity (1: solid). */
+  videoShellAlpha = 1;
+
+  /** The video's camera follows what is moving: the world box of the items in motion now (where they are and
+   *  where they seat), else the next to come, else the last that came; null outside a step. */
+  videoFocus(): { c: number[]; s: number[] } | null {
+    const q = this.seq;
+    if (!q || !q.items.length) return null;
+    const now = q.items.filter((it) => q.t >= it.start && q.t <= it.start + it.dur);
+    const next = q.items.find((it) => it.start > q.t);
+    const last = [...q.items].reverse().find((it) => it.start + it.dur < q.t);
+    const items = now.length ? now : next ? [next] : last ? [last] : [];
+    const box = new THREE.Box3();
+    this.root.updateMatrixWorld(true);
+    for (const it of items) {
+      for (const id of it.ids) {
+        const po = this.parts.get(id);
+        if (po?.mesh.parent) {
+          const g = po.mesh.geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          if (g.boundingBox!.isEmpty()) continue;
+          box.union(g.boundingBox!.clone().applyMatrix4(po.mesh.matrixWorld));
+          box.union(g.boundingBox!.clone().translate(po.sBase ?? po.base).applyMatrix4(po.mesh.parent.matrixWorld));
+          continue;
+        }
+        const fo = this.fast.get(id);
+        if (fo?.obj.parent) {
+          const g = fo.obj.geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          box.union(g.boundingBox!.clone().applyMatrix4(fo.obj.matrixWorld));
+          box.union(g.boundingBox!.clone().applyMatrix4(fo.base.clone().premultiply(fo.obj.parent.matrixWorld)));
+        }
+      }
+    }
+    if (box.isEmpty()) return null;
+    return { c: box.getCenter(new THREE.Vector3()).toArray(), s: box.getSize(new THREE.Vector3()).toArray() };
+  }
+
+  /** The video's wide shot: the section as it stands. */
+  videoWhole(): { c: number[]; s: number[] } | null {
+    const g = this.guide;
+    if (!g) return null;
+    const box = this.bounds(true, g.parts);
+    return box.isEmpty() ? null : { c: box.getCenter(new THREE.Vector3()).toArray(), s: box.getSize(new THREE.Vector3()).toArray() };
   }
 
   /** The step paused at t seconds (the video steps a virtual clock). */
@@ -2289,6 +2360,12 @@ export class Workbench {
         opacity = Math.min(opacity, 0.12);
       }
       m.color.setHex(finish.color);
+      // the video: a black print lifted to a dark grey that shows its form
+      if (this.video) {
+        const hsl = m.color.getHSL({ h: 0, s: 0, l: 0 });
+        if (hsl.l < 0.2) m.color.setHSL(hsl.h, hsl.s, 0.2 + hsl.l * 0.5);
+      }
+      m.userData.base = m.color.getHex();
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
       // aluminium a pale one) - never mixed with its paint, which turns the orange shells purple. A part being
       // inspected shows as it is, not as new.
@@ -2340,7 +2417,8 @@ export class Workbench {
       fo.obj.visible = visible;
       fo.obj.userData.vis = visible;
       const addsF = !!g && !g.title && !!cur && fastIn.has(id) && !this.isolated && !this.video;
-      fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : MATERIAL.fastener.color);
+      fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : this.video ? 0xb2b8c0 : MATERIAL.fastener.color);
+      fo.mat.userData.base = fo.mat.color.getHex();
       fo.mat.emissive.setHex(0);
       setLook(fo.mat, 1, clip);
       if (g) rim(fo.mat, GUIDE_COLOR.focus, g.hover?.has(id) || (this.selected === id && !this.isolated) ? 0.8 : 0);

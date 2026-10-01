@@ -30,12 +30,11 @@ const FPS = 30;
 const TITLE = opt('title', "Hunter Smoke's head mech");
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 // pacing (s): parts, screws (a bolt circle's overlap), the hold after a step, the opening, the ending
-const TIMING = { part: 0.45, fastener: 0.25, overlap: 0.75, fastenerOverlap: 0.45, hold: 0.05, maxTotal: 1e9, minDur: 0.1 };
+const TIMING = { part: 0.5, fastener: 0.28, overlap: 0.8, fastenerOverlap: 0.5, hold: 0.05, maxTotal: 1e9, minDur: 0.1 };
 const STEP_HOLD = 0.2;
 const OPEN_S = 1.0;
-const MOTION_S = 2.6;
-const ORBIT_S = 1.4;
-const CAM_EASE_S = 0.5;
+const MOTION_S = 2.8;
+const ORBIT_S = 1.6;
 
 fs.mkdirSync(path.join(OUT, 'frames'), { recursive: true });
 for (const f of fs.readdirSync(path.join(OUT, 'frames'))) fs.rmSync(path.join(OUT, 'frames', f));
@@ -104,112 +103,116 @@ const steps = await ev(`(() => {
 })()`);
 const shown = steps.filter((s) => s.parts > 0);
 
-// pre-pass: each step's length and the box of what is built by then plus what it brings
+// each step's length
 const plan = [];
 for (const s of shown) {
-  const r = await ev(`(() => {
-    const wb = __r3x.build;
-    wb.setGuideStep(${s.i}, true);
-    wb.seqSetTime(0);
-    const b = wb.guideBuiltBox();
-    const c = b.getCenter(new b.min.constructor());
-    return { total: wb.seqState.total, c: c.toArray(), r: b.getSize(new b.min.constructor()).length() / 2 };
-  })()`);
-  plan.push({ ...s, ...r });
+  const total = await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${s.i}, true); wb.seqSetTime(0); return wb.seqState.total; })()`);
+  plan.push({ ...s, total });
 }
-// what is built only grows: the framing never closes in
-let acc = null;
-for (const p of plan) {
-  if (!acc) acc = { c: p.c, r: p.r };
-  else {
-    // the union of two spheres
-    const d = Math.hypot(...p.c.map((v, k) => v - acc.c[k]));
-    if (d + p.r > acc.r) {
-      const r = (acc.r + d + p.r) / 2;
-      const k = d > 1e-6 ? (r - acc.r) / d : 0;
-      acc = { c: acc.c.map((v, j) => v + (p.c[j] - v) * k), r };
-    }
-  }
-  p.frame = { c: [...acc.c], r: acc.r };
-}
+// the shells come last: the mechanism moves once without them, then they go on and it moves again
+const SHELLS_FROM = Number(opt('shells-from', 15));
+const mech = plan.filter((p) => p.n < SHELLS_FROM);
+const shells = plan.filter((p) => p.n >= SHELLS_FROM);
 
 // ------------------------------------------------------------------ the timeline
-const segs = [];
-segs.push({ kind: 'open', dur: OPEN_S });
-for (const p of plan) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
-segs.push({ kind: 'motion', dur: MOTION_S });
-segs.push({ kind: 'orbit', dur: ORBIT_S });
+const segs = [{ kind: 'open', dur: OPEN_S }];
+for (const p of mech) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
+segs.push({ kind: 'wide', dur: 0.6 }, { kind: 'motion', dur: MOTION_S, ghost: false });
+for (const p of shells) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
+segs.push({ kind: 'wide', dur: 0.5 }, { kind: 'motion', dur: MOTION_S, ghost: false }, { kind: 'orbit', dur: ORBIT_S });
 const total = segs.reduce((t, s) => t + s.dur, 0);
 const nFrames = Math.round(total * FPS);
 console.log(`${shown.length} steps, ${total.toFixed(1)} s, ${nFrames} frames`);
 
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
-const AZ0 = 35; // deg, from the front right
-const EL = 20;
-const AZ_RATE = 3.2; // deg/s, a slow orbit
-const camAt = (T, frame) => {
-  const az = ((AZ0 + T * AZ_RATE) * Math.PI) / 180;
-  const el = (EL * Math.PI) / 180;
-  return { target: frame.c, dir: [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)], r: frame.r };
-};
-const lerpF = (a, b, k) => ({ c: a.c.map((v, i) => v + (b.c[i] - v) * k), r: a.r + (b.r - a.r) * k });
+// one 3/4 view, a very slow drift; the orbit only at the very end
+const AZ0 = 32;
+const EL = 24;
+const DRIFT = 0.35; // deg/s
+const MIN_FOCUS = 0.055; // m: the closest it frames (a screw still shows where it goes)
+const FILL = 0.66; // of the frame height
+const OMEGA = 5.5; // critically damped follow (rad/s)
 
-let T = 0;
-let f = 0;
-let lastStep = -1;
-let prevFrame = plan[0].frame;
+// the camera state: target and framed size, each a critically damped spring
+const cam = { c: null, v: [0, 0, 0], r: null, vr: 0 };
+const spring = (x, v, goal, dt) => {
+  const a = OMEGA * OMEGA * (goal - x) - 2 * OMEGA * v;
+  v += a * dt;
+  return [x + v * dt, v];
+};
 const node = JSON.stringify(SECTION);
 const label = async (num, text, op) => ev(`(() => { const l = document.querySelector('#vid .lab'); l.querySelector('b').textContent = ${JSON.stringify(String(num ?? ''))}; l.querySelector('span').textContent = ${JSON.stringify(text ?? '')}; l.style.opacity = ${op}; 1 })()`);
 const card = async (text, sub, op) => ev(`(() => { const c = document.querySelector('#vid .card'); c.innerHTML = ${JSON.stringify(text)} + (${JSON.stringify(sub ?? '')} ? '<small>' + ${JSON.stringify(sub ?? '')} + '</small>' : ''); c.style.opacity = ${op}; 1 })()`);
 await card(TITLE, 'Assembly', 1);
 await label('', '', 0);
+// a bigger label for a phone, in the lower third
+await ev(`(() => { const st = document.createElement('style'); st.textContent = '#vid .lab { left: 0; right: 0; bottom: 15%; justify-content: center; font-size: 38px; font-weight: 600; gap: 18px; text-shadow: 0 1px 0 rgba(255,255,255,.6); } #vid .lab b { font-size: 60px; font-weight: 300; } #vid .card { font-size: 56px; }'; document.head.append(st); 1 })()`);
 
+let T = 0;
+let f = 0;
+let lastStep = -1;
 for (const sg of segs) {
   const n = Math.round(sg.dur * FPS);
   for (let k = 0; k < n; k++, f++) {
     const t = k / FPS;
-    let frame = plan[0].frame;
+    let goal = null;
+    let fill = FILL;
+    let orbit = 0;
     if (sg.kind === 'open') {
-      // the empty stage, then the card fades as the first step starts
-      if (lastStep !== 0) {
+      if (lastStep !== plan[0].i) {
         await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${plan[0].i}, true); wb.seqSetTime(0); 1 })()`);
-        lastStep = 0;
+        lastStep = plan[0].i;
       }
-      await card(TITLE, 'Assembly', t < sg.dur - 0.35 ? 1 : Math.max(0, (sg.dur - t) / 0.35));
+      await card(TITLE, 'Assembly', t < sg.dur - 0.3 ? 1 : Math.max(0, (sg.dur - t) / 0.3));
+      goal = await ev(`JSON.stringify(__r3x.build.videoFocus())`).then(JSON.parse);
     } else if (sg.kind === 'step') {
       const p = sg.p;
-      if (lastStep !== p.i) {
-        if (k === 0 && lastStep !== -1) prevFrame = camFrame;
-        await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${p.i}, true); 1 })()`);
+      if (k === 0) {
+        await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); for (const j of ['head_tilt','head_roll','visor']) wb.setJoint(n, j, 0); wb.setGuideStep(${p.i}, true); 1 })()`);
         lastStep = p.i;
         await card('', '', 0);
       }
       await ev(`__r3x.build.seqSetTime(${t.toFixed(4)})`);
-      frame = lerpF(prevFrame, p.frame, ease(Math.min(1, t / CAM_EASE_S)));
-      await label(p.n, p.title, Math.min(1, t / 0.2));
-    } else if (sg.kind === 'motion') {
-      // the finished mech moves: tilt, roll, the visor - the push rods follow
-      frame = plan[plan.length - 1].frame;
-      const u = t / sg.dur;
-      const w = (a, b) => Math.max(0, Math.min(1, (u - a) / (b - a)));
-      const swing = (x, lo, hi) => (x <= 0 || x >= 1 ? 0 : x < 0.25 ? hi * ease(x * 4) : x < 0.75 ? hi + (lo - hi) * ease((x - 0.25) * 2) : lo * (1 - ease((x - 0.75) * 4)));
-      const tilt = swing(w(0, 0.45), -20, 25), roll = swing(w(0.3, 0.75), -12, 12), visor = swing(w(0.55, 1), -15, 30);
-      await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); wb.setJoint(n, 'head_tilt', ${tilt}); wb.setJoint(n, 'head_roll', ${roll}); wb.setJoint(n, 'visor', ${visor}); 1 })()`);
-      await label('', '', Math.max(0, 1 - t / 0.3));
+      goal = await ev(`JSON.stringify(__r3x.build.videoFocus())`).then(JSON.parse);
+      await label(p.n, p.title, Math.min(1, t / 0.15));
     } else {
-      frame = plan[plan.length - 1].frame;
+      // the whole thing: wide, the motion, the orbit
+      goal = await ev(`JSON.stringify(__r3x.build.videoWhole())`).then(JSON.parse);
+      fill = 0.74;
+      await label('', '', 0);
+      if (sg.kind === 'motion') {
+        const u = t / sg.dur;
+        const w = (a, b) => Math.max(0, Math.min(1, (u - a) / (b - a)));
+        const swing = (x, lo, hi) => (x <= 0 || x >= 1 ? 0 : x < 0.25 ? hi * ease(x * 4) : x < 0.75 ? hi + (lo - hi) * ease((x - 0.25) * 2) : lo * (1 - ease((x - 0.75) * 4)));
+        const tilt = swing(w(0, 0.45), -20, 25), roll = swing(w(0.3, 0.75), -12, 12), visor = swing(w(0.55, 1), -15, 30);
+        await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); wb.setJoint(n, 'head_tilt', ${tilt}); wb.setJoint(n, 'head_roll', ${roll}); wb.setJoint(n, 'visor', ${visor}); 1 })()`);
+      }
+      if (sg.kind === 'orbit') orbit = 70 * ease(t / sg.dur);
     }
-    var camFrame = frame;
-    const cam = camAt(T, frame);
+    // the framed size: the box seen from the view (its height, its width over the aspect), never closer than MIN_FOCUS
+    if (goal) {
+      const h = Math.max(goal.s[1], Math.hypot(goal.s[0], goal.s[2]) / (W / H) * 0.85, MIN_FOCUS);
+      goal.r = h / fill;
+    }
+    const dt = 1 / FPS;
+    if (!cam.c && goal) { cam.c = [...goal.c]; cam.r = goal.r; }
+    if (goal) {
+      for (let j = 0; j < 3; j++) [cam.c[j], cam.v[j]] = spring(cam.c[j], cam.v[j], goal.c[j], dt);
+      [cam.r, cam.vr] = spring(cam.r, cam.vr, goal.r, dt);
+    }
+    const az = ((AZ0 + T * DRIFT + orbit) * Math.PI) / 180;
+    const el = (EL * Math.PI) / 180;
+    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     await ev(`(() => {
-      const cam = __r3x.camera, ctl = __r3x.build;
-      const fov = cam.fov * Math.PI / 180, aspect = ${W / H};
-      const half = Math.min(Math.tan(fov / 2), Math.tan(fov / 2) * aspect);
-      const d = ${cam.r} / Math.sin(Math.atan(half)) * 1.08;
-      const t = ${JSON.stringify(cam.target)}, dir = ${JSON.stringify(cam.dir)};
-      cam.position.set(t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d);
-      __r3x.camera.lookAt(t[0], t[1], t[2]);
-      const c = ctl.cameraState(); c.target.set(t[0], t[1], t[2]); c.pos.copy(cam.position); ctl.setCameraState(c);
+      const cam = __r3x.camera, wb = __r3x.build;
+      const fov = cam.fov * Math.PI / 180;
+      const d = (${cam.r} / 2) / Math.tan(fov / 2);
+      const t = ${JSON.stringify(cam.c)}, dir = ${JSON.stringify(dir)};
+      const c = wb.cameraState();
+      c.target.set(t[0], t[1], t[2]);
+      c.pos.set(t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d);
+      wb.setCameraState(c);
+      cam.position.copy(c.pos); cam.lookAt(t[0], t[1], t[2]);
       return 1;
     })()`);
     await ev(`__r3xStill.hold(2)`);
