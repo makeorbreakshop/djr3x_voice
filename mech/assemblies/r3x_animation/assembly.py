@@ -650,6 +650,46 @@ def top_drive(middle: Asm, top: Asm):
     j.zero = {"how": "RX-24 plate at the front, hero arm up at the front-left; pinion mid-sector"}
 
 
+def line_onto(p0, d0, p1, d1) -> np.ndarray:
+    """A concentric mate: the rigid motion taking the line (p0, d0) onto the line (p1, d1) - the least
+    rotation (d0 to d1, either sense) about p0, then p0 to its nearest point on the target line."""
+    d0 = np.asarray(d0, float) / np.linalg.norm(d0)
+    d1 = np.asarray(d1, float) / np.linalg.norm(d1)
+    if d0 @ d1 < 0:
+        d1 = -d1
+    ax = np.cross(d0, d1)
+    s_ = float(np.linalg.norm(ax))
+    R = frames.rot(ax / s_, math.degrees(math.atan2(s_, float(d0 @ d1)))) if s_ > 1e-9 else np.eye(4)
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    return trans(p1 + d1 * ((p0 - p1) @ d1)) @ R @ trans(-p0)
+
+
+# The kit's hero-arm parts that stay on Anderson's arm, and how they mate to it (kit STL coordinates, measured
+# on the kit meshes: circle fits of the tubes' outer surfaces, the fingers' pivot holes by ray casting).
+# - HA_PJ_1 (piston flange) sits on the bicep HA_EB_4, a 32 mm tube; Anderson's body tube is a 32 mm rod too,
+#   but 7.3 mm higher (on the servo's shaft height): concentric onto it, then slid 8 mm along it, off the
+#   servomount's collar (shared volume 0 at 8, 140 mm3 at 6). The rod end to HA_P_1 telescopes (guide p59-62).
+KIT_BICEP_AXIS = ((18.263, 521.09, 100.48), (35.481, 521.09, 194.961))     # two points on HA_EB_4's axis
+PISTON_FLANGE_SLIDE_MM = -8.0                                              # along the tube, toward the body
+# - HA_PL_1 / HA_PL_2 clamp the forearm tube HA_SP_2 (25.4 mm above its 31.75 mm root, guide p60), HA_P_1 and
+#   HA_PS_1 hang off HA_PL_2. Anderson's main arm has the same two diameters (32 / 25 mm spigots) but 6.5 mm
+#   off the kit tube's axis and 2.6 deg from it, and its step is at z 120 (his frame) where the kit's is at
+#   108.5 on the mated axis: the four go concentric onto his spigot and up 11.5 mm onto his shoulder.
+KIT_FOREARM_AXIS = ((66.35, 661.854, 364.055), (0.12959, 0.69319, 0.70901))  # HA_SP_2's 25.4 mm tube
+PISTON_BRACKET_RISE_MM = 11.5
+PISTON_GROUP = ("ha_pl_1", "ha_pl_2", "ha_p_1", "ha_ps_1")
+# - the fingers: HA_LF_2 / HA_RF_2 pivot on one screw axis each side of HA_W_1 (guide p64); Anderson's
+#   hand-finger-side carries them the same way, on its cheeks' pivot bosses (axis along its X at y -19.385,
+#   z 22). His fork is the kit hand turned 90 deg about the wrist (the fingers' pivot along his X, the thumb
+#   in the 12.5 mm slot between the cheeks): at rest the fork is rolled -90 deg so the claw keeps the kit
+#   pose, the fingers' pivot goes concentric onto the bosses' axis, and each finger slides along it to
+#   seat: LF on its boss (+2.05), RF on its (+4.0 - his cheeks span 27.5 mm over the bosses, the kit hand
+#   24.1), the thumb centred in the slot (+2.7; its 12.7 mm root takes 0.1 mm a side, a relief cut).
+KIT_FINGER_PIVOT = ((68.68, 713.33, 389.99), (0.9884, 0.0, -0.152))
+HAND_ROLL_DEG = -90.0
+FINGER_SEAT_MM = {"lf": 2.05, "rf": 4.0, "tf": 2.7}
+
+
 def hero_arm(top: Asm):
     from assemblies.kit.assembly import kit_T
     Tk = kit_T("top_ring")
@@ -704,7 +744,10 @@ def hero_arm(top: Asm):
         P("hero_hand_arm_side", "hand-arm-side (wrist bearing half, fixed)", "mech", "hero_arm", A("hand_arm_side"),
           f("wrist", "hand-arm-side"), placement="fitted", evidence=ev),
         P("hero_hand_finger_side", "hand-finger-side (turns; carries the fingers)", "mech", "hero_hand",
-          A("hand_finger_side"), f("wrist", "hand-finger-side"), placement="fitted", replaces=["ha_w_1"], evidence=ev),
+          A("hand_finger_side") @ frames.rot((0, 0, 1), HAND_ROLL_DEG), f("wrist", "hand-finger-side"),
+          placement="fitted", replaces=["ha_w_1"],
+          evidence=ev + f"; rolled {HAND_ROLL_DEG:g} deg at rest so the kit claw keeps its pose (its 4 join holes "
+                        "to the arm side are 90 deg apart)"),
     ]
     # the kit's fingers ride the hand: they keep their place relative to it. The hand used to sit on the
     # kit forearm axis 229 mm from the foot (the kit pose's fit of HA_W_1); move them with it
@@ -717,6 +760,34 @@ def hero_arm(top: Asm):
         if p.link == "hero_hand" and p.origin == "kit":
             p.T = delta @ p.T
             p.evidence = (p.evidence + "; " if p.evidence else "") + "moved with Anderson's hand (hero_arm.py)"
+    # ... then mated to it: the fingers' pivot on his cheeks' boss axis, each finger seated (KIT_FINGER_PIVOT)
+    from parts.anderson.hand_finger_side import DEFAULTS as HFS
+
+    Hn = next(p.T for p in top.parts if p.id == "hero_hand_finger_side")
+    fp = frames.apply(delta @ Tk, KIT_FINGER_PIVOT[0])
+    fd = (delta @ Tk)[:3, :3] @ np.asarray(KIT_FINGER_PIVOT[1], float)
+    Mf = line_onto(fp, fd, frames.apply(Hn, (0.0, HFS["pivot"][0], HFS["pivot"][1])), Hn[:3, 0])
+    for p in top.parts:
+        g = p.id[3:5]
+        if p.origin == "kit" and p.id[:3] == "ha_" and g in FINGER_SEAT_MM:
+            p.T = trans(Hn[:3, 0] * FINGER_SEAT_MM[g]) @ Mf @ p.T
+            p.placement = "fitted"
+            p.evidence += (f"; pivot on Anderson's cheek bosses, seated {FINGER_SEAT_MM[g]:+g} mm along it "
+                           "(KIT_FINGER_PIVOT)")
+    # the faux piston: its flange onto his body tube, its brackets (with the piston) onto his main arm
+    Mpj = trans(sm[:3, 1] * PISTON_FLANGE_SLIDE_MM) @ line_onto(
+        frames.apply(Tk, KIT_BICEP_AXIS[0]), frames.apply(Tk, KIT_BICEP_AXIS[1]) - frames.apply(Tk, KIT_BICEP_AXIS[0]),
+        frames.apply(W("bodytube"), (0.0, 0.0, 0.0)), sm[:3, 1])
+    Mpl = trans(ma[:3, 2] * PISTON_BRACKET_RISE_MM) @ line_onto(
+        frames.apply(Tk, KIT_FOREARM_AXIS[0]), Tk[:3, :3] @ np.asarray(KIT_FOREARM_AXIS[1], float),
+        frames.apply(ma, (-26.0, -30.0, 0.0)), ma[:3, 2])
+    for p in top.parts:
+        if p.id == "ha_pj_1" or p.id in PISTON_GROUP:
+            p.T = (Mpj if p.id == "ha_pj_1" else Mpl) @ p.T
+            p.placement = "fitted"
+            p.evidence = (p.evidence + "; " if p.evidence else "") + (
+                "on Anderson's body tube (KIT_BICEP_AXIS), slid off his servomount" if p.id == "ha_pj_1" else
+                "on Anderson's main arm spigot (KIT_FOREARM_AXIS), up to his shoulder")
     hinge_axis = sm[:3, 0]                                     # the servomount's +X: theta grows about it
     wp, wd = HA.WRIST_AXIS_MA
     w_pivot = (ma @ np.append(np.asarray(wp, float) + np.asarray(wd) * 213.0, 1.0))[:3]
@@ -741,6 +812,18 @@ def hero_arm(top: Asm):
                evidence=["the wrist axis of the main arm (hero_arm.py WRIST_AXIS_MA), the hand at z 213"],
                confidence="high")
     top.joints += [js, jw]
+
+
+def hero_reliefs(top: Asm):
+    """Clearance cuts the kit needs for Anderson's arm (relief(): the vendored STL untouched, noted on the part):
+    the top ring's side hole for his body tube (7.3 mm higher than the kit's bicep: the hole is filed up), and
+    the kit thumb's 12.7 mm root to his fork's 12.5 mm slot."""
+    by = {p.id: p for p in top.parts}
+    for kid, cut, grow, why in (
+            ("tr_nr_full", "hero_elbow_tube", 0.5, "Anderson's body tube runs 7.3 mm above the kit bicep's hole"),
+            ("ha_tf_2", "hero_hand_finger_side", 0.1, "the thumb's root in Anderson's fork slot (12.5 mm)")):
+        if kid in by and cut in by:
+            relief(by[kid], by[cut], grow, why)
 
 
 def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, default: bool = True):
@@ -796,6 +879,7 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, d
     # the upper neck guide's outer race against the kit top ring's neck ring: Anderson's files give no
     # height for it (PNG 01/03 show the ring under the elbow disc's centre; its height here is
     # inferred), so a relief in the kit ring, as decided (2026-09-30)
+    hero_reliefs(top)
     ring = next((p for p in top.parts if p.id == "neck_guide_ring_outer"), None)
     if ring is not None:
         for kid in ("tr_nr_full", "tr_rr_full"):
