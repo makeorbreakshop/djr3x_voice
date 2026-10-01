@@ -154,7 +154,7 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
                 log(f"3mf export skipped for {p.id}: {e}")
                 exports.pop("3mf", None)
         sigs.d[mesh_rel + "#faces"] = n_disp
-    return centre, n_disp, mesh_rel, exports
+    return centre, n_disp, mesh_rel, exports, h[:12]
 
 
 def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = True, loaded_children=None,
@@ -167,12 +167,12 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as ex:
         files = list(ex.map(lambda p: _part_files(p, prefix, out, export, sigs), asm.parts))
     parts = []
-    for p, (centre, n_disp, mesh_rel, exports) in zip(asm.parts, files):
+    for p, (centre, n_disp, mesh_rel, exports, msig) in zip(asm.parts, files):
         m = p.mesh
         parts.append(_clean({
             "id": p.id, "name": p.name, "class": p.cls, "link": p.link,
             "transform": Transform(tuple(centre)).json(),
-            "mesh": mesh_rel, "export": exports, "source": p.source,
+            "mesh": mesh_rel, "mesh_sig": msig, "export": exports, "source": p.source,
             "material": p.material, "printed": p.printed,
             "explode": vec(np.asarray(p.explode, float) / (np.linalg.norm(p.explode) or 1)),
             "explode_mm": p.explode_mm,

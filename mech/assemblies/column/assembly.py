@@ -228,27 +228,32 @@ def _near(feats: dict, prefix: str, p, tol=0.6):
 
 
 def phase(mod, params, other_mesh, teeth, key):
-    """The tooth phase (deg, one pitch in 0.25 deg steps) at which a gear shares the least volume
-    with its mate at rest (the placements fix the centres, not the tooth phase). Cached."""
+    """The tooth phase (deg, one pitch in 0.5 deg steps) at which a gear shares the least volume with
+    its mate at rest (the placements fix the centres, not the tooth phase): the gear's mesh at turn 0
+    turned about its `axis` feature, so only the final gear is built. Cached on the two meshes."""
     import manifold3d as mf
 
     from workbench.collide import mesh_hash
-    from workbench.geom import _cache_key, cached, code_sig
+    from workbench.geom import _cache_key, cached
 
     def man(m):
         return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32), tri_verts=np.asarray(m.faces, np.uint32)))
+
+    m0, feats, _ = parametric_mesh(mod, {**params, "turn": 0.0})
+    ax = feats["axis"]
 
     def run():
         o = man(other_mesh)
         best = None
         for t in np.arange(0.0, 360.0 / teeth, 0.5):
-            m, _, _ = parametric_mesh(mod, {**params, "turn": float(t)})
+            m = m0.copy()
+            m.apply_transform(trimesh.transformations.rotation_matrix(np.radians(t), ax["d"], ax["p"]))
             v = (man(m) ^ o).volume()
             if best is None or v < best[1]:
                 best = (float(t), float(v))
         return best
 
-    return cached(_cache_key("col-phase", key, mod, code_sig(mod), sorted(params.items()), mesh_hash(other_mesh), teeth, 2), run)
+    return cached(_cache_key("col-phase", key, mesh_hash(m0), mesh_hash(other_mesh), teeth, 3), run)
 
 
 # ------------------------------------------------------------------ build

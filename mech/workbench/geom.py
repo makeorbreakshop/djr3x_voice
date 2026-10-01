@@ -4,6 +4,7 @@ fasteners, simple goBILDA-style hardware, decimation and fitting."""
 from __future__ import annotations
 
 import hashlib
+import re
 import math
 import pickle
 from pathlib import Path
@@ -37,7 +38,32 @@ def code_sig(module_name: str) -> str:
     mod = importlib.import_module(module_name)
     here = Path(mod.__file__).resolve()
     root = Path(__file__).resolve().parents[1] / "parts"
-    files = {here} | set(here.parent.glob("*.py")) | set(root.glob("*.py"))
+    files = {here} | set(root.glob("*.py"))
+    # the package's modules this one imports (relative or parts.*), followed through: an edit to one part
+    # rebuilds only the parts that read it, not every sibling
+    todo = [here]
+    while todo:
+        src = todo.pop().read_text()
+        deps = []
+        for pkg_rel, names in re.findall(r"^\s*from\s+(\.+[\w.]*|parts\.[\w.]+)\s+import\s+\(?([\w\s,]+)", src, re.M):
+            if pkg_rel.startswith("parts."):
+                base = root.parent / Path(*pkg_rel.split("."))
+            else:
+                base = here.parent
+                for _ in range(len(pkg_rel) - len(pkg_rel.lstrip(".")) - 1):
+                    base = base.parent
+                rest = pkg_rel.lstrip(".")
+                if rest:
+                    base = base / Path(*rest.split("."))
+            cands = [base.with_suffix(".py")] + [base / f"{n.strip()}.py" for n in names.split(",") if n.strip()]
+            deps += [c for c in cands if c.is_file()]
+            if (base / "__init__.py").is_file():
+                deps.append(base / "__init__.py")
+        for d in deps:
+            d = d.resolve()
+            if d not in files:
+                files.add(d)
+                todo.append(d)
     h = hashlib.sha1()
     for f in sorted(files):
         h.update(f.name.encode())

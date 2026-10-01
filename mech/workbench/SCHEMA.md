@@ -116,6 +116,7 @@ A rigid body. Every part rides on exactly one link.
   "link": "head",
   "transform": Transform,               // part mesh -> assembly frame at zero pose
   "mesh": "parts/head_mount_plate.glb", // display mesh (decimated), in the part's own frame
+  "mesh_sig": "3f1c0a9e2b7d",           // optional: the mesh's content hash (a reader may cache the GLB on it)
   "export": {"stl": "export/head_mount_plate.stl", "3mf": "export/head_mount_plate.3mf"}, // full detail
   "source": {"file": "RX Head Mech Base Plate V4.stl", "kind": "step | stl | dxf | generated",
              "entity": "Head_Mounting_Plate", "placement": "step | fitted | inferred"},
