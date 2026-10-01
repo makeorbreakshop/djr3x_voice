@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 /**
  * The mech manifest (r3x.mech.manifest v1, mech/workbench/SCHEMA.md) as Build mode reads it,
  * plus the loader: the dev server serves mech/out/ at /mech/out/ (src/workbench/mech.mjs).
@@ -321,4 +322,31 @@ export function firstStep(a: MAssembly): Map<string, number> {
     for (const p of s.parts ?? []) if (!out.has(p)) out.set(p, i);
   });
   return out;
+}
+
+
+/** The one mesh of a display GLB as plain float geometry in the part's frame: the workbench writes
+ * positions quantized (KHR_mesh_quantization: int16, dequantized by the node's translation + scale),
+ * so the node's transform is baked in here; normals are left to the reader. */
+export function meshGeometry(scene: THREE.Object3D, url = ''): THREE.BufferGeometry {
+  let mesh: THREE.Mesh | null = null;
+  scene.traverse((o) => {
+    if (!mesh && (o as THREE.Mesh).isMesh) mesh = o as THREE.Mesh;
+  });
+  if (!mesh) throw new Error(`${url}: no mesh`);
+  const m = mesh as THREE.Mesh;
+  m.updateWorldMatrix(true, false);
+  const src = m.geometry as THREE.BufferGeometry;
+  const p = src.getAttribute('position');
+  const out = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    out[i * 3] = p.getX(i);
+    out[i * 3 + 1] = p.getY(i);
+    out[i * 3 + 2] = p.getZ(i);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  if (src.index) g.setIndex(src.index.clone());
+  g.applyMatrix4(m.matrixWorld);
+  return g;
 }

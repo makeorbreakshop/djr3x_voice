@@ -17,7 +17,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tameHighlights } from '../look';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod } from '../workbench/kinematics';
-import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, MECH_BASE, type MAssembly, type MLinkage, type PartClass } from '../workbench/manifest';
+import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, meshGeometry, MECH_BASE, type MAssembly, type MLinkage, type PartClass } from '../workbench/manifest';
 
 export type ModelView = 'visual' | 'mechanical' | 'xray';
 
@@ -102,14 +102,7 @@ export class MechView {
       const geo = (u: string) => {
         let g = cache.get(u);
         if (!g) {
-          g = loader.loadAsync(u).then((gltf) => {
-            let found: THREE.BufferGeometry | null = null;
-            gltf.scene.traverse((o) => {
-              if (!found && (o as THREE.Mesh).isMesh) found = (o as THREE.Mesh).geometry as THREE.BufferGeometry;
-            });
-            if (!found) throw new Error(`${u}: no mesh`);
-            return clean(found);
-          });
+          g = loader.loadAsync(u).then((gltf) => clean(meshGeometry(gltf.scene, u)));
           cache.set(u, g);
         }
         return g;

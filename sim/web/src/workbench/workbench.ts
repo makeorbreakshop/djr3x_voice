@@ -17,7 +17,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  firstStep, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
+  firstStep, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type Manifest, type MLinkage, type MPart, type PartClass,
 } from './manifest';
 
@@ -37,6 +37,8 @@ export interface BuildHost {
 
 interface PartObj {
   part: MPart;
+  /** A part of an unpicked variant option: its mesh is fetched when the option is picked. */
+  lazy?: string;
   node: AsmNode;
   holder: THREE.Object3D; // posed by a linkage (horns, rods), else the mesh itself
   mesh: THREE.Mesh;
@@ -48,7 +50,7 @@ interface PartObj {
 
 export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
 
-interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null }
+interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null; lazy?: string }
 
 export interface AsmNode {
   asm: MAssembly;
@@ -306,13 +308,8 @@ export class Workbench {
       let g = geoCache.get(u);
       if (!g) {
         g = loader.loadAsync(u).then((gltf) => {
-          let found: THREE.BufferGeometry | null = null;
-          gltf.scene.traverse((o) => {
-            if (!found && (o as THREE.Mesh).isMesh) found = (o as THREE.Mesh).geometry as THREE.BufferGeometry;
-          });
-          if (!found) throw new Error(`${u}: no mesh`);
           // Round faces render round, hard edges stay sharp: weld, then crease at 30 deg.
-          let geo = found as THREE.BufferGeometry;
+          let geo = meshGeometry(gltf.scene, u);
           geo.deleteAttribute('normal');
           geo = toCreasedNormals(mergeVertices(geo, 1e-4), CREASE);
           saneNormals(geo);
@@ -324,6 +321,10 @@ export class Workbench {
     };
     const parts: PartObj[] = [];
     const fast: FastObj[] = [];
+    // only the picked variant options' meshes are fetched now; the others when they are picked
+    this.variants = this.defaultPicks(m.root, keep?.variants);
+    this.lazyHidden = hiddenAssemblies(m.root, this.variants);
+    this.geometryFn = geometry;
     const top = await this.buildNode(m.root, null, geometry, parts, fast);
     if (seq !== this.loadSeq) return;
     await this.loadInterference(url, geometry);
@@ -340,19 +341,7 @@ export class Workbench {
     const mt = m.root.mount?.transform?.t ?? [0, 0, 0];
     this.root.position.set(mt[0] / 1000, mt[1] / 1000, mt[2] / 1000);
     this.focus = this.top;
-    this.variants = {};
-    // A group can span nodes (the droid's `internals`: the column under the base, Anderson's ring drives
-    // under the rings): a default option anywhere wins over another node's first option.
-    const defaulted = new Set<string>();
-    this.forEachNode((n) => {
-      for (const v of variantOptions(n.asm)) {
-        if (defaulted.has(v.group)) continue;
-        if (v.default) { this.variants[v.group] = v.id; defaulted.add(v.group); }
-        else if (!(v.group in this.variants)) this.variants[v.group] = v.id;
-      }
-    });
     if (keep) {
-      for (const [g, id] of Object.entries(keep.variants)) if (g in this.variants) this.variants[g] = id;
       this.forEachNode((n) => {
         const p = keep.poses[n.asm.id];
         if (!p) return;
@@ -364,6 +353,8 @@ export class Workbench {
     this.pose();
     this.refresh();
     if (this.active && !keep) this.frame();
+    // for load-time measurement (scripts/build_load_time.mjs): when the open assembly is on screen
+    (globalThis as { __r3xBuildLoaded?: { url: string; at: number } }).__r3xBuildLoaded = { url, at: performance.now() };
   }
 
   /** The suite's interference.json next to the manifest: each pair's shared solid (a GLB) or,
@@ -466,19 +457,16 @@ export class Workbench {
       // the mesh's content hash (workbench build) keys the geometry cache, so a live reload refetches only
       // the parts whose mesh changed
       const sig = (p as { mesh_sig?: string }).mesh_sig;
-      const geo = await geometry(joinUrl(base, p.mesh) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`));
+      const url = joinUrl(base, p.mesh) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`);
+      const lazy = this.lazyHidden.has(asm);
+      const geo = lazy ? new THREE.BufferGeometry() : await geometry(url);
       const mat = this.material(p.class);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = p.id;
       mesh.userData.partId = p.id;
       mesh.castShadow = mesh.receiveShadow = false;
       // Feature edges, drawn over the faces (pushed back a hair by polygonOffset).
-      let eg = this.edgeGeo.get(geo);
-      if (!eg) this.edgeGeo.set(geo, (eg = new THREE.EdgesGeometry(geo, EDGE_ANGLE)));
-      const edges = new THREE.LineSegments(eg, this.edgeMat);
-      edges.name = 'edges';
-      edges.raycast = () => {};
-      mesh.add(edges);
+      if (!lazy) this.addEdges(mesh, geo);
       const b = new THREE.Vector3(...p.transform.t);
       mesh.position.copy(b);
       let holder: THREE.Object3D = mesh;
@@ -490,11 +478,13 @@ export class Workbench {
       } else {
         (node.links.get(p.link) ?? group).add(mesh);
       }
-      parts.push({ part: p, node, holder, mesh, mat, base: b });
+      parts.push({ part: p, node, holder, mesh, mat, base: b, lazy: lazy ? url : undefined });
     }));
     const fastMat = this.material('fastener');
     await Promise.all((asm.fasteners ?? []).filter((f) => f.placed && f.mesh && f.transform).map(async (f) => {
-      const geo = await geometry(joinUrl(base, f.mesh!));
+      const furl = joinUrl(base, f.mesh!);
+      const flazy = this.lazyHidden.has(asm);
+      const geo = flazy ? new THREE.BufferGeometry() : await geometry(furl);
       const mat = fastMat.clone();
       const obj = new THREE.Mesh(geo, mat);
       obj.name = f.id;
@@ -513,7 +503,7 @@ export class Workbench {
       } else {
         (node.links.get(f.link) ?? group).add(obj);
       }
-      fast.push({ f, node, obj, base: m, mat, holder });
+      fast.push({ f, node, obj, base: m, mat, holder, lazy: flazy ? furl : undefined });
     }));
     // Zero-pose rod balls: where the rod meshes were exported.
     const zero = linkMatrices(asm.links, asm.joints, {});
@@ -537,6 +527,65 @@ export class Workbench {
   private material(cls: PartClass) {
     const look = CLASS_LOOK[cls];
     return new THREE.MeshStandardMaterial({ ...look, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+  }
+
+  private lazyHidden = new Set<MAssembly>();
+  private geometryFn: ((u: string) => Promise<THREE.BufferGeometry>) | null = null;
+
+  /** Variant picks for a tree: a group can span nodes (the droid's `internals`: the column under the
+   * base, Anderson's ring drives under the rings), so a default option anywhere wins over another
+   * node's first option; `keep` (a live reload) overrides where the group still exists. */
+  private defaultPicks(root: MAssembly, keep?: Record<string, string>) {
+    const picks: Record<string, string> = {};
+    const defaulted = new Set<string>();
+    const walk = (a: MAssembly) => {
+      for (const v of variantOptions(a)) {
+        if (defaulted.has(v.group)) continue;
+        if (v.default) { picks[v.group] = v.id; defaulted.add(v.group); } else if (!(v.group in picks)) picks[v.group] = v.id;
+      }
+      for (const c of (a.children ?? []) as MAssembly[]) walk(c);
+    };
+    walk(root);
+    for (const [g, id] of Object.entries(keep ?? {})) if (g in picks) picks[g] = id;
+    return picks;
+  }
+
+  /** Fetch the meshes of parts that became visible (a variant just picked). */
+  private loadShown() {
+    const geometry = this.geometryFn;
+    if (!geometry) return;
+    const seq = this.loadSeq;
+    for (const po of this.allParts) {
+      if (!po.lazy || this.variantHidden.has(po.node)) continue;
+      const u = po.lazy;
+      po.lazy = undefined;
+      void geometry(u).then((geo) => {
+        if (seq !== this.loadSeq) return;
+        po.mesh.geometry = geo;
+        this.addEdges(po.mesh, geo);
+        this.refresh();
+        this.emit();
+      });
+    }
+    for (const fo of this.allFast) {
+      if (!fo.lazy || this.variantHidden.has(fo.node)) continue;
+      const u = fo.lazy;
+      fo.lazy = undefined;
+      void geometry(u).then((geo) => {
+        if (seq !== this.loadSeq) return;
+        fo.obj.geometry = geo;
+        this.refresh();
+      });
+    }
+  }
+
+  private addEdges(mesh: THREE.Mesh, geo: THREE.BufferGeometry) {
+    let eg = this.edgeGeo.get(geo);
+    if (!eg) this.edgeGeo.set(geo, (eg = new THREE.EdgesGeometry(geo, EDGE_ANGLE)));
+    const edges = new THREE.LineSegments(eg, this.edgeMat);
+    edges.name = 'edges';
+    edges.raycast = () => {};
+    mesh.add(edges);
   }
 
   /** Child variants: hide the unpicked options' subtrees and index the shown parts by id first. */
@@ -675,6 +724,7 @@ export class Workbench {
   setVariant(group: string, id: string) {
     this.variants[group] = id;
     this.applyVariantNodes();
+    this.loadShown();
     if (this.focus && this.variantHidden.has(this.focus)) this.focus = this.top;
     this.pose();
     this.refresh();
