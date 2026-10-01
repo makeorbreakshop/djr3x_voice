@@ -9,6 +9,13 @@ the hub face; a centre relief hole for the hub's boss; four M4 tap holes on the 
 hub's 16 mm square pattern (the hub's screws self-thread into the plastic); one M4 tap hole
 through the +X wall, `pin_y` up, to pin the cup to the tube.
 
+Hub screws as through-bolts (`hub_hole="nut_trap"`): M4 clearance through the plate and a hex
+pocket for each nut in the plate's underside (flats toward the axis; the tube's top closes them).
+The 15 mm relief is then only as deep as the hub's 14 mm boss needs (`relief_depth`), with a 12 mm
+hole on through (the hex shaft stops at the hub face, so nothing else uses the centre): that keeps
+1.5 mm of plastic between each pocket and the hole (1.8 at 12 mm) and >= 1.5 between the pockets
+and the relief above them.
+
 Variants:
     make()                      Hunter's: 32 mm neck tube
     make(tube_od=26.0)          the R-3X kit's 26 mm neck tube (wall 7 mm instead of 4)
@@ -17,8 +24,10 @@ Variants:
 
 from __future__ import annotations
 
-from ._common import (INSERTS, Print, axis, finish, hole_d, hole_features, hole_group_params, plane,
-                      resolve_hole_types, rot_x, transform)
+import math
+
+from ._common import (INSERTS, NUTS, WALL_MIN, Print, axis, finish, hole_d, hole_features, hole_group_params,
+                      plane, resolve_hole_types, rot_x, transform)
 
 REFERENCE = "RXNeckCouplerV1.stl"          # the mesh the workbench regresses against (same solid, same frame)
 REFERENCE_CAD = "RX Neck Coupler V1 v1.step"  # Hunter's B-rep: what the defaults are read from
@@ -42,12 +51,16 @@ DEFAULTS = dict(
     pin_bolt="M4",
     pin_y=15.0,           # side pin hole height above the open end
     insert="M4-kit",      # the head's inserts: the BOM's 6 x 6 mm M4
+    nut_top_t=8.0,        # the plate when the hub screws are through-bolts into nut traps
+    relief_depth=2.5,     # nut traps: the 15 mm relief's depth (the hub's boss is 14 x 2 mm)
+    cable_hole_d=12.0,    # nut traps: the centre hole below the relief
     **hole_group_params(DESIGNED),   # hub_hole / pin_hole: clearance | heat_set | tapped (as designed: tapped)
 )
 
 
 def make(params: dict | None = None, **kw):
-    from build123d import Align, Axis, BuildPart, BuildSketch, Circle, Cylinder, Hole, Locations, Mode, Plane, extrude
+    from build123d import (Align, Axis, BuildPart, BuildSketch, Circle, Cylinder, Hole, Locations, Mode, Plane,
+                           RegularPolygon, extrude)
 
     P = dict(DEFAULTS)
     given = dict(params or {}, **kw)
@@ -63,19 +76,30 @@ def make(params: dict | None = None, **kw):
     if bore >= od - 2.0:
         raise ValueError(f"tube_od {P['tube_od']} leaves less than a 1 mm wall in a {od} mm coupler")
     types = resolve_hole_types(P, DESIGNED, INSERT_CANDIDATES)
-    if "nut_trap" in types.values():
-        raise ValueError("no room for nut traps in the coupler: clearance | heat_set | tapped")
-
-    tt = P["top_t"] if P["top_t"] is not None else (P["insert_top_t"] if types["hub"] == "heat_set" else 5.0)
+    if types["pin"] == "nut_trap":
+        raise ValueError("no room for a nut trap at the side pin (the tube fills the bore): clearance | heat_set | tapped")
+    trapped = types["hub"] == "nut_trap"
+    default_t = {"heat_set": P["insert_top_t"], "nut_trap": P["nut_top_t"]}.get(types["hub"], 5.0)
+    tt = P["top_t"] if P["top_t"] is not None else default_t
     P["top_t"] = tt
     ins = INSERTS[P["insert"]]
 
     def dia(bolt, t):
         return INSERTS[P["insert"]]["d"] + fit if t == "heat_set" else hole_d(bolt, "tap" if t == "tapped" else t, fit)
 
-    d_hub = dia(P["hub_bolt"], types["hub"])
+    d_hub = dia(P["hub_bolt"], "clearance" if trapped else types["hub"])
     d_pin = dia(P["pin_bolt"], types["pin"])
     hp = P["hub_pattern"] / 2
+    if trapped:
+        af, nt = NUTS[P["hub_bolt"]]
+        af += fit
+        pocket = nt + 0.2
+        r_hole = math.hypot(hp, hp)
+        side = r_hole - af / 2 - (P["cable_hole_d"] + fit) / 2       # pocket flat to the centre hole
+        over = tt - P["relief_depth"] - pocket                     # pocket to the relief above it
+        if side < WALL_MIN - 1e-9 or over < WALL_MIN - 1e-9:
+            raise ValueError(f"nut traps: {side:.2f} mm to the centre hole and {over:.2f} mm under the relief "
+                             f"(both need {WALL_MIN}): a smaller cable_hole_d / relief_depth or a thicker top_t")
 
     # design frame: axis +Z, open end at z = 0 (turned to the reference's +Y at the end)
     with BuildPart() as bp:
@@ -88,9 +112,22 @@ def make(params: dict | None = None, **kw):
         extrude(amount=h - tt, mode=Mode.SUBTRACT)
         top = bp.faces().sort_by(Axis.Z)[-1]
         with Locations(Plane(top.center(), z_dir=(0, 0, 1))):
-            Hole((P["centre_hole_d"] + fit) / 2, tt)
+            if trapped:
+                Hole((P["centre_hole_d"] + fit) / 2, P["relief_depth"])
+                Hole((P["cable_hole_d"] + fit) / 2, tt)
+            else:
+                Hole((P["centre_hole_d"] + fit) / 2, tt)
             with Locations(*[(x, y) for x in (-hp, hp) for y in (-hp, hp)]):
                 Hole(d_hub / 2, tt)
+        if trapped:
+            # hex pockets up from the plate's underside, a flat toward the axis
+            for x in (-hp, hp):
+                for y in (-hp, hp):
+                    ang = math.degrees(math.atan2(y, x))
+                    with BuildSketch(Plane.XY.offset(h - tt)):
+                        with Locations((x, y)):
+                            RegularPolygon(af / math.sqrt(3), 6, rotation=ang + 30, major_radius=True)
+                    extrude(amount=pocket, mode=Mode.SUBTRACT)
         # side pin hole through the +X wall only; an insert gets a boss outside the wall when the
         # wall is thinner than the insert's hole
         wall = (od - bore) / 2
@@ -118,6 +155,9 @@ def make(params: dict | None = None, **kw):
     for i, (x, z) in enumerate(hub):
         hole_features(feats, f"cp{i + 1}", (x, h, z), (0, -1, 0), d_hub / 2, depth=tt, bolt=P["hub_bolt"],
                       kind=types["hub"])
+        if trapped:
+            feats[f"hole_cp{i + 1}"]["nut"] = f"{P['hub_bolt']} ISO 4032, AF {NUTS[P['hub_bolt']][0]}"
+            feats[f"nut_cp{i + 1}"] = plane((x, h - tt + pocket, z), (0, -1, 0))   # the nut's seat (faces down)
     hole_features(feats, "side_f", (x_face, P["pin_y"], 0), (-1, 0, 0), d_pin / 2, depth=x_face - od / 2 + wall,
                   bolt=P["pin_bolt"], kind=types["pin"])
     return finish(part, label=LABEL, params=P, features=feats, reference=REFERENCE,

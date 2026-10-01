@@ -248,3 +248,26 @@ def test_plate_servo_inserts_preset():
         assert p.is_inside(Vector(x + sx * toward * (f["r"] + 1.95), ym, z))      # >= 1.5 (2.0) of wall
         assert p.is_inside(Vector(x, y - f["depth"] - 1.25, z))                  # a floor under every hole
     assert mod.make({"inserts": True, "sins_hole": "heat_set"}).features["hole_sins1"]["bolt"] == "M4"
+
+
+def test_coupler_hub_nut_traps():
+    """Hub screws as through-bolts: clearance through the plate, a hex pocket under each (flat to the
+    axis), 1.5 mm or more to the 12 mm centre hole; the relief only as deep as the hub's boss."""
+    from build123d import Vector
+
+    from parts.head import neck_coupler
+
+    p = neck_coupler.make(bore_d=26.0, hub_hole="nut_trap", top_t=10.0)
+    assert p.is_valid and len(p.solids()) == 1
+    f = p.features
+    for i in range(1, 5):
+        h = f[f"hole_cp{i}"]
+        assert h["kind"] == "nut_trap" and math.isclose(2 * h["r"], 4.5) and h["depth"] == 10.0
+        assert math.isclose(f[f"nut_cp{i}"]["p"][1], 25.0 + 3.4)              # the seat, 0.2 over the nut
+    u = 2 ** -0.5
+    assert p.is_inside(Vector(6.05 * u, 26.7, 6.05 * u)) and p.is_inside(Vector(7.5 * u, 26.7, 7.5 * u))
+    assert not p.is_inside(Vector(8.0 * u, 26.7, 8.0 * u))                  # the pocket
+    with pytest.raises(ValueError):
+        neck_coupler.make(hub_hole="nut_trap", top_t=5.0)                     # no room under the relief
+    with pytest.raises(ValueError):
+        neck_coupler.make(pin_hole="nut_trap")

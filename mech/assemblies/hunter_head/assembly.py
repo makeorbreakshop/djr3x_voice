@@ -66,10 +66,9 @@ PARAMS = {
     "neck_tube_bore": 26.0,       # the coupler's bore: 26 on Anderson's neck tube (the droid's default); Hunter's own neck is 32
     "plate_insert_depth": 6.0,    # servo insert holes as Hunter drew them (stock, Brandon 2026-09-30); the plate's
                                   # M3-insert change (parametric agent) brings the walls and the tunnel clearance
-    "coupler_top_t": 10.0,        # the coupler's hub plate: 10 (was 5) so the hub screws' 6 mm inserts fit and M4 x 20s
-                                  # engage the whole insert and stop 1 mm short of the tube (fastening rule)
-    "coupler_hub_hole": "heat_set",  # decided: through-bolts with nuts ("nut_trap"), which parts/head/neck_coupler
-                                     # refuses today ("no room for nut traps"): inserts until it takes them
+    "coupler_top_t": 10.0,        # the coupler's hub plate: 10 (was 5): room for the hub boss relief over the nut pockets
+    "coupler_hub_hole": "nut_trap",  # decided: through-bolts with nuts; the coupler takes hex pockets under its plate
+                                     # (the relief only as deep as the hub's boss, a 12 mm hole on: 1.8 mm walls)
     "visor_channel_mm": 1.5,      # clearance channel in the shells along the kit visor's sweep (0 = none)
     "printed_infill": 0.15,
 }
@@ -107,11 +106,11 @@ EXPLAINED = [
               "look wins)",
      "fix": "trim Hunter's shell where each kit part lands (the overlap report gives the depth and place), or "
             "glue the kit part on its surface; nothing moves"},
-    {"test": "inserts", "parts": ["neck_coupler", "ins_coupler_*"],
-     "cause": "on the coupler, goBILDA's 16 mm hub pattern puts each 6 mm insert 0.8 mm from the 15 mm centre relief "
-              "(the sonic hub's boss), and the side insert 1.5 mm from an edge: 3 mm is not there",
-     "fix": "M3-size pattern is not an option (the hub is M4): keep the inserts and accept 0.8 mm (PLA at 100 % "
-            "infill there), or through-bolts with nuts under the hub plate if the tube's bore leaves room - Brandon"},
+    {"test": "inserts", "parts": ["neck_coupler", "ins_coupler_side"],
+     "cause": "the coupler's side insert (the tube's set screw) has 1.5 mm of plastic round it: the parametric "
+              "coupler grows an outside boss to the 1.5 mm wall rule, the suite's 0.5 x OD (6 mm) wants 3",
+     "fix": "accepted at the rule's 1.5 mm (a set screw, no load along it); the hub screws are through-bolts "
+            "into nut traps now"},
     {"test": "inserts", "parts": ["mount_plate", "ins_servo_1", "ins_servo_2", "ins_servo_7", "ins_servo_8"],
      "cause": "the four outer-post servo inserts (Ruthex M3 x 5.7, OD 4.6) have 2.0 mm of plastic to the servo pocket: "
               "above the 1.5 mm floor, short of the rule's 0.5 x OD = 2.3 mm, and no M3 insert can reach 2.3 because the "
@@ -844,17 +843,20 @@ def add_steps(asm: Assembly):
              tools=["3 mm hex key"],
              notes=["Print the 26 mm-bore coupler for Anderson's neck tube (Hunter's own neck takes 32).",
                     "Heat-set an M4 insert in its side hole: the set screw that clamps the tube goes in there when "
-                    "the head goes on the droid."]),
+                    "the head goes on the droid.",
+                    "Press an M4 nut into each of the four hex pockets under the hub plate (from the bore side), "
+                    "flats toward the centre; the hub screws in s04 thread into them."]),
         Step("s03", "Bottom sonic hub and the hex post", ["hub_bottom", "hex_shaft"],
              F("clamp_hub_bottom"), context=["neck_coupler"],
              tools=["3 mm hex key", "Loctite 243"],
              notes=["Hub onto the coupler's 16 mm pattern (4 x M4 into the printed holes: snug, not tight).",
                     "Push the hex shaft fully into the hub and clamp both screws, Loctite on the clamps."],
              inferred=True, inferred_note="Thru-hole vs threaded hub assignment and screw length inferred."),
-        Step("s04", "U-joint onto the hub", ["ujoint", "uj_bearing_l", "uj_bearing_r"], F("scr_hub_coupler"),
+        Step("s04", "U-joint onto the hub", ["ujoint", "uj_bearing_l", "uj_bearing_r"],
+             F("scr_hub_coupler") + F("nut_coupler"),
              context=["hex_shaft", "hub_bottom", "neck_coupler"], tools=["3 mm hex key"],
              notes=["Slide the U-joint body down the hex post onto the hub; 4 x M4 down through its pattern "
-                    "mount and the thru-hole hub into the coupler."]),
+                    "mount and the thru-hole hub, through the coupler's plate into its trapped nuts."]),
         Step("s04b", "The cross into the U-joint (tilt axis)", ["custom_joint_piece"],
              F("pin_tilt") + F("wash_tilt"), context=["ujoint", "hex_shaft"],
              tools=["3 mm hex key", "Loctite 243"],

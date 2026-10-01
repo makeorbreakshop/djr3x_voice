@@ -436,9 +436,10 @@ def add_hardware(asm, fit, visor):
     hb_top = float(hub_b.bounds[1][1])
     uj = P["ujoint"].mesh
     for i, (c, r) in enumerate(sorted(c_holes, key=lambda h: (h[0][0], h[0][2]))):
-        hw.hole("neck_coupler", f"cp{i + 1}", [c[0], c_top, c[2]], -UP, r)
+        # read the part's own hole (kind, depth) before hw.hole replaces it with the bare axis
         trapped = cf[f"hole_cp{i + 1}"].get("kind") == "nut_trap"
         depth = float(cf[f"hole_cp{i + 1}"].get("depth", c_top - cf["bore_stop"]["p"][1]))
+        hw.hole("neck_coupler", f"cp{i + 1}", [c[0], c_top, c[2]], -UP, r)
         if trapped:
             # through-bolts with nuts in the plate's traps (fastening rule: the wall round an insert is
             # too thin here); the nut's far face 0.2 mm inside the plate, over the neck tube's top
