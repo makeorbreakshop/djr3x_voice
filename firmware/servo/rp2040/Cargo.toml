@@ -8,7 +8,7 @@ publish = false
 rust-version = "1.91"
 
 [dependencies]
-r3x-servo-ctl = { path = "../../rust/crates/r3x-servo-ctl" }
+r3x-servo-ctl = { path = "../../../rust/crates/r3x-servo-ctl" }
 
 embassy-rp = { version = "0.10", features = ["rp2040", "defmt", "time-driver", "critical-section-impl", "unstable-pac"] }
 embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
