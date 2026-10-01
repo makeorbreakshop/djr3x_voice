@@ -128,7 +128,8 @@ pub struct Runtime {
     pub voice: Option<r3x_voice::VoiceStack>,
     pub music: Option<music::MusicStack>,
     pub brain: Option<r3x_brain::Brain>,
-    pub vision: Option<r3x_vision::Vision>,
+    /// Filled once the face models have loaded (`None` = vision off).
+    pub vision: Option<vision::VisionSlot>,
     /// The gamepad reader (`R3X_PAD`); dropping it stops the thread.
     pub pad: Option<r3x_pad::PadReader>,
     gateway: GatewayConfig,
@@ -210,10 +211,8 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
     };
     // `--vision` (R3X_VISION): fail-open; presence goes to the brain's memory, scenes and
     // `analyze_scene` to the brain.
-    let vision = if vision::enabled_from_env() { vision::start(&bus, memory) } else { None };
-    if let (Some(b), Some(v)) = (&brain, &vision) {
-        b.attach_vision(Arc::new(vision::BrainEyes(v.clone())));
-    }
+    // The face models load in the background (~0.9 s): the gateway serves without waiting.
+    let vision = vision::enabled_from_env().then(|| vision::start(&bus, memory, brain.clone()));
     // `--music rust` (R3X_MUSIC): the r3x engine plays; in bridge mode it speaks
     // MusicController's topics over the tap (CantinaOS runs with R3X_EXTERNAL_MUSIC=1).
     let music = match music::MusicMode::from_env() {
