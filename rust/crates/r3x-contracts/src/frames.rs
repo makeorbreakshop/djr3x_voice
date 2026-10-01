@@ -63,6 +63,11 @@ pub struct PadControls {
     /// Claw grip 0..1: hero, poker.
     #[serde(default)]
     pub grip: [f64; 2],
+    /// Crane mode (an arm layer latched): `hero` | `poker` | `both`. Both sticks drive the
+    /// arm(s) at a speed, and they stay where they are left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub crane: Option<String>,
     /// The open menu, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

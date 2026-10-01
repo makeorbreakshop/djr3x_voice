@@ -196,6 +196,22 @@ export class PadOverlay {
     });
   }
 
+  /** Crane mode: both sticks drive the arm(s) at a speed (r3x-pad controls.rs). */
+  private craneLayout(crane: string) {
+    const rows: [string, string][] = crane === 'both'
+      ? [['Left stick', 'hero arm: aim ↔, raise ↕'], ['Right stick', 'poker arm: around ↔, up/down ↕'], ['R2', 'poker grip (press harder)'], ['✕', 'grip both']]
+      : crane === 'hero'
+        ? [['Left stick', 'aim ↔, raise ↕'], ['Right stick', 'twist ↔'], ['R2 / ✕', 'grip (press harder)'], ['R1 hold', 'creep (slow) · double-tap: both arms']]
+        : [['Left stick', 'around ↔, reach in/out ↕'], ['Right stick', 'claw up/down ↕'], ['R2 / ✕', 'grip (press harder)'], ['L1 hold', 'creep (slow) · double-tap: both arms']];
+    rows.push(['D-pad ← →', 'tap: glide to spot · hold: save spot'], ['D-pad ↑', 'glide home'], [crane === 'hero' ? 'L1 tap' : crane === 'poker' ? 'R1 tap' : 'L1/R1 tap', 'leave the crane (the arm stays put)']);
+    this.legend.append(el('div', 'padov-title', `Crane: ${crane === 'both' ? 'both arms' : `${crane} arm`} · the head watches the claw`));
+    for (const [ctl, does] of rows) {
+      const row = el('div', 'padov-row padov-bank');
+      row.append(el('span', 'padov-ctl', ctl), el('span', 'padov-does', does), el('span'));
+      this.legend.append(row);
+    }
+  }
+
   private menuLayout(c: PadControls) {
     const m = c.menu!;
     this.legend.append(el('div', 'padov-title', m.path.join(' › ')));
@@ -209,7 +225,7 @@ export class PadOverlay {
     const layerKey = (c?.layer || 'base') as keyof PadLayers;
     const bank = MAPPING.layers[layerKey] ?? MAPPING.layers.base;
     const stick = c?.stick ?? 'body';
-    const key = !c ? 'legacy' : c.menu ? `menu:${c.menu.path.join('/')}:${c.menu.items.join('|')}:${c.menu.cursor}` : `layer:${layerKey}:${stick}`;
+    const key = !c ? 'legacy' : c.menu ? `menu:${c.menu.path.join('/')}:${c.menu.items.join('|')}:${c.menu.cursor}` : c.crane ? `crane:${c.crane}` : `layer:${layerKey}:${stick}`;
     if (key === this.layoutKey) return;
     this.layoutKey = key;
     this.legend.replaceChildren();
@@ -217,7 +233,10 @@ export class PadOverlay {
     const tags = c ? runtimeTags(bank, stick) : LEGACY;
     for (const [k, t] of this.tags) t.textContent = tags[k];
     if (c?.menu) this.menuLayout(c);
-    else if (c) this.layerLayout(layerKey, bank);
+    else if (c?.crane) {
+      this.craneLayout(c.crane);
+      this.tags.get('rstick')!.textContent = 'Arm (crane)';
+    } else if (c) this.layerLayout(layerKey, bank);
   }
 
   private render(p: PadFrame | null) {
@@ -229,6 +248,7 @@ export class PadOverlay {
     if (c?.talking) chips.push(['talking', 'talk']);
     if (c && c.layer && c.layer !== 'base') chips.push([MAPPING.layers[c.layer as keyof PadLayers]?.name ?? c.layer, 'layer']);
     for (const m of c?.latched ?? []) chips.push([`${m.toUpperCase()} latched`, 'layer']);
+    if (c?.crane) chips.push([`crane: ${c.crane}`, 'talk']);
     if (c?.pickup) chips.push(['bring the stick to the arm', 'warn']);
     for (const a of c?.pinned ?? []) chips.push([`${a} pinned`, '']);
     (c?.grip ?? [0, 0]).forEach((g, i) => { if (g > 0.02) chips.push([`${i ? 'poker' : 'hero'} grip ${Math.round(g * 100)}%`, '']); });

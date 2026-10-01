@@ -2529,6 +2529,13 @@
           "description": "Motion outputs enabled (PS hold toggles).",
           "type": "boolean"
         },
+        "crane": {
+          "description": "Crane mode (an arm layer latched): `hero` | `poker` | `both`. Both sticks drive the\narm(s) at a speed, and they stay where they are left.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "grip": {
           "default": [
             0.0,

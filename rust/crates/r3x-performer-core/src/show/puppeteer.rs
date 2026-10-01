@@ -76,7 +76,7 @@ fn dead(x: f64) -> f64 {
 
 /// Deg of pan before the rings take over.
 const NECK: f64 = 60.0;
-const GAZE_YAW: f64 = 85.0;
+pub const GAZE_YAW: f64 = 85.0;
 const GAZE_PITCH: f64 = 14.0;
 const LIFT: f64 = 12.0;
 const BODY_YAW_LOWER: f64 = 24.0;
@@ -89,8 +89,8 @@ const ARM_DOWN: f64 = 20.0;
 const ROLL: f64 = 9.0;
 /// Ring turn that aims an arm at full stick, deg: the hero arm rides the top ring, the poker
 /// arm the lower one (which carries everything above it).
-const HERO_AIM: f64 = 25.0;
-const POKER_AIM: f64 = 25.0;
+pub const HERO_AIM: f64 = 25.0;
+pub const POKER_AIM: f64 = 25.0;
 const HERO_TWIST: f64 = 80.0;
 /// Hero arm at full stick, deg of shoulder. The arm rests raised, and a + shoulder swings it
 /// forward and down (measured in the sim, 2026-10-01: +1 took the claw from 0.68 to 0.55 m),
@@ -99,8 +99,8 @@ const HERO_UP: f64 = 28.0;
 const HERO_DOWN: f64 = 34.0;
 /// Poker claw tip at full stick: swung this far around the shoulder (deg); at full d-pad,
 /// reached this far in or out (mm; out stops at full stretch, a few mm past rest).
-const POKER_SWING: f64 = 30.0;
-const POKER_REACH_MM: f64 = 40.0;
+pub const POKER_SWING: f64 = 30.0;
+pub const POKER_REACH_MM: f64 = 40.0;
 /// Claw fingers at full grip, deg (`claw_snap` closes to 25).
 const CLAW_CLOSED: f64 = 25.0;
 const HERO_CLAWS: [&str; 3] = ["hero_claw_l", "hero_claw_r", "hero_claw_t"];
@@ -279,12 +279,14 @@ impl Puppeteer {
                 0.0,
                 energy,
                 -raw(op_axis::ROLL),
-                dead(raw(op_axis::HERO_AIM)),
-                dead(raw(op_axis::HERO_RAISE)),
+                // The hands arrive shaped (dead zone, pickup, crane), so no dead zone here: a crane
+                // holding the arm at 0.1 must stay at 0.1.
+                raw(op_axis::HERO_AIM),
+                raw(op_axis::HERO_RAISE),
                 raw(op_axis::HERO_TWIST),
                 raw(op_axis::HERO_GRIP).max(0.0),
-                dead(raw(op_axis::POKER_AIM)),
-                dead(raw(op_axis::POKER_RAISE)),
+                raw(op_axis::POKER_AIM),
+                raw(op_axis::POKER_RAISE),
                 raw(op_axis::POKER_REACH),
                 raw(op_axis::POKER_GRIP).max(0.0),
             ];
@@ -423,7 +425,8 @@ impl Puppeteer {
         let up = expo(hero_raise);
         add(pose, "hero_shoulder", if up >= 0.0 { -up * HERO_UP } else { -up * HERO_DOWN });
         add(pose, "hero_wrist", hero_twist.clamp(-1.0, 1.0) * HERO_TWIST);
-        let (shoulder, wrist) = super::arm_ik::POKER.solve(expo(poker_raise) * POKER_SWING, poker_reach.clamp(-1.0, 1.0) * POKER_REACH_MM);
+        // Linear (no expo): the crane moves the tip in straight lines through these channels.
+        let (shoulder, wrist) = super::arm_ik::POKER.solve(poker_raise.clamp(-1.0, 1.0) * POKER_SWING, poker_reach.clamp(-1.0, 1.0) * POKER_REACH_MM);
         add(pose, "poker_shoulder", shoulder);
         add(pose, "poker_wrist", wrist);
         for c in HERO_CLAWS {

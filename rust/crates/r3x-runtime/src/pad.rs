@@ -10,7 +10,8 @@
 //!
 //! Feedback: pad LEDs = the layer while one is active (LED 1 = L1, 2 = R1, 3 = R2, 4 = something
 //! latched), else the state (1 idle, 2 engaged, 3 DJ; all four = frozen). Rumble: a tick on
-//! every layer change, two for a latch, one long for an unlatch, a short one for pin/unpin and
+//! every layer change, two for a latch, one long for an unlatch, a bump at a crane's edge of
+//! reach, three for a saved crane spot, a short one for pin/unpin and
 //! for a command that landed, a long one for a refusal. Reports `pad`: running while a pad
 //! streams.
 
@@ -237,6 +238,8 @@ impl Operator {
             Cue::Latch(true) => &[60, 80, 60],
             Cue::Latch(false) => &[160],
             Cue::Pin(_) => &[70],
+            Cue::Edge => &[25],
+            Cue::Saved => &[40, 60, 40, 60, 40],
         };
         tokio::spawn(async move {
             for (i, ms) in pattern.iter().enumerate() {

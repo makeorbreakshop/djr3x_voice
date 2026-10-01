@@ -33,6 +33,11 @@ pinned: Array<string>,
  */
 grip: [number, number], 
 /**
+ * Crane mode (an arm layer latched): `hero` | `poker` | `both`. Both sticks drive the
+ * arm(s) at a speed, and they stay where they are left.
+ */
+crane?: string, 
+/**
  * The open menu, if any.
  */
 menu?: PadMenuView, 

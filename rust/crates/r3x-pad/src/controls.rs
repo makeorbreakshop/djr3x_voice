@@ -20,13 +20,23 @@
 //!   so nothing jumps when it changes hands;
 //! - a part the stick lets go of eases home (min-jerk) unless it is pinned.
 //!
+//! **Crane mode** (2026-10-01): an arm layer *latched* (double-tap R1 = poker, L1 = hero,
+//! both = both) turns both sticks into that arm's controls, excavator style (ISO): the stick
+//! sets a speed and the arm stays where it is left. Poker: left X = around (its ring), left Y
+//! = reach in/out, right Y = up/down, in straight lines through the IK. Hero: left X = aim,
+//! left Y = raise, right X = twist. Both: left stick = hero, right stick = poker. R2 = grip
+//! (by pressure); the free bumper held = creep (30 %), double-tapped = both arms. The head watches the claw. D-pad: tap
+//! ←/→ = glide to a saved spot, hold = save it there, ↑ = glide home. A rumble at the edge of
+//! reach. Tap the latched bumper to leave: the arm stays where it was put (pinned).
+//!
 //! Face buttons fire their tap binding on release, or their hold binding once held
 //! `tap_hold_s`. How hard a face button is pressed (the DS3 measures it) sets the intensity of
 //! what it plays. A button whose tap binding is a held control (`grip`) acts while held.
 
 use r3x_contracts::{PadBinding, PadControls, PadLayer, PadMapping, PadMenuView, StickTarget};
+use r3x_performer_core::show::arm_ik::POKER as POKER_IK;
 use r3x_performer_core::show::curve::minjerk;
-use r3x_performer_core::show::puppeteer::{op_axis, PadState};
+use r3x_performer_core::show::puppeteer::{op_axis, PadState, GAZE_YAW, HERO_AIM, POKER_AIM, POKER_REACH_MM, POKER_SWING};
 
 use crate::ds3::std_btn as b;
 
@@ -43,6 +53,18 @@ pub const PICKUP: f64 = 0.2;
 pub const RATE: f64 = 1.2;
 /// The stick past this while a modifier is down makes that press "use", not a tap.
 const STICK_USED: f64 = 0.3;
+/// Stick dead zone (the arms; the puppeteer applies its own to the body and head).
+const DEAD: f64 = 0.12;
+/// Crane speeds at full stick: ring aim and hero raise / twist (range per second), the poker
+/// claw tip (mm per second).
+pub const CRANE_RATE: f64 = 0.8;
+pub const CRANE_TIP_MM_S: f64 = 120.0;
+/// The free bumper held in crane mode: this fraction of the speed.
+pub const CREEP: f64 = 0.3;
+/// A glide to a saved spot (or home) takes this long.
+pub const GLIDE_S: f64 = 1.0;
+/// No more than one edge rumble per this.
+const EDGE_EVERY_S: f64 = 0.35;
 
 const FACES: [usize; 4] = [b::CROSS, b::CIRCLE, b::SQUARE, b::TRIANGLE];
 const DPAD: [usize; 4] = [b::UP, b::RIGHT, b::DOWN, b::LEFT];
@@ -84,6 +106,42 @@ pub enum Cue {
     Latch(bool),
     /// An arm pinned (`true`) or unpinned.
     Pin(bool),
+    /// The crane pushed against the edge of reach.
+    Edge,
+    /// A crane spot saved.
+    Saved,
+}
+
+/// Which arms a crane drives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Crane {
+    Hero,
+    Poker,
+    Both,
+}
+
+impl Crane {
+    fn arms(self) -> &'static [usize] {
+        match self {
+            Crane::Hero => &[HERO],
+            Crane::Poker => &[POKER],
+            Crane::Both => &[HERO, POKER],
+        }
+    }
+    fn index(self) -> usize {
+        self as usize
+    }
+    fn name(self) -> &'static str {
+        ["hero", "poker", "both"][self as usize]
+    }
+}
+
+fn dead(x: f64) -> f64 {
+    if x.abs() < DEAD {
+        0.0
+    } else {
+        (x - x.signum() * DEAD) / (1.0 - DEAD)
+    }
 }
 
 /// One menu entry; the runtime rebuilds the tree from live state every step, so labels can
@@ -146,9 +204,17 @@ struct Part {
     pickup: bool,
     /// Easing home: started at, from (pos, extra).
     home: Option<(f64, [f64; 3])>,
+    /// A crane glide: started at, from, to (pos, extra).
+    glide: Option<(f64, [f64; 3], [f64; 3])>,
 }
 
 impl Part {
+    fn state(&self) -> [f64; 3] {
+        [self.pos[0], self.pos[1], self.extra]
+    }
+    fn set(&mut self, s: [f64; 3]) {
+        (self.pos, self.extra) = ([s[0], s[1]], s[2]);
+    }
     fn at_home(&self) -> bool {
         self.pos == [0.0, 0.0] && self.extra == 0.0
     }
@@ -185,6 +251,11 @@ pub struct Controls {
     lift: f64,
     visor: f64,
     roll: f64,
+    /// Crane d-pad presses (tap = go, hold = save), when each went down.
+    crane_dpad: [Option<f64>; 4],
+    /// Saved spots per crane (hero, poker, both) and slot (←, →): every arm's state.
+    spots: [[Option<[[f64; 3]; 3]>; 2]; 3],
+    edge_at: f64,
     pub armed: bool,
 }
 
@@ -210,6 +281,9 @@ impl Controls {
             lift: 0.0,
             visor: 0.0,
             roll: 0.0,
+            crane_dpad: [None; 4],
+            spots: [[None; 2]; 3],
+            edge_at: f64::NEG_INFINITY,
             armed: true,
         }
     }
@@ -221,9 +295,24 @@ impl Controls {
     /// The pad went away: forget everything held, latched or pinned (the runtime stops talk
     /// itself and the puppeteer eases the body home).
     pub fn reset(&mut self) {
-        let armed = self.armed;
+        let (armed, spots) = (self.armed, self.spots);
         *self = Controls::new(self.map.clone());
-        self.armed = armed;
+        (self.armed, self.spots) = (armed, spots);
+    }
+
+    /// The crane the latched modifiers make, if any: L1 alone = hero, R1 alone = poker, both
+    /// = both (R2 latched is a sound layer, no crane).
+    pub fn crane(&self) -> Option<Crane> {
+        match self.latched {
+            [true, false, false] => Some(Crane::Hero),
+            [false, true, false] => Some(Crane::Poker),
+            [true, true, false] => Some(Crane::Both),
+            _ => None,
+        }
+    }
+
+    fn latched_mask(&self) -> Mask {
+        (0..3).filter(|&m| self.latched[m]).fold(0, |acc, m| acc | (1 << m))
     }
 
     /// Unpin both arms and send them home (a menu or `act` binding: `arms.home`).
@@ -342,6 +431,7 @@ impl Controls {
         // ---------------------------------------------------------------- modifiers
         let other_pressed = (0..b::COUNT).any(|i| !MODS.contains(&i) && pressed(i));
         let stick_used = stick[0].hypot(stick[1]) > STICK_USED;
+        let crane_before = self.crane();
         for (m, &i) in MODS.iter().enumerate() {
             let md = &mut self.mods[m];
             if pressed(i) {
@@ -354,8 +444,18 @@ impl Controls {
                 md.down_at = None;
                 if tapped {
                     if self.latched[m] {
+                        // Leaving a crane: the arm stays where it was put.
+                        if let Some(c) = crane_before {
+                            for &a in c.arms() {
+                                self.parts[a].pinned = true;
+                                self.parts[a].glide = None;
+                            }
+                        }
                         self.latched[m] = false;
                         cues.push(Cue::Latch(false));
+                    } else if crane_before.is_some() && m == 2 {
+                        // In a crane R2 grips: never a latch. (The free bumper creeps when held,
+                        // and a double tap of it makes the crane two-armed.)
                     } else if md.last_tap.is_some_and(|t| now - t <= self.map.double_tap_s) {
                         self.latched[m] = true;
                         md.last_tap = None;
@@ -366,7 +466,12 @@ impl Controls {
                 }
             }
         }
-        let desired: Mask = (0..3).filter(|&m| down(MODS[m]) || self.latched[m]).fold(0, |acc, m| acc | (1 << m));
+        // In a crane only the latch counts: the other modifiers are its creep and grip.
+        let desired: Mask = if self.crane().is_some() {
+            self.latched_mask()
+        } else {
+            (0..3).filter(|&m| down(MODS[m]) || self.latched[m]).fold(0, |acc, m| acc | (1 << m))
+        };
 
         // The stick's layer settles for the grace first.
         if desired == self.active {
@@ -506,7 +611,15 @@ impl Controls {
                     self.face[k] = Some(fp);
                 }
             }
+            let crane = self.crane().filter(|_| self.active == self.latched_mask());
+            if let Some(c) = crane {
+                self.crane_dpad_step(c, now, &down, &pressed, &mut cues);
+            }
             for (k, &i) in DPAD.iter().enumerate() {
+                if crane.is_some() {
+                    self.dpad[k] = None;
+                    continue;
+                }
                 if pressed(i) {
                     self.dpad[k] = Some(desired);
                     let bd = self.layer(desired).1.dpad[k].clone();
@@ -563,6 +676,21 @@ impl Controls {
                 }
             }
         }
+        let crane = self.crane().filter(|_| self.active == self.latched_mask());
+        if let Some(c) = crane {
+            // R2 grips by pressure: the poker claw in a two-armed crane, else the crane's arm.
+            let r2 = val(b::R2);
+            if r2 > 0.0 {
+                let arms: &[usize] = if c == Crane::Both { &[POKER] } else { c.arms() };
+                for &i in arms {
+                    self.parts[i].grip = self.parts[i].grip.max(r2).min(1.0);
+                    if !gripping[i] {
+                        self.parts[i].grip = r2;
+                    }
+                    gripping[i] = true;
+                }
+            }
+        }
         let open = 1.0 - (-dt / 0.08).exp();
         for (i, part) in self.parts.iter_mut().enumerate() {
             if !gripping[i] && !part.grip_keep {
@@ -574,13 +702,21 @@ impl Controls {
         }
 
         // ---------------------------------------------------------------- the left stick
-        let driven = Self::driven(self.layer(self.active).1.stick);
+        let driven: &[usize] = match crane {
+            Some(c) => {
+                let right = [axis(2), axis(3)];
+                let creep = if (down(b::L1) && !self.latched[0]) || (down(b::R1) && !self.latched[1]) { CREEP } else { 1.0 };
+                self.crane_step(c, stick, right, dt * creep, now, &mut cues);
+                c.arms()
+            }
+            None => Self::driven(self.layer(self.active).1.stick),
+        };
         for (i, part) in self.parts.iter_mut().enumerate() {
-            if part.pinned {
+            if part.pinned || (crane.is_some() && driven.contains(&i)) {
                 continue;
             }
             if driven.contains(&i) {
-                let want = if i == BODY { stick } else { [stick[0], -stick[1]] };
+                let want = if i == BODY { stick } else { [dead(stick[0]), -dead(stick[1])] };
                 if part.pickup && (want[0] - part.pos[0]).hypot(want[1] - part.pos[1]) < PICKUP {
                     part.pickup = false;
                 }
@@ -609,6 +745,17 @@ impl Controls {
         axes[1] = body.pos[1];
         axes[2] = axis(2);
         axes[3] = axis(3);
+        // In a crane the right stick is the arm's: the head watches the claw instead (roughly:
+        // toward the arm's ring, down to the poker claw), or rests for a two-armed one.
+        if let Some(c) = crane {
+            let (yaw, down) = match c {
+                Crane::Poker => (poker.pos[0] * POKER_AIM, 0.6 - 0.4 * poker.pos[1]),
+                Crane::Hero => (hero.pos[0] * HERO_AIM, 0.1 - 0.2 * hero.pos[1]),
+                Crane::Both => (0.0, 0.0),
+            };
+            axes[2] = (yaw / GAZE_YAW).clamp(-1.0, 1.0);
+            axes[3] = down.clamp(-1.0, 1.0);
+        }
         axes[op_axis::ROLL] = self.roll;
         axes[op_axis::HERO_AIM] = hero.pos[0];
         axes[op_axis::HERO_RAISE] = hero.pos[1];
@@ -630,12 +777,123 @@ impl Controls {
             pickup: driven.iter().any(|&i| self.parts[i].pickup && !self.parts[i].pinned),
             pinned: (HERO..=POKER).filter(|&i| self.parts[i].pinned).map(|i| PART_NAMES[i].to_string()).collect(),
             grip: [hero.grip, poker.grip],
+            crane: crane.map(|c| c.name().to_string()),
             menu: self.menu_view(menu),
             talking: matches!(self.talk_down, Some((_, true))),
             armed: self.armed,
             last: None,
         };
         Step { puppet: PadState { axes, buttons: vec![(false, 0.0); b::COUNT] }, actions, cues, view }
+    }
+
+    /// One crane step: both sticks as speeds (`dt` already scaled for creep).
+    fn crane_step(&mut self, c: Crane, left: [f64; 2], right: [f64; 2], dt: f64, now: f64, cues: &mut Vec<Cue>) {
+        let (l, r) = ([dead(left[0]), -dead(left[1])], [dead(right[0]), -dead(right[1])]);
+        let mut edge = false;
+        let rate = CRANE_RATE * dt;
+        // Add `d`, clamped to -1..1; true when the clamp held it back.
+        fn bump(v: &mut f64, d: f64) -> bool {
+            let n = *v + d;
+            *v = n.clamp(-1.0, 1.0);
+            d != 0.0 && !(-1.0..=1.0).contains(&n)
+        }
+        // (hero aim, hero raise, hero twist) and (poker around, poker reach, poker up) inputs.
+        let (hero_in, poker_in) = match c {
+            Crane::Hero => ([l[0], l[1], r[0]], [0.0; 3]),
+            Crane::Poker => ([0.0; 3], [l[0], l[1], r[1]]),
+            Crane::Both => ([l[0], l[1], 0.0], [r[0], 0.0, r[1]]),
+        };
+        let moving = |v: &[f64; 3]| v.iter().any(|x| *x != 0.0);
+        for (i, input) in [(HERO, hero_in), (POKER, poker_in)] {
+            if !c.arms().contains(&i) {
+                continue;
+            }
+            let part = &mut self.parts[i];
+            part.home = None;
+            part.pickup = false;
+            if moving(&input) {
+                part.glide = None;
+            } else if let Some((t0, from, to)) = part.glide {
+                let w = minjerk(((now - t0) / GLIDE_S).min(1.0));
+                part.set([0, 1, 2].map(|k| from[k] + (to[k] - from[k]) * w));
+                if w >= 1.0 {
+                    part.glide = None;
+                }
+                continue;
+            }
+            if i == HERO {
+                edge |= bump(&mut part.pos[0], input[0] * rate);
+                edge |= bump(&mut part.pos[1], input[1] * rate);
+                edge |= bump(&mut part.extra, input[2] * rate);
+            } else {
+                edge |= bump(&mut part.pos[0], input[0] * rate);
+                if input[1] != 0.0 || input[2] != 0.0 {
+                    let mm = CRANE_TIP_MM_S * dt;
+                    edge |= Self::poker_move(part, input[1] * mm, input[2] * mm);
+                }
+            }
+        }
+        if edge && now - self.edge_at >= EDGE_EVERY_S {
+            self.edge_at = now;
+            cues.push(Cue::Edge);
+        }
+    }
+
+    /// Move the poker claw tip `fwd` / `up` mm in its plane, in a straight line, clamped to
+    /// what the arm reaches. True when the clamp held it back (the edge).
+    fn poker_move(part: &mut Part, fwd: f64, up: f64) -> bool {
+        let (rx, ry) = POKER_IK.tip(0.0, 0.0);
+        let (a0, r0) = (ry.atan2(rx), rx.hypot(ry));
+        let a = a0 + (part.pos[1] * POKER_SWING).to_radians();
+        let r = r0 + part.extra * POKER_REACH_MM;
+        let (x, y) = (r * a.cos() + fwd, r * a.sin() + up);
+        let swing = ((y.atan2(x) - a0).to_degrees() / POKER_SWING).clamp(-1.0, 1.0);
+        let out_max = (POKER_IK.l1 + POKER_IK.l2 - 1.0 - r0) / POKER_REACH_MM;
+        let reach = ((x.hypot(y) - r0) / POKER_REACH_MM).clamp(-1.0, out_max.min(1.0));
+        // Held back if the clamp took more than a hair off the asked-for move.
+        let (want_s, want_r) = ((y.atan2(x) - a0).to_degrees() / POKER_SWING, (x.hypot(y) - r0) / POKER_REACH_MM);
+        let edge = (want_s - swing).abs() > 1e-6 || (want_r - reach).abs() > 1e-6;
+        part.pos[1] = swing;
+        part.extra = reach;
+        edge
+    }
+
+    /// Crane d-pad: tap ←/→ = glide to that spot, hold = save it there; tap ↑ = glide home.
+    fn crane_dpad_step(&mut self, c: Crane, now: f64, down: &dyn Fn(usize) -> bool, pressed: &dyn Fn(usize) -> bool, cues: &mut Vec<Cue>) {
+        for (k, &i) in DPAD.iter().enumerate() {
+            if pressed(i) {
+                self.crane_dpad[k] = Some(now);
+            }
+            let Some(t) = self.crane_dpad[k] else { continue };
+            let slot = match i {
+                b::LEFT => Some(0),
+                b::RIGHT => Some(1),
+                _ => None,
+            };
+            if down(i) {
+                if let Some(slot) = slot.filter(|_| t.is_finite() && now - t >= self.map.tap_hold_s) {
+                    self.spots[c.index()][slot] = Some(self.parts.map(|p| p.state()));
+                    self.crane_dpad[k] = Some(f64::INFINITY);
+                    cues.push(Cue::Saved);
+                }
+                continue;
+            }
+            self.crane_dpad[k] = None;
+            if !t.is_finite() {
+                continue; // that was a save
+            }
+            let target = match (i, slot) {
+                (b::UP, _) => Some([[0.0; 3]; 3]),
+                (_, Some(slot)) => self.spots[c.index()][slot],
+                _ => None,
+            };
+            if let Some(to) = target {
+                for &a in c.arms() {
+                    let p = &mut self.parts[a];
+                    p.glide = Some((now, p.state(), to[a]));
+                }
+            }
+        }
     }
 
     /// The stick changes hands: parts it lets go of ease home (unless pinned), parts it takes
@@ -745,7 +1003,7 @@ mod tests {
         for &i in held {
             buttons[i] = (true, pressure);
         }
-        PadState { axes: vec![left[0], left[1], -0.5, 0.2], buttons }
+        PadState { axes: vec![left[0], left[1], -0.5, 0.0], buttons }
     }
 
     struct Run {
@@ -851,7 +1109,7 @@ mod tests {
         r.hold(0.05, &[b::L1], [0.05, 0.0]);
         let s = r.hold(0.05, &[b::L1], [0.4, -0.6]);
         assert!(!s.view.pickup);
-        assert!((s.puppet.axes[ax::HERO_AIM] - 0.4).abs() < 1e-9 && (s.puppet.axes[ax::HERO_RAISE] - 0.6).abs() < 1e-9, "stick up = raise");
+        assert!((s.puppet.axes[ax::HERO_AIM] - dead(0.4)).abs() < 1e-9 && (s.puppet.axes[ax::HERO_RAISE] - dead(0.6)).abs() < 1e-9, "stick up = raise");
     }
 
     #[test]
@@ -903,9 +1161,11 @@ mod tests {
         assert_eq!(s.cues, vec![Cue::Latch(true)]);
         let s = r.hold(0.2, &[], [0.0, 0.0]);
         assert_eq!((s.view.stick, s.view.latched.clone()), (StickTarget::Poker, vec!["r1".to_string()]), "latched: hands free");
-        // Latched + R2 held = the R2+R1 layer.
+        assert_eq!(s.view.crane.as_deref(), Some("poker"), "a latched arm layer is the crane");
+        // In the crane R2 is the grip, not a layer.
         let s = r.hold(0.2, &[b::R2], [0.0, 0.0]);
-        assert_eq!(s.view.layer, "r2r1");
+        assert_eq!(s.view.layer, "r1");
+        assert_eq!(s.view.grip[1], 1.0);
         r.hold(0.2, &[], [0.0, 0.0]);
         r.at(0.01, &[b::R1]);
         let s = r.at(0.05, &[]);
@@ -1034,7 +1294,7 @@ mod tests {
         r.with(0.01, &[b::R1, b::L3], [0.5, 0.0], 1.0);
         r.with(0.01, &[b::R1], [0.5, 0.0], 1.0);
         let s = r.hold(0.3, &[], [0.0, 0.0]);
-        assert_eq!(s.puppet.axes[ax::POKER_AIM], 0.5, "pinned");
+        assert_eq!(s.puppet.axes[ax::POKER_AIM], dead(0.5), "pinned");
         r.at(0.01, &[b::L3]);
         r.at(0.01, &[]);
         assert_eq!(r.hold(1.0, &[], [0.0, 0.0]).puppet.axes[ax::POKER_AIM], 0.0);
@@ -1091,12 +1351,129 @@ mod tests {
         assert!(!r.c.armed, "losing the pad does not re-arm the motors");
     }
 
+    fn latch(r: &mut Run, held: &[usize]) {
+        r.at(0.01, held);
+        r.at(0.05, &[]);
+        r.at(0.1, held);
+        r.at(0.05, &[]);
+        r.hold(0.2, &[], [0.0, 0.0]);
+    }
+
+    /// Both sticks are speeds in the crane, and the arm stays where it is left (2026-10-01:
+    /// "a crane mode so I can use both sticks").
+    #[test]
+    fn the_poker_crane_moves_at_a_speed_and_stays_where_it_is_left() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::R1]);
+        // Left X: around, at CRANE_RATE per second.
+        let s = r.hold(0.5, &[], [1.0, 0.0]);
+        assert!((s.puppet.axes[ax::POKER_AIM] - 0.4).abs() < 0.02, "{}", s.puppet.axes[ax::POKER_AIM]);
+        let s = r.hold(1.0, &[], [0.0, 0.0]);
+        assert!((s.puppet.axes[ax::POKER_AIM] - 0.4).abs() < 0.02, "let go: it stays");
+        assert!(s.puppet.axes[2] > 0.0, "the head turns to watch the claw");
+        // Right Y up: the claw tip rises, the right stick no longer moves the head.
+        let s = r.c.step(r.t + 0.5, &PadState { axes: vec![0.0, 0.0, 0.0, -1.0], buttons: vec![(false, 0.0); b::COUNT] }, &r.menu);
+        r.t += 0.5;
+        assert!(s.puppet.axes[ax::POKER_RAISE] > 0.1, "up: {}", s.puppet.axes[ax::POKER_RAISE]);
+        assert!(s.puppet.axes[3] < 0.6, "the head follows the claw up");
+    }
+
+    #[test]
+    fn the_poker_crane_moves_the_tip_in_a_straight_line_and_rumbles_at_the_edge() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::R1]);
+        let tip = |s: &Step| {
+            let (sh, wr) = POKER_IK.solve(s.puppet.axes[ax::POKER_RAISE] * POKER_SWING, s.puppet.axes[ax::POKER_REACH] * POKER_REACH_MM);
+            POKER_IK.tip(sh, wr)
+        };
+        let s0 = r.hold(0.05, &[], [0.0, 0.0]);
+        let (x0, y0) = tip(&s0);
+        // Up for 0.25 s at 120 mm/s: 30 mm straight up, no drift in or out.
+        let mut s = Step::default();
+        for _ in 0..25 {
+            r.t += 0.01;
+            s = r.c.step(r.t, &PadState { axes: vec![0.0, 0.0, 0.0, -1.0], buttons: vec![(false, 0.0); b::COUNT] }, &r.menu);
+        }
+        let (x, y) = tip(&s);
+        assert!((y - y0 - 30.0).abs() < 2.0 && (x - x0).abs() < 2.0, "({:.1}, {:.1})", x - x0, y - y0);
+        // Reach out (left stick up) until the arm is straight: an edge rumble, and it stops.
+        let mut edges = 0;
+        for _ in 0..200 {
+            edges += r.with(0.01, &[], [0.0, -1.0], 1.0).cues.iter().filter(|c| **c == Cue::Edge).count();
+        }
+        assert!(edges >= 1, "the edge is felt");
+        assert!(edges < 10, "but not as a constant buzz: {edges}");
+    }
+
+    #[test]
+    fn creep_slows_the_crane_and_r2_grips() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::R1]);
+        let s = r.hold(0.5, &[b::L1], [1.0, 0.0]);
+        assert!((s.puppet.axes[ax::POKER_AIM] - 0.4 * CREEP).abs() < 0.02, "creep: {}", s.puppet.axes[ax::POKER_AIM]);
+        assert_eq!(s.view.layer, "r1", "L1 held is the creep, not the both-arms layer");
+        let s = r.with(0.01, &[b::R2], [0.0, 0.0], 0.6);
+        assert!((s.view.grip[1] - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn crane_spots_save_on_hold_and_glide_back_on_tap() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::R1]);
+        r.hold(0.5, &[], [1.0, 0.0]);
+        let s = r.hold(0.5, &[b::RIGHT], [0.0, 0.0]);
+        assert_eq!(s.cues, vec![], "saved earlier in the hold");
+        r.at(0.01, &[]);
+        let s = r.hold(1.0, &[], [-1.0, 0.0]);
+        assert!(s.puppet.axes[ax::POKER_AIM] < 0.0);
+        // ↑ = home, → = the saved spot, both as glides.
+        r.at(0.01, &[b::UP]);
+        r.at(0.01, &[]);
+        let s = r.hold(GLIDE_S + 0.1, &[], [0.0, 0.0]);
+        assert!(s.puppet.axes[ax::POKER_AIM].abs() < 1e-9, "home: {}", s.puppet.axes[ax::POKER_AIM]);
+        r.at(0.01, &[b::RIGHT]);
+        let mid = r.at(0.01, &[]);
+        let s = r.hold(GLIDE_S + 0.1, &[], [0.0, 0.0]);
+        assert!((s.puppet.axes[ax::POKER_AIM] - 0.4).abs() < 0.02, "back at the spot");
+        assert!(mid.puppet.axes[ax::POKER_AIM] < 0.1, "glided, not jumped");
+    }
+
+    #[test]
+    fn leaving_the_crane_leaves_the_arm_where_it_was_put() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::R1]);
+        r.hold(0.5, &[], [1.0, 0.0]);
+        r.at(0.01, &[b::R1]);
+        let s = r.at(0.05, &[]);
+        assert!(s.cues.contains(&Cue::Latch(false)));
+        let s = r.hold(1.5, &[], [0.0, 0.0]);
+        assert_eq!((s.view.crane.clone(), s.view.layer.as_str()), (None, "base"));
+        assert!((s.puppet.axes[ax::POKER_AIM] - 0.4).abs() < 0.02, "pinned where it was put");
+        assert_eq!(s.view.pinned, vec!["poker"]);
+    }
+
+    #[test]
+    fn a_two_armed_crane_puts_the_hero_on_the_left_stick_and_the_poker_on_the_right() {
+        let mut r = Run::new();
+        latch(&mut r, &[b::L1]);
+        latch(&mut r, &[b::R1]);
+        let s = r.hold(0.1, &[], [0.0, 0.0]);
+        assert_eq!(s.view.crane.as_deref(), Some("both"));
+        r.t += 0.5;
+        let s = r.c.step(r.t, &PadState { axes: vec![0.0, -1.0, 1.0, 0.0], buttons: vec![(false, 0.0); b::COUNT] }, &r.menu);
+        let _ = s;
+        let s = r.c.step(r.t + 0.5, &PadState { axes: vec![0.0, -1.0, 1.0, 0.0], buttons: vec![(false, 0.0); b::COUNT] }, &r.menu);
+        assert!(s.puppet.axes[ax::HERO_RAISE] > 0.3, "left up: hero raises");
+        assert!(s.puppet.axes[ax::POKER_AIM] > 0.3, "right X: poker turns");
+        assert_eq!(s.puppet.axes[ax::HERO_AIM], 0.0);
+    }
+
     #[test]
     fn the_puppeteer_sees_an_operator_feed_and_no_buttons() {
         let mut r = Run::new();
         let s = r.with(0.01, &[b::L2, b::R2, b::START, b::CROSS], [0.1, 0.2], 1.0);
         assert_eq!(s.puppet.axes.len(), op_axis::COUNT);
         assert!(s.puppet.buttons.iter().all(|x| !x.0), "no raw buttons: triggers would move the arm");
-        assert_eq!(&s.puppet.axes[..4], &[0.1, 0.2, -0.5, 0.2]);
+        assert_eq!(&s.puppet.axes[..4], &[0.1, 0.2, -0.5, 0.0]);
     }
 }
