@@ -190,9 +190,24 @@ for (const sg of segs) {
       if (sg.kind === 'orbit') orbit = 70 * ease(t / sg.dur);
     }
     // the framed size: the box seen from the view (its height, its width over the aspect), never closer than MIN_FOCUS
-    if (goal) {
-      const h = Math.max(goal.s[1], Math.hypot(goal.s[0], goal.s[2]) / (W / H) * 0.85, MIN_FOCUS);
-      goal.r = h / fill;
+    const az = ((AZ0 + T * DRIFT + orbit) * Math.PI) / 180;
+    const el = (EL * Math.PI) / 180;
+    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    const right = [Math.cos(az), 0, -Math.sin(az)];
+    const up = [-Math.sin(az) * Math.sin(el), Math.cos(el), -Math.cos(az) * Math.sin(el)];
+    if (goal && sg.kind !== 'step' && sg.kind !== 'open') {
+      // the whole thing: framed from each part's own extent as this view sees it (one box round all is loose)
+      const v = await ev(`JSON.stringify(__r3x.build.videoWholeView(${JSON.stringify(right)}, ${JSON.stringify(up)}))`).then(JSON.parse);
+      if (v) goal = { c: v.c, s: goal.s, r: Math.max(v.h, v.w / (W / H)) / fill };
+    } else if (goal) {
+      // the box as this view sees it: its extent across the screen and up it
+      let w = 0, hh = 0;
+      for (const sx of [-0.5, 0.5]) for (const sy of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) {
+        const p = [goal.s[0] * sx, goal.s[1] * sy, goal.s[2] * sz];
+        w = Math.max(w, 2 * Math.abs(p[0] * right[0] + p[2] * right[2]));
+        hh = Math.max(hh, 2 * Math.abs(p[0] * up[0] + p[1] * up[1] + p[2] * up[2]));
+      }
+      goal.r = Math.max(hh, w / (W / H), MIN_FOCUS) / fill;
     }
     const dt = 1 / FPS;
     if (!cam.c && goal) { cam.c = [...goal.c]; cam.r = goal.r; }
@@ -200,13 +215,11 @@ for (const sg of segs) {
       for (let j = 0; j < 3; j++) [cam.c[j], cam.v[j]] = spring(cam.c[j], cam.v[j], goal.c[j], dt);
       [cam.r, cam.vr] = spring(cam.r, cam.vr, goal.r, dt);
     }
-    const az = ((AZ0 + T * DRIFT + orbit) * Math.PI) / 180;
-    const el = (EL * Math.PI) / 180;
-    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     await ev(`(() => {
       const cam = __r3x.camera, wb = __r3x.build;
-      const fov = cam.fov * Math.PI / 180;
-      const d = (${cam.r} / 2) / Math.tan(fov / 2);
+      // the lens as it projects (zoom and view offset included): 1 / tan(half the vertical view)
+      cam.updateProjectionMatrix();
+      const d = (${cam.r} / 2) * cam.projectionMatrix.elements[5];
       const t = ${JSON.stringify(cam.c)}, dir = ${JSON.stringify(dir)};
       const c = wb.cameraState();
       c.target.set(t[0], t[1], t[2]);

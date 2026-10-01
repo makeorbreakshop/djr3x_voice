@@ -1602,6 +1602,37 @@ export class Workbench {
     return { c: box.getCenter(new THREE.Vector3()).toArray(), s: box.getSize(new THREE.Vector3()).toArray() };
   }
 
+  /** The video's wide shot as a view sees it (its right and up directions): the centre and the extent across
+   *  and up the screen of the visible section's parts, from their vertices (a box round a round shell is loose). */
+  videoWholeView(right: number[], up: number[]): { c: number[]; w: number; h: number } | null {
+    const g = this.guide;
+    if (!g) return null;
+    const R = new THREE.Vector3(...(right as [number, number, number]));
+    const U = new THREE.Vector3(...(up as [number, number, number]));
+    const N = R.clone().cross(U);
+    let lo = [Infinity, Infinity, Infinity];
+    let hi = [-Infinity, -Infinity, -Infinity];
+    const p = new THREE.Vector3();
+    this.root.updateMatrixWorld(true);
+    for (const id of g.parts) {
+      const po = this.parts.get(id);
+      if (!po?.mesh.visible) continue;
+      const pos = po.mesh.geometry.attributes.position as THREE.BufferAttribute | undefined;
+      if (!pos) continue;
+      // its vertices (every few: the extent, not the whole mesh), as round shells are loose in a box
+      for (let i = 0; i < pos.count; i += 5) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(po.mesh.matrixWorld);
+        const v = [p.dot(R), p.dot(U), p.dot(N)];
+        lo = lo.map((l, k) => Math.min(l, v[k]));
+        hi = hi.map((h, k) => Math.max(h, v[k]));
+      }
+    }
+    if (!Number.isFinite(lo[0])) return null;
+    const m = lo.map((l, k) => (l + hi[k]) / 2);
+    const c = R.clone().multiplyScalar(m[0]).addScaledVector(U, m[1]).addScaledVector(N, m[2]);
+    return { c: c.toArray(), w: hi[0] - lo[0], h: hi[1] - lo[1] };
+  }
+
   /** The video's wide shot: the section as it stands. */
   videoWhole(): { c: number[]; s: number[] } | null {
     const g = this.guide;
