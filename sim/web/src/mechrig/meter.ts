@@ -10,6 +10,8 @@ import { RULE, type ServoLoad } from './torque';
 const LABEL: Record<string, string> = {
   pan_servo: 'neck pan', lift_servo: 'head lift', servo_l: 'gimbal L', servo_r: 'gimbal R', visor_servo: 'visor',
   lower_servo: 'lower ring', top_servo: 'top ring', hero_shoulder_servo: 'hero shoulder', hero_wrist_servo: 'hero wrist',
+  // the central column's (mech/assemblies/column)
+  col_pan_servo: 'neck pan', col_lift_servo: 'head lift', col_lower_servo: 'lower ring', col_top_servo: 'top ring',
 };
 
 export class LoadMeter {
