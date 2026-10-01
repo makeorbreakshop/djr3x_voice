@@ -148,7 +148,8 @@ class Hw:
                   hole_depth_mm=avail)
         return f
 
-    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None, reason="clamp", kind="lock_nut"):
+    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None, reason="clamp", kind="lock_nut",
+            clock_ref=None):
         """A nut: `kind` lock_nut (nylon ring), nut (ISO 4032) or thin_nut (DIN 439, 2.2 mm); `reason` is
         why a nut and not an insert (fastening rule): clamp | pivot | captive."""
         spec = {"type": kind if kind != "thin_nut" else "nut", "thread": "M4", "reason": reason,
@@ -168,7 +169,7 @@ class Hw:
         d = unit(d)
         feats = {"thread": axis(at, d, 2.0), "face": plane(at, -d)}
         key = {"lock_nut": "lock_nut-M4", "nut": "nut-M4", "thin_nut": "thin_nut-M4"}[kind]
-        self.fast.append(Fastener(fid, spec, key, [pid], link, step, frame_on_axis(at, d), mesh=mesh,
+        self.fast.append(Fastener(fid, spec, key, [pid], link, step, frame_on_axis(at, d, clock_ref), mesh=mesh,
                                   cad=cad, features=feats, linkage=linkage, role=role))
         return fid
 
@@ -445,8 +446,18 @@ def add_hardware(asm, fit, visor):
             # too thin here); the nut's far face 0.2 mm inside the plate, over the neck tube's top
             nut_t = NUT_T["M4"]
             nut_at = np.array([c[0], c_top - (depth - nut_t - 0.2), c[2]])
-            nid = hw.nut(f"nut_coupler_cp{i + 1}", nut_at, -UP, "neck_coupler", "s04", "neck",
-                         reason="clamp", kind="nut")
+            # clocked to the trap's hex (5 deg steps over one 60 deg period): the least shared volume
+            best = None
+            for ref in ([math.cos(math.radians(a)), 0, math.sin(math.radians(a))] for a in range(0, 60, 5)):
+                nid = hw.nut(f"nut_coupler_cp{i + 1}", nut_at, -UP, "neck_coupler", "s04", "neck",
+                             reason="clamp", kind="nut", clock_ref=ref)
+                fo = hw.fast.pop()
+                nm = fo.mesh.copy()
+                nm.apply_transform(fo.matrix)
+                v = _shared_volume(nm, P["neck_coupler"].mesh)
+                if best is None or v < best[0]:
+                    best = (v, fo)
+            hw.fast.append(best[1])
         else:
             nid = hw.insert(f"ins_coupler_cp{i + 1}", "neck_coupler", f"cp{i + 1}", "s02").id
             # the hub plate is the whole thread: below it is the neck tube's top (the screw stops short)
@@ -638,6 +649,17 @@ def _rod_parts(lk, s):
                cad=R.status, catalog="gobilda:2808-0004-0050",
                features={"end_a": axis(start, d, 2.0), "end_b": axis(start + d * ROD_L, -d, 2.0)})
     return parts[0], parts[1], rod
+
+
+def _shared_volume(a, b) -> float:
+    import manifold3d as mf
+
+    def man(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32), tri_verts=np.asarray(m.faces, np.uint32)))
+    try:
+        return float((man(a) ^ man(b)).volume())
+    except Exception:
+        return float("inf")
 
 
 CROSS_WALL = 4.0  # the cross's walls (parts/head/joint_ring.py wall)
