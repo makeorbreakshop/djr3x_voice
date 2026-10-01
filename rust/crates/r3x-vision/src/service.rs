@@ -120,11 +120,14 @@ pub struct VisionConfig {
     pub hfov_deg: f64,
     /// A camera that failed to open (busy, unplugged) is tried again this often.
     pub camera_retry: Duration,
+    /// Start switched on. `from_env`: only with `R3X_VISION_ON=1` - vision starts off
+    /// (camera closed, no paid scene calls) and the panel's switch turns it on.
+    pub start_on: bool,
 }
 
 impl Default for VisionConfig {
     fn default() -> Self {
-        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, scene_max_width: 768, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0, camera_retry: Duration::from_secs(10) }
+        Self { fps: 5.0, presence: PresenceConfig::default(), camera: None, jpeg_quality: 85, scene_max_width: 768, frame_max_age: Duration::from_secs(2), scene_max_tokens: 200, hfov_deg: 70.0, camera_retry: Duration::from_secs(10), start_on: true }
     }
 }
 
@@ -141,6 +144,7 @@ impl VisionConfig {
         if let Some(f) = get("R3X_CAMERA_HFOV").and_then(|v| v.parse().ok()) {
             c.hfov_deg = f;
         }
+        c.start_on = get("R3X_VISION_ON").is_some_and(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"));
         c.presence.scenes = get("R3X_VISION_SCENES").is_none_or(|v| !matches!(v.as_str(), "0" | "false" | "no" | "off"));
         c
     }
@@ -226,7 +230,7 @@ impl Vision {
             scene: Mutex::new(None),
             status: status.clone(),
             control: Mutex::new(ctl_tx),
-            enabled: tokio::sync::watch::Sender::new(true),
+            enabled: tokio::sync::watch::Sender::new(cfg.start_on),
         });
         let capture_cfg = cfg.clone();
         std::thread::Builder::new()
@@ -235,7 +239,11 @@ impl Vision {
             .expect("spawn vision capture thread");
         let v = Vision { inner };
         let task = tokio::spawn(v.clone().presence_loop(obs_rx));
-        r3x_ops::report(bus, "vision", ServiceStatus::Running, None);
+        if cfg.start_on {
+            r3x_ops::report(bus, "vision", ServiceStatus::Running, None);
+        } else {
+            r3x_ops::report(bus, "vision", ServiceStatus::Stopped, Some("switched off".into()));
+        }
         (v, task)
     }
 
@@ -501,7 +509,7 @@ fn capture_loop(
     let mut cadence = Cadence::new(fps);
     let mut source: Option<Box<dyn FrameSource>> = None;
     let mut next = Instant::now();
-    let mut paused = false;
+    let mut paused = !cfg.start_on;
     // After a failed open: when to try the same camera again.
     let mut retry_at: Option<Instant> = None;
     loop {

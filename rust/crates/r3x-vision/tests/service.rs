@@ -153,6 +153,40 @@ async fn switched_off_the_camera_closes_and_looks_are_refused() {
     vision.shutdown();
 }
 
+/// Vision starts switched off by default (`R3X_VISION_ON` unset, 2026-10-01: "default off, turn
+/// it on when we need it"): the camera never opens, no visit, no looks, until the panel's
+/// switch turns it on.
+#[tokio::test]
+async fn started_off_the_camera_stays_closed_until_switched_on() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    struct Counting(Arc<AtomicU32>);
+    impl Camera for Counting {
+        fn list(&self) -> Vec<CameraInfo> {
+            vec![CameraInfo { index: 1, name: "FaceTime HD Camera".into() }]
+        }
+        fn open(&self, _index: u32, _fps: f64) -> Result<Box<dyn FrameSource>, VisionError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(Script(vec![1u8; 20_000])))
+        }
+    }
+    std::env::remove_var("R3X_VISION_ON");
+    assert!(!VisionConfig::from_env().start_on, "off unless R3X_VISION_ON");
+    let bus = Bus::new(BusConfig::default());
+    let mut rx = bus.subscribe(Domain::Vision);
+    let opens = Arc::new(AtomicU32::new(0));
+    let cfg = VisionConfig { fps: 50.0, start_on: false, frame_max_age: Duration::from_secs(30), ..Default::default() };
+    let (vision, _task) = Vision::spawn(&bus, cfg, Box::new(Counting(opens.clone())), Box::new(ByteRecognizer), None);
+    assert!(!vision.enabled());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(opens.load(Ordering::SeqCst), 0, "the camera never opened");
+    assert!(vision.snapshot().await.unwrap_err().to_string().contains("switched off"));
+
+    vision.set_enabled(true);
+    assert!(matches!(next_vision(&mut rx).await, VisionEvent::PersonDetected { .. }), "on: recognition starts");
+    assert_eq!(opens.load(Ordering::SeqCst), 1);
+    vision.shutdown();
+}
+
 /// A camera that is busy at first (another app holds it) is retried on its own, instead of
 /// vision staying dead until someone types `camera select`.
 #[tokio::test]
