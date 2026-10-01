@@ -15,13 +15,14 @@ import pytest
 MECH = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(MECH))
 
-ASSEMBLIES = ["hunter_head"]
+ASSEMBLIES = ["hunter_head", "column"]
+NEEDS = {"hunter_head": "hunter_head", "column": "parts_cad"}  # vendored folder each one reads
 
 
 @pytest.mark.skipif(os.environ.get("R3X_MECH_SUITE") != "1", reason="slow: set R3X_MECH_SUITE=1")
 @pytest.mark.parametrize("name", ASSEMBLIES)
 def test_suite_green_or_explained(name):
-    if not (MECH / "vendor" / name).exists():
+    if not (MECH / "vendor" / NEEDS.get(name, name)).exists():
         pytest.skip("vendored sources not on this machine")
     from workbench.build import run_suite
 
