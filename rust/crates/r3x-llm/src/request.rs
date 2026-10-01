@@ -19,12 +19,40 @@ pub fn accepts_temperature(model: &str) -> bool {
     TEMPERATURE_MODEL_PREFIXES.iter().any(|p| bare.starts_with(p))
 }
 
+/// How a between-tools model thinks (`CLAUDE_THINKING`): `between_tools` (the default; thinking
+/// off except between tool calls) or `adaptive` (it reasons in thinking blocks, so its reasoning
+/// never lands in the spoken text before a tool call).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Thinking {
+    #[default]
+    BetweenTools,
+    Adaptive,
+}
+
+impl Thinking {
+    pub fn parse(v: Option<&str>) -> Self {
+        match v.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("adaptive") => Thinking::Adaptive,
+            _ => Thinking::BetweenTools,
+        }
+    }
+}
+
 /// Sampling/thinking fields for one request. `requested` is the Anthropic id (before provider
 /// mapping), `wire` the id actually sent.
 pub fn generation_params(requested: &str, wire: &str, temperature: f32, effort: &str) -> Map<String, Value> {
+    generation_params_with(requested, wire, temperature, effort, Thinking::BetweenTools)
+}
+
+/// [`generation_params`] with the thinking mode chosen.
+pub fn generation_params_with(requested: &str, wire: &str, temperature: f32, effort: &str, thinking: Thinking) -> Map<String, Value> {
     let mut m = Map::new();
     if BETWEEN_TOOLS_MODELS.contains(&requested) {
-        m.insert("thinking".into(), json!({"type": "between_tools"}));
+        let t = match thinking {
+            Thinking::BetweenTools => "between_tools",
+            Thinking::Adaptive => "adaptive",
+        };
+        m.insert("thinking".into(), json!({"type": t}));
         m.insert("output_config".into(), json!({"effort": effort}));
     } else if accepts_temperature(wire) {
         m.insert("temperature".into(), json!(temperature));
@@ -169,6 +197,11 @@ impl MessagesRequest {
 
     /// The JSON body. `requested`/`wire` model ids as in [`generation_params`].
     pub fn to_body(&self, requested: &str, wire: &str, effort: &str, stream: bool) -> Value {
+        self.to_body_with(requested, wire, effort, Thinking::BetweenTools, stream)
+    }
+
+    /// [`Self::to_body`] with the thinking mode chosen.
+    pub fn to_body_with(&self, requested: &str, wire: &str, effort: &str, thinking: Thinking, stream: bool) -> Value {
         let mut b = Map::new();
         b.insert("model".into(), json!(wire));
         b.insert("max_tokens".into(), json!(self.max_tokens));
@@ -192,7 +225,7 @@ impl MessagesRequest {
             b.insert("tool_choice".into(), c.to_json());
         }
         if let Some(t) = self.temperature {
-            b.extend(generation_params(requested, wire, t, effort));
+            b.extend(generation_params_with(requested, wire, t, effort, thinking));
         }
         if stream {
             b.insert("stream".into(), json!(true));
@@ -249,6 +282,19 @@ mod tests {
         assert_eq!(Value::Object(p), json!({"thinking": {"type": "between_tools"}, "output_config": {"effort": "low"}}));
         assert!(generation_params("claude-sonnet-5", "claude-sonnet-5", 0.4, "low").is_empty());
         assert_eq!(generation_params("claude-haiku-4-5", "claude-haiku-4-5", 0.5, "low")["temperature"], json!(0.5));
+    }
+
+    /// `CLAUDE_THINKING=adaptive`: Sonnet 5.5 reasons in thinking blocks (at the same effort)
+    /// instead of `between_tools`, where it sometimes reasons in the spoken text before a tool
+    /// call ("Brandon says \"Stop.\" It's a direct command, ..." - 2026-09-30).
+    #[test]
+    fn adaptive_thinking_replaces_between_tools() {
+        let p = generation_params_with("claude-sonnet-5-5", "claude-sonnet-5-5", 0.4, "low", Thinking::Adaptive);
+        assert_eq!(Value::Object(p), json!({"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}));
+        let p = generation_params_with("claude-sonnet-5-5", "claude-sonnet-5-5", 0.4, "low", Thinking::BetweenTools);
+        assert_eq!(Value::Object(p), json!({"thinking": {"type": "between_tools"}, "output_config": {"effort": "low"}}));
+        assert_eq!(Thinking::parse(Some("adaptive")), Thinking::Adaptive);
+        assert_eq!(Thinking::parse(None), Thinking::BetweenTools, "the default is unchanged");
     }
 
     #[test]

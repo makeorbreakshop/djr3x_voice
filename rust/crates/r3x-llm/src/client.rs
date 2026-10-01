@@ -28,6 +28,8 @@ pub struct LlmConfig {
     pub wire_model: String,
     /// `output_config.effort` for between-tools models (`SPOKEN_EFFORT`, default `low`).
     pub effort: String,
+    /// `CLAUDE_THINKING`: `between_tools` (default) or `adaptive`.
+    pub thinking: crate::request::Thinking,
 }
 
 impl LlmConfig {
@@ -41,6 +43,7 @@ impl LlmConfig {
             requested_model: requested.trim().to_string(),
             wire_model: wire,
             effort: get("SPOKEN_EFFORT").filter(|s| !s.is_empty()).unwrap_or_else(|| "low".into()),
+            thinking: crate::request::Thinking::parse(get("CLAUDE_THINKING").as_deref()),
         })
     }
 
@@ -64,6 +67,7 @@ pub struct LlmClient {
     requested_model: String,
     wire_model: String,
     effort: String,
+    thinking: crate::request::Thinking,
 }
 
 impl LlmClient {
@@ -79,6 +83,7 @@ impl LlmClient {
             requested_model: cfg.requested_model.clone(),
             wire_model: cfg.wire_model.clone(),
             effort: cfg.effort.clone(),
+            thinking: cfg.thinking,
             backend: Arc::new(Backend::Http { http, cfg }),
         })
     }
@@ -96,12 +101,19 @@ impl LlmClient {
             requested_model: model.into(),
             wire_model: model.into(),
             effort: "low".into(),
+            thinking: Default::default(),
         }
     }
 
     /// This client with `meter` called on every completed call's usage.
     pub fn with_meter(mut self, meter: UsageMeter) -> Self {
         self.meter = Some(meter);
+        self
+    }
+
+    /// This client thinking `thinking` instead of its configured mode (the thinking benchmark).
+    pub fn with_thinking(mut self, thinking: crate::request::Thinking) -> Self {
+        self.thinking = thinking;
         self
     }
 
@@ -118,7 +130,7 @@ impl LlmClient {
 
     /// The exact JSON body a request becomes.
     pub fn body(&self, req: &MessagesRequest, stream: bool) -> Value {
-        req.to_body(&self.requested_model, &self.wire_model, &self.effort, stream)
+        req.to_body_with(&self.requested_model, &self.wire_model, &self.effort, self.thinking, stream)
     }
 
     async fn post(&self, http: &reqwest::Client, cfg: &LlmConfig, body: &Value) -> Result<reqwest::Response, LlmError> {
