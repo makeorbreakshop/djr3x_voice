@@ -27,7 +27,7 @@
         "min": -32.66,
         "max": 32.66
       },
-      "v_max": 79.4,
+      "v_max": 55.3,
       "a_max": 120,
       "j_max": 800,
       "extended": false
@@ -269,7 +269,7 @@
         "min": -23.46,
         "max": 23.46
       },
-      "v_max": 71.0,
+      "v_max": 49.4,
       "a_max": 120,
       "j_max": 800,
       "extended": false
@@ -388,20 +388,20 @@
       "name": "head_lift",
       "kind": "prismatic",
       "unit": "mm",
-      "parent": "head_pan",
+      "parent": null,
       "hard": {
         "min": -37.0,
-        "max": 37.0
+        "max": 45.0
       },
       "soft": {
-        "min": -34.04,
-        "max": 34.04
+        "min": -33.72,
+        "max": 41.72
       },
       "animation": {
-        "min": -34.04,
-        "max": 34.04
+        "min": -33.72,
+        "max": 41.72
       },
-      "v_max": 99.8,
+      "v_max": 70.0,
       "a_max": 300,
       "j_max": 4000,
       "extended": false
@@ -410,20 +410,20 @@
       "name": "head_pan",
       "kind": "revolute",
       "unit": "deg",
-      "parent": null,
+      "parent": "head_lift",
       "hard": {
-        "min": -33.8,
-        "max": 33.8
+        "min": -90.0,
+        "max": 90.0
       },
       "soft": {
-        "min": -31.1,
-        "max": 31.1
+        "min": -82.8,
+        "max": 82.8
       },
       "animation": {
-        "min": -31.1,
-        "max": 31.1
+        "min": -82.8,
+        "max": 82.8
       },
-      "v_max": 75.4,
+      "v_max": 210.0,
       "a_max": 600,
       "j_max": 4000,
       "extended": false
@@ -432,7 +432,7 @@
       "name": "head_tilt",
       "kind": "revolute",
       "unit": "deg",
-      "parent": "head_lift",
+      "parent": "head_pan",
       "hard": {
         "min": -20.0,
         "max": 25.0
@@ -503,13 +503,13 @@
       },
       "driver": "r3x_servo",
       "channel": 0,
-      "servo": "SERVO_35KG_270",
+      "servo": "GOBILDA_2000_25_2",
       "calibration": {
         "center_us": 1490,
         "center_value": 0,
         "trim_us": 0,
         "invert": false,
-        "gear": 4.0,
+        "gear": 1.0,
         "pulse_min_us": 500,
         "pulse_max_us": 2500,
         "range_deg": 270,
@@ -525,7 +525,7 @@
       },
       "driver": "r3x_servo",
       "channel": 1,
-      "servo": "SERVO_60KG_270",
+      "servo": "GOBILDA_2000_25_2",
       "calibration": {
         "center_us": 1500,
         "center_value": 0,
@@ -536,7 +536,7 @@
         "pulse_max_us": 2500,
         "range_deg": 270,
         "status": "assumed",
-        "mm_per_deg": 0.475
+        "mm_per_deg": 0.3333
       },
       "extended": false,
       "note": "Rack and pinion, ~12 mm pinion assumed: 0.21 mm per servo degree; 1500 us = rest (0 mm), 800-2200 us = +/-20 mm."
@@ -656,7 +656,7 @@
       },
       "driver": "r3x_servo",
       "channel": 6,
-      "servo": "SERVO_35KG_270",
+      "servo": "GOBILDA_2000_25_2",
       "calibration": {
         "center_us": 1504,
         "center_value": 0,
@@ -678,7 +678,7 @@
       },
       "driver": "r3x_servo",
       "channel": 7,
-      "servo": "SERVO_35KG_270",
+      "servo": "GOBILDA_2000_25_2",
       "calibration": {
         "center_us": 1511,
         "center_value": 0,
@@ -944,17 +944,16 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-10-01T01:38:17+00:00",
+    "generated_at": "2026-10-01T05:01:26+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-10-01T01:38:13+00:00",
+      "generated_at": "2026-10-01T05:01:19+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
         "base_panels_closed",
-        "r3x_neck_drive",
+        "column_internals",
         "hunter_head",
-        "morton_frame",
         "lower_ring",
         "middle_ring",
         "top_ring"
@@ -962,8 +961,10 @@
       "skipped": [
         "base_panels_open",
         "base_panels_port",
-        "head_r3x",
-        "randall_frame"
+        "internals_anderson",
+        "r3x_neck_guide_race",
+        "r3x_top_drive",
+        "r3x_lower_drive"
       ]
     },
     "supply_volts": 6.0,
@@ -1002,10 +1003,10 @@
         "drive": {
           "kind": "gear",
           "servos": [
-            "lower_servo"
+            "col_lower_servo"
           ],
-          "servo_model": "SERVO_35KG_270",
-          "servo_model_source": "part lower_servo material",
+          "servo_model": "GOBILDA_2000_25_2",
+          "servo_model_source": "part col_lower_servo name",
           "servo_deg_per_unit": 3.8,
           "mm_per_servo_deg": null,
           "eta": 0.85,
@@ -1253,10 +1254,10 @@
         "drive": {
           "kind": "gear",
           "servos": [
-            "top_servo"
+            "col_top_servo"
           ],
-          "servo_model": "SERVO_35KG_270",
-          "servo_model_source": "profile actuator heroarm",
+          "servo_model": "GOBILDA_2000_25_2",
+          "servo_model_source": "part col_top_servo name",
           "servo_deg_per_unit": 4.25,
           "mm_per_servo_deg": null,
           "eta": 0.85,
@@ -1355,49 +1356,8 @@
         "driven": true
       },
       "head_lift": {
-        "gid": "r3x_neck_drive/head_lift",
+        "gid": "column_internals/head_lift",
         "type": "prismatic",
-        "parent": "head_pan",
-        "pivot": [
-          0.0,
-          0.0,
-          0.0
-        ],
-        "axis": [
-          0.0,
-          1.0,
-          0.0
-        ],
-        "child_link": "r3x_neck_drive/slide",
-        "mech_limits": {
-          "min": -37.0,
-          "max": 37.0
-        },
-        "drive": {
-          "kind": "gear",
-          "servos": [
-            "lift_servo"
-          ],
-          "servo_model": "SERVO_60KG_270",
-          "servo_model_source": "part lift_servo material",
-          "servo_deg_per_unit": null,
-          "mm_per_servo_deg": 0.475,
-          "eta": 0.85,
-          "linkages": [],
-          "how": "rack: 0.475 mm per servo deg",
-          "jacobian_at_rest": null
-        },
-        "first_contact": {
-          "min": null,
-          "max": null,
-          "source": "mech/out/checks.json sweep"
-        },
-        "inferred": false,
-        "driven": true
-      },
-      "head_pan": {
-        "gid": "r3x_neck_drive/head_pan",
-        "type": "revolute",
         "parent": null,
         "pivot": [
           0.0,
@@ -1409,23 +1369,64 @@
           1.0,
           0.0
         ],
-        "child_link": "r3x_neck_drive/turntable",
+        "child_link": "column_internals/carriage",
         "mech_limits": {
-          "min": -33.8,
-          "max": 33.8
+          "min": -37.0,
+          "max": 45.0
         },
         "drive": {
           "kind": "gear",
           "servos": [
-            "pan_servo"
+            "col_lift_servo"
           ],
-          "servo_model": "SERVO_35KG_270",
-          "servo_model_source": "part pan_servo material",
-          "servo_deg_per_unit": 4.0,
+          "servo_model": "GOBILDA_2000_25_2",
+          "servo_model_source": "part col_lift_servo name",
+          "servo_deg_per_unit": null,
+          "mm_per_servo_deg": 0.3333,
+          "eta": 0.85,
+          "linkages": [],
+          "how": "rack: 0.3333 mm per servo deg",
+          "jacobian_at_rest": null
+        },
+        "first_contact": {
+          "min": null,
+          "max": null,
+          "source": "mech/out/checks.json sweep"
+        },
+        "inferred": false,
+        "driven": true
+      },
+      "head_pan": {
+        "gid": "column_internals/head_pan",
+        "type": "revolute",
+        "parent": "head_lift",
+        "pivot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "child_link": "column_internals/neck",
+        "mech_limits": {
+          "min": -90.0,
+          "max": 90.0
+        },
+        "drive": {
+          "kind": "gear",
+          "servos": [
+            "col_pan_servo"
+          ],
+          "servo_model": "GOBILDA_2000_25_2",
+          "servo_model_source": "part col_pan_servo name",
+          "servo_deg_per_unit": 1.0,
           "mm_per_servo_deg": null,
           "eta": 0.85,
           "linkages": [],
-          "how": "gear 4:1",
+          "how": "gear 1:1",
           "jacobian_at_rest": null
         },
         "first_contact": {
@@ -1439,7 +1440,7 @@
       "head_tilt": {
         "gid": "hunter_head/head_tilt",
         "type": "revolute",
-        "parent": "head_lift",
+        "parent": "head_pan",
         "pivot": [
           0.0,
           738.3,
@@ -1580,8 +1581,8 @@
     },
     "drives": [
       {
-        "servo": "lower_servo",
-        "model": "SERVO_35KG_270",
+        "servo": "col_lower_servo",
+        "model": "GOBILDA_2000_25_2",
         "kind": "gear",
         "joints": [
           "torso_lower"
@@ -1590,12 +1591,12 @@
         "servo_deg_per_unit": 3.8,
         "mm_per_servo_deg": null,
         "eta": 0.85,
-        "stall_nm": 2.8603,
-        "no_load_dps": 431.1
+        "stall_nm": 2.4713,
+        "no_load_dps": 300.0
       },
       {
-        "servo": "top_servo",
-        "model": "SERVO_35KG_270",
+        "servo": "col_top_servo",
+        "model": "GOBILDA_2000_25_2",
         "kind": "gear",
         "joints": [
           "torso_top"
@@ -1604,8 +1605,8 @@
         "servo_deg_per_unit": 4.25,
         "mm_per_servo_deg": null,
         "eta": 0.85,
-        "stall_nm": 2.8603,
-        "no_load_dps": 431.1
+        "stall_nm": 2.4713,
+        "no_load_dps": 300.0
       },
       {
         "servo": "hero_shoulder_servo",
@@ -1636,32 +1637,32 @@
         "no_load_dps": 600.0
       },
       {
-        "servo": "lift_servo",
-        "model": "SERVO_60KG_270",
+        "servo": "col_lift_servo",
+        "model": "GOBILDA_2000_25_2",
         "kind": "gear",
         "joints": [
           "head_lift"
         ],
         "linkage": null,
         "servo_deg_per_unit": null,
-        "mm_per_servo_deg": 0.475,
+        "mm_per_servo_deg": 0.3333,
         "eta": 0.85,
-        "stall_nm": 4.9033,
+        "stall_nm": 2.4713,
         "no_load_dps": 300.0
       },
       {
-        "servo": "pan_servo",
-        "model": "SERVO_35KG_270",
+        "servo": "col_pan_servo",
+        "model": "GOBILDA_2000_25_2",
         "kind": "gear",
         "joints": [
           "head_pan"
         ],
         "linkage": null,
-        "servo_deg_per_unit": 4.0,
+        "servo_deg_per_unit": 1.0,
         "mm_per_servo_deg": null,
         "eta": 0.85,
-        "stall_nm": 2.8603,
-        "no_load_dps": 431.1
+        "stall_nm": 2.4713,
+        "no_load_dps": 300.0
       },
       {
         "servo": "servo_l",
@@ -1758,72 +1759,72 @@
         "catalogue_parts": 0
       },
       {
-        "id": "r3x_neck_drive/neck_stage",
-        "name": "Pan stage ring + sector (fixed to the base)",
+        "id": "column_internals/column",
+        "name": "Column (fixed: posts, plates, ring drives, lift drive)",
         "joint": null,
-        "kg": 0.6161,
+        "kg": 5.9479,
         "com": [
-          -1.71,
-          -49.0,
-          13.89
+          -0.14,
+          110.73,
+          -1.09
         ],
         "inertia": [
-          0.005203,
-          0.009606,
-          0.004662,
-          2.501e-05,
-          6.746e-05,
-          -0.0002037
+          0.311,
+          0.08656,
+          0.3091,
+          0.0002974,
+          -5.696e-05,
+          0.002093
         ],
-        "parts": 2,
-        "catalogue_parts": 0
+        "parts": 27,
+        "catalogue_parts": 16
       },
       {
-        "id": "r3x_neck_drive/turntable",
-        "name": "Pan turntable + lift tower",
-        "joint": "head_pan",
-        "kg": 1.0807,
+        "id": "column_internals/carriage",
+        "name": "Lift carriage (rides the rails)",
+        "joint": "head_lift",
+        "kg": 0.3507,
         "com": [
-          -16.25,
-          75.6,
-          -19.68
+          15.44,
+          458.4,
+          25.25
         ],
         "inertia": [
-          0.06255,
-          0.004596,
-          0.06151,
-          -0.001666,
-          -0.0004922,
-          0.0006688
+          0.0004387,
+          0.0008047,
+          0.0005547,
+          -4.267e-06,
+          0.000136,
+          3.275e-05
         ],
         "parts": 12,
-        "catalogue_parts": 6
+        "catalogue_parts": 9
       },
       {
-        "id": "r3x_neck_drive/slide",
-        "name": "Lift carriage + neck tube",
-        "joint": "head_lift",
-        "kg": 0.4094,
+        "id": "column_internals/neck",
+        "name": "Pan hub, neck tube (the head rides it)",
+        "joint": "head_pan",
+        "kg": 0.1654,
         "com": [
-          -1.94,
-          278.89,
-          -10.27
+          -0.01,
+          508.46,
+          -0.03
         ],
         "inertia": [
-          0.02716,
-          0.0001561,
-          0.02711,
-          -0.0002322,
-          2.439e-06,
-          -4.509e-05
+          0.001061,
+          3.697e-05,
+          0.001061,
+          -2.057e-08,
+          2.538e-11,
+          -3.929e-07
         ],
-        "parts": 8,
-        "catalogue_parts": 3
+        "parts": 4,
+        "catalogue_parts": 2
       },
       {
         "id": "hunter_head/neck",
         "name": "Neck post (coupler, hubs, hex shaft, U-joint body)",
-        "joint": "head_lift",
+        "joint": "head_pan",
         "kg": 0.0628,
         "com": [
           0.0,
@@ -1905,46 +1906,25 @@
         "catalogue_parts": 5
       },
       {
-        "id": "morton_frame/frame",
-        "name": "Frame (static)",
-        "joint": null,
-        "kg": 1.2338,
-        "com": [
-          0.31,
-          120.31,
-          0.22
-        ],
-        "inertia": [
-          0.02138,
-          0.01609,
-          0.02137,
-          -1.474e-05,
-          -3.61e-05,
-          -1.097e-05
-        ],
-        "parts": 13,
-        "catalogue_parts": 7
-      },
-      {
         "id": "lower_ring/lower_ring_mount",
         "name": "Lower-ring lazy susan (static race)",
         "joint": null,
-        "kg": 0.2548,
+        "kg": 0.1473,
         "com": [
-          -0.76,
-          366.07,
-          -35.77
+          0.08,
+          376.85,
+          0.19
         ],
         "inertia": [
-          0.00138,
-          0.002098,
-          0.0009402,
-          2.648e-06,
-          -9.155e-06,
-          -0.000138
+          0.0008456,
+          0.001612,
+          0.0008477,
+          -1.704e-08,
+          1.112e-06,
+          -4.039e-08
         ],
-        "parts": 4,
-        "catalogue_parts": 1
+        "parts": 1,
+        "catalogue_parts": 0
       },
       {
         "id": "lower_ring/lower_ring",
@@ -2023,22 +2003,22 @@
         "id": "middle_ring/middle_ring",
         "name": "Middle ring (logic panels)",
         "joint": "torso_middle",
-        "kg": 0.6581,
+        "kg": 0.5652,
         "com": [
-          -26.22,
-          444.54,
-          5.4
+          -30.3,
+          444.13,
+          20.02
         ],
         "inertia": [
-          0.006085,
-          0.01146,
-          0.00616,
-          5.469e-05,
-          0.0002431,
-          -5.884e-05
+          0.005206,
+          0.01052,
+          0.00606,
+          5.874e-05,
+          4.086e-06,
+          -8.308e-05
         ],
-        "parts": 22,
-        "catalogue_parts": 1
+        "parts": 18,
+        "catalogue_parts": 0
       },
       {
         "id": "middle_ring/throttle_upper",
@@ -2117,21 +2097,21 @@
         "id": "top_ring/top_ring",
         "name": "Top ring (RX-24)",
         "joint": "torso_top",
-        "kg": 1.4761,
+        "kg": 1.2238,
         "com": [
-          36.94,
-          529.98,
-          40.61
+          44.55,
+          531.36,
+          48.98
         ],
         "inertia": [
-          0.01535,
-          0.02738,
-          0.01458,
-          0.0003586,
-          -0.006037,
-          0.0001759
+          0.01354,
+          0.02389,
+          0.01286,
+          0.000434,
+          -0.00558,
+          0.0002587
         ],
-        "parts": 22,
+        "parts": 21,
         "catalogue_parts": 1
       },
       {
@@ -2478,17 +2458,17 @@
         "table": [
           [
             -37.0,
-            -10.0,
+            -20.0,
             15.0
           ],
           [
             -32.0,
-            -10.0,
+            -20.0,
             15.0
           ],
           [
             -27.0,
-            -15.0,
+            -20.0,
             20.0
           ],
           [
@@ -2557,7 +2537,17 @@
             25.0
           ],
           [
-            37.0,
+            38.0,
+            -20.0,
+            25.0
+          ],
+          [
+            43.0,
+            -20.0,
+            25.0
+          ],
+          [
+            45.0,
             -20.0,
             25.0
           ]
@@ -2568,12 +2558,11 @@
         ],
         "because": [
           "h_m_1 / tr_n_1",
-          "h_m_1 / tr_n_2",
-          "head_bottom / neck_guide_rail"
+          "h_m_1 / tr_n_2"
         ],
         "note": "head_tilt's range as a function of head_lift (head_roll swept to its ends): outside it the arm comes within 1.0 mm of the body"
       }
     ],
-    "total_kg": 12.983
+    "total_kg": 15.655
   }
 }
