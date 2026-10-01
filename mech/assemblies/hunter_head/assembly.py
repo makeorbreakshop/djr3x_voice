@@ -875,7 +875,7 @@ def add_steps(asm: Assembly):
              tools=["soldering iron with an M4 insert tip (~220 C for PLA)", "flat plate to seat them level"],
              notes=["Do all 14 before anything else: 6 in the head bottom's bosses, 8 in the plate's servo bosses.",
                     "Press straight and stop flush; a proud insert tilts the plate or the servo."]),
-        Step("s02", "Neck coupler", ["neck_coupler"], F("ins_coupler"),
+        Step("s02", "Neck coupler", ["neck_coupler"], F("ins_coupler") + F("nut_coupler"),
              tools=["3 mm hex key"],
              notes=["Print the 26 mm-bore coupler for Anderson's neck tube (Hunter's own neck takes 32).",
                     "Heat-set an M4 insert in its side hole: the set screw that clamps the tube goes in there when "
@@ -889,7 +889,7 @@ def add_steps(asm: Assembly):
                     "Push the hex shaft fully into the hub and clamp both screws, Loctite on the clamps."],
              inferred=True, inferred_note="Thru-hole vs threaded hub assignment and screw length inferred."),
         Step("s04", "U-joint onto the hub", ["ujoint", "uj_bearing_l", "uj_bearing_r"],
-             F("scr_hub_coupler") + F("nut_coupler"),
+             F("scr_hub_coupler"),
              context=["hex_shaft", "hub_bottom", "neck_coupler"], tools=["3 mm hex key"],
              notes=["Slide the U-joint body down the hex post onto the hub; 4 x M4 down through its pattern "
                     "mount and the thru-hole hub, through the coupler's plate into its trapped nuts."]),

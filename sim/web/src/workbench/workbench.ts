@@ -24,7 +24,7 @@ import {
   assemblyLabel, exposed, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
-import { fastenerPose, fastenerTravel, itemU, planSequence, type SeqFastener, type SeqItem, type SeqPart } from './sequence';
+import { fastenerKind, fastenerPose, fastenerTravel, itemU, planSequence, type SeqFastener, type SeqItem, type SeqPart } from './sequence';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type MGear, type MJoint, type Manifest, type MLinkage, type MPart, type MStep,
@@ -1465,7 +1465,49 @@ export class Workbench {
       const axis = new THREE.Vector3(0, 0, 1).transformDirection(fo.base);
       fasteners.push({ id: fid, spec: fo.f.spec, joins: fo.f.joins, at, axis });
     }
+    this.seqOpen = this.openSides(s);
     return planSequence(parts, fasteners, (id) => (first.get(id) ?? -1) < this.step);
+  }
+
+  /** A nut in a trap (a pocket inside its part, open to a bore) comes in from that open side: how far out along
+   *  its axis (mm) it has to start to come from outside the part, when that way is clear of the part's walls. */
+  private seqOpen = new Map<string, number>();
+  private openSides(s: AStep): Map<string, number> {
+    const out = new Map<string, number>();
+    this.root.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster();
+    for (const fid of s.fasteners ?? []) {
+      const fo = this.fast.get(fid);
+      if (!fo?.obj.parent || fastenerKind(fo.f.spec) !== 'nut') continue;
+      const { side } = fastenerTravel(fo.f.spec);
+      const seatW = fo.base.clone().premultiply(fo.obj.parent.matrixWorld);
+      const p = new THREE.Vector3().setFromMatrixPosition(seatW);
+      const d = new THREE.Vector3(0, 0, -side).transformDirection(seatW); // the way it comes from (fastenerPose): +Z for a nut
+      for (const j of fo.f.joins) {
+        const po = this.parts.get(j);
+        if (!po?.mesh.parent) continue;
+        const geo = po.mesh.geometry;
+        if (!geo.boundingBox) geo.computeBoundingBox();
+        const box = geo.boundingBox!.clone().translate(po.sBase ?? po.base).applyMatrix4(po.mesh.parent.matrixWorld);
+        if (!box.containsPoint(p)) continue;
+        // where the line leaves the part's box, and whether a wall of the part is in the way before that
+        let exit = Infinity;
+        for (const k of ['x', 'y', 'z'] as const) {
+          if (Math.abs(d[k]) < 1e-9) continue;
+          exit = Math.min(exit, ((d[k] > 0 ? box.max[k] : box.min[k]) - p[k]) / d[k]);
+        }
+        ray.set(p, d);
+        ray.far = exit;
+        const wasPos = po.mesh.position.clone();
+        po.mesh.position.copy(po.sBase ?? po.base); // the part where it seats
+        po.mesh.updateMatrixWorld(true);
+        const hit = ray.intersectObject(po.mesh, false).find((h) => h.distance > 0.0005);
+        po.mesh.position.copy(wasPos);
+        po.mesh.updateMatrixWorld(true);
+        if (!hit && Number.isFinite(exit)) out.set(fid, Math.max(out.get(fid) ?? 0, exit / 0.001 + 8));
+      }
+    }
+    return out;
   }
 
   // ---- the step's playback (guide.ts's transport)
@@ -2197,7 +2239,9 @@ export class Workbench {
       let visible = this.fasteners && look !== 'exterior' && joinsVisible && !this.hidden.has(id);
       // Instructions: the hardware is part of the build in any look (the guide shows every screw)
       if (g) visible = (joinsVisible || !!this.isolated?.has(id)) && !this.hidden.has(id) && (!g.hover || g.hover.has(id))
-        && (!this.isolated || this.isolated.has(id)); // inspecting: only what is inspected
+        && (!this.isolated || this.isolated.has(id)) // inspecting: only what is inspected
+        // (and the shells faded back for a step inside them take their own hardware with them)
+        && !(insideShells && !fastIn.has(id) && fo.f.joins.every((j) => this.parts.get(j)?.part.class === 'shell' && !inStep.has(j)));
       if (cur && (fastAt.get(id) ?? -1) > this.step) visible = false;
       if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p)) && !this.isolated.has(id)) visible = false;
       fo.obj.visible = visible;
@@ -2401,7 +2445,11 @@ export class Workbench {
           const o = (this.guideFrom.get(j)?.clone() ?? new THREE.Vector3()).multiplyScalar(GUIDE_PULL.part * u);
           clear = Math.max(clear, o.dot(outDir) + 4);
         }
-        fo.obj.matrix.copy(fastenerPose(fo.base, fo.f.spec, this.seqU(fo.f.id), undefined, clear));
+        // a trapped nut comes in from the open side of its part, all the way along its axis
+        const open = this.seqOpen.get(fo.f.id);
+        const uf = this.seqU(fo.f.id);
+        if (open) clear = Math.max(clear, (open - fastenerTravel(fo.f.spec).mm) * uf);
+        fo.obj.matrix.copy(fastenerPose(fo.base, fo.f.spec, uf, undefined, clear));
         continue;
       }
       const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 40 : 0); // driven in along its axis

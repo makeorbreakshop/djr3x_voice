@@ -119,3 +119,44 @@ def test_built_manifests_cover_everything_once(manifest):
         assert all(v == 1 for v in placed.values()), (a["id"], [k for k, v in placed.items() if v > 1])
         assert set(fast) == {f["id"] for f in a.get("fasteners", [])}, a["id"]
         assert all(v == 1 for v in fast.values()), a["id"]
+
+
+def test_a_big_group_splits_into_kinds_and_rows():
+    from workbench.steps import MAX_PARTS
+    a = Assembly("panels", "Panels")
+    a.links = [Link("ring", "Ring")]
+    a.parts = [part("ring", "Ring", "ring", [300, 40, 300], [0, 0, 0])]
+    for row, x in (("l", -60), ("m", 0), ("r", 60)):
+        a.parts += [part(f"lpi_{row}_{k}", f"LPI_{row.upper()}_{k}", "ring", [8, 8, 2], [x, k * 10 - 10, 151]) for k in (1, 2, 3)]
+    a.parts += [part("led", "LED_B", "ring", [30, 6, 2], [0, 15, 151])]
+    steps = plan(a)
+    assert all(len(s.parts) <= MAX_PARTS for s in steps)
+    rows = [set(s.parts) for s in steps if any(p.startswith("lpi_") for p in s.parts)]
+    assert {"lpi_l_1", "lpi_l_2", "lpi_l_3"} in rows and {"lpi_r_1", "lpi_r_2", "lpi_r_3"} in rows
+
+
+def test_kit_hardware_goes_in_the_holes_the_guide_counts():
+    import manifold3d as mf
+    from workbench.kitgeom import holes, parse, place_hardware
+
+    assert parse("10-32 x 1/2in 316 SS Phillips flat head screw") == {"type": "fhcs", "thread": "10-32", "d_mm": 4.83, "length_mm": 12.7}
+    assert parse("M4 tapered heat-set insert, 4.7mm")["type"] == "insert"
+    assert parse("neodymium magnet 1/4in OD x 1/8in")["d_mm"] == 6.35
+    assert parse("aluminium round standoff 1/4in OD x 7/16in, 6-32 female") is None
+    plate = mf.Manifold.cube((80, 6, 80), True)
+    for x, z in ((-30, -30), (30, -30), (-30, 30), (30, 30)):
+        plate = plate - mf.Manifold.cylinder(10, 2.6, 2.6, 48).rotate((90, 0, 0)).translate((x, 5, z))
+    m = plate.to_mesh()
+    mesh = trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts))
+    found = holes(mesh)
+    assert len(found) == 8 and all(abs(r - 2.6) < 0.1 for _, _, r in found)  # each through hole opens on both faces
+    a = Assembly("kitlike", "Kit-like")
+    a.links = [Link("l", "L")]
+    a.parts = [Part("plate", "TR_RR_Full", "shell", "l", mesh, {"kind": "stl"})]
+    st = Step("s1", "Step 1", ["plate"], unplaced=[{"key": "mcmaster-93365A240", "count": 4, "note": "into TR_RR_Full",
+                                                   "spec": {"mcmaster": "93365A240", "desc": "10-32 tapered heat-set insert, 0.15in"}}])
+    fs = place_hardware(a, [st])
+    assert len(fs) == 4 and st.unplaced == [] and st.fasteners == [f.id for f in fs]
+    for f in fs:  # each on its hole's axis, going into the plate
+        z = f.matrix[:3, 2]
+        assert abs(abs(z[1]) - 1) < 1e-6 and f.inferred

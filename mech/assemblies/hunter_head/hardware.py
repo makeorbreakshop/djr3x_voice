@@ -449,7 +449,8 @@ def add_hardware(asm, fit, visor):
             # clocked to the trap's hex (5 deg steps over one 60 deg period): the least shared volume
             best = None
             for ref in ([math.cos(math.radians(a)), 0, math.sin(math.radians(a))] for a in range(0, 60, 5)):
-                nid = hw.nut(f"nut_coupler_cp{i + 1}", nut_at, -UP, "neck_coupler", "s04", "neck",
+                # pressed into its trap when the coupler is printed (s02), before the hub's screws (s04)
+                nid = hw.nut(f"nut_coupler_cp{i + 1}", nut_at, -UP, "neck_coupler", "s02", "neck",
                              reason="clamp", kind="nut", clock_ref=ref)
                 fo = hw.fast.pop()
                 nm = fo.mesh.copy()

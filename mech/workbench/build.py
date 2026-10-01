@@ -15,6 +15,7 @@ import numpy as np
 import trimesh
 
 from . import geom
+from . import kitgeom
 from .steps import plan as plan_steps
 from .model import SCHEMA, VERSION, Assembly, Transform, rollup, vec
 
@@ -230,6 +231,11 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
     from concurrent.futures import ThreadPoolExecutor
 
     sigs = sigs or _Sigs(out)
+    # the build steps (every part and fastener once), the hardware a mesh-only assembly's steps list placed
+    # in its holes, and a way in for each part nothing else gives one (workbench/steps.py, kitgeom.py)
+    steps = plan_steps(asm)
+    all_fast = [*asm.fasteners, *kitgeom.place_hardware(asm, steps)]
+    d_mates, d_feats = kitgeom.insert_axes(asm, steps, all_fast)
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as ex:
         files = list(ex.map(lambda p: _part_files(p, prefix, out, export, sigs), asm.parts))
     parts = []
@@ -247,12 +253,12 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
             "triangles": _clean({"display": n_disp, "full": full[1] if full else None, "source": int(len(m.faces))}),
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
-            "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch, "exposed": p.exposed,
+            "cad": p.cad, "catalog": p.catalog, "features": {**(p.features or {}), **d_feats.get(p.id, {})}, "stretch": p.stretch, "exposed": p.exposed,
             "replaced_by": p.replaced_by, "finish": p.finish,
         }))
     fast = []
     written = set()
-    for f in asm.fasteners:
+    for f in all_fast:
         node = _clean({"id": f.id, "spec": f.spec, "key": f.key, "joins": f.joins, "link": f.link,
                        "placed": f.matrix is not None, "step": f.step, "cad": f.cad, "catalog": f.catalog,
                        "linkage": f.linkage, "role": f.role,
@@ -310,13 +316,13 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "inferred": g.inferred, "inferred_note": g.inferred_note,
         }) for g in asm.gears],
         "fasteners": fast,
-        "steps": [_clean({**s.__dict__, "n": i + 1}) for i, s in enumerate(plan_steps(asm))],
+        "steps": [_clean({**s.__dict__, "n": i + 1}) for i, s in enumerate(steps)],
         "bom": [_clean(b.__dict__) for b in asm.bom],
         "bom_rollup": [_clean(b.__dict__) for b in rollup(asm, loaded_children)],
         "checks": [_clean(c.__dict__) for c in asm.checks] + [_clean(c.__dict__) for c in asm.tests],
         "mates": [_clean({"id": m.id, "type": m.type, "a": {"part": m.a[0], "feature": m.a[1]},
                           "b": {"part": m.b[0], "feature": m.b[1]}, "params": m.params,
-                          "solved": m.solved, "note": m.note}) | {"solved": m.solved} for m in asm.mates],
+                          "solved": m.solved, "note": m.note}) | {"solved": m.solved} for m in asm.mates] + d_mates,
         "children": children,
         "designs": asm.designs,
         "ground": asm.ground,

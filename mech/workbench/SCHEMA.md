@@ -320,6 +320,13 @@ build order: the frame, then outward by contact, each moving link after the one 
 derived group right after the authored step that placed what it touches. Fasteners go with the step
 that places the last part they join.
 
+A mesh-only assembly (the kit's STLs) gets more from its geometry at build (`workbench/kitgeom.py`):
+the hardware its steps list (`unplaced`, from the guide transcription) is placed as real fasteners
+(`mcmaster-*` keys, `inferred`) in the round holes of the step's parts when exactly as many holes of
+the right size are there, and a part with no mate and no fastener to what is already built gets a
+derived mate (`derived: true, inferred: true`, a `contact_seat` plane or `contact_axis` feature) from
+the faces it touches - the way the viewer moves it in.
+
 ## BomLine
 
 ```jsonc

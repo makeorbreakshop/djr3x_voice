@@ -60,7 +60,7 @@ def label(p) -> str:
     if _CODE.match(n):
         code = n
         while True:
-            t = re.sub(r"_(\d+|L|R|Full)$", "", code)
+            t = re.sub(r"_(\d+|Full)$", "", code)
             if t == code or not t:
                 return code
             code = t
@@ -211,7 +211,32 @@ def group(asm: Assembly, ids: list[str], near: dict[frozenset, float]) -> list[l
                 best = (ob, t)
         if best:
             hosts.add(g.join(best[1], r))
-    return g.sets()
+    return [sub for s in g.sets() for sub in _split(s, parts)]
+
+
+#: A step adds at most this many parts; a bigger group splits into its kinds, then rows.
+MAX_PARTS = 6
+
+
+def _split(ids: list[str], parts: dict) -> list[list[str]]:
+    """A group too big to take in at once: one step per kind of part (a symmetric pair, a row of like parts);
+    a kind still too big by its rows (the kit's MS_LPI_L/_M/_R panel inserts)."""
+    if len(ids) <= MAX_PARTS:
+        return [ids]
+    by: dict[tuple, list[str]] = {}
+    for i in ids:
+        by.setdefault((stem(i), parts[i].link), []).append(i)
+    out: list[list[str]] = []
+    for fam in by.values():
+        if len(fam) <= MAX_PARTS:
+            out.append(fam)
+            continue
+        rows: dict[str, list[str]] = {}
+        for i in fam:
+            rows.setdefault(re.sub(r"_\d+$", "", i.lower()), []).append(i)
+        for row in rows.values():
+            out.extend(row[k:k + MAX_PARTS] for k in range(0, len(row), MAX_PARTS))
+    return out
 
 
 def title(ids: list[str], parts: dict, extra: str = "") -> str:
