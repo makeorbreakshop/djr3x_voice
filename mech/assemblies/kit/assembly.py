@@ -444,7 +444,8 @@ def _pedestal_cap(base: Asm, internals: str):
             name=f"Pedestal cap P_M_3 ({'the kit' if vid == 'anderson_morton' else 'cut for the core plate'})",
             mount_link="base", variant={"group": "internals", "id": vid, "default": dflt},
             links=[Link("pedestal_cap", "Pedestal cap (static)", None)], parts=[part],
-            steps=[dict(st, id=f"{st['id']}_cap", parts=["p_m_3"], unplaced=[], title=f"{st.get('title', '')} (P_M_3)")
+            steps=[dict(st, id=f"{st['id']}_cap", parts=["p_m_3"], unplaced=[],
+                        title="Pedestal cap P_M_3 onto the pedestal: 6 x M4 x 8 socket heads + washers")
                    for st in steps[:1]]))
 
 
@@ -602,7 +603,10 @@ def build():
     """Workbench entry point (`python -m workbench build kit`): the whole droid as a
     workbench.model.Assembly with meshes at the rest pose."""
     from r3xmech.wb import to_workbench
+    from assemblies.kit.fastening import fasten
+
     asm = to_workbench(build_model())
+    fasten(asm, INTERNALS)
     asm.designs = [dict(d) for d in DESIGNS]
     asm.ground = _ground(asm)
     return asm

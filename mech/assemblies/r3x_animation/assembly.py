@@ -592,6 +592,12 @@ def head_mech(head: Asm):
     ]
 
 
+# The lower sector stands on the lower lazy susan's outer race (y 352.0, assemblies/kit/fastening.py): placed
+# on the pedestal top (+3) it would fill the race's ring (r 113.5-124.5 against r 111.4-124.6); both ride the
+# ring, so it sits on the race, its teeth (45 mm tall) still across the pinion's band (y 373.3-383.3).
+LOWER_SECTOR_LIFT = 7.2
+
+
 def lower_drive(lower: Asm):
     TL = trans(0, Y_PEDESTAL_TOP + 3, 0) @ ZUP      # mount underside (z=-3) on the pedestal top
     lower.parts += [
@@ -604,9 +610,12 @@ def lower_drive(lower: Asm):
                    evidence="mount window centred (0, 83); shaft x=-9.8 -> R83.6 = (95-25)/2 x module 2.39"),
         P("lower_pinion", "lower-ring-servo-gear: 25T", "mech", "lower_ring_mount", TL @ trans(-9.8, 83, 4 + 16.8 + 7.5),
           f("lower", "lower-ring-servo-gear"), placement="fitted", evidence="on the servo shaft"),
-        P("lower_sector", "lower-ring-inner-gear: 95T-pitch internal sector (79.6 deg)", "mech", "lower_ring",
-          TL @ frames.rot((0, 0, 1), 6.7), f("lower", "lower-ring-inner-gear"), placement="fitted",
-          evidence="outer arc R124.5 against the ring's inner wall (LS_M r125.4); centred on the pinion at rest"),
+        P("lower_sector", "Lower ring gear sector (on the ring): Anderson's lower-ring-inner-gear, 95T-pitch internal, "
+                          "79.6 deg", "mech", "lower_ring",
+          trans(0, LOWER_SECTOR_LIFT, 0) @ TL @ frames.rot((0, 0, 1), 6.7), f("lower", "lower-ring-inner-gear"), placement="fitted",
+          evidence="outer arc R124.5 against the ring's inner wall (LS_M r125.4); centred on the pinion at rest; standing "
+                   "on the lower lazy susan's outer race (+7.2 mm: inferred)", inferred=True,
+          inferred_note="height: on the outer race (the kit gives the race's place, Anderson's files not the sector's)"),
     ]
     j = next(j for j in lower.joints if j.id == "torso_lower")
     t = min(sector_travel("lower"), 135 / (GEAR["lower_sector"] / GEAR["lower_pinion"]))
@@ -635,7 +644,8 @@ def top_drive(middle: Asm, top: Asm):
           f("top", "top-ring-servo-gear"), placement="fitted",
           evidence="R83.6 = (85-20)/2 x module 2.57"),
     ]
-    top.parts.append(P("top_sector", "top-ring-inner-gear: 85T-pitch internal sector (59.4 deg)", "mech", "top_ring",
+    top.parts.append(P("top_sector", "Top ring gear sector (on the ring): Anderson's top-ring-inner-gear, 85T-pitch "
+                                     "internal, 59.4 deg", "mech", "top_ring",
                        TT @ frames.rot((0, 0, 1), 51.7), f("top", "top-ring-inner-gear"),
                        placement="inferred", evidence="centred on the pinion at rest", inferred=True,
                        inferred_note="height (hung under the top ring) and fixing not stated"))

@@ -12,7 +12,7 @@ from parts.head._common import Print, finish, plane
 from . import _layout as L
 from ._cad import at_angle, box, clearance_hole, cyl_y
 
-DEFAULTS = dict(y1=L.BASE_RING["y1"], t=L.BASE_RING["t"], r=L.BASE_RING["r"], half=L.HALF, gap=0.4,
+DEFAULTS = dict(bt=L.BASE_RING["bt"], y1=L.BASE_RING["y1"], t=L.BASE_RING["t"], r=L.BASE_RING["r"], half=L.HALF, gap=0.4,
                 tab_t=L.BASE_RING["tab_t"], tab_h=L.BASE_RING["tab_h"], post=L.POST_C, cable=(4, 110.0, 12.0))
 
 
@@ -40,5 +40,14 @@ def make(params: dict | None = None, **kw):
     for k in range(n):
         x, z = at_angle(rc, 45 + 360 / n * k)
         body = body - cyl_y(x, z, rr, y0 - 1, y1 + 1)
+    # the base top B_T screwed down into it: four M4 heat-set inserts in its top (ours: B_T is drilled to suit)
+    from parts.head._common import hole_d, hole_features
+
+    rb, angs = P["bt"]
+    ri = hole_d("M4", "heatset") / 2
+    for i, a in enumerate(angs):
+        x, z = at_angle(rb, a)
+        body = body - cyl_y(x, z, ri, y1 - 8.6, y1 + 1)
+        hole_features(feats, f"bt{i + 1}", (x, y1, z), (0, -1, 0), ri, depth=8.6, bolt="M4", kind="insert")
     return finish(body, label="Shell support ring", params=P, features=feats, reference="",
                   printability=Print("top face down", "top", False, "the tabs rise from the bed; no supports"))

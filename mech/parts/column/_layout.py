@@ -176,15 +176,16 @@ SUPPORT = dict(
     # open at the back: the top sector (r >= 84, swept +-25.7 deg) and the top drive (pinion, hub, servo)
     top=dict(y_top=476.8, r=116.0, screws=(348.0, 78.0, 258.0), open=((124.0, 248.0, 84.0), (146.0, 220.0, 0.0))),
 )
-LS_IC_RING_TOP = 358.1   # LS_IC_1's bottom ring's top (its screws' heads; sections: full ring to y ~358, pillars above)
-TOP_RACE_TOP = 482.0     # the top lazy susan's lower race on TR-MR_SC's flange (y 480 + ~2 mm race: inferred)
+LS_IC_RING_TOP = 361.1   # LS_IC_1's screw recesses' top (the 9.8 mm countersinks at r 104.4, read from its mesh)
+TOP_RACE_TOP = 488.0     # the top lazy susan's inner race on TR-MR_SC's flange, y 480-488 (assemblies/kit/fastening.py)
 BRACKET = dict(leg=20.0, w=20.0, t=5.0)   # 2020 corner bracket (cast aluminium, 20 x 20 x 20 x 5; inferred dims)
 # the clamp: one M4 into a drop-in T-nut per bracket (inferred: what a drop-in nut in 6063 holds before its
 # lips yield, and anodised aluminium on aluminium)
 CLAMP = dict(preload_n=1200.0, mu=0.2)   # M4 (8.8) at ~2.5 N m
 
 # ------------------------------------------------------------------ shell support (Hunter/Morton ring round the pedestal's foot)
-BASE_RING = dict(y1=160.15, t=15.0, r=160.0, tab_t=5.8, tab_h=22.0)   # under the kit's base top B_T (160.25)
+BASE_RING = dict(y1=160.15, t=15.0, r=160.0, tab_t=5.8, tab_h=22.0,   # under the kit's base top B_T (160.25)
+                 bt=(120.0, (60.0, 150.0, 240.0, 330.0)))   # B_T screwed down into it: r, angles (B_T solid there: 3.4 mm)
 
 # ------------------------------------------------------------------ inserts / hardware
 INSERT_M4 = {"type": "insert", "thread": "M4", "length_mm": 8.1, "od_mm": 6.3,

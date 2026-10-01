@@ -171,8 +171,10 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
         anchor = kept[0] if kept else parent_anchor
         if anchor and ground[0] is None:
             ground[0] = anchor  # the first part on the ground: what parentless sub-assemblies join
-        if kept and not a.mates:
-            # a placement model: its parts joined to its first part, that to the parent's (connected test only)
+        if kept and (not a.mates or (a.mount or {}).get("placement_model")):
+            # a placement model: its parts joined to its first part, that to the parent's (connected test only);
+            # `mount.placement_model`: the kit's mesh assemblies keep that join under the mates modelled in them
+            # (assemblies/kit/fastening.py: the races and their screws)
             info["no_mates"][a.id] = kept
             for q in kept[1:] + ([parent_anchor] if parent_anchor else []):
                 out.mates.append(Mate(f"placed:{a.id}:{q}", "placed", (kept[0], ""), (q, ""), {}, False,

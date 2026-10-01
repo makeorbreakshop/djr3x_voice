@@ -106,6 +106,8 @@ A mated sub-assembly may name parts of its parent it stands on, `mount.rests_on:
 optional `rests_on_note`): the whole-droid suite joins them for its connected test (placement only).
 An entry may instead be `{"part": "col_core_plate", "on": "ls_ic_1", "note": "..."}`: the child's part that
 carries a part elsewhere in the droid (a ring plate under a lazy susan's race), joined the same way.
+`mount.placement_model: true` marks a mesh assembly (the kit's) whose parts the suite joins by placement even
+though some of its parts carry mates (the lazy susans' races and their screws, assemblies/kit/fastening.py).
 
 The root may carry `couplings` (from `python -m workbench test <root>`, workbench/droid.py): coupled
 joint limits, the dependent joint's range as a table over the driving one, profile joint names:
