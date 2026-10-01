@@ -57,8 +57,10 @@ export const initial = (): PttState => ({
 
 const listeningForUs = (s: PttState) => s.phase === 'listening' && s.owner === OWNER;
 const ours = (s: PttState) => s.live || listeningForUs(s);
-/** A new turn may start: idle, or thinking (a follow-up while R3X is still composing). */
-const canStart = (s: PttState) => s.connected && s.enabled && !s.pending && (s.phase === 'idle' || s.phase === 'thinking');
+/** A new turn may start: idle, thinking (a follow-up while R3X is still composing), or
+ * speaking - talking over R3X interrupts him (the runtime stops his speech before the mic opens). */
+const canStart = (s: PttState) =>
+  s.connected && s.enabled && !s.pending && (s.phase === 'idle' || s.phase === 'thinking' || s.phase === 'speaking');
 
 export function step(s: PttState, i: PttInput): PttStep {
   switch (i.kind) {
@@ -125,6 +127,6 @@ export function view(s: PttState): { look: PttLook; label: string; hint: string 
     return { look: 'busy', label: `Listening (${who})`, hint: `only ${who} can stop this turn` };
   }
   if (s.phase === 'thinking') return { look: 'thinking', label: 'Thinking…', hint: 'click to talk again' };
-  if (s.phase === 'speaking') return { look: 'speaking', label: 'R3X is talking', hint: 'wait for him to finish' };
+  if (s.phase === 'speaking') return { look: 'speaking', label: 'R3X is talking', hint: 'click or hold Space to interrupt' };
   return { look: 'idle', label: 'Click to talk', hint };
 }

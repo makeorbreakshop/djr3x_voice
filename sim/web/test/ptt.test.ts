@@ -33,8 +33,10 @@ describe('push-to-talk', () => {
     r = run([ack('stop'), server('thinking')], r.s);
     expect(view(r.s).look).toBe('thinking');
     r = run([server('speaking')], r.s);
-    expect(view(r.s).label).toBe('R3X is talking');
-    expect(run([click], r.s).sent).toEqual([]); // the mic would record R3X
+    expect(view(r.s)).toMatchObject({ look: 'speaking', label: 'R3X is talking', hint: 'click or hold Space to interrupt' });
+    // Talking over R3X interrupts him: the runtime stops his speech before the mic opens.
+    expect(run([click], r.s).sent).toEqual(['ptt_start']);
+    expect(run([down()], r.s).sent).toEqual(['ptt_start']);
   });
 
   it('a double click while the start is pending sends one start', () => {

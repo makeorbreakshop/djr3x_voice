@@ -490,3 +490,41 @@ async fn a_silent_command_is_followed_up_in_the_conversation() {
     tokio::time::sleep(Duration::from_secs(10)).await;
     assert_eq!(spoken(&rec), ["You're Brandon, and Funky Town is rolling!"]);
 }
+
+/// Talking over a playing track ducks it (the 2026-10-01 session: "can you stop playing the
+/// music now?" said over Utinni at full volume); an empty press restores it.
+#[tokio::test(start_paused = true)]
+async fn talking_over_music_ducks_it() {
+    use r3x_contracts::MusicEvent;
+    let bus = Bus::default();
+    bus.update(Source::System, |s: &mut StageState| s.brain = true);
+    bus.update(Source::System, |m: &mut MusicState| m.playing = true);
+    let rec = log(&bus);
+    let deps = BrainDeps {
+        llm: None,
+        router: IntentRouter::new(JevClient::new("", Duration::from_millis(800)), RouterConfig::default()),
+        memory: None,
+        latency: None,
+        ptt: None,
+        chooser: random_chooser(),
+    };
+    let _brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let music = |rec: &Arc<Mutex<Vec<Arc<Envelope>>>>| -> Vec<&'static str> {
+        rec.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Event(Event::Music(MusicEvent::Duck { .. })) => Some("duck"),
+                Body::Event(Event::Music(MusicEvent::Unduck { .. })) => Some("unduck"),
+                _ => None,
+            })
+            .collect()
+    };
+    bus.publish(Source::System, Some("t1".into()), Event::Conversation(ConversationEvent::ListeningStarted));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(music(&rec), ["duck"], "talk pressed over music");
+    bus.publish(Source::System, Some("t1".into()), Event::Conversation(ConversationEvent::ListeningStopped { transcript: String::new() }));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(music(&rec), ["duck", "unduck"], "nothing heard: music back");
+}

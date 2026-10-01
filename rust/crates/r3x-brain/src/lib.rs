@@ -17,6 +17,7 @@
 pub mod catalog;
 pub mod console;
 pub mod dj;
+pub mod listen_duck;
 pub mod plan;
 pub mod tags;
 pub mod tools;
@@ -319,6 +320,8 @@ impl Brain {
             tokio::spawn(brain.clone().warmup_loop()),
             tokio::spawn(brain.clone().dj_loop()),
             tokio::spawn(brain.clone().dj_step_loop()),
+            // The music ducks while the guest talks (and until their reply takes over).
+            listen_duck::spawn(bus),
         ];
         brain.tasks.lock().unwrap().extend(t);
         if brain.inner.router.active() {
