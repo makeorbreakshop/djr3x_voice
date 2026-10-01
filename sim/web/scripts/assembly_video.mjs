@@ -30,8 +30,10 @@ const FPS = 30;
 const TITLE = opt('title', "Hunter Smoke's head mech");
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 // pacing (s): parts, screws (a bolt circle's overlap), the hold after a step, the opening, the ending
-const TIMING = { part: 0.5, fastener: 0.28, overlap: 0.8, fastenerOverlap: 0.5, hold: 0.05, maxTotal: 1e9, minDur: 0.1 };
-const STEP_HOLD = 0.2;
+// parts one at a time with a short gap, screws in order (a bolt circle overlapping a little); `hold` is the camera's move
+const MOVE_S = 1.0;
+const TIMING = { part: 0.75, fastener: 0.35, overlap: (0.75 + 0.12) / 0.75, fastenerOverlap: 0.6, hold: MOVE_S + 0.1, maxTotal: 1e9, minDur: 0.1 };
+const STEP_HOLD = 0.6;
 const OPEN_S = 1.0;
 const MOTION_S = 2.8;
 const ORBIT_S = 1.6;
@@ -117,69 +119,99 @@ const shells = plan.filter((p) => p.n >= SHELLS_FROM);
 // ------------------------------------------------------------------ the timeline
 const segs = [{ kind: 'open', dur: OPEN_S }];
 for (const p of mech) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
-segs.push({ kind: 'wide', dur: 0.6 }, { kind: 'motion', dur: MOTION_S, ghost: false });
+segs.push({ kind: 'wide', dur: MOVE_S + 0.2 }, { kind: 'motion', dur: MOTION_S });
 for (const p of shells) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
-segs.push({ kind: 'wide', dur: 0.5 }, { kind: 'motion', dur: MOTION_S, ghost: false }, { kind: 'orbit', dur: ORBIT_S });
+segs.push({ kind: 'wide', dur: MOVE_S + 0.2 }, { kind: 'motion', dur: MOTION_S }, { kind: 'orbit', dur: ORBIT_S });
 const total = segs.reduce((t, s) => t + s.dur, 0);
 const nFrames = Math.round(total * FPS);
 console.log(`${shown.length} steps, ${total.toFixed(1)} s, ${nFrames} frames`);
 
-const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
-// one 3/4 view, a very slow drift; the orbit only at the very end
-const AZ0 = 32;
-const EL = 24;
-const DRIFT = 0.35; // deg/s
-const MIN_FOCUS = 0.055; // m: the closest it frames (a screw still shows where it goes)
-const FILL = 0.66; // of the frame height
-const OMEGA = 5.5; // critically damped follow (rad/s)
-
-// the camera state: target and framed size, each a critically damped spring
-const cam = { c: null, v: [0, 0, 0], r: null, vr: 0 };
-const spring = (x, v, goal, dt) => {
-  const a = OMEGA * OMEGA * (goal - x) - 2 * OMEGA * v;
-  v += a * dt;
-  return [x + v * dt, v];
-};
 const node = JSON.stringify(SECTION);
 const label = async (num, text, op) => ev(`(() => { const l = document.querySelector('#vid .lab'); l.querySelector('b').textContent = ${JSON.stringify(String(num ?? ''))}; l.querySelector('span').textContent = ${JSON.stringify(text ?? '')}; l.style.opacity = ${op}; 1 })()`);
 const card = async (text, sub, op) => ev(`(() => { const c = document.querySelector('#vid .card'); c.innerHTML = ${JSON.stringify(text)} + (${JSON.stringify(sub ?? '')} ? '<small>' + ${JSON.stringify(sub ?? '')} + '</small>' : ''); c.style.opacity = ${op}; 1 })()`);
-await card(TITLE, 'Assembly', 1);
-await label('', '', 0);
-// a bigger label for a phone, in the lower third
-await ev(`(() => { const st = document.createElement('style'); st.textContent = '#vid .lab { left: 0; right: 0; bottom: 15%; justify-content: center; font-size: 38px; font-weight: 600; gap: 18px; text-shadow: 0 1px 0 rgba(255,255,255,.6); } #vid .lab b { font-size: 60px; font-weight: 300; } #vid .card { font-size: 56px; }'; document.head.append(st); 1 })()`);
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
+// one 3/4 view; each step one held shot, one eased move between steps; the orbit only at the very end
+const AZ0 = 32;
+const EL = 24;
+const DRIFT = 0.12; // deg/s: barely there
+const BAND = 0.12; // the label band under the picture (share of the frame)
+const PIC = 1 - BAND;
+const MIN_SHOT = 0.06; // m: the closest a step's shot comes
+await ev(`(() => { __r3x.build.guideRect = { right: 0, bottom: ${Math.round(BAND * H)}, top: 0 }; 1 })()`);
+await ev(`(() => { const st = document.createElement('style'); st.textContent = '#vid .lab { left: 0; right: 0; bottom: 0; height: ${BAND * 100}%; background: #1b1c1f; color: #f2f1ee; justify-content: center; align-items: center; font-size: 34px; font-weight: 600; gap: 20px; text-shadow: none; padding: 0 40px; text-align: left; } #vid .lab b { font-size: 56px; font-weight: 300; color: #f2f1ee; } #vid .card { font-size: 56px; top: 38%; }'; document.head.append(st); 1 })()`);
+
+const view = (az) => {
+  const a = (az * Math.PI) / 180, e = (EL * Math.PI) / 180;
+  return { dir: [Math.sin(a) * Math.cos(e), Math.sin(e), Math.cos(a) * Math.cos(e)], right: [Math.cos(a), 0, -Math.sin(a)], up: [-Math.sin(a) * Math.sin(e), Math.cos(e), -Math.cos(a) * Math.sin(e)] };
+};
+/** A box's shot from this view: its centre and the size to frame (the picture's height at `fill`). */
+const boxShot = (b, az, fill, grow = 1) => {
+  const { right, up } = view(az);
+  let w = 0, h = 0;
+  for (const sx of [-0.5, 0.5]) for (const sy of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) {
+    const p = [b.s[0] * sx * grow, b.s[1] * sy * grow, b.s[2] * sz * grow];
+    w = Math.max(w, 2 * Math.abs(p[0] * right[0] + p[2] * right[2]));
+    h = Math.max(h, 2 * Math.abs(p[0] * up[0] + p[1] * up[1] + p[2] * up[2]));
+  }
+  return { c: [...b.c], r: Math.max(h, w / (W / (H * PIC)), MIN_SHOT) / (fill * PIC) };
+};
+/** The camera never inside what is built: at least out of its box along the view. */
+const outside = async (shot, az) => {
+  const whole = await ev(`JSON.stringify(__r3x.build.videoWhole())`).then(JSON.parse);
+  if (!whole) return 0;
+  const { dir } = view(az);
+  let exit = Infinity;
+  for (let k = 0; k < 3; k++) {
+    if (Math.abs(dir[k]) < 1e-9) continue;
+    const lo = whole.c[k] - whole.s[k] / 2, hi = whole.c[k] + whole.s[k] / 2;
+    exit = Math.min(exit, ((dir[k] > 0 ? hi : lo) - shot.c[k]) / dir[k]);
+  }
+  return Number.isFinite(exit) ? exit + 0.03 : 0;
+};
 
 let T = 0;
 let f = 0;
-let lastStep = -1;
+let cur = null; // the camera: { c, r, az, minD }
+let from = null;
+let to = null;
 for (const sg of segs) {
   const n = Math.round(sg.dur * FPS);
   for (let k = 0; k < n; k++, f++) {
     const t = k / FPS;
-    let goal = null;
-    let fill = FILL;
     let orbit = 0;
     if (sg.kind === 'open') {
-      if (lastStep !== plan[0].i) {
+      if (k === 0) {
         await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${plan[0].i}, true); wb.seqSetTime(0); 1 })()`);
-        lastStep = plan[0].i;
+        const b = await ev(`JSON.stringify(__r3x.build.videoStepBox())`).then(JSON.parse);
+        cur = { ...boxShot(b, AZ0, 0.6, 1.15), az: AZ0, minD: 0 };
+        await label('', '', 0);
+        from = to = cur;
       }
       await card(TITLE, 'Assembly', t < sg.dur - 0.3 ? 1 : Math.max(0, (sg.dur - t) / 0.3));
-      goal = await ev(`JSON.stringify(__r3x.build.videoFocus())`).then(JSON.parse);
     } else if (sg.kind === 'step') {
       const p = sg.p;
       if (k === 0) {
-        await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); for (const j of ['head_tilt','head_roll','visor']) wb.setJoint(n, j, 0); wb.setGuideStep(${p.i}, true); 1 })()`);
-        lastStep = p.i;
+        await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); for (const j of ['head_tilt','head_roll','visor']) wb.setJoint(n, j, 0); wb.setGuideStep(${p.i}, true); wb.seqSetTime(0); 1 })()`);
         await card('', '', 0);
+        // the step's shot: what it adds, where it starts and where it seats, with some of what it goes onto
+        const b = await ev(`JSON.stringify(__r3x.build.videoStepBox())`).then(JSON.parse);
+        const az = AZ0 + T * DRIFT;
+        const shot = { ...boxShot(b, az, 0.6, 1.15), az };
+        shot.minD = await outside(shot, az);
+        from = cur;
+        to = shot;
       }
       await ev(`__r3x.build.seqSetTime(${t.toFixed(4)})`);
-      goal = await ev(`JSON.stringify(__r3x.build.videoFocus())`).then(JSON.parse);
-      await label(p.n, p.title, Math.min(1, t / 0.15));
+      await label(p.n, p.title, 1);
     } else {
-      // the whole thing: wide, the motion, the orbit
-      goal = await ev(`JSON.stringify(__r3x.build.videoWhole())`).then(JSON.parse);
-      fill = 0.74;
-      await label('', '', 0);
+      // the whole thing: one move to the wide shot, then held (the motion), then the orbit
+      if (k === 0 && sg.kind === 'wide') {
+        await label('', '', 0);
+        const az = AZ0 + T * DRIFT;
+        const v = await ev(`JSON.stringify(__r3x.build.videoWholeView(${JSON.stringify(view(az).right)}, ${JSON.stringify(view(az).up)}))`).then(JSON.parse);
+        from = cur;
+        to = { c: v.c, r: Math.max(v.h, v.w / (W / (H * PIC))) / (0.74 * PIC), az, minD: 0 };
+      }
       if (sg.kind === 'motion') {
         const u = t / sg.dur;
         const w = (a, b) => Math.max(0, Math.min(1, (u - a) / (b - a)));
@@ -187,40 +219,21 @@ for (const sg of segs) {
         const tilt = swing(w(0, 0.45), -20, 25), roll = swing(w(0.3, 0.75), -12, 12), visor = swing(w(0.55, 1), -15, 30);
         await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); wb.setJoint(n, 'head_tilt', ${tilt}); wb.setJoint(n, 'head_roll', ${roll}); wb.setJoint(n, 'visor', ${visor}); 1 })()`);
       }
-      if (sg.kind === 'orbit') orbit = 70 * ease(t / sg.dur);
+      if (sg.kind === 'orbit') orbit = 60 * ease(t / sg.dur);
     }
-    // the framed size: the box seen from the view (its height, its width over the aspect), never closer than MIN_FOCUS
-    const az = ((AZ0 + T * DRIFT + orbit) * Math.PI) / 180;
-    const el = (EL * Math.PI) / 180;
-    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
-    const right = [Math.cos(az), 0, -Math.sin(az)];
-    const up = [-Math.sin(az) * Math.sin(el), Math.cos(el), -Math.cos(az) * Math.sin(el)];
-    if (goal && sg.kind !== 'step' && sg.kind !== 'open') {
-      // the whole thing: framed from each part's own extent as this view sees it (one box round all is loose)
-      const v = await ev(`JSON.stringify(__r3x.build.videoWholeView(${JSON.stringify(right)}, ${JSON.stringify(up)}))`).then(JSON.parse);
-      if (v) goal = { c: v.c, s: goal.s, r: Math.max(v.h, v.w / (W / H)) / fill };
-    } else if (goal) {
-      // the box as this view sees it: its extent across the screen and up it
-      let w = 0, hh = 0;
-      for (const sx of [-0.5, 0.5]) for (const sy of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) {
-        const p = [goal.s[0] * sx, goal.s[1] * sy, goal.s[2] * sz];
-        w = Math.max(w, 2 * Math.abs(p[0] * right[0] + p[2] * right[2]));
-        hh = Math.max(hh, 2 * Math.abs(p[0] * up[0] + p[1] * up[1] + p[2] * up[2]));
-      }
-      goal.r = Math.max(hh, w / (W / H), MIN_FOCUS) / fill;
-    }
-    const dt = 1 / FPS;
-    if (!cam.c && goal) { cam.c = [...goal.c]; cam.r = goal.r; }
-    if (goal) {
-      for (let j = 0; j < 3; j++) [cam.c[j], cam.v[j]] = spring(cam.c[j], cam.v[j], goal.c[j], dt);
-      [cam.r, cam.vr] = spring(cam.r, cam.vr, goal.r, dt);
-    }
+    // one eased move at the start of a step (or of the wide shot), then still
+    const moving = (sg.kind === 'step' || sg.kind === 'wide') && t < MOVE_S;
+    if (moving) {
+      const e = ease(t / MOVE_S);
+      cur = { c: from.c.map((v, j) => v + (to.c[j] - v) * e), r: from.r + (to.r - from.r) * e, az: from.az + (to.az - from.az) * e, minD: from.minD + (to.minD - from.minD) * e };
+    } else if (to && (sg.kind === 'step' || sg.kind === 'wide')) cur = { ...to, az: to.az + (t - MOVE_S) * DRIFT };
+    const az = cur.az + orbit;
+    const { dir } = view(az);
     await ev(`(() => {
       const cam = __r3x.camera, wb = __r3x.build;
-      // the lens as it projects (zoom and view offset included): 1 / tan(half the vertical view)
       cam.updateProjectionMatrix();
-      const d = (${cam.r} / 2) * cam.projectionMatrix.elements[5];
-      const t = ${JSON.stringify(cam.c)}, dir = ${JSON.stringify(dir)};
+      const d = Math.max((${cur.r} / 2) * cam.projectionMatrix.elements[5], ${cur.minD});
+      const t = ${JSON.stringify(cur.c)}, dir = ${JSON.stringify(dir)};
       const c = wb.cameraState();
       c.target.set(t[0], t[1], t[2]);
       c.pos.set(t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d);
@@ -241,9 +254,12 @@ kill();
 // ------------------------------------------------------------------ encode
 const mp4 = path.join(OUT, `${SECTION}_assembly.mp4`);
 const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(OUT, 'frames', '%05d.png'),
-  '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
 if (r.status) process.exit(r.status);
+const small = mp4.replace(/\.mp4$/, '_720.mp4');
+spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(OUT, 'frames', '%05d.png'), '-vf', 'scale=720:-2',
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', small], { stdio: 'inherit' });
 const every = Math.max(1, Math.floor(f / 12));
 spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp4, '-vf', `select='not(mod(n\\,${every}))',scale=360:-1,tile=4x3`, '-frames:v', '1',
   path.join(OUT, 'contact_sheet.png')], { stdio: 'inherit' });
-console.log(JSON.stringify({ mp4, seconds: +(f / FPS).toFixed(1), mb: +(fs.statSync(mp4).size / 1e6).toFixed(1) }));
+console.log(JSON.stringify({ mp4, seconds: +(f / FPS).toFixed(1), mb: +(fs.statSync(mp4).size / 1e6).toFixed(1), mb720: +(fs.statSync(small).size / 1e6).toFixed(1) }));

@@ -1633,6 +1633,40 @@ export class Workbench {
     return { c: c.toArray(), w: hi[0] - lo[0], h: hi[1] - lo[1] };
   }
 
+  /** The video's shot of a step: what it adds where it starts and where it seats (world box). */
+  videoStepBox(): { c: number[]; s: number[] } | null {
+    const q = this.seq;
+    if (!q || !q.items.length) return null;
+    const box = new THREE.Box3();
+    const add = () => {
+      this.applyOffsets(0);
+      this.root.updateMatrixWorld(true);
+      for (const it of q.items) for (const id of it.ids) {
+        const po = this.parts.get(id);
+        if (po) {
+          const g = po.mesh.geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          if (!g.boundingBox!.isEmpty()) box.union(g.boundingBox!.clone().applyMatrix4(po.mesh.matrixWorld));
+          continue;
+        }
+        const fo = this.fast.get(id);
+        if (fo) {
+          const g = fo.obj.geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          box.union(g.boundingBox!.clone().applyMatrix4(fo.obj.matrixWorld));
+        }
+      }
+    };
+    const was = q.force;
+    q.force = 1;
+    add();
+    q.force = 0;
+    add();
+    q.force = was;
+    this.applyOffsets(0);
+    return box.isEmpty() ? null : { c: box.getCenter(new THREE.Vector3()).toArray(), s: box.getSize(new THREE.Vector3()).toArray() };
+  }
+
   /** The video's wide shot: the section as it stands. */
   videoWhole(): { c: number[]; s: number[] } | null {
     const g = this.guide;
@@ -2391,10 +2425,13 @@ export class Workbench {
         opacity = Math.min(opacity, 0.12);
       }
       m.color.setHex(finish.color);
-      // the video: a black print lifted to a dark grey that shows its form
+      // the video: a black print as a dark charcoal that still shows its form (the kit's shells a cooler shade)
       if (this.video) {
         const hsl = m.color.getHSL({ h: 0, s: 0, l: 0 });
-        if (hsl.l < 0.2) m.color.setHSL(hsl.h, hsl.s, 0.2 + hsl.l * 0.5);
+        if (hsl.l < 0.1) {
+          if (shell) m.color.setHSL(0.6, 0.07, 0.11);
+          else m.color.setHSL(hsl.h, Math.min(hsl.s, 0.04), 0.065);
+        }
       }
       m.userData.base = m.color.getHex();
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
