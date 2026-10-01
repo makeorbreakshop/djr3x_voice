@@ -293,11 +293,8 @@ impl Host {
         if self.stage.mode != OperatingMode::Show {
             return None;
         }
-        let raw = match self.stage.gaze {
-            GazeSource::Viewport => self.viewport.filter(|(_, at)| self.now() - at < LOOK_STALE_S).map(|(pt, _)| pt),
-            GazeSource::Vision => self.face,
-            GazeSource::Audio | GazeSource::Off => None,
-        }?;
+        let viewport = self.viewport.filter(|(_, at)| self.now() - at < LOOK_STALE_S).map(|(pt, _)| pt);
+        let raw = pick_gaze(self.stage.gaze, self.face.filter(|_| face_steers_gaze()), viewport)?;
         let clamp = |j: &str, v: f64| self.profile.joint(j).map_or(v, |j| j.animation.clamp(v));
         Some((clamp("head_pan", raw.0), clamp("head_tilt", raw.1)))
     }
@@ -439,7 +436,9 @@ impl Host {
             PerfCommand::Look { pan, tilt, owner } => {
                 // The retained state, not our copy: a claim acked a moment ago must count.
                 let s = self.bus.get::<StageState>();
-                let ack = if s.gaze != GazeSource::Viewport {
+                // Vision falls back to the viewport while no face is seen, so a panel keeps
+                // sending its view then too.
+                let ack = if !matches!(s.gaze, GazeSource::Viewport | GazeSource::Vision) {
                     Ack::rejected(format!("the gaze follows {:?}, not the viewport", s.gaze).to_lowercase())
                 } else if s.gaze_owner.is_some() && s.gaze_owner != *owner {
                     Ack::rejected("another panel owns the viewport gaze")
@@ -663,9 +662,38 @@ pub fn spawn(bus: &Bus, cfg: PerformerHostConfig) -> anyhow::Result<JoinHandle<(
     }))
 }
 
+/// `R3X_FACE_GAZE=1`: a seen face steers the head (gaze source vision). Off until R3X runs on
+/// the real robot with the camera where his eyes are: on the sim the camera sits beside a
+/// screen, so a face's position means nothing to his head, and he looks at the viewer -
+/// straight out of the screen - instead (2026-10-01). Recognition and scenes are unaffected.
+fn face_steers_gaze() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("R3X_FACE_GAZE").is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes" | "on")))
+}
+
+/// What the head looks at for a gaze source. Vision with no face (none seen, or faces not
+/// steering the gaze yet) falls back to the viewport: with no target at all the idle glances
+/// and reactions turn the head freely and R3X looks all over the place (2026-10-01).
+fn pick_gaze(source: GazeSource, face: Option<(f64, f64)>, viewport: Option<(f64, f64)>) -> Option<(f64, f64)> {
+    match source {
+        GazeSource::Viewport => viewport,
+        GazeSource::Vision => face.or(viewport),
+        GazeSource::Audio | GazeSource::Off => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vision_without_a_face_follows_the_viewport() {
+        let (face, view) = (Some((10.0, 2.0)), Some((-20.0, 0.0)));
+        assert_eq!(pick_gaze(GazeSource::Vision, face, view), face, "a face wins");
+        assert_eq!(pick_gaze(GazeSource::Vision, None, view), view, "no face: the viewer");
+        assert_eq!(pick_gaze(GazeSource::Viewport, face, view), view);
+        assert_eq!(pick_gaze(GazeSource::Off, face, view), None);
+    }
 
     #[test]
     fn run_numbers_and_enables() {

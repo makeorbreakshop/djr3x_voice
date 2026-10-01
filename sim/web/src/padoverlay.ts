@@ -40,7 +40,7 @@ function runtimeTags(layer: PadLayer, stick: StickTarget): Tags {
   return {
     l2: 'L2 Talk', l1: `L1 ${MAPPING.layers.l1.name}`, r2: `R2 ${MAPPING.layers.r2.name}`, r1: `R1 ${MAPPING.layers.r1.name}`,
     dpad: layer.name, face: layer.name, faceSub: 'tap · hold', select: 'tap cancel · hold menu', start: 'FREEZE', ps: 'hold: motors',
-    lstick: STICK[stick], lclick: arm ? 'click: pin' : 'click: arms home', rstick: 'Head', rclick: 'click: look · L3+R3 reset',
+    lstick: STICK[stick], lclick: arm ? 'click: pin' : 'click: arms home', rstick: 'Head', rclick: 'hold: look · L3+R3 reset',
   };
 }
 

@@ -1582,7 +1582,9 @@ if (!connected) renderGaze(null); // standalone until the gateway says hello
 let lookSent = { pan: NaN, tilt: NaN, at: 0 };
 function sendViewportGaze() {
   const st = gwState?.stage;
-  if (!connected || !st || st.mode !== 'show' || st.gaze !== 'viewport' || (st.gaze_owner && st.gaze_owner !== PANEL_ID)) return;
+  // Vision follows the viewport until the camera sees a face (runtime gaze_target), so the
+  // view is sent then too.
+  if (!connected || !st || st.mode !== 'show' || (st.gaze !== 'viewport' && st.gaze !== 'vision') || (st.gaze_owner && st.gaze_owner !== PANEL_ID)) return;
   const now = performance.now();
   if (now - lookSent.at < 66) return;
   const pt = aimAt(camera.position);

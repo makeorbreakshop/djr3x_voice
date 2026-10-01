@@ -8,7 +8,8 @@
 //!
 //! **Fixed in every layer:** right stick = head; L2 = push-to-talk (opens after
 //! [`TALK_ARM_S`]); L3 click = pin/unpin the arm the left stick drives (body layers: send the
-//! arms home); R3 click = look at guests on/off; L3+R3 = reset everything; Start = freeze;
+//! arms home); R3 *held* `tap_hold_s` = look at guests on/off (a click does nothing: the head
+//! stick is easy to click by accident, 2026-10-01); L3+R3 = reset everything; Start = freeze;
 //! Select tap = cancel, hold = menu; PS hold = motors on/off.
 //!
 //! **Smooth by construction** (2026-10-01: "make it smooth, not insanely complicated"):
@@ -241,6 +242,8 @@ pub struct Controls {
     /// L3/R3 down; `chord` once both were down together (then neither fires alone).
     sticks_down: [bool; 2],
     chord: bool,
+    /// R3 down since (INFINITY once its hold fired).
+    r3_at: Option<f64>,
     menu: Option<(Vec<usize>, usize)>,
     mods: [Mod; 3],
     latched: [bool; 3],
@@ -271,6 +274,7 @@ impl Controls {
             talk_down: None,
             select_down: None,
             sticks_down: [false; 2],
+            r3_at: None,
             chord: false,
             menu: None,
             mods: [Mod::default(); 3],
@@ -547,6 +551,9 @@ impl Controls {
         for (k, i) in [b::L3, b::R3].into_iter().enumerate() {
             if pressed(i) {
                 self.sticks_down[k] = true;
+                if k == 1 {
+                    self.r3_at = Some(now);
+                }
                 if self.sticks_down[1 - k] {
                     self.chord = true;
                     self.reset_all(now, &mut actions, &mut cues);
@@ -554,25 +561,29 @@ impl Controls {
             }
             if released(i) {
                 self.sticks_down[k] = false;
-                if !self.chord {
-                    if k == 0 {
-                        let stick_target = self.layer(self.active).1.stick;
-                        match Self::arms_of(stick_target) {
-                            [] => {
-                                for p in &mut self.parts[HERO..] {
-                                    p.send_home(now);
-                                }
+                if !self.chord && k == 0 {
+                    let stick_target = self.layer(self.active).1.stick;
+                    match Self::arms_of(stick_target) {
+                        [] => {
+                            for p in &mut self.parts[HERO..] {
+                                p.send_home(now);
                             }
-                            arms => self.toggle_pin(arms, now, &mut cues),
                         }
-                    } else {
-                        actions.push(Action::LookToggle);
+                        arms => self.toggle_pin(arms, now, &mut cues),
                     }
+                }
+                if k == 1 {
+                    self.r3_at = None;
                 }
                 if !self.sticks_down[1 - k] {
                     self.chord = false;
                 }
             }
+        }
+        // R3 held: look at guests on/off, once per hold, never as part of the reset chord.
+        if self.r3_at.is_some_and(|t| t.is_finite() && down(b::R3) && !self.chord && now - t >= self.map.tap_hold_s) {
+            self.r3_at = Some(f64::INFINITY);
+            actions.push(Action::LookToggle);
         }
 
         // ---------------------------------------------------------------- face + d-pad
@@ -1267,7 +1278,11 @@ mod tests {
     fn r3_looks_l3_r3_together_resets_everything() {
         let mut r = Run::new();
         r.at(0.01, &[b::R3]);
-        assert_eq!(r.at(0.01, &[]).actions, vec![Action::LookToggle]);
+        assert!(r.at(0.01, &[]).actions.is_empty(), "a click (often an accident on the head stick) does nothing");
+        r.at(0.01, &[b::R3]);
+        assert_eq!(r.at(0.4, &[b::R3]).actions, vec![Action::LookToggle], "a hold toggles");
+        assert!(r.at(0.5, &[b::R3]).actions.is_empty(), "once per hold");
+        assert!(r.at(0.01, &[]).actions.is_empty());
         // Latch L1, pin the hero arm up, then L3+R3.
         r.at(0.01, &[b::L1]);
         r.at(0.05, &[]);
