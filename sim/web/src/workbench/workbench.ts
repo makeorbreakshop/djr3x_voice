@@ -17,7 +17,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  defaultVariants, firstStep, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
+  firstStep, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type Manifest, type MLinkage, type MPart, type PartClass,
 } from './manifest';
 
@@ -322,7 +322,16 @@ export class Workbench {
     this.root.position.set(mt[0] / 1000, mt[1] / 1000, mt[2] / 1000);
     this.focus = this.top;
     this.variants = {};
-    this.forEachNode((n) => Object.assign(this.variants, defaultVariants(n.asm)));
+    // A group can span nodes (the droid's `internals`: the column under the base, Anderson's ring drives
+    // under the rings): a default option anywhere wins over another node's first option.
+    const defaulted = new Set<string>();
+    this.forEachNode((n) => {
+      for (const v of variantOptions(n.asm)) {
+        if (defaulted.has(v.group)) continue;
+        if (v.default) { this.variants[v.group] = v.id; defaulted.add(v.group); }
+        else if (!(v.group in this.variants)) this.variants[v.group] = v.id;
+      }
+    });
     this.applyVariantNodes();
     this.pose();
     this.refresh();
