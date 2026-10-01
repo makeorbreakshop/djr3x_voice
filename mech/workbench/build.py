@@ -15,7 +15,7 @@ import numpy as np
 import trimesh
 
 from . import geom
-from . import kitgeom
+from . import kitgeom, paths
 from .steps import plan as plan_steps
 from .model import SCHEMA, VERSION, Assembly, Transform, rollup, vec
 
@@ -236,6 +236,13 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
     steps = plan_steps(asm)
     all_fast = [*asm.fasteners, *kitgeom.place_hardware(asm, steps)]
     d_mates, d_feats = kitgeom.insert_axes(asm, steps, all_fast)
+    # approach paths that pass through nothing already there (workbench/paths.py): for assemblies with their
+    # own modelled hardware (the meshes' contacts are meaningful there)
+    if asm.fasteners:
+        t0 = time.time()
+        unclean = paths.plan(asm, steps, all_fast)
+        log(f"paths {time.time() - t0:.1f} s: {sum(len(s.sequence) for s in steps)} items, {len(unclean)} not clean"
+            + "".join(f"\n  {u['step']} {'+'.join(u['ids'])} hits {', '.join(u['hits'])}" for u in unclean))
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as ex:
         files = list(ex.map(lambda p: _part_files(p, prefix, out, export, sigs), asm.parts))
     parts = []

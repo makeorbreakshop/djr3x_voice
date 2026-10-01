@@ -149,17 +149,48 @@ export function planSequence(parts: SeqPart[], fasteners: SeqFastener[], seatedB
     flush();
   }
   for (const f of fastenerOrder(fasteners.filter((f) => !queued.has(f.id)))) raw.push({ kind: 'fastener', ids: [f.id], dur: DUR.fastener });
-  // timing: each starts as the one before is mostly in; a long step plays faster
-  const span = raw.reduce((t, it, i) => t + (i === raw.length - 1 ? it.dur : it.dur * OVERLAP), 0);
-  const k = span > MAX_TOTAL ? Math.max(MIN_DUR / DUR.fastener, MAX_TOTAL / span) : 1;
-  let t = HOLD;
-  const items: SeqItem[] = raw.map((it) => {
-    const item = { kind: it.kind, ids: it.ids, start: t, dur: it.dur * k };
-    t += item.dur * OVERLAP;
+  return timed(raw.map((it) => ({ kind: it.kind, ids: it.ids })));
+}
+
+/** How a step's items are paced: seconds per part and per fastener, how far in the one before is when the
+ *  next starts (a bolt circle's screws may overlap more), the hold before the first, the longest a step
+ *  may take (then it plays faster, no item quicker than minDur). */
+export interface Timing { part: number; fastener: number; overlap: number; fastenerOverlap: number; hold: number; maxTotal: number; minDur: number }
+export const GUIDE_TIMING: Timing = { part: DUR.part, fastener: DUR.fastener, overlap: OVERLAP, fastenerOverlap: OVERLAP, hold: HOLD, maxTotal: MAX_TOTAL, minDur: MIN_DUR };
+
+/** Items in order, timed. */
+export function timed(order: { kind: SeqItem['kind']; ids: string[] }[], tm: Timing = GUIDE_TIMING): { items: SeqItem[]; total: number } {
+  const dur = (it: { kind: SeqItem['kind'] }) => (it.kind === 'part' ? tm.part : tm.fastener);
+  const gap = (it: { kind: SeqItem['kind'] }, next?: { kind: SeqItem['kind'] }) =>
+    dur(it) * (it.kind === 'fastener' && next?.kind === 'fastener' ? tm.fastenerOverlap : tm.overlap);
+  const span = order.reduce((t, it, i) => t + (i === order.length - 1 ? dur(it) : gap(it, order[i + 1])), 0);
+  const k = span > tm.maxTotal ? Math.max(tm.minDur / tm.fastener, tm.maxTotal / span) : 1;
+  let t = tm.hold;
+  const items: SeqItem[] = order.map((it, i) => {
+    const item = { kind: it.kind, ids: it.ids, start: t, dur: dur(it) * k };
+    t += gap(it, order[i + 1]) * k;
     return item;
   });
   const total = items.length ? Math.max(...items.map((i) => i.start + i.dur)) : 0;
   return { items, total };
+}
+
+/** Where along its path (way points: offsets from its seat, the start first) an item is at `u` (1 start, 0 seated). */
+export function pathAt(points: THREE.Vector3[], u: number, out = new THREE.Vector3()): THREE.Vector3 {
+  if (!points.length || u <= 0) return out.set(0, 0, 0);
+  const pts = [...points, new THREE.Vector3()];
+  const lens = pts.slice(1).map((p, i) => p.distanceTo(pts[i]));
+  const total = lens.reduce((a, b) => a + b, 0);
+  // distance still to go, walked back from the seat
+  let left = Math.min(1, u) * total;
+  for (let i = lens.length - 1; i >= 0; i--) {
+    if (left <= lens[i] || i === 0) {
+      const f = lens[i] > 0 ? Math.min(1, left / lens[i]) : 0;
+      return out.copy(pts[i + 1]).lerp(pts[i], f);
+    }
+    left -= lens[i];
+  }
+  return out.copy(pts[0]);
 }
 
 /** An item's travel left at time t: 1 out, 0 seated, eased. */

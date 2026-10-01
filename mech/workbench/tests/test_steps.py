@@ -160,3 +160,54 @@ def test_kit_hardware_goes_in_the_holes_the_guide_counts():
     for f in fs:  # each on its hole's axis, going into the plate
         z = f.matrix[:3, 2]
         assert abs(abs(z[1]) - 1) < 1e-6 and f.inferred
+
+
+def test_paths_go_round_what_is_in_the_way():
+    """A peg into a socket under a bridge: straight down its axis is blocked, so it comes in level and then down."""
+    from workbench.mates import Mate, axis
+    from workbench.paths import plan as plan_paths
+
+    a = Assembly("bridge", "Bridge")
+    a.links = [Link("l", "L")]
+    base = part("base", "Base", "l", [120, 10, 60], [0, -5, 0])
+    bridge = part("bridge", "Bridge", "l", [40, 6, 60], [0, 40, 0])
+    peg = part("peg", "Peg", "l", [8, 20, 8], [0, 10, 0])
+    peg.features = {"axis": axis([0, 0, 0], [0, 1, 0], 4)}
+    base.features = {"socket": axis([0, 0, 0], [0, 1, 0], 4)}
+    a.parts = [base, bridge, peg]
+    a.mates = [Mate("m1", "concentric", ("peg", "axis"), ("base", "socket"))]
+    steps = [Step("s1", "Base and bridge", ["base", "bridge"]), Step("s2", "Peg", ["peg"])]
+    assert plan_paths(a, steps, []) == []
+    path = steps[1].sequence[0]["paths"]["peg"]
+    # not straight down from above through the bridge, nor up through the base
+    straight_up = len(path) == 1 and abs(path[0][0]) < 1e-6 and abs(path[0][2]) < 1e-6
+    assert not straight_up and steps[1].sequence[0]["clean"]
+
+
+# Items of Hunter's head no approach path clears, and why (the build's order, not a path, is the issue).
+HUNTER_KNOWN = {
+    "nut_tilt_l": "the left tilt nut's line runs through the cross and the other bearing; it goes on before the cross",
+    "h_v_3": "the kit visor's right arm is glued into the brow, which overlaps it in the print",
+    "pin_visor_tab": "the tab pin goes through before the axle slides into its bracket; the step places the axle first",
+    "side_left": "the sides go on over the visor axle ends glued on in the step before (they flex round them)",
+    "side_right": "as side_left",
+    "head_top": "the top goes on with the visor flipped up; the path is planned at visor 0",
+    "h_fp": "the face plate goes in with the visor flipped up; the path is planned at visor 0",
+}
+
+
+def test_hunter_head_paths_cross_nothing():
+    f = MECH / "out" / "hunter_head" / "manifest.json"
+    if not f.exists():
+        pytest.skip("no mech/out/hunter_head manifest")
+    root = json.loads(f.read_text())["root"]
+    bad = set()
+    for s in root["steps"]:
+        seq = s.get("sequence") or []
+        named = {i for it in seq for i in it["ids"]}
+        assert set(s.get("parts", [])) <= named and set(s.get("fasteners", [])) <= named, s["id"]
+        for it in seq:
+            assert set(it["ids"]) <= set(it["paths"]), (s["id"], it["ids"])
+            if not it.get("clean", True):
+                bad |= set(it["ids"])
+    assert bad <= set(HUNTER_KNOWN), sorted(bad - set(HUNTER_KNOWN))

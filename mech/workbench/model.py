@@ -191,6 +191,8 @@ class Step:
     text: str = ""
     # Grouped by workbench/steps.py from the structure, not written by anyone.
     derived: bool = False
+    # The order things go in and each one's approach path (workbench/paths.py; SCHEMA.md "Step").
+    sequence: list = field(default_factory=list)
 
 
 @dataclass

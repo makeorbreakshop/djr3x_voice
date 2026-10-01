@@ -24,7 +24,7 @@ import {
   assemblyLabel, exposed, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
-import { fastenerKind, fastenerPose, fastenerTravel, itemU, planSequence, type SeqFastener, type SeqItem, type SeqPart } from './sequence';
+import { fastenerKind, fastenerPose, fastenerTravel, GUIDE_TIMING, itemU, pathAt, planSequence, timed, type SeqFastener, type SeqItem, type SeqPart, type Timing } from './sequence';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type MGear, type MJoint, type Manifest, type MLinkage, type MPart, type MStep,
@@ -1451,6 +1451,20 @@ export class Workbench {
   private planStep(s: AStep) {
     this.root.updateMatrixWorld(true);
     const first = this.stepIndex();
+    // the manifest's own order and paths (mech/workbench/paths.py: swept clear of what is already there)
+    this.seqPaths.clear();
+    const data = (s as AStep & { sequence?: { ids: string[]; kind: 'part' | 'fastener'; paths?: Record<string, number[][]> }[] }).sequence;
+    const have = (id: string) => this.parts.has(id) || this.fast.has(id);
+    if (data?.length) {
+      for (const it of data) for (const [id, pts] of Object.entries(it.paths ?? {})) this.seqPaths.set(id, pts.map((p) => new THREE.Vector3(...(p as [number, number, number]))));
+      const order = data.map((it) => ({ kind: it.kind, ids: it.ids.filter(have) })).filter((it) => it.ids.length);
+      // anything the viewer has in the step that the data does not order goes in at the end
+      const named = new Set(order.flatMap((it) => it.ids));
+      for (const id of s.parts ?? []) if (!named.has(id) && this.parts.has(id)) order.push({ kind: 'part', ids: [id] });
+      for (const id of s.fasteners ?? []) if (!named.has(id) && this.fast.has(id)) order.push({ kind: 'fastener', ids: [id] });
+      this.seqOpen = new Map();
+      return timed(order, this.seqTiming);
+    }
     const parts: SeqPart[] = [];
     for (const id of s.parts ?? []) {
       const po = this.parts.get(id);
@@ -1472,6 +1486,84 @@ export class Workbench {
   /** A nut in a trap (a pocket inside its part, open to a bore) comes in from that open side: how far out along
    *  its axis (mm) it has to start to come from outside the part, when that way is clear of the part's walls. */
   private seqOpen = new Map<string, number>();
+  /** The step's approach paths from the manifest (mm, the section's frame: offsets from the seat, start first). */
+  private seqPaths = new Map<string, THREE.Vector3[]>();
+  /** How steps are paced (the video paces them its own way). */
+  seqTiming: Timing = GUIDE_TIMING;
+
+  // ---- the assembly video (scripts/assembly_video.mjs): real materials, no marks, a shadow on the floor
+  video = false;
+  private catcher: THREE.Mesh | null = null;
+  private videoHidden: THREE.Object3D[] = [];
+  setVideo(on: boolean) {
+    this.video = on;
+    if (on && !this.catcher) {
+      this.catcher = new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.ShadowMaterial({ opacity: 0.22 }));
+      this.catcher.rotation.x = -Math.PI / 2;
+      this.catcher.receiveShadow = true;
+      this.catcher.name = 'video_floor';
+      this.host.scene.add(this.catcher);
+    }
+    if (this.catcher) this.catcher.visible = on;
+    // the set (the booth, the droid's lights) out of the picture: only the section, its lights and the floor
+    const sc = this.host.scene;
+    if (on) {
+      this.videoHidden = sc.children.filter((o) => o.visible && o !== this.root && o !== this.lights && o !== this.catcher && o !== this.guideLines
+        && !(o as THREE.Light).isLight);
+      this.videoHidden.forEach((o) => (o.visible = false));
+    } else {
+      this.videoHidden.forEach((o) => (o.visible = true));
+      this.videoHidden = [];
+    }
+    this.refresh();
+    this.markShadow();
+    this.host.interact();
+  }
+  /** The video builds up: what a step adds shows only once it starts moving in, and hardware that rides a part
+   *  (put in before the part goes on) only once that part does. */
+  private videoVisibility(inStep: Set<string>, fastIn: Set<string>) {
+    const q = this.seq;
+    const started = (id: string) => {
+      const it = q?.of.get(id);
+      return !it || q!.force !== null || q!.t >= it.start;
+    };
+    for (const po of this.parts.values()) {
+      const v = !!po.mesh.userData.vis && (!inStep.has(po.part.id) || started(po.part.id));
+      po.mesh.visible = v;
+      po.holder.visible = v;
+    }
+    for (const fo of this.fast.values()) {
+      const own = fo.f.joins.filter((j) => this.parts.has(j));
+      const ok = fastIn.has(fo.f.id) ? started(fo.f.id) : own.every((j) => !inStep.has(j) || started(j));
+      fo.obj.visible = !!fo.obj.userData.vis && ok && own.some((j) => this.parts.get(j)?.mesh.visible);
+    }
+  }
+
+  /** The step paused at t seconds (the video steps a virtual clock). */
+  seqSetTime(t: number) {
+    const q = this.seq;
+    if (!q) return;
+    q.playing = false;
+    q.t = Math.max(0, Math.min(q.total, t));
+    this.applyOffsets(0);
+  }
+  /** What is built so far and what this step brings, where it starts (world box). */
+  guideBuiltBox(): THREE.Box3 {
+    const g = this.guide;
+    const box = new THREE.Box3();
+    if (!g) return box;
+    if (this.seq) this.seq.force = 1;
+    this.applyOffsets(0);
+    box.union(this.bounds(true, g.parts));
+    for (const fo of this.fast.values()) {
+      if (!fo.obj.visible) continue;
+      if (!fo.obj.geometry.boundingBox) fo.obj.geometry.computeBoundingBox();
+      box.union(fo.obj.geometry.boundingBox!.clone().applyMatrix4(fo.obj.matrixWorld));
+    }
+    if (this.seq) this.seq.force = null;
+    this.applyOffsets(0);
+    return box;
+  }
   private openSides(s: AStep): Map<string, number> {
     const out = new Map<string, number>();
     this.root.updateMatrixWorld(true);
@@ -1733,7 +1825,7 @@ export class Workbench {
   private updateGuidePaths() {
     const g = this.guide;
     const cur = g && !g.title && this.step >= 0 ? this.steps[this.step] : null;
-    if (!cur || this.isolated) {
+    if (!cur || this.isolated || this.video) {
       this.guideLines.visible = false;
       return;
     }
@@ -2160,10 +2252,11 @@ export class Workbench {
       // step's context), whatever the look (a look changes how parts are drawn, not which)
       if (g) {
         visible = g.parts.has(id) && !hideV.has(id) && !this.variantHidden.has(po.node) && (!this.isolated || this.isolated.has(id))
-          && (g.title || !cur || (f !== undefined && f <= this.step) || ctx.has(id));
+          && (g.title || !cur || (f !== undefined && f <= this.step) || (ctx.has(id) && !this.video));
       }
       po.holder.visible = visible;
       po.mesh.visible = visible;
+      po.mesh.userData.vis = visible;
       const m = po.mat;
       // ghosts are one neutral grey, whatever the part's paint (no pink X-ray, no purple cups)
       let finish: Finish;
@@ -2199,7 +2292,7 @@ export class Workbench {
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
       // aluminium a pale one) - never mixed with its paint, which turns the orange shells purple. A part being
       // inspected shows as it is, not as new.
-      const adds = !!g && !g.title && !!cur && inStep.has(id) && !(g.hover && !g.hover.has(id)) && !this.isolated;
+      const adds = !!g && !g.title && !!cur && inStep.has(id) && !(g.hover && !g.hover.has(id)) && !this.isolated && !this.video;
       if (adds) {
         const own = m.color.getHSL({ h: 0, s: 0, l: 0 }).l;
         const acc = new THREE.Color(GUIDE_COLOR.add).getHSL({ h: 0, s: 0, l: 0 });
@@ -2245,7 +2338,8 @@ export class Workbench {
       if (cur && (fastAt.get(id) ?? -1) > this.step) visible = false;
       if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p)) && !this.isolated.has(id)) visible = false;
       fo.obj.visible = visible;
-      const addsF = !!g && !g.title && !!cur && fastIn.has(id) && !this.isolated;
+      fo.obj.userData.vis = visible;
+      const addsF = !!g && !g.title && !!cur && fastIn.has(id) && !this.isolated && !this.video;
       fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : MATERIAL.fastener.color);
       fo.mat.emissive.setHex(0);
       setLook(fo.mat, 1, clip);
@@ -2418,9 +2512,11 @@ export class Workbench {
     const g = !!this.guide && !this.guide.title && !!cur;
     for (const po of this.parts.values()) {
       const u = g && inStep.has(po.part.id) ? this.seqU(po.part.id) : 0;
-      // a step's new parts come in from where the explode would take them (at least 50 mm out)
+      const path = g ? this.seqPaths.get(po.part.id) : undefined;
+      // a step's new parts come in along their path (the manifest's), else from where the explode would take them
       const step = inStep.has(po.part.id) && (u > 0 || (!g && insert > 0))
-        ? (g ? (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u) : this.arrival(po).multiplyScalar(insert)) : null;
+        ? (g ? (path ? pathAt(path, u) : (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u))
+          : this.arrival(po).multiplyScalar(insert)) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);
     }
@@ -2431,7 +2527,23 @@ export class Workbench {
       if (g) {
         // the guide: only ever along its own axis from its seat (never a part's offset), spinning on
         if (!fastIn.has(fo.f.id)) {
-          fo.obj.matrix.copy(fo.base);
+          // hardware put into a part before the part goes in (step 1's inserts) rides in with it
+          const own = fo.f.joins.filter((j) => this.parts.has(j));
+          const carrier = own.length && own.every((j) => inStep.has(j)) ? own[0] : null;
+          const cp = carrier ? this.parts.get(carrier)! : null;
+          if (cp && this.seqU(carrier!) > 0) {
+            const d = cp.mesh.position.clone().sub(cp.sBase ?? cp.base);
+            fo.obj.matrix.copy(fo.base).premultiply(new THREE.Matrix4().makeTranslation(d.x, d.y, d.z));
+          } else fo.obj.matrix.copy(fo.base);
+          continue;
+        }
+        const fpath = this.seqPaths.get(fo.f.id);
+        if (fpath) {
+          // its manifest path (along its own axis, or in from the side into a gap), spinning on as it drives
+          const uf = this.seqU(fo.f.id);
+          const o = pathAt(fpath, uf);
+          const spin = fastenerTravel(fo.f.spec).turns * uf * Math.PI * 2;
+          fo.obj.matrix.copy(fo.base).multiply(new THREE.Matrix4().makeRotationZ(spin)).premultiply(new THREE.Matrix4().makeTranslation(o.x, o.y, o.z));
           continue;
         }
         // waiting clear of a part it goes through that is still coming in: as far again out along its own axis
@@ -2460,6 +2572,7 @@ export class Workbench {
       }
       fo.obj.matrix.copy(m);
     }
+    if (this.video && g) this.videoVisibility(inStep, fastIn);
     this.root.updateMatrixWorld(true);
     this.updateGuidePaths();
     this.updateMarkers();

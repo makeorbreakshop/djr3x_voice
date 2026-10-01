@@ -329,6 +329,16 @@ the right size are there, and a part with no mate and no fastener to what is alr
 derived mate (`derived: true, inferred: true`, a `contact_seat` plane or `contact_axis` feature) from
 the faces it touches - the way the viewer moves it in.
 
+An assembly with its own modelled hardware also carries each step's `sequence`: the order things go
+in and each one's approach path, swept clear of what is already there (`workbench/paths.py`):
+
+```jsonc
+"sequence": [{"ids": ["servo_l"], "kind": "part",
+              "paths": {"servo_l": [[0, 50.9, 0]]},   // way points, mm: offsets from the seat, start first
+              "clean": true},                        // false: no path clears it ("hits": what it crosses)
+             {"ids": ["scr_servo_5"], "kind": "fastener", "paths": {"scr_servo_5": [[0, 18, 0]]}, "clean": true}]
+```
+
 ## BomLine
 
 ```jsonc
