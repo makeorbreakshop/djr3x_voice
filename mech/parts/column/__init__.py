@@ -18,5 +18,6 @@ PARTS = {
     "parts.column.clockspring_case": "clock-spring cassette for the head's cables (printed)",
     "parts.column.ring_pinion": "ring-drive pinions (Anderson's teeth) on 1906 hubs (printed)",
     "parts.column.drive_bracket": "ring-drive brackets on the column's back posts (printed)",
+    "parts.column.support": "ring plates: the core plate (lower + middle races) and the top-ring plate, their brackets",
     "parts.column.neck_tube": "the short neck, 26 x 1.5 aluminium, cross-drilled",
 }

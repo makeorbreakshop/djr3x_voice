@@ -104,6 +104,8 @@ drives under the rings); a `default: true` option anywhere in the tree wins.
 
 A mated sub-assembly may name parts of its parent it stands on, `mount.rests_on: ["b_b_1"]` (with an
 optional `rests_on_note`): the whole-droid suite joins them for its connected test (placement only).
+An entry may instead be `{"part": "col_core_plate", "on": "ls_ic_1", "note": "..."}`: the child's part that
+carries a part elsewhere in the droid (a ring plate under a lazy susan's race), joined the same way.
 
 The root may carry `couplings` (from `python -m workbench test <root>`, workbench/droid.py): coupled
 joint limits, the dependent joint's range as a table over the driving one, profile joint names:

@@ -161,6 +161,28 @@ for _k, _v in RING.items():
     _v["plate"] = (_v["flange"][1], _v["flange"][1] + 8.0)
 DRIVE_PLATE = dict(t=8.0, r_max=96.0, back=5.8)
 
+# ------------------------------------------------------------------ ring plates (the body on the column)
+# The kit carries every ring down its printed stack: the lower lazy susan's inner race is clamped between
+# LS_IC_1 and the pedestal cap P_M_3 (guide p20), the middle ring's race sits on LS_IC_1's pillars (p33-34),
+# the top ring's on TR-MR_SC, a carrier hung in the middle ring (p52). The plates put those races on the
+# column (Charlton's aluminium ring plates, Hunter's ring plate, Morton's frame rings): measured from the kit -
+# the lower race's underside = P_M_3's top (y 342.1, r 97-110.3; LS_SR_1 from r 111.8), LS_IC_1's four screw
+# holes (4.8) at r 104.4, 1.1 deg + 90 k; TR-MR_SC's flange underside y 476.8 (r 98.5-127.8), its race-screw
+# holes (4.8) at r 104.4 and 348/78/168/258 deg; MS_Main's inner wall r >= 121.
+SUPPORT = dict(
+    t=6.0, hole_half=HALF + 0.5, screw_r=104.4,
+    notch=(-88.0, -20.0, 14.0),     # (x0, z0, z1) on -X: the lift servo (to r 83.4) and its hanger over the travel
+    core=dict(y_top=342.1, r=110.3, screws=(1.1, 91.1, 181.1, 271.1)),
+    # open at the back: the top sector (r >= 84, swept +-25.7 deg) and the top drive (pinion, hub, servo)
+    top=dict(y_top=476.8, r=116.0, screws=(348.0, 78.0, 258.0), open=((124.0, 248.0, 84.0), (146.0, 220.0, 0.0))),
+)
+LS_IC_RING_TOP = 358.1   # LS_IC_1's bottom ring's top (its screws' heads; sections: full ring to y ~358, pillars above)
+TOP_RACE_TOP = 482.0     # the top lazy susan's lower race on TR-MR_SC's flange (y 480 + ~2 mm race: inferred)
+BRACKET = dict(leg=20.0, w=20.0, t=5.0)   # 2020 corner bracket (cast aluminium, 20 x 20 x 20 x 5; inferred dims)
+# the clamp: one M4 into a drop-in T-nut per bracket (inferred: what a drop-in nut in 6063 holds before its
+# lips yield, and anodised aluminium on aluminium)
+CLAMP = dict(preload_n=1200.0, mu=0.2)   # M4 (8.8) at ~2.5 N m
+
 # ------------------------------------------------------------------ shell support (Hunter/Morton ring round the pedestal's foot)
 BASE_RING = dict(y1=160.15, t=15.0, r=160.0, tab_t=5.8, tab_h=22.0)   # under the kit's base top B_T (160.25)
 

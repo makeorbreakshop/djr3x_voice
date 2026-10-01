@@ -194,8 +194,12 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
             walk(ca, cm, cpl, f"{path}/{ca.id}", None if ref.get("interface") else anchor)
             # a mated sub-assembly that sits on parts of its parent (the column's Gil plate under the kit's
             # skirt): `mount.rests_on` names them; a placement join for the connected test
+            # (an entry {"part", "on", "note"} names the child's part that carries it: a ring plate under a race)
             for rid in ((ca.mount or {}).get("rests_on") or []):
-                if len(out.parts) > n0:
+                if isinstance(rid, dict):
+                    out.mates.append(Mate(f"placed:{ca.id}:{rid['part']}:{rid['on']}", "placed", (rid["part"], ""),
+                                          (rid["on"], ""), {}, False, rid.get("note", "carried by the child's part")))
+                elif len(out.parts) > n0:
                     out.mates.append(Mate(f"placed:{ca.id}:{rid}", "placed", (out.parts[n0].id, ""), (rid, ""), {},
                                           False, (ca.mount or {}).get("rests_on_note", "rests on its parent's part")))
             if ref.get("interface"):

@@ -22,6 +22,7 @@ CASES = [(m, {}) for m in sorted(PARTS)] + [("parts.column.ring_pinion", {"ring"
                                              ("parts.column.drive_bracket", {"ring": "top"})]
 CASES += [("parts.column.sled", {"kind": k}) for k in ("back", "side_l", "side_r", "bottom", "top", "hanger")]
 CASES += [("parts.column.purchased", {"kind": k}) for k in ("vwheel", "ecc", "tnut", "collar")]
+CASES += [("parts.column.support", {"kind": "top"}), ("parts.column.support", {"kind": "bracket", "sx": -1, "sz": -1})]
 
 
 @pytest.mark.parametrize("mod,params", CASES)
@@ -87,3 +88,16 @@ def test_ring_pinions_where_anderson_put_them():
     assert L.RING_PINION_C == (-9.8, -83.0)
     assert abs(L.RING["lower"]["y0"] - (342.0 + 3 + 4 + 16.8 + 7.5)) < 1e-6
     assert abs(L.RING["top"]["y0"] - 462.0) < 1e-6
+
+
+def test_ring_plates_under_the_races():
+    """The core plate's top is the lower race's underside (P_M_3's top, y 342.1) and reaches LS_IC_1's screw
+    circle (r 104.4) inside the outer race's spacer (r 111.8); the top-ring plate is under TR-MR_SC's flange
+    (y 476.8) inside MS_Main (r 121); both clear the lift servo (r 83.4) through the notch."""
+    S = L.SUPPORT
+    assert abs(S["core"]["y_top"] - 342.1) < 1e-6 and abs(S["top"]["y_top"] - 476.8) < 1e-6
+    assert S["screw_r"] + 2.4 < S["core"]["r"] < 111.8
+    assert S["screw_r"] + 2.4 < S["top"]["r"] < 121.0
+    assert S["notch"][0] < -83.4 - 2.0
+    # the brackets' outer corners clear the pedestal cap's inner wall under the core plate (r 88.5)
+    assert math.hypot(L.HALF + L.BRACKET["leg"], L.POST_C + L.BRACKET["w"] / 2) < 88.5

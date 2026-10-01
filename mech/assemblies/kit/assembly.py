@@ -61,6 +61,7 @@ LINK_RULES = [
     ("throttle_fore", r"^(TA_FA|TA_W)"),
     ("throttle_hand", r"^(TA_FA_1$|TA_W)"),
     ("top_ring", r"^(TR[-_]|RR_|RX-24$|HA_EB_|HA_[LR]E_1$|HA_PJ_)"),
+    ("top_ring_mount", r"^TR-MR_SC"),   # the top lazy susan's lower-race carrier, hung in the middle ring (guide p52)
     ("hero_arm", r"^(HA_SB_|HA_SP_|HA_PL_|HA_P_1$|HA_PS_|HA_W_|HA_[LRT]F_)"),
     ("hero_hand", r"^(HA_W_1$|HA_[LRT]F_)"),
     ("head", r"^H_"),
@@ -69,7 +70,8 @@ LINK_RULES = [
 LINK_SUBTREE_YAW = {  # which rest yaw applies to a link's kit geometry
     "base": "static", "lower_ring_mount": "torso_lower", "lower_ring": "torso_lower", "poker_upper": "torso_lower", "poker_hand": "torso_lower",
     "middle_ring": "torso_middle", "throttle_upper": "torso_middle", "throttle_fore": "torso_middle",
-    "throttle_hand": "torso_middle", "top_ring": "torso_top", "hero_arm": "torso_top", "hero_hand": "torso_top",
+    "throttle_hand": "torso_middle", "top_ring": "torso_top", "top_ring_mount": "torso_top", "hero_arm": "torso_top",
+    "hero_hand": "torso_top",
     "head": "head", "visor": "head",
 }
 
@@ -311,7 +313,7 @@ def build_model(with_r3x: bool = True, community: bool = True, internals: str | 
     asms = {"base": base, "lower_ring": lower, "middle_ring": middle, "top_ring": top, "head": head}
     link_to_asm = {"base": base, "lower_ring_mount": lower, "lower_ring": lower, "poker_upper": lower, "poker_hand": lower,
                    "middle_ring": middle, "throttle_upper": middle, "throttle_fore": middle, "throttle_hand": middle,
-                   "top_ring": top, "hero_arm": top, "hero_hand": top, "head": head, "visor": head}
+                   "top_ring": top, "top_ring_mount": top, "hero_arm": top, "hero_hand": top, "head": head, "visor": head}
     by_stem: dict[str, list[str]] = {}
     for p in parts:
         link_to_asm[p.link].parts.append(p)
@@ -394,7 +396,56 @@ def build_model(with_r3x: bool = True, community: bool = True, internals: str | 
             opts = [dict(column, variant={"group": "internals", "id": "column"}),
                     dict(anderson, variant={"group": "internals", "id": "anderson_morton"})]
             j.drive = dict(column if internals == "column" else anderson, variants=opts)
+        _pedestal_cap(base, internals)
     return root
+
+
+def _pedestal_cap(base: Asm, internals: str):
+    """P_M_3 per internals: the kit's (Anderson's internals clamp the lower race on it, guide p20) or, under
+    the column, 6.3 mm shorter - its top band is where the column's core plate carries that race (guide p11:
+    "a working build would instead mount to an internal frame"). Both are children of the base in the
+    `internals` group; the base's guide step that placed P_M_3 goes with each."""
+    import copy as _copy
+
+    from assemblies.r3x_animation.assembly import relief
+    from parts.column import _layout as CL
+
+    cap = next((p for p in base.parts if p.id == "p_m_3"), None)
+    if cap is None:
+        return
+    base.parts.remove(cap)
+    steps = []
+    for st in base.steps:
+        if "p_m_3" in st.get("parts", []):
+            steps.append(dict(st))
+            st["parts"] = [x for x in st["parts"] if x != "p_m_3"]
+    cut = _copy.copy(cap)
+    y1 = CL.SUPPORT["core"]["y_top"] + 0.5
+    y0 = CL.SUPPORT["core"]["y_top"] - CL.SUPPORT["t"] - 0.3
+
+    def gen():
+        import trimesh as _tm
+
+        m = _tm.creation.cylinder(radius=CL.SUPPORT["core"]["r"] + 1.0, height=y1 - y0, sections=96)
+        m.apply_transform(_tm.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
+        m.apply_translation([0, (y0 + y1) / 2, 0])
+        return m
+
+    env = Part(id="core_plate_envelope", name="the column's core plate (6 mm + 0.3)", cls="mech", link="base",
+               T=np.eye(4), generator=gen, kind="generated", origin="ours")
+    relief(cut, env, 0.0, "the column's core plate carries the lower race in its place (guide p11)")
+    cut.note = (cut.note + "; " if cut.note else "") + "6.3 mm shorter: the column's core plate takes its top band"
+    for vid, part, dflt in (("anderson_morton", cap, internals == "anderson_morton"), ("column", cut, internals == "column")):
+        part.link = "pedestal_cap"
+        # first among the base's children: a viewer that names an `internals` option by its node lists the
+        # column / Anderson's nodes after these
+        base.children.insert(0, Asm(
+            id=f"pedestal_cap_{'kit' if vid == 'anderson_morton' else 'column'}",
+            name=f"Pedestal cap P_M_3 ({'the kit' if vid == 'anderson_morton' else 'cut for the core plate'})",
+            mount_link="base", variant={"group": "internals", "id": vid, "default": dflt},
+            links=[Link("pedestal_cap", "Pedestal cap (static)", None)], parts=[part],
+            steps=[dict(st, id=f"{st['id']}_cap", parts=["p_m_3"], unplaced=[], title=f"{st.get('title', '')} (P_M_3)")
+                   for st in steps[:1]]))
 
 
 def _lower_pinion_relief(lower: Asm):

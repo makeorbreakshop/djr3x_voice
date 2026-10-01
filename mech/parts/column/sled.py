@@ -57,7 +57,8 @@ def _front_back(sz):
     y0, y1 = S["y0"], S["y1"]
     body = box(-S["half_x"], S["half_x"], y0, y1, z0, z1)
     feats = {"inner": plane((0, (y0 + y1) / 2, sz * S["z_in"]), (0, 0, -sz)),
-             "outer": plane((0, (y0 + y1) / 2, sz * S["z_out"]), (0, 0, sz))}
+             "outer": plane((0, (y0 + y1) / 2, sz * S["z_out"]), (0, 0, sz)),
+             "bottom": plane((0, y0, sz * (S["z_in"] + S["t"] / 2)), (0, -1, 0))}
     keep = []
     k = 0
     for yw in L.WHEEL_Y:
@@ -77,7 +78,9 @@ def _side(sx):
     y0, y1 = S["y0"], S["y1"]
     body = box(x0, x1, y0, y1, -S["z_in"], S["z_in"])
     feats = {"inner": plane((sx * sx_in, (y0 + y1) / 2, 0), (-sx, 0, 0)),
-             "outer": plane((sx * (sx_in + S["t"]), (y0 + y1) / 2, 0), (sx, 0, 0))}
+             "outer": plane((sx * (sx_in + S["t"]), (y0 + y1) / 2, 0), (sx, 0, 0)),
+             "bottom": plane((sx * (sx_in + S["t"] / 2), y0, 0), (0, -1, 0)),
+             "top_edge": plane((sx * (sx_in + S["t"] / 2), y1, 0), (0, 1, 0))}
     keep = []
     if sx < 0:  # the hanger's top arm bolts here (two M4)
         _, ys, zs = L.LIFT_SPLINE

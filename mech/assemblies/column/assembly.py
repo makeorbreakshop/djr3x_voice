@@ -35,6 +35,16 @@ Design (parts/column/_layout.py has every number and its evidence):
   the head low and the hero arm raised, the head's right ear meets the arm: a coupled limit to add later.
   The short neck (26 x 1.5 aluminium) rises into Hunter's coupler, its top on the coupler's bore stop:
   the head sits where it does today.
+* **Ring plates** (Charlton's aluminium ring plates clamped to his column, Hunter's ring plate, Morton's
+  frame rings; supports_load.py has the numbers): the kit carries every ring down its printed stack
+  (LS_IC_1 on the pedestal cap P_M_3, the top ring's race carrier TR-MR_SC hung in the middle ring).
+  A 6061 core plate in P_M_3's top (the cap 6.3 mm shorter) takes the lower lazy susan's inner race -
+  LS_IC_1 clamps it there with the kit's four screws, now tapped into the plate - so the lower ring (on
+  the race's outer side) and the middle ring (on LS_IC_1's pillars) stand on the column; a 6061
+  top-ring plate under TR-MR_SC's flange takes the top ring's race (three of its four screws run on into
+  it; open at the back round the top drive). Each plate on four 2020 corner brackets in the posts'
+  outer X slots. Retention is the kit's screws: nothing these plates carry is a removable cover (the
+  logic panels Charlton holds with magnets are on the middle ring, which turns with its own race).
 * **Connected motion** (manifest `gears`): the lift pinion turns as the sled climbs (and the lift servo
   maps to head_lift), the ring pinions and their hubs turn with the kit's rings; the pan's hub and
   coupler ride the neck.
@@ -206,6 +216,12 @@ class Hw:
         return fid
 
 
+def _bracket_points():
+    from parts.column.support import bracket_points
+
+    return bracket_points()
+
+
 def _on_axis(p, d):
     from workbench.mates import frame_on_axis
 
@@ -266,11 +282,20 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
                     "(Charlton's) climbs a fixed rack with its own servo; the pan servo hangs under the sled and turns "
                     "the neck directly through a coupler (1:1, +-135 deg design, +-150 the servo's end); the neck in two "
                     "6806 in the sled's top plate; ring drives on brackets on the column; shell support ring round "
-                    "the pedestal's foot.",
+                    "the pedestal's foot; ring plates carry the lower/middle and top rings' races on the column.",
         frame_note="Body frame (show/SPEC.md): mm, +Y up, +Z front, +X droid's left; rest pose. Every part is "
                    "modelled in it (parts/column/_layout.py).",
         mount={"parent_link": mount_link, "transform": {"t": [0, 0, 0]}, "inferred": False,
-               "rests_on": ["b_b_1", "b_b_2"],
+               "rests_on": ["b_b_1", "b_b_2",
+                            {"part": "col_core_plate", "on": "ls_ic_1",
+                             "note": "LS_IC_1 and the lower lazy susan's inner race screwed down to the core plate"},
+                            {"part": "col_core_plate", "on": "ms_main_full",
+                             "note": "the middle ring on its lazy susan on LS_IC_1's pillars (kit guide p33-34)"},
+                            {"part": "col_core_plate", "on": "ls_m_full",
+                             "note": "the lower ring on the lower lazy susan's outer race (kit guide p19-20)"},
+                            {"part": "col_top_ring_plate", "on": "tr_mr_sc_full_fixed",
+                             "note": "the top lazy susan's lower race and its carrier screwed down to the top-ring plate"},
+                            {"part": "col_base_ring", "on": "b_t_1", "note": "the base top on the shell support ring"}],
                "rests_on_note": "the kit's skirt (B_B) and the Gil plate both stand on Morton's skid plate / the Gil "
                                 "drive (not modelled)",
                **({"variant": variant} if variant else {})},
@@ -326,6 +351,26 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     ours("col_top_plate", "Column top plate, 6 mm 6061", "hardware", "column", "parts.column.top_plate", material=ALU,
          printed=False)
     ours("col_base_ring", "Shell support ring (pedestal foot)", "mech", "column", "parts.column.base_ring")
+    # ---------------------------------------------------------- ring plates: the body's rings on the column
+    ours("col_core_plate", "Core plate: the lower and middle rings' races on the column (6061, 6 mm)", "hardware",
+         "column", "parts.column.support", {"kind": "core"}, material=ALU, printed=False,
+         note="In P_M_3's top (the pedestal cap takes a 6 mm relief, column internals only): the lower lazy susan's "
+              "inner race clamped between LS_IC_1 and this plate with the kit's four screws, now tapped M4 here.",
+         inferred_note="plate thickness and the brackets' size are ours; the race's footprint is measured from the kit")
+    ours("col_top_ring_plate", "Top-ring plate: the top lazy susan's lower race on the column (6061, 6 mm)", "hardware",
+         "column", "parts.column.support", {"kind": "top"}, material=ALU, printed=False,
+         note="Under TR-MR_SC's flange: the race's screws run on through the flange into its tapped holes; open at "
+              "the back round the top ring's drive and sector.",
+         inferred_note="TR-MR_SC's race screws lengthened (10 mm into the plate); plate thickness ours")
+    for lv in ("core", "top"):
+        yb = L.SUPPORT[lv]["y_top"] - L.SUPPORT["t"]
+        for sx, lr in ((1, "l"), (-1, "r")):
+            for sz, fb in ((1, "f"), (-1, "b")):
+                ours(f"col_{lv}_brk_{fb}{lr}", f"2020 corner bracket ({lv} plate, {'front' if sz > 0 else 'back'} "
+                     f"{'left' if sx > 0 else 'right'})", "hardware", "column", "parts.column.support",
+                     {"kind": "bracket", "sx": sx, "sz": sz, "y_top": yb}, material="aluminium (cast)", printed=False,
+                     mass=8.0, mass_note="catalogue (typical)",
+                     inferred_note="a cast 2020 corner bracket, 20 x 20 x 20 x 4 (inferred dims)")
     # ---------------------------------------------------------- the sled: four plates, eight V-wheels, top and bottom
     ALU_GRID = "aluminium (goBILDA-pattern grid plate)"
     grid_note = ("goBILDA-pattern grid plate (4 mm holes on an 8 mm grid) cut to size; thickness (3 mm) and the part "
@@ -667,6 +712,39 @@ def _hardware(hw: Hw, P, posts, lift_servo, pan_servo, pan_hub, ring):
                  "s04", "column", thread="M4")
         P[post].features[f"face_ring{i + 1}"] = plane((p[0], p[1], np.sign(p[2]) * L.HALF), (0, 0, np.sign(p[2])))
         hw.mate("seated", ("col_base_ring", f"seat{i + 1}"), (post, f"face_ring{i + 1}"))
+    # -- ring plates: each on four corner brackets (an M4 into a T-nut in each post's outer X slot, an M5 up
+    #    through the plate into a lock nut under the bracket's leg); the kit's race screws into the plates
+    for lv, step in (("core", "s05"), ("top", "s05b")):
+        plate = f"col_{lv}_plate" if lv == "core" else "col_top_ring_plate"
+        for k, (bx, bz) in enumerate(_bracket_points()):
+            sx, sz = int(np.sign(bx)), int(np.sign(bz))
+            bid = f"col_{lv}_brk_{'bf'[sz > 0]}{'rl'[sx > 0]}"
+            post = f"col_post_{'bf'[sz > 0]}{'rl'[sx > 0]}"
+            hp = F(bid)["hole_post"]
+            tid = tnut_on(post, (sx, 0, 0), hp["p"][1], "M4", step, f"col_tnut_rp{lv}_{k + 1}")
+            hw.screw(f"col_scr_rp{lv}_post_{k + 1}", hp["p"], hp["d"], [(bid, "post")], (tid, "thread", "metal", L.TNUT_THREAD),
+                     step, "column", thread="M4")
+            P[post].features[f"face_{lv}brk"] = plane((sx * L.HALF, hp["p"][1], sz * L.POST_C), (sx, 0, 0))
+            hw.mate("seated", (bid, "post_face"), (post, f"face_{lv}brk"))
+            hw.mate("seated", (plate, "under"), (bid, "plate_face"))
+            hn = _near(F(plate), "brk", F(bid)["hole_plate"]["p"])
+            hpl = F(plate)[f"hole_{hn}"]
+            far = np.asarray(F(bid)["nut_face"]["p"])
+            nid, nt = hw.nut(f"col_nut_rp{lv}_{k + 1}", far, -UP, step, "column", thread="M5", reason="clamp", joins=[bid])
+            hw.screw(f"col_scr_rp{lv}_plate_{k + 1}", hpl["p"], hpl["d"], [(plate, hn), (bid, "plate")],
+                     (nid, "thread", "nut", nt), step, "column", thread="M5")
+        # the kit's race screws, now into the plate (flat heads; heads on LS_IC_1's ring / on the race's flange)
+        head_y, kit = ((L.LS_IC_RING_TOP, "ls_ic_1"), (L.TOP_RACE_TOP, "tr_mr_sc_full_fixed"))[lv == "top"]
+        for i in range(len(L.SUPPORT[lv]["screws"])):
+            h = F(plate)[f"hole_race{i + 1}"]
+            f_ = hw.screw(f"col_scr_rp{lv}_race_{i + 1}", (h["p"][0], head_y, h["p"][2]), (0, -1, 0), [],
+                          (plate, f"hole_race{i + 1}", "metal", L.SUPPORT["t"]), "s19" if lv == "core" else "s19b", "column",
+                          kind="fhcs", thread="M4",
+                          note=("the kit's LS_IC_1 screw (guide p20), through LS_IC_1 and the lazy susan's inner race into "
+                                "the core plate instead of P_M_3's insert") if lv == "core" else
+                               ("the top lazy susan's lower-race screw (guide p52), through the race and TR-MR_SC's flange "
+                                "on into the top-ring plate"))
+            f_.joins[:0] = [kit, "lazy_susan_10in"]
     # -- the lift: the rack on the back-right post (M3 into T-nuts at its ends), the servo on the sled's
     #    hanger, its brass pinion on the spline with the servo's centre screw
     hw.mate("seated", ("col_lift_rack", "base"), ("col_post_br", "face_in_z"))
@@ -718,6 +796,12 @@ def _hardware(hw: Hw, P, posts, lift_servo, pan_servo, pan_hub, ring):
             hw.screw(f"col_scr_axle_{tag}", np.array([p[0], p[1], sz * L.SLED["z_in"]]), (0, 0, sz),
                      [(plate, f"axle{k + 1}")], (nid, "thread", "nut", nt), "s14", "sled", thread="M5",
                      note="The wheel's axle: through the plate, the eccentric spacer and the wheel's bearings.")
+    # -- the sled's box: the four plates stand on the bottom plate, the top plate flush with the sides' tops
+    #    (their screws are unplaced hardware until the plates' part numbers are chosen: step s11)
+    for k in ("front", "back", "side_l", "side_r"):
+        hw.mate("seated", (f"col_sled_{k}", "bottom"), ("col_sled_bottom", "top"), note="screwed through the grid (unplaced)")
+    for k in ("side_l", "side_r"):
+        hw.mate("coplanar", ("col_sled_top", "top"), (f"col_sled_{k}", "top_edge"), note="screwed through the grid (unplaced)")
     # -- bearings, bearing hub, collar, tube; the coupler on the pan servo's hub
     for s_ in ("lo", "up"):
         hw.mate("press", (f"col_brg_{s_}", "outer"), ("col_sled_top", f"seat_{s_}"), gap_mm=0.0, note="pressed into the housing")
@@ -825,6 +909,17 @@ def _steps(asm: Assembly):
              tools=["4 mm hex key", "8 mm spanner"], notes=["Four M5 through both plates, lock nuts underneath."]),
         Step("s04", "Shell support ring round the pedestal's foot", ["col_base_ring"], F("col_tnut_ring", "col_scr_ring"),
              tools=["3 mm hex key"], notes=["Its top carries the kit's base top (B_T); set it flush with the skirt's top edge."]),
+        Step("s05", "Core plate on four corner brackets, into the pedestal cap's relief",
+             ["col_core_plate"] + [f"col_core_brk_{x}" for x in ("bl", "br", "fl", "fr")],
+             F("col_tnut_rpcore", "col_scr_rpcore_post", "col_scr_rpcore_plate", "col_nut_rpcore"), tools=["4 mm hex key", "8 mm spanner", "a level"],
+             notes=["Brackets on the posts' outer X slots, their legs' tops at y 336.1 (the plate's underside); level "
+                    "the plate before tightening: it sets the lower ring's plane.",
+                    "The plate takes P_M_3's top 6 mm (the pedestal cap is relieved for it): the pedestal goes on round "
+                    "the column first, the plate drops into the relief."]),
+        Step("s05b", "Top-ring plate on four corner brackets",
+             ["col_top_ring_plate"] + [f"col_top_brk_{x}" for x in ("bl", "br", "fl", "fr")],
+             F("col_tnut_rptop", "col_scr_rptop_post", "col_scr_rptop_plate", "col_nut_rptop"), tools=["4 mm hex key", "8 mm spanner", "a level"],
+             notes=["Its top at y 476.8, under TR-MR_SC's flange; the open side to the back (the top ring's drive)."]),
         Step("s07", "Lower ring drive: bracket and servo", ["col_lower_bracket", "col_lower_servo"],
              F("col_tnut_lower", "col_scr_lowerbrk", "col_scr_lowerfl", "col_nut_lowerfl"), tools=["3 mm hex key", "2.5 mm hex key"],
              notes=["Build this drive on the bench (bracket, servo, hub, pinion: s07-s08) and bolt it to the back posts "
@@ -876,6 +971,15 @@ def _steps(asm: Assembly):
              notes=["Wind the ribbon (250 mm) loosely on the tube with the head at pan 0, its outer end through the "
                     "case's slot to the service cable."]),
         Step("s18", "Top plate", ["col_top_plate"], F("col_scr_post_top"), tools=["4 mm hex key"]),
+        Step("s19", "Lower and middle rings onto the core plate (kit guide p19-20, p33-34)", [], F("col_scr_rpcore_race"),
+             tools=["Phillips #2"],
+             notes=["The kit's four LS_IC_1 screws (guide p20) go through LS_IC_1 and the lower lazy susan's inner race "
+                    "into the core plate's tapped M4 holes instead of P_M_3's inserts; the middle ring then goes on "
+                    "LS_IC_1's pillars as the guide has it (p33-34): both rings stand on the column."]),
+        Step("s19b", "Top ring's lower race onto the top-ring plate (kit guide p52)", [], F("col_scr_rptop_race"),
+             tools=["Phillips #2"],
+             notes=["Three of the race's four screws (the fourth is over the plate's open back) run on through "
+                    "TR-MR_SC's flange into the plate's tapped holes: longer screws than the kit's."]),
         Step("s20", "Service cable", ["col_coil_cable"], [], tools=["zip ties"],
              notes=["From the foot plate's cable hole up the column's front opening to the sled's bottom-plate tab: the "
                     "pan and lift servos' leads and the clock spring's ribbon (both servos ride the sled)."]),
@@ -942,6 +1046,10 @@ def _bom(asm: Assembly):
                 "(6061, machined)", 2, "hardware", parts=["col_sled_bottom", "col_sled_top"]),
         BomLine("coupler-pan", "Pan coupler, turned 6061 (1906 hub to the 26 mm tube)", 1, "hardware",
                 parts=["col_pan_coupler"]),
+        BomLine("plate-ring", "Ring plates, 6061, 6 mm, waterjet + tapped M4 (core plate r 110.3, top-ring plate r 116)",
+                2, "hardware", parts=["col_core_plate", "col_top_ring_plate"]),
+        BomLine("bracket-2020", "2020 corner bracket, cast aluminium (20 x 20 x 20)", 8, "hardware",
+                parts=sorted(p.id for p in asm.parts if "_brk_" in p.id)),
         BomLine("bearing-6806-2rs", "Ball bearing 6806-2RS, 30 x 42 x 7", 2, "bearing", parts=["col_brg_lo", "col_brg_up"]),
         BomLine("collar-30", "Clamp collar, one-piece, 30 mm bore, 45 x 13 (e.g. Ruland MSP-30-F)", 1, "hardware",
                 parts=["col_collar"]),
@@ -993,6 +1101,13 @@ def _notes():
         "The arms keep riding their rings (a shoulder must turn with its ring); what moved onto the column is the rings' "
         "drives (static brackets on the back posts) and the shells' support (the ring round the pedestal's foot).",
         "Hunter's head is unchanged: its 26 mm coupler takes the short neck's top at its bore stop (y 696.3).",
+        "Ring plates: the core plate (y 336.1-342.1) carries the lower and middle rings and the poker and throttle "
+        "arms (~4.0 kg with two lazy susans), the top-ring plate (y 470.8-476.8) the top ring and the hero arm "
+        "(~2.2 kg); each on four corner brackets, one M4 T-nut each: >= 7x on slip at twice the weight "
+        "(assemblies/column/supports_load.py; clamp and lazy-susan masses inferred).",
+        "Kit changes for the column: P_M_3 6.3 mm shorter (the core plate in its place: a variant, the kit's own "
+        "stays with Anderson's internals); the race screws into the plates are metric (M4 flat heads) and the top "
+        "race's three are longer.",
         "Kit change: LS_IC_1 (the static core) takes a relief for the lower pinion's swept disc (Anderson's pinion sits "
         "in the same place; the cut applies to both internals).",
     ]
