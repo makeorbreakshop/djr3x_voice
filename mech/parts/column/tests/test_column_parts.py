@@ -18,10 +18,10 @@ sys.path.insert(0, str(MECH))
 
 from parts.column import PARTS, _layout as L  # noqa: E402
 
-CASES = [(m, {}) for m in sorted(PARTS)] + [("parts.column.pan_gear", {"kind": "pinion"}),
-                                             ("parts.column.ring_pinion", {"ring": "top"}),
+CASES = [(m, {}) for m in sorted(PARTS)] + [("parts.column.ring_pinion", {"ring": "top"}),
                                              ("parts.column.drive_bracket", {"ring": "top"})]
-CASES += [("parts.column.purchased", {"kind": k}) for k in ("rail", "block", "tnut", "collar")]
+CASES += [("parts.column.sled", {"kind": k}) for k in ("back", "side_l", "side_r", "bottom", "top", "hanger")]
+CASES += [("parts.column.purchased", {"kind": k}) for k in ("vwheel", "ecc", "tnut", "collar")]
 
 
 @pytest.mark.parametrize("mod,params", CASES)
@@ -51,9 +51,11 @@ def test_lift_travel_and_ratio():
     assert L.LIFT[0] <= -37.0 and L.LIFT[1] >= 37.0
     servo_deg = max(abs(v) for v in L.LIFT) / L.LIFT_MM_PER_DEG
     assert servo_deg <= 135.0 + 1e-6
-    # the carriage's top stays under the top plate at full lift
+    # the sled's cassette stays under the top plate at full lift
     top = L.CASE["y0"] + L.CASE["h"] + L.LIFT[1]
     assert top < L.Y_POST_TOP - 2.0
+    # the lift pinion's pitch point stays on the rack's teeth over the travel
+    assert L.RACK["teeth_y"][0] <= L.LIFT_PINION_C[1] + L.LIFT[0] and L.LIFT_PINION_C[1] + L.LIFT[1] <= L.RACK["teeth_y"][1]
 
 
 def test_head_height_unchanged():
@@ -62,9 +64,22 @@ def test_head_height_unchanged():
 
 
 def test_clock_spring_allows_the_pan():
+    """Direct drive: the servo's own end (+-150) is the pan's; the ribbon must allow at least that."""
     from parts.column.clockspring_case import ribbon_turns
 
-    assert ribbon_turns(250.0) * 360 >= (L.PAN[1] - L.PAN[0])
+    assert ribbon_turns(250.0) * 360 >= 2 * L.PAN_MECH
+    assert L.PAN[1] <= L.PAN_MECH
+
+
+def test_sled_between_the_posts():
+    """The sled's plates clear the posts (inner faces at +-30 where |the other| >= 30) and the rack; the
+    V-wheels' tips reach the slot."""
+    S = L.SLED
+    assert S["z_out"] < L.POST_C - 10.0                 # front/back plates inside the posts' inner Z faces
+    assert -S["half_x"] > L.RACK["x"] + L.RACK["face"] / 2   # the back plate's right edge clears the rack (x -35)
+    assert abs(L.WHEEL_X + L.VWHEEL["od"] / 2 - (L.POST_C - 10.0 + L.VWHEEL["tip_in"])) < 1e-9
+    assert S["z_out"] + L.ECC["l"] + L.VWHEEL["w"] / 2 - L.POST_C < 1e-6        # the wheel centred on the slot
+    assert L.WHEEL_Y[0] - L.VWHEEL["od"] / 2 >= L.BOTTOM["y1"] and L.WHEEL_Y[1] + L.VWHEEL["od"] / 2 <= L.HOUSING["y1"]
 
 
 def test_ring_pinions_where_anderson_put_them():

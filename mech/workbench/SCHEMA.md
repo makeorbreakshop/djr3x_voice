@@ -53,6 +53,7 @@ the change at the bottom of this file.
   "parts":     [Part],
   "joints":    [Joint],
   "linkages":  [Linkage],
+  "gears":     [Gear],                 // optional: parts a joint turns through a gear ratio
   "fasteners": [Fastener],
   "steps":     [Step],
   "bom":       [BomLine],              // this assembly's own lines
@@ -153,6 +154,8 @@ A rigid body. Every part rides on exactly one link.
     "servos": ["servo_l", "servo_r"],       // part ids
     "linkages": ["rod_l", "rod_r"],
     "gear_ratio": 1.0,                      // joint deg per servo deg when linear; null when not
+    "servo_deg_per_unit": 1.0,              // optional, linear drives (gear/direct): servo deg per joint
+                                            // unit (deg or mm); servo -> joint = servo / this
     "note": "pitch = both horns together, roll = differential"
   },
   "zero": {"how": "text: what 0 looks like and how it is set", "step": "s06"},
@@ -184,6 +187,30 @@ Given the child link's pose, the servo angle `th` solves `|A(th) - B| = L`, with
 `a = 2 r D.u'`, `b = 2 r D.w'`, `c = L^2 - |D|^2 - r^2`, `D = C' + o n' - B`,
 `th = atan2(b, a) +/- acos(c / hypot(a, b))`, the branch nearest the zero direction.
 No real root = the pose is unreachable (reported, never clamped silently).
+
+## Gear (parts a joint turns through a ratio)
+
+The push rod's sibling for gear and direct drives: the parts that turn about their own axle as a
+joint moves - a servo's pinion climbing a rack, a pinion in a ring's sector, a coupler on a direct-drive
+spline - so moving the joint visibly turns the servo's output, and a servo slider can drive the joint.
+
+```jsonc
+{ "id": "g_lift", "kind": "rack_pinion | internal | spur | direct",
+  "joint": "head_lift",                   // the joint whose value turns it
+  "joint_assembly": "lower_ring",         // optional: the assembly (id) that declares `joint`, when it is
+                                          // not this one (the column's ring pinions turn with the kit's rings)
+  "link": "sled",                         // the link its axle is fixed to (the parts' `link` too)
+  "pivot": [x, y, z], "axis": [x, y, z],  // the axle, assembly frame, zero pose
+  "deg_per_unit": -2.984,                 // turn (deg, right-hand about axis) per joint unit (deg or mm)
+  "servo": "col_lift_servo",              // the servo whose spline this is (optional)
+  "servo_deg_per_unit": -2.984,           // servo deg per joint unit; servo -> joint = servo deg / this
+  "parts": ["col_lift_pinion"], "fasteners": ["col_scr_liftgear"],
+  "mesh_with": "col_lift_rack" }          // what it meshes (reference)
+```
+
+A gear part's pose: `link matrix x T(pivot) R(axis, deg_per_unit x value) T(-pivot)`. Readers without
+gears draw the parts rigid on their link (as before). Python: `workbench/kinematics.py gear_matrix`.
+The sign is set from the geometry (the teeth stay in mesh through the sweep), not assumed.
 
 ## Fastener
 
@@ -327,3 +354,5 @@ The assembly carries its connections (workbench/mates.py):
 - v1 (2026-09-30): first version; `variants` and `electronics` added the same day, before any
   consumer shipped, so still v1 (both optional). Same day: `cad`, `catalog`, `features`,
   `mates`, test checks and the `explained` status (all optional).
+- v1 (2026-10-01): `gears` (optional) and `drive.servo_deg_per_unit` (optional): gear and direct
+  drives connected the way push rods are (a joint turns its pinions; a servo maps to its joint).

@@ -27,7 +27,7 @@ def _mass(p):
 
 def to_workbench(a: Asm, variant: dict | None = None):
     from workbench.mates import moved
-    from workbench.model import Assembly, BomLine, Joint, Link, Part, Step
+    from workbench.model import Assembly, BomLine, Gear, Joint, Link, Part, Step
 
     parts = []
     for p in a.parts:
@@ -64,4 +64,5 @@ def to_workbench(a: Asm, variant: dict | None = None):
     children = [to_workbench(c) if isinstance(c, Asm) else c for c in a.children]
     return Assembly(id=a.id, name=a.name, description=a.description, frame_note=a.frame_note, mount=mount,
                     guide=a.guide, links=[Link(l.id, l.name, l.joint) for l in a.links], parts=parts, joints=joints,
-                    steps=steps, bom=bom, children=children, notes=list(a.notes))
+                    steps=steps, bom=bom, children=children, notes=list(a.notes),
+                    gears=[Gear(**g) for g in getattr(a, "gears", [])])

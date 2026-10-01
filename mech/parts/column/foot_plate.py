@@ -1,7 +1,7 @@
 """The column's foot plate: 6.35 mm 6061, 150 x 150, on the Gil plate.
 
 Holes: the four posts' M5 flat heads from below (countersunk, flush: the plate sits on the Gil
-plate), four M5 clearance holes on to the Gil plate, a cable hole for the carriage's service cable.
+plate), four M5 clearance holes on to the Gil plate, a cable hole for the sled's service cable (the column's front opening).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from . import _layout as L
 from ._cad import box, clearance_hole, cyl, tapped_hole, cyl_y
 
 DEFAULTS = dict(y0=L.Y_GIL_TOP, t=L.FOOT["t"], half=L.FOOT["half"], post=L.POST_C, bolt_at=L.FOOT["bolt_at"],
-                cable=(0.0, 36.0, 7.0))
+                cable=(L.COIL["x"], L.COIL["z"], 7.0))
 
 
 def make(params: dict | None = None, **kw):

@@ -278,12 +278,12 @@ def explained_placement(info, flat) -> list[dict]:
                     "fix": "none in the model; on the print, the usual clean-up of a tight kit joint"})
     ids = {p.id for p in flat.parts}
     gears = [x for x in ("pan_pinion", "pan_sector", "lift_pinion", "lift_rack", "lower_pinion", "lower_sector",
-                         "top_pinion", "top_sector", "col_lower_pinion", "col_top_pinion", "col_pan_pinion",
-                         "col_pan_gear", "col_lift_pinion", "col_lift_rack") if x in ids]
+                         "top_pinion", "top_sector", "col_lower_pinion", "col_top_pinion", "col_lift_pinion",
+                         "col_lift_rack", "tilt_pinion", "tilt_center_gear") if x in ids]
     if gears:
         out.append({"test": "clearance", "parts": gears,
-                    "cause": "a pinion and its sector/rack: the model turns the ring (or slides the rack) but not the "
-                             "pinion with it (a gear ratio, not a joint), so their teeth pass through each other in the "
+                    "cause": "a pinion and its sector/rack: the manifest turns the pinion with its joint (`gears`), but "
+                             "the suite's sweep does not read gears yet, so their teeth pass through each other in the "
                              "sweep; at rest they are phased to mesh",
                     "fix": "none on the parts (the mesh is checked at rest); gear-driven poses in the sweep are a "
                            "model limit"})

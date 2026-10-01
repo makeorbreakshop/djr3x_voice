@@ -715,7 +715,8 @@ def _pivots(hw, P):
         cj_face = cj_face if cj_face is not None else np.array([c[0], c[1], sz * 25.0])
         hw.hole("custom_joint_piece", f"roll_{s}", cj_face, d, 2.25)
         nid = hw.nut(f"nut_roll_{s}", cj_face + d * CROSS_WALL, d, "custom_joint_piece", "s05", "cross", reason="pivot")
-        hw.screw(f"pin_roll_{s}", outer, d, [], (nid, "thread", "nut", 8.0), "s05", "head",
+        # the bolt is clamped in the cross by its nut; the pillow block's bearing turns round it: it rides the cross
+        hw.screw(f"pin_roll_{s}", outer, d, [], (nid, "thread", "nut", 8.0), "s05", "cross",
                  inferred=True, joins=[f"pillow_bearing_{s}", "custom_joint_piece", nid],
                  note="Pivot bolt through the pillow-block bearing (6 mm bore) and the cross end, lock nut inside "
                       "(shear joint).")

@@ -245,14 +245,17 @@ def lazy_susan(spec):
 
 
 def extrusion(spec):
-    """2020 T-slot (5 series: 6.2 mm slot, 4.2 mm centre bore) along +Y from 0."""
+    """2020 T-slot (5 series: 6.2 mm slot, 4.2 mm centre bore) along +Y from 0; profile "vslot2020":
+    OpenBuilds V-slot (the slot's mouth a 90 deg V, 9.2 wide at the face, for V-wheels)."""
     L = float(spec.get("length_mm", 100))
     sq = box(-10, -10, 10, 10)
     slots = []
+    v = spec.get("profile") == "vslot2020"
     for ang in (0, 90, 180, 270):
         # 6.2 mm opening, 1.8 mm lips, the T cavity tapering to the 7.5 mm core (webs to the corners stay)
-        t = Polygon([(-3.1, 10.01), (3.1, 10.01), (3.1, 8.2), (5.5, 8.2), (5.5, 6.2), (3.2, 4.8), (-3.2, 4.8),
-                     (-5.5, 6.2), (-5.5, 8.2), (-3.1, 8.2)])
+        mouth = [(-4.6, 10.01), (4.6, 10.01), (3.1, 8.5)] if v else [(-3.1, 10.01), (3.1, 10.01)]
+        t = Polygon(mouth + [(3.1, 8.2), (5.5, 8.2), (5.5, 6.2), (3.2, 4.8), (-3.2, 4.8),
+                             (-5.5, 6.2), (-5.5, 8.2), (-3.1, 8.2)] + ([(-3.1, 8.5)] if v else []))
         from shapely import affinity
 
         slots.append(affinity.rotate(t, ang, origin=(0, 0)))

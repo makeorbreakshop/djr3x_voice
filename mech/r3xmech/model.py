@@ -83,6 +83,7 @@ class Asm:
     parts: list[Part] = field(default_factory=list)
     joints: list[Joint] = field(default_factory=list)
     children: list = field(default_factory=list)   # Asm or dict (ChildRef)
+    gears: list[dict] = field(default_factory=list)  # workbench.model.Gear fields (SCHEMA.md "Gear")
     steps: list[dict] = field(default_factory=list)
     fasteners: list[dict] = field(default_factory=list)
     bom: list[dict] = field(default_factory=list)

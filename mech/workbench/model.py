@@ -126,6 +126,30 @@ class Linkage:
 
 
 @dataclass
+class Gear:
+    """Parts that turn about their own axle with a joint (SCHEMA.md "Gear"): a servo's pinion on a
+    rack or a ring's sector, a coupler on a direct-drive spline. Posed by its link's matrix and a
+    turn of `deg_per_unit` x the joint's value about `pivot`/`axis` (assembly frame, zero pose)."""
+
+    id: str
+    kind: str  # rack_pinion | internal | spur | direct
+    joint: str  # the joint whose value turns it
+    link: str  # the link its axle is fixed to
+    pivot: tuple
+    axis: tuple
+    deg_per_unit: float  # turn (deg, right-hand about axis) per joint unit (deg or mm)
+    parts: list = field(default_factory=list)
+    fasteners: list = field(default_factory=list)
+    joint_assembly: Optional[str] = None  # the assembly that declares `joint` (None = this one)
+    servo: Optional[str] = None  # the servo whose output this is (its spline turns the same)
+    servo_deg_per_unit: Optional[float] = None  # servo deg per joint unit (servo -> joint: divide)
+    mesh_with: Optional[str] = None  # the part it meshes (a rack, a sector), for reference
+    note: str = ""
+    inferred: bool = False
+    inferred_note: str = ""
+
+
+@dataclass
 class Fastener:
     id: str
     spec: dict
@@ -202,6 +226,7 @@ class Assembly:
     parts: list = field(default_factory=list)
     joints: list = field(default_factory=list)
     linkages: list = field(default_factory=list)
+    gears: list = field(default_factory=list)  # Gear: parts turned with a joint by a gear ratio
     fasteners: list = field(default_factory=list)
     steps: list = field(default_factory=list)
     bom: list = field(default_factory=list)

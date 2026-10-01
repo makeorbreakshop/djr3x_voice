@@ -16,7 +16,7 @@ evidence follows):
   1 mm a side - with eight 3.5 mm holes at (+-112, +-64) / (+-64, +-112). inferred: only the height.
   The Gil file is in its own frame (y -275.7); the skid plate is in the kit frame at y -53..-48 and
   Morton's 2020 posts stand at y -48, so the Gil plate's top is put at -48.0, in the skid's window.
-* Column: four 2020 posts on a 100 x 100 square. The square is set by the kit: the pedestal's
+* Column: four V-slot 2020 posts on a 100 x 100 square (the sled's V-wheels run in their inner slots). The square is set by the kit: the pedestal's
   back grille pocket comes in to r 59.7 at y 165-265 (P_M_1/P_M_2/P_G_1, measured) and the rest of
   the pedestal wall is at r 86-88, so a 100 mm square (faces at 50, corners at r 70.7) clears both
   with >= 9.7 mm. Hunter's tower (photos 2025-08-06/11) is the same idea; his square is inferred
@@ -24,6 +24,10 @@ evidence follows):
 * Ring heights: Anderson's sectors on the rings stay where his files put them (lower sector y
   345-390, top sector y 462-476, both at the back, measured from his parametric remodels); the
   column's ring drives put the same pinions at the same places (centre (-9.8, *, -83)).
+* Sled (lift + pan): Jason Charlton's build (his replies 2026-10-01, mech/vendor/refs/column_internals):
+  an inner assembly on V-wheels, the lift servo behind a grid plate on it on a rack at the rear, the
+  pan servo at its base turning the neck through a coupler. Plate thicknesses, the wheels' depth in
+  the slot and the stack heights are ours (inferred).
 * Head: Hunter's gimbal centre at body y 738.3 (assemblies/hunter_head), its coupler's bore stop
   (the tube's top) at 696.3: the short neck ends there, so the head sits where it does today.
 """
@@ -48,15 +52,83 @@ Y_POST_TOP = 584.0     # under the top cap: TR_N_3 at y 570 is an annulus r >= 8
 TOP = dict(t=6.0, tube_hole_r=16.0)                       # 6061 top plate, 100 x 100
 POST_LEN = Y_POST_TOP - Y_FOOT_TOP
 
-# 2020 (5 series) slot, in the post's own frame (face at 10 from its centre): opening, lips, T cavity
+# V-slot 2020 (OpenBuilds; the V-wheels ride its slots): the slot in the post's own frame (face at 10 from
+# its centre): the V's mouth and floor, then the T cavity (as the 5-series slot)
 SLOT = dict(open_half=3.1, lip_in=8.2, cav_half=5.5, cav_floor=6.2, taper_half=3.2, taper_floor=4.8)
 
+# ------------------------------------------------------------------ servos (goBILDA 2000-0025-0002, vendor STEP)
+SPLINE_ABOVE_BOSS = 4.1      # spline top above the case boss (vendor STEP)
+HUB_H = 5.5                  # 1906 hub: servo face to arm face (vendor STEP)
+HUB_TAP_R = 11.43            # 1906 hub: the four tapped M4 holes, on its own axes (measured, vendor STEP)
+FLANGE_Y = (-16.9, -13.39)   # servo flange, below the spline top (measured, vendor STEP)
+FLANGE_HOLES = [(10.0 + sx * 24.0, sz * 4.89) for sx in (-1, 1) for sz in (-1, 1)]   # (long axis, across)
+CASE_BOTTOM = -44.1
+CASE_TOP = -4.3              # the case's top face below the spline top (parts/models.py "standard")
+
+# ------------------------------------------------------------------ the sled (after Jason Charlton's build)
+# Charlton (2026-10-01, mech/vendor/refs/column_internals): an inner assembly round the neck "glides up
+# and down the outer rails with V-wheels"; the lift servo sits behind a grid plate on it, its brass
+# servo gear on a long vertical rack on the rear of the structure; the rotation servo is attached to the
+# base of that inner assembly and turns the neck through a round coupler (his photo: the servo at the
+# sled's bottom, spline up, a hub/coupler up into the neck). So: a box of four plates between the posts,
+# eight V-wheels in the posts' inner slots (V-slot 2020), the pan servo hung under its bottom plate on the
+# axis, the neck in two bearings in its top plate.
+#
+# V-wheels: axle along Z (the wheel's plane is X-Y, square to the post's inner X face), on the slot
+# centre (z = +-40, the post's), the V tip `tip_in` into the slot: wheel centre at |x| = 30 + tip_in - r.
+VWHEEL = dict(od=24.39, w=10.23, bore=5.0, hub_r=7.0, tip_in=1.5, tip_hw=3.1)   # OpenBuilds solid V-wheel (od, w)
+WHEEL_X = POST_C - 10.0 + VWHEEL["tip_in"] - VWHEEL["od"] / 2       # 19.305
+ECC = dict(l=6.0, od=10.0)                                        # eccentric spacer, 6 mm (OpenBuilds)
+SLED = dict(t=3.0, half_x=33.5,                                   # goBILDA-pattern grid plates (inferred t)
+            z_in=POST_C - VWHEEL["w"] / 2 - ECC["l"] - 3.0,       # front/back plates' inner face (25.885)
+            side_x=30.5,                                          # side plates' inner face
+            grid=8.0, grid_r=2.0)                                 # 4 mm holes on an 8 mm grid (goBILDA pattern)
+SLED["z_out"] = SLED["z_in"] + SLED["t"]                          # 28.885: the wheels' spacers start here
+
+# ------------------------------------------------------------------ pan: direct drive at the sled's base
+# The pan servo hangs spline-up on the axis under the sled's bottom plate (its flange under the plate, the
+# case's top through a cut-out); a goBILDA 1906 hub on its spline and a turned coupler on the hub clamp the
+# neck tube's bottom. The neck runs up through two 6806 in the top plate's housing (the head's weight on the
+# upper inner race through the hub's flange). Direct, 1:1: the servo's own travel is the pan's.
+PAN_SPLINE_Y = 385.0                                             # spline top (sets the stack below)
+PAN_SERVO_SPLINE = (0.0, PAN_SPLINE_Y, 0.0)
+BOTTOM = dict(t=4.0, y0=PAN_SPLINE_Y + FLANGE_Y[1])               # 371.61: the flange's top against its underside
+BOTTOM["y1"] = BOTTOM["y0"] + BOTTOM["t"]                         # 375.61: the box's plates stand on it
+TAB = dict(half_x=9.0, z1=48.0)                                   # the bottom plate's tab for the service cable
+COUPLER = dict(r=19.0, flange_y0=PAN_SPLINE_Y - SPLINE_ABOVE_BOSS + HUB_H, flange_t=8.0, socket=25.0, bore_r=13.05,
+               cb_r=3.6, cb_depth=4.5, slit=1.0)
+COUPLER["stop"] = COUPLER["flange_y0"] + COUPLER["flange_t"]      # 394.4: the tube's bottom on the flange
+COUPLER["top"] = COUPLER["stop"] + COUPLER["socket"]              # 419.4
+PAN = (-135.0, 135.0)  # design range: the suite's +-135 servo rule (goBILDA 2000 standard mode is 300 deg:
+                       # +-150 is the mechanical end); the clock spring allows +-200. Past ~+120 relative to
+                       # the top ring the low head's right ear meets the raised hero arm: a coupled limit
+PAN_MECH = 150.0       # the servo's own end (standard mode, 300 deg): nothing else stops the neck before it
+BRG = dict(id=30.0, od=42.0, w=7.0)                       # 6806-2RS (30 x 42 x 7), two
+G0 = 480.0             # the hub flange's top (the bearings' stack hangs off it)
+HUB = dict(r=15.0, flange_r=21.5, flange_t=4.0, bore_r=13.05, y0=423.0, top=500.0, screw_r=19.0)
+Y_FLANGE = (G0 - HUB["flange_t"], G0)                     # 476..480
+Y_BRG_UP = (Y_FLANGE[0] - BRG["w"], Y_FLANGE[0])          # 469..476
+Y_BRG_LO = (436.0, 436.0 + BRG["w"])                      # 436..443
+HOUSING = dict(r=25.0, y0=437.5, y1=474.5, seat_r=21.05, mid_r=18.0)   # bearings stand 1.5 proud of each end
+COLLAR = dict(r=22.5, y0=423.0, y1=436.0)                 # 30 mm one-piece clamp collar, 45 OD x 13
+CROSS_Y = 494.0        # the M4 cross bolt through hub and tube (above the flange)
+TUBE = dict(od=26.0, wall=1.5, y0=COUPLER["stop"], top=696.3)   # 26 x 1.5 6061: Hunter's coupler bore; top = its bore stop
+TOP_PLATE_SLED = dict(t=8.0, y1=HOUSING["y1"])            # the sled's top plate, flush with the housing's top
+TOP_PLATE_SLED["y0"] = TOP_PLATE_SLED["y1"] - TOP_PLATE_SLED["t"]
+SLED["y0"], SLED["y1"] = BOTTOM["y1"], HOUSING["y1"]      # the four plates: 375.61..474.5
+WHEEL_Y = (BOTTOM["y1"] + VWHEEL["od"] / 2 + 1.0, HOUSING["y1"] - VWHEEL["od"] / 2 - 0.3)   # 388.8, 462.0
+STANDOFF = dict(r=33.0, angles=(45.0, 135.0, 225.0, 315.0), length=24.0)   # McMaster 92871A317 (6 OD, M4, 24)
+EAR = dict(t=6.0, r=38.0, w=12.0)
+CASE = dict(y0=HOUSING["y1"] + STANDOFF["length"], floor=3.0, h=14.0, r=28.0, wall=2.0, hole_r=18.0, top_hole_r=14.5,
+            inner_r=15.0)
+COIL = dict(x=0.0, z=40.0, r=5.0, wire_r=2.0)             # retractile service cable (the column's front opening)
+
 # ------------------------------------------------------------------ lift (a rack climber, after Jason Charlton)
-# The lift servo rides the carriage (beside the pan servo); its brass Mod 0.8 servo gear climbs a
-# fixed vertical rack on the back-right post's inner face (x -40, the droid's right) (Charlton's build: "the lifting servo is
-# attached behind the grid plate; the brass servo gear meshes with a long vertical gear rack attached
-# to the rear of the structure", 2026-10-01). 48 teeth: pitch radius 19.2, 0.335 mm per servo degree,
-# so the servo's +-135 deg is +-45.2 mm.
+# The lift servo rides the sled, behind a plate on its right (-X) side; its brass Mod 0.8 servo gear climbs
+# a fixed vertical rack on the back-right post's inner face (x -40, the droid's right) (Charlton's build: "the
+# lifting servo is attached behind the grid plate; the brass servo gear meshes with a long vertical gear
+# rack attached to the rear of the structure", 2026-10-01). 48 teeth: pitch radius 19.2, 0.335 mm per
+# servo degree, so the servo's +-135 deg is +-45.2 mm.
 RACK = dict(module=0.8, x=-40.0, face=10.0, z_base=-30.0, pitch_z=-22.0, y0=350.0, y1=482.0, teeth_y=(362.0, 470.0),
             screws_y=(356.0, 476.0), cb_floor=4.0)
 LIFT_PINION = dict(teeth=48, thick=6.0)
@@ -66,44 +138,10 @@ LIFT_PINION_C = (RACK["x"], 412.0, RACK["pitch_z"] + R_LIFT)          # (x mid-p
 LIFT = (-37.0, 45.0)    # travel: down as today's (the mouth meets the top cap's collars below that), up +45 (free)
 # the lift servo: spline along +X into the pinion (its boss on the pinion's -X face), long side down
 LIFT_SPLINE = (RACK["x"] - LIFT_PINION["thick"] / 2 + 4.1, LIFT_PINION_C[1], LIFT_PINION_C[2])
-HANGER = dict(t=8.0, y_top=446.0, arm_y=(438.0, 446.0), arm_x1=-23.0, half_z=15.0)
-
-# ------------------------------------------------------------------ servos (goBILDA 2000-0025-0002, vendor STEP)
-SPLINE_ABOVE_BOSS = 4.1      # spline top above the case boss (vendor STEP)
-HUB_H = 5.5                  # 1906 hub: servo face to arm face (vendor STEP)
-HUB_TAP_R = 11.43            # 1906 hub: the four tapped M4 holes, on its own axes (measured, vendor STEP)
-FLANGE_Y = (-16.9, -13.39)   # servo flange, below the spline top (measured, vendor STEP)
-FLANGE_HOLES = [(10.0 + sx * 24.0, sz * 4.89) for sx in (-1, 1) for sz in (-1, 1)]   # (long axis, across)
-CASE_BOTTOM = -44.1
-
-# ------------------------------------------------------------------ carriage + pan
-G0 = 480.0             # the pan gears' plane (bottom); everything on the carriage hangs off it
-PAN_GEAR = dict(module=2.0, teeth=25, thick=8.0)          # 1:1, centre distance 50
-PAN_CD = PAN_GEAR["module"] * PAN_GEAR["teeth"]          # 50
-PAN = (-135.0, 135.0)  # the full mechanism: 1:1 on a goBILDA 2000 (+-150 standard mode), the suite's +-135 servo
-                       # rule; the clock spring allows +-200. Past ~+120 relative to the top ring the low head's
-                       # right ear meets the raised hero arm: a coupled limit to add (pan vs the arm and the top ring)
-BRG = dict(id=30.0, od=42.0, w=7.0)                       # 6806-2RS (30 x 42 x 7), two
-HUB = dict(r=15.0, flange_r=21.5, flange_t=4.0, bore_r=13.05, y0=423.0, top=500.0, screw_r=19.0)
-Y_FLANGE = (G0 - HUB["flange_t"], G0)                     # 476..480
-Y_BRG_UP = (Y_FLANGE[0] - BRG["w"], Y_FLANGE[0])          # 469..476
-Y_BRG_LO = (436.0, 436.0 + BRG["w"])                      # 436..443
-HOUSING = dict(r=25.0, y0=437.5, y1=474.5, seat_r=21.05, mid_r=18.0)   # bearings stand 1.5 proud of each end
-COLLAR = dict(r=22.5, y0=423.0, y1=436.0)                 # 30 mm one-piece clamp collar, 45 OD x 13
-CROSS_Y = 494.0        # the M4 cross bolt through hub and tube (above the gear)
-TUBE = dict(od=26.0, wall=1.5, y0=430.0, top=696.3)       # 26 x 1.5 6061: Hunter's coupler bore (26); top = its bore stop
-STANDOFF = dict(r=33.0, angles=(-90.0, 145.0, 180.0), length=24.0)   # McMaster 92871A317 (6 OD, M4, 24)
-EAR = dict(t=6.0, r=38.0, w=12.0)
-CASE = dict(y0=HOUSING["y1"] + STANDOFF["length"], floor=3.0, h=14.0, r=28.0, wall=2.0, hole_r=18.0, top_hole_r=14.5,
-            inner_r=15.0)
-YC = 456.0             # MGN12H blocks' centre (y) at rest
-RAIL = dict(y0=365.0, length=180.0, first=10.0, pitch=25.0, x=POST_C, z0=HALF)   # MGN12 on the front posts' front faces
-BLOCK = dict(w=27.0, l=45.4, h=13.0, h1=3.0, holes=20.0)  # MGN12H (Hiwin): body 27 x 45.4, H 13, 20 x 20 M3
-FRONT = dict(z0=RAIL["z0"] + BLOCK["h"], t=8.0, half=53.5, y0=YC - 25.0, y1=YC + 25.0)
-WEB = dict(half=22.0, z0=20.0, y0=438.0, y1=462.0)
-PAN_SERVO_SPLINE = (PAN_CD, G0 - (HUB_H - SPLINE_ABOVE_BOSS), 0.0)   # spline top: (50, 478.6, 0)
-CRADLE = dict(t=8.0, x0=20.0, x1=92.0, half_z=12.0)
-COIL = dict(x=0.0, z=36.0, r=6.0, wire_r=2.0)             # retractile service cable (inside the column, front)
+# its hanger (on the sled): a plate behind the flange, arms to the sled's right side plate (top) and under
+# its bottom plate (bottom), round the pinion
+HANGER = dict(t=8.0, y_top=446.0, arm_top=(438.0, 446.0), arm_bot=(BOTTOM["y0"] - 8.0, BOTTOM["y0"]), arm_bot_x1=-25.0,
+              half_z=15.0)
 
 # ------------------------------------------------------------------ ring drives (Anderson's sectors, our servos)
 RING_PINION_C = (-9.8, -83.0)                             # (x, z): Anderson's pinion centre, both rings
@@ -129,7 +167,6 @@ BASE_RING = dict(y1=160.15, t=15.0, r=160.0, tab_t=5.8, tab_h=22.0)   # under th
 INSERT_M4 = {"type": "insert", "thread": "M4", "length_mm": 8.1, "od_mm": 6.3,
              "note": "Ruthex RX-M4x8.1 (hole 5.6; OD 6.3 from its datasheet, not on file)"}
 TNUT_THREAD = 4.95     # our drop-in T-nut's thread length (it fills the slot's T cavity up through the lips)
-MGN_THREAD = 4.0       # MGN12H mounting holes: M3, 4 deep (inferred: Hiwin lists M3 x 3.5..4)
 STANDOFF_THREAD = 8.0  # female M4 standoff thread depth each end (inferred)
 HUB_THREAD = 5.0       # 1906 hub tapped holes (as hunter_head/hardware.py)
 POST_THREAD = 12.0     # M5 tapped into the 2020's 4.2 mm centre bore (as tapped)

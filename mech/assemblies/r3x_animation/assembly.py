@@ -711,14 +711,15 @@ def hero_arm(top: Asm):
     js = Joint("hero_shoulder", "Hero arm shoulder (20 kg dual-shaft servo in the elbow)", "revolute",
                "top_ring", "hero_arm", pivot=tuple(np.round(pivot, 2)), axis=tuple(np.round(hinge_axis, 5)),
                limits=(-35, 45), profile_joint="hero_shoulder",
-               drive={"kind": "direct", "servos": ["hero_shoulder_servo"], "gear_ratio": 1.0},
+               drive={"kind": "direct", "servos": ["hero_shoulder_servo"], "gear_ratio": 1.0, "servo_deg_per_unit": 1.0},
                zero={"how": f"the kit pose: arm at theta {theta0:.1f} deg (hero_arm.py), so the range is "
                             f"{theta0 - 35:.1f}..{theta0 + 45:.1f}"},
                evidence=["hinge = the kit discs' axis (HA_LE_1 / HA_RE_1 centres) = the servo's shafts (hero_arm.py)"],
                confidence="high")
     jw = Joint("hero_wrist", "Hero wrist roll (micro servo in the wrist)", "revolute", "hero_arm", "hero_hand",
                pivot=tuple(np.round(w_pivot, 2)), axis=tuple(np.round(w_axis, 5)), limits=(-90, 90),
-               profile_joint="hero_wrist", drive={"kind": "direct", "servos": ["hero_wrist_servo"], "gear_ratio": 1.0},
+               profile_joint="hero_wrist", drive={"kind": "direct", "servos": ["hero_wrist_servo"], "gear_ratio": 1.0,
+                                                  "servo_deg_per_unit": 1.0},
                zero={"how": "claw as in the kit pose"},
                evidence=["the wrist axis of the main arm (hero_arm.py WRIST_AXIS_MA), the hand at z 213"],
                confidence="high")
@@ -814,3 +815,59 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, d
                                  links=[Link(f"{cid}_mount", f"{name} (rigid on {link})", None)]))
         for p in mine:
             p.link = f"{cid}_mount"
+    anderson_gears(nd, lower, middle, top, head)
+
+
+# Each pinion's turn about its own axle per unit of its joint, relative to the link it rides (SCHEMA.md
+# "Gear"): magnitude from the tooth counts, sign from the geometry - with it the teeth stay in mesh through
+# the sweep, with the other one they run 20-340 mm3 into the sector or rack (checked 2026-10-01, as
+# parts/column/tests/test_column_gears.py does for the column's); the axle is the pinion's thinnest
+# principal axis through its centroid (as phase_gears turns it), oriented to its largest component +.
+ANDERSON_GEARS = {
+    # id: (pinion and what turns with it, joint, joint's assembly or None, ratio, sign, servo, meshes)
+    "g_pan": (("pan_pinion", "pan_horn"), "head_pan", None, GEAR["pan_sector"] / GEAR["pan_pinion"], -1.0, "pan_servo",
+              "pan_sector"),
+    "g_lift": (("lift_pinion",), "head_lift", None, 1.0 / LIFT_MM_PER_DEG, 1.0, "lift_servo", "lift_rack"),
+    "g_lower": (("lower_pinion",), "torso_lower", "lower_ring", GEAR["lower_sector"] / GEAR["lower_pinion"], 1.0,
+                "lower_servo", "lower_sector"),
+    "g_top": (("top_pinion",), "torso_top", "top_ring", GEAR["top_sector"] / GEAR["top_pinion"], 1.0, "top_servo",
+              "top_sector"),
+    # the reference head's tilt pinion is not phased (its teeth overlap the centre gear's at rest): the sign
+    # is the one that keeps that overlap constant through the sweep
+    "g_tilt": (("tilt_pinion",), "head_tilt", None, GEAR["tilt_center"] / GEAR["tilt_pinion"], 1.0, "tilt_servo",
+               "tilt_center_gear"),
+}
+
+
+def pinion_axle(p):
+    from r3xmech.meshes import part_mesh
+
+    m = part_mesh(p)
+    ev, vec = np.linalg.eigh(np.cov((m.vertices - m.centroid).T))
+    ax = vec[:, 0]
+    if ax[int(np.argmax(np.abs(ax)))] < 0:
+        ax = -ax
+    return tuple(float(v) for v in m.centroid), tuple(float(v) for v in ax)
+
+
+def anderson_gears(nd: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm):
+    """Anderson's pinions connected to their joints (manifest `gears`): each turns with its joint."""
+    homes = [nd, head] + [c for c in lower.children + middle.children if isinstance(c, Asm)]
+    for gid, (parts, joint, jasm, ratio, sign, servo, mesh_with) in ANDERSON_GEARS.items():
+        home = next((a for a in homes if any(p.id == parts[0] for p in a.parts)), None)
+        if home is None:
+            continue
+        pin = next(p for p in home.parts if p.id == parts[0])
+        c, ax = pinion_axle(pin)
+        k = sign * ratio
+        home.gears.append(dict(id=gid, kind="rack_pinion" if joint == "head_lift" else "internal" if jasm or joint == "head_pan"
+                               else "spur", joint=joint, joint_assembly=jasm, link=pin.link, pivot=c, axis=ax,
+                               deg_per_unit=k, parts=[x for x in parts if any(p.id == x for p in home.parts)],
+                               servo=servo if any(p.id == servo for p in home.parts) or jasm else None,
+                               servo_deg_per_unit=k, mesh_with=mesh_with,
+                               note=f"{ratio:.3f} deg of pinion per {'mm' if joint == 'head_lift' else 'deg'} of {joint}"))
+        j = next((j for a in (nd, head, lower, middle, top) for j in a.joints if j.id == joint and servo in
+                  j.drive.get("servos", [])), None)
+        if j is not None:
+            j.drive["servo_deg_per_unit"] = round(k, 4)
+            j.drive["gears"] = [f"{home.id}/{gid}"]

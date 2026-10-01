@@ -126,3 +126,23 @@ def servo_jacobian(asm: Assembly, pose: dict, joints: list[str], eps: float = 0.
                 return None
             jac[i, k] = math.remainder(math.radians(hi[lid][0] - lo[lid][0]), 2 * math.pi) / math.radians(2 * eps)
     return jac
+
+
+def gear_matrix(g, link_m: np.ndarray, joint_value: float) -> np.ndarray:
+    """A gear's parts' matrix (SCHEMA.md "Gear"): its link's, turned about its own axle by
+    deg_per_unit x the joint's value."""
+    p = np.asarray(g.pivot, float)
+    return link_m @ trans(p) @ rot(g.axis, g.deg_per_unit * joint_value) @ trans(-p)
+
+
+def gear_matrices(asm: Assembly, pose: dict, joint_values: dict | None = None) -> dict[str, np.ndarray]:
+    """{part or fastener id: matrix} for every gear of `asm` at a pose. A gear whose joint is another
+    assembly's (`joint_assembly`) reads `joint_values[(assembly, joint)]`, else 0."""
+    ms = link_matrices(asm, pose)
+    out = {}
+    for g in asm.gears:
+        v = pose.get(g.joint, 0.0) if not g.joint_assembly else (joint_values or {}).get((g.joint_assembly, g.joint), 0.0)
+        m = gear_matrix(g, ms[g.link], v)
+        for pid in list(g.parts) + list(g.fasteners):
+            out[pid] = m
+    return out
