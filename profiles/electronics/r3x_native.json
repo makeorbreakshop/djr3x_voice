@@ -1,0 +1,1713 @@
+{
+  "id": "r3x_native",
+  "label": "R3X native (face + chest Nanos, RP2040 servo controller)",
+  "vendor": "this repo",
+  "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an 8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 chest logic-panel pixels (rex_chest_v1); our RP2040 controller (firmware/servo) runs the 18 servo channels.",
+  "support": "driven",
+  "emulator": "native",
+  "boards": [
+    {
+      "id": "face_nano",
+      "model": "Arduino Nano (ATmega328P)",
+      "role": "face LEDs: eyes + mouth",
+      "url": "https://store.arduino.cc/products/arduino-nano",
+      "dims_mm": [
+        45.0,
+        18.0,
+        8.0
+      ],
+      "mount": {
+        "bracket": "head shell, inside the rear of the head",
+        "link": "head_tilt",
+        "t": [
+          0.0,
+          0.76,
+          0.02
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Where the face Nano sits in the head is not recorded; placed behind the eyes."
+      },
+      "connectors": [
+        {
+          "id": "usb",
+          "kind": "usb_mini_b",
+          "pins": [
+            "VBUS",
+            "D-",
+            "D+",
+            "GND"
+          ],
+          "note": "serial 115200 to the host"
+        },
+        {
+          "id": "d6",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "D6",
+            "5V",
+            "GND"
+          ],
+          "note": "eye jewels DIN"
+        },
+        {
+          "id": "d5",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "D5",
+            "5V",
+            "GND"
+          ],
+          "note": "mouth V DIN"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 20,
+        "typical_ma": 25,
+        "max_ma": 40
+      },
+      "firmware": "cantina_os/arduino/rex_face_v3_clean",
+      "driver": "driver.face",
+      "support": "driven"
+    },
+    {
+      "id": "eye_jewels",
+      "model": "2 x WS2812 7-LED jewel (23 mm)",
+      "role": "eyes, one jewel per eye bulb",
+      "url": "https://www.adafruit.com/product/2226",
+      "dims_mm": [
+        23.0,
+        23.0,
+        4.0
+      ],
+      "mount": {
+        "bracket": "eye distortion / diffusion bulb (H_*Eye_4), against its back",
+        "link": "head_tilt",
+        "t": [
+          0.00074,
+          0.79899,
+          0.10243
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "connectors": [
+        {
+          "id": "din",
+          "kind": "solder_pad",
+          "pins": [
+            "DIN",
+            "5V",
+            "GND"
+          ]
+        },
+        {
+          "id": "dout",
+          "kind": "solder_pad",
+          "pins": [
+            "DOUT",
+            "5V",
+            "GND"
+          ],
+          "note": "left jewel DOUT -> right jewel DIN"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 7,
+        "typical_ma": 180,
+        "max_ma": 840.0
+      },
+      "support": "driven"
+    },
+    {
+      "id": "mouth_v",
+      "model": "8 x WS2812B (60/m strip, cut into a V)",
+      "role": "mouth, behind the light pipe",
+      "dims_mm": [
+        55.0,
+        65.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "Mic-Mouth-Split back mount",
+        "link": "head_tilt",
+        "t": [
+          -8e-05,
+          0.73164,
+          0.16148
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "connectors": [
+        {
+          "id": "din",
+          "kind": "solder_pad",
+          "pins": [
+            "DIN",
+            "5V",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 4,
+        "typical_ma": 90,
+        "max_ma": 480.0
+      },
+      "support": "driven"
+    },
+    {
+      "id": "chest_nano",
+      "model": "Arduino Nano (ATmega328P)",
+      "role": "chest logic panels + machine status",
+      "url": "https://store.arduino.cc/products/arduino-nano",
+      "dims_mm": [
+        45.0,
+        18.0,
+        8.0
+      ],
+      "mount": {
+        "bracket": "middle ring, behind the logic panels",
+        "link": "torso_middle",
+        "t": [
+          -0.1,
+          0.41,
+          0.02
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Placed inside the middle ring behind panel 2; not recorded."
+      },
+      "connectors": [
+        {
+          "id": "usb",
+          "kind": "usb_mini_b",
+          "pins": [
+            "VBUS",
+            "D-",
+            "D+",
+            "GND"
+          ]
+        },
+        {
+          "id": "d6",
+          "kind": "dupont_3p_2.54",
+          "pins": [
+            "D6",
+            "5V",
+            "GND"
+          ],
+          "note": "chest strip DIN via 330 R"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 20,
+        "typical_ma": 25,
+        "max_ma": 40
+      },
+      "firmware": "cantina_os/arduino/rex_chest_v1",
+      "driver": "driver.chest",
+      "support": "driven"
+    },
+    {
+      "id": "chest_strip",
+      "model": "33 x WS2812B",
+      "role": "3 panels x (8 LED holes + 3 windows)",
+      "dims_mm": [
+        120.0,
+        60.0,
+        3.0
+      ],
+      "mount": {
+        "bracket": "MS_P_1_Full logic panels (x3), from behind",
+        "link": "torso_middle",
+        "t": [
+          -0.12,
+          0.453,
+          0.09
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "connectors": [
+        {
+          "id": "din",
+          "kind": "solder_pad",
+          "pins": [
+            "DIN",
+            "5V",
+            "GND"
+          ]
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 17,
+        "typical_ma": 250,
+        "max_ma": 1980.0
+      },
+      "support": "driven"
+    },
+    {
+      "id": "servo_ctl",
+      "model": "Raspberry Pi Pico (RP2040) + INA219 + rail MOSFET",
+      "role": "18 servo channels (16 PWM + 2 PIO), goals at event time",
+      "url": "https://www.raspberrypi.com/products/raspberry-pi-pico/",
+      "dims_mm": [
+        51.0,
+        21.0,
+        4.0
+      ],
+      "mount": {
+        "bracket": "base electronics plate",
+        "link": "torso_lower",
+        "t": [
+          0.0,
+          0.08,
+          0.0
+        ],
+        "q": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "inferred": true,
+        "inferred_note": "Mounting in the base is not recorded; placed on the base plate."
+      },
+      "connectors": [
+        {
+          "id": "usb",
+          "kind": "usb_micro_b",
+          "pins": [
+            "VBUS",
+            "D-",
+            "D+",
+            "GND"
+          ],
+          "note": "CDC, R3X_SERVO_PORT"
+        },
+        {
+          "id": "servo",
+          "kind": "servo_3p_2.54 x18",
+          "pins": [
+            "GPIO0..GPIO17",
+            "6V",
+            "GND"
+          ]
+        },
+        {
+          "id": "i2c",
+          "kind": "dupont_4p_2.54",
+          "pins": [
+            "GPIO20 SDA",
+            "GPIO21 SCL",
+            "3V3",
+            "GND"
+          ],
+          "note": "INA219 @ 0x40"
+        },
+        {
+          "id": "rail_en",
+          "kind": "dupont_1p",
+          "pins": [
+            "GPIO22"
+          ],
+          "note": "servo rail enable (active high)"
+        }
+      ],
+      "volts": 5.0,
+      "current": {
+        "idle_ma": 25,
+        "typical_ma": 30,
+        "max_ma": 50
+      },
+      "firmware": "firmware/servo",
+      "driver": "driver.servo",
+      "support": "driven"
+    }
+  ],
+  "lights": [
+    {
+      "name": "eyes",
+      "pixels": 14,
+      "layout": [
+        {
+          "kind": "jewel",
+          "pos": [
+            0.04383,
+            0.79899,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.04383,
+            0.80749,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.03647,
+            0.80324,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.03647,
+            0.79474,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.04383,
+            0.79049,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.05119,
+            0.79474,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            0.05119,
+            0.80324,
+            0.10243
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.04235,
+            0.79902,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.04235,
+            0.80752,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.04971,
+            0.80327,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.04971,
+            0.79477,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.04235,
+            0.79052,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.03499,
+            0.79477,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "jewel",
+          "pos": [
+            -0.03499,
+            0.80327,
+            0.10303
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "face",
+        "port_hint": "ARDUINO_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "eye_jewels",
+      "link": "head_tilt",
+      "data_line": "face_nano.D6",
+      "chain_start": 0,
+      "led": "WS2812 5050 (jewel)",
+      "ma_per_led": 60.0,
+      "serves": [
+        "eyes"
+      ],
+      "inferred": true,
+      "inferred_note": "Jewel wiring (LED 0 centre, 1-6 clockwise from the top; left jewel first) is the sim's assumption (leds.ts)."
+    },
+    {
+      "name": "mouth",
+      "pixels": 8,
+      "layout": [
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.02191,
+            0.75755,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.01552,
+            0.74136,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.00913,
+            0.72452,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            -0.00274,
+            0.70768,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.00258,
+            0.70768,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.00897,
+            0.72452,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.01536,
+            0.74136,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        },
+        {
+          "kind": "mouth",
+          "pos": [
+            0.02175,
+            0.75755,
+            0.15196
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "w": 0.005,
+          "h": 0.005
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "face",
+        "port_hint": "ARDUINO_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "mouth_v",
+      "link": "head_tilt",
+      "data_line": "face_nano.D5",
+      "chain_start": 0,
+      "led": "WS2812B 5050",
+      "ma_per_led": 60.0,
+      "serves": [
+        "mouth",
+        "speech_amplitude"
+      ],
+      "inferred": true,
+      "inferred_note": "V order (viewer-left arm top -> tip -> right arm) is the sim's assumption (leds.ts)."
+    },
+    {
+      "name": "chest",
+      "pixels": 33,
+      "layout": [
+        {
+          "kind": "dot",
+          "pos": [
+            -0.15957,
+            0.43355,
+            0.00306
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0192
+          ],
+          "w": 0.0024,
+          "h": 0.0008
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16098,
+            0.43871,
+            0.00325
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16226,
+            0.44355,
+            0.00327
+          ],
+          "normal": [
+            -0.9998,
+            0.0,
+            0.0202
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16397,
+            0.45028,
+            0.00376
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0229
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16544,
+            0.45552,
+            0.004
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16718,
+            0.46218,
+            0.00404
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16848,
+            0.46702,
+            0.00408
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0242
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.16974,
+            0.47199,
+            0.00439
+          ],
+          "normal": [
+            -0.9997,
+            0.0,
+            0.0259
+          ],
+          "w": 0.0016,
+          "h": 0.0016
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.15612,
+            0.43834,
+            0.01711
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1089
+          ],
+          "w": 0.0144,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.16449,
+            0.46823,
+            0.01809
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "w": 0.0136,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.16253,
+            0.46817,
+            0.03259
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "w": 0.0136,
+          "h": 0.012
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.13509,
+            0.43355,
+            0.08493
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.0024,
+          "h": 0.0008
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.1362,
+            0.43871,
+            0.08582
+          ],
+          "normal": [
+            -0.8461,
+            0.0,
+            0.5331
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.13739,
+            0.44363,
+            0.08638
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.13871,
+            0.45008,
+            0.08721
+          ],
+          "normal": [
+            -0.8466,
+            0.0,
+            0.5322
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.13978,
+            0.45559,
+            0.08853
+          ],
+          "normal": [
+            -0.8448,
+            0.0,
+            0.5351
+          ],
+          "w": 0.0016,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.14119,
+            0.46226,
+            0.08956
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.14229,
+            0.4671,
+            0.09026
+          ],
+          "normal": [
+            -0.8445,
+            0.0,
+            0.5356
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.14346,
+            0.47206,
+            0.09094
+          ],
+          "normal": [
+            -0.8446,
+            0.0,
+            0.5354
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.12547,
+            0.43839,
+            0.0952
+          ],
+          "normal": [
+            -0.7966,
+            0.0,
+            0.6044
+          ],
+          "w": 0.0144,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.11628,
+            0.43836,
+            0.10662
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "w": 0.0144,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.11923,
+            0.4529,
+            0.10929
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "w": 0.0136,
+          "h": 0.012
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07227,
+            0.43355,
+            0.14228
+          ],
+          "normal": [
+            -0.4529,
+            0.0,
+            0.8916
+          ],
+          "w": 0.0016,
+          "h": 0.0008
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07279,
+            0.43865,
+            0.1436
+          ],
+          "normal": [
+            -0.4521,
+            0.0,
+            0.8919
+          ],
+          "w": 0.0016,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07314,
+            0.44363,
+            0.14488
+          ],
+          "normal": [
+            -0.4506,
+            0.0,
+            0.8927
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07407,
+            0.45016,
+            0.14636
+          ],
+          "normal": [
+            -0.4515,
+            0.0,
+            0.8922
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07407,
+            0.45559,
+            0.14796
+          ],
+          "normal": [
+            -0.4477,
+            0.0,
+            0.8942
+          ],
+          "w": 0.0016,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07499,
+            0.46218,
+            0.14949
+          ],
+          "normal": [
+            -0.4484,
+            0.0,
+            0.8938
+          ],
+          "w": 0.0016,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07533,
+            0.4671,
+            0.15073
+          ],
+          "normal": [
+            -0.4471,
+            0.0,
+            0.8945
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "dot",
+          "pos": [
+            -0.07598,
+            0.47206,
+            0.15192
+          ],
+          "normal": [
+            -0.4473,
+            0.0,
+            0.8944
+          ],
+          "w": 0.0024,
+          "h": 0.0016
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.06003,
+            0.45362,
+            0.14977
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "w": 0.0136,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.0612,
+            0.46823,
+            0.15339
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "w": 0.0128,
+          "h": 0.012
+        },
+        {
+          "kind": "window",
+          "pos": [
+            -0.04732,
+            0.46823,
+            0.15898
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "w": 0.0128,
+          "h": 0.012
+        }
+      ],
+      "driver": {
+        "type": "serial_led",
+        "board": "chest",
+        "port_hint": "CHEST_SERIAL_PORT",
+        "protocol": "named_v1"
+      },
+      "board": "chest_strip",
+      "link": "torso_middle",
+      "data_line": "chest_nano.D6",
+      "chain_start": 0,
+      "led": "WS2812B 5050",
+      "ma_per_led": 60.0,
+      "serves": [
+        "chest",
+        "speech_amplitude",
+        "tempo",
+        "chest_status"
+      ],
+      "windows": [
+        {
+          "id": "p1_w0",
+          "panel": "logic_panel_1",
+          "leds": [
+            8
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.15711,
+            0.43834,
+            0.01722
+          ],
+          "normal": [
+            -0.9941,
+            0.0,
+            0.1089
+          ],
+          "u": [
+            0.1089,
+            0.0,
+            0.9941
+          ],
+          "size_m": [
+            0.0136,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w1",
+          "panel": "logic_panel_1",
+          "leds": [
+            9
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16548,
+            0.46823,
+            0.0182
+          ],
+          "normal": [
+            -0.994,
+            0.0,
+            0.1093
+          ],
+          "u": [
+            0.1093,
+            0.0,
+            0.994
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p1_w2",
+          "panel": "logic_panel_1",
+          "leds": [
+            10
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.16351,
+            0.46817,
+            0.03279
+          ],
+          "normal": [
+            -0.9805,
+            0.0,
+            0.1966
+          ],
+          "u": [
+            0.1966,
+            0.0,
+            0.9805
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w0",
+          "panel": "logic_panel_2",
+          "leds": [
+            19
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.12627,
+            0.43839,
+            0.0958
+          ],
+          "normal": [
+            -0.7967,
+            0.0,
+            0.6044
+          ],
+          "u": [
+            0.6044,
+            0.0,
+            0.7967
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w1",
+          "panel": "logic_panel_2",
+          "leds": [
+            20
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11702,
+            0.43836,
+            0.1073
+          ],
+          "normal": [
+            -0.737,
+            0.0,
+            0.6758
+          ],
+          "u": [
+            0.6758,
+            0.0,
+            0.737
+          ],
+          "size_m": [
+            0.0138,
+            0.0116
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p2_w2",
+          "panel": "logic_panel_2",
+          "leds": [
+            21
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.11997,
+            0.4529,
+            0.10997
+          ],
+          "normal": [
+            -0.7372,
+            0.0,
+            0.6757
+          ],
+          "u": [
+            0.6757,
+            0.0,
+            0.7372
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w0",
+          "panel": "logic_panel_3",
+          "leds": [
+            30
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.0604,
+            0.45362,
+            0.1507
+          ],
+          "normal": [
+            -0.372,
+            0.0,
+            0.9282
+          ],
+          "u": [
+            0.9282,
+            0.0,
+            0.372
+          ],
+          "size_m": [
+            0.0138,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w1",
+          "panel": "logic_panel_3",
+          "leds": [
+            31
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.06157,
+            0.46823,
+            0.15432
+          ],
+          "normal": [
+            -0.3706,
+            0.0,
+            0.9288
+          ],
+          "u": [
+            0.9288,
+            0.0,
+            0.3706
+          ],
+          "size_m": [
+            0.014,
+            0.012
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        },
+        {
+          "id": "p3_w2",
+          "panel": "logic_panel_3",
+          "leds": [
+            32
+          ],
+          "shape": "rect",
+          "centre": [
+            -0.04761,
+            0.46823,
+            0.15994
+          ],
+          "normal": [
+            -0.2853,
+            0.0,
+            0.9584
+          ],
+          "u": [
+            0.9584,
+            0.0,
+            0.2853
+          ],
+          "size_m": [
+            0.0136,
+            0.0118
+          ],
+          "diffuser": {
+            "kind": "opal",
+            "transmission": 0.55
+          }
+        }
+      ]
+    }
+  ],
+  "actuators": [
+    {
+      "actuators": [
+        "*"
+      ],
+      "board": "servo_ctl",
+      "driver": "r3x_servo",
+      "support": "driven",
+      "note": "Every profile actuator with driver r3x_servo (channel = GPIO)."
+    }
+  ],
+  "power": [
+    {
+      "name": "5V logic + LEDs",
+      "volts": 5.0,
+      "max_ma": 3430.0,
+      "typical_ma": 600,
+      "loads": [
+        "face_nano",
+        "eye_jewels",
+        "mouth_v",
+        "chest_nano",
+        "chest_strip",
+        "servo_ctl"
+      ],
+      "psu": "5 V 4 A regulated (UBEC or bench supply); LED boards at brightness 128 stay under 2 A",
+      "psu_amps": 4.0,
+      "note": "Full white is 3.3 A at brightness 255; both Nanos cap at 128, so ~1.7 A worst case. USB alone is not enough for the LEDs."
+    },
+    {
+      "name": "6V servo rail",
+      "volts": 6.0,
+      "max_ma": 6000,
+      "typical_ma": 1500,
+      "loads": [
+        "servo_ctl"
+      ],
+      "psu": "6 V 10 A (servo PSU), switched by the controller's rail MOSFET",
+      "psu_amps": 10.0,
+      "note": "The controller trips at 6 A for 300 ms (INA219), so 6 A is the rail's effective max. Typical is inferred."
+    }
+  ],
+  "wiring": [
+    {
+      "from": "face_nano.d6",
+      "to": "eye_jewels.din",
+      "signal": "eyes DIN",
+      "connector": "dupont_3p_2.54",
+      "awg": 24,
+      "note": "330 R in series"
+    },
+    {
+      "from": "face_nano.d5",
+      "to": "mouth_v.din",
+      "signal": "mouth DIN",
+      "connector": "dupont_3p_2.54",
+      "awg": 24,
+      "note": "330 R in series"
+    },
+    {
+      "from": "chest_nano.d6",
+      "to": "chest_strip.din",
+      "signal": "chest DIN",
+      "connector": "dupont_3p_2.54",
+      "awg": 24,
+      "note": "330 R in series, 1000 uF across the strip"
+    },
+    {
+      "from": "face_nano.usb",
+      "to": "host",
+      "signal": "serial (ARDUINO_SERIAL_PORT)",
+      "connector": "usb_mini_b",
+      "awg": 28
+    },
+    {
+      "from": "chest_nano.usb",
+      "to": "host",
+      "signal": "serial (CHEST_SERIAL_PORT)",
+      "connector": "usb_mini_b",
+      "awg": 28
+    },
+    {
+      "from": "servo_ctl.usb",
+      "to": "host",
+      "signal": "CDC (R3X_SERVO_PORT)",
+      "connector": "usb_micro_b",
+      "awg": 28
+    },
+    {
+      "from": "5 V 4 A supply",
+      "to": "eye_jewels.din",
+      "signal": "5V/GND",
+      "connector": "dupont_3p_2.54",
+      "awg": 22,
+      "note": "LED power in at the jewels, not through the Nano"
+    },
+    {
+      "from": "5 V 4 A supply",
+      "to": "chest_strip.din",
+      "signal": "5V/GND",
+      "connector": "dupont_3p_2.54",
+      "awg": 20
+    },
+    {
+      "from": "6 V 10 A supply",
+      "to": "servo_ctl.servo",
+      "signal": "6V/GND servo rail",
+      "connector": "XT30 -> servo bus",
+      "awg": 14
+    }
+  ],
+  "bom": [
+    {
+      "item": "Arduino Nano (ATmega328P)",
+      "qty": 2,
+      "category": "board",
+      "url": "https://store.arduino.cc/products/arduino-nano",
+      "unit_usd": 24.9
+    },
+    {
+      "item": "WS2812 7-LED jewel",
+      "qty": 2,
+      "category": "led",
+      "url": "https://www.adafruit.com/product/2226",
+      "unit_usd": 5.95
+    },
+    {
+      "item": "WS2812B strip 60/m (41 px: mouth 8 + chest 33)",
+      "qty": 1,
+      "category": "led",
+      "note": "1 m reel"
+    },
+    {
+      "item": "Raspberry Pi Pico",
+      "qty": 1,
+      "category": "board",
+      "url": "https://www.raspberrypi.com/products/raspberry-pi-pico/",
+      "unit_usd": 4.0
+    },
+    {
+      "item": "INA219 breakout",
+      "qty": 1,
+      "category": "board",
+      "url": "https://www.adafruit.com/product/904",
+      "unit_usd": 9.95
+    },
+    {
+      "item": "5 V 4 A supply",
+      "qty": 1,
+      "category": "power"
+    },
+    {
+      "item": "6 V 10 A supply",
+      "qty": 1,
+      "category": "power"
+    },
+    {
+      "item": "330 R resistor",
+      "qty": 3,
+      "category": "hardware"
+    },
+    {
+      "item": "1000 uF 10 V capacitor",
+      "qty": 2,
+      "category": "hardware"
+    },
+    {
+      "item": "3 mm opal acrylic window diffuser (cut to the window)",
+      "qty": 9,
+      "category": "optics",
+      "note": "one per logic-panel window, ~55 % transmission"
+    }
+  ],
+  "notes": [
+    "Two Nanos: set ARDUINO_SERIAL_PORT and CHEST_SERIAL_PORT whenever both are plugged in.",
+    "Each logic-panel window has an opal diffuser (lights.chest.windows): one LED per window, one colour. The 8 LED holes per panel stay individual points."
+  ]
+}

@@ -18,6 +18,11 @@ import { PostPipeline } from './post';
 import { Rig, RigDoc, restFromUrl } from './rig';
 import { FaceLeds, OUTPUT_BRIGHTNESS, type RGB } from './leds';
 import { ChestLights } from './chestlights';
+import {
+  BoardsView, Diffusers, PACKAGES, PackageLeds, diffuserSources, diffusersFromUrl, faceSlots, mountElectronics, ownsLights,
+  profileJsonWith, selectedPackageId,
+} from './electronics';
+import type { ElectronicsPackage } from './generated/ElectronicsPackage';
 import { SpeechAudio, TtsAmplitudeAgc } from './audio';
 import { accessToken, LiveLink } from './link';
 import { ControlPanel, type PageMode } from './panel';
@@ -202,6 +207,10 @@ interface Profile {
 const PROFILE = JSON.parse(PROFILE_JSON) as Profile;
 const FULL_PROFILE = JSON.parse(PROFILE_JSON) as RobotProfile;
 const JOINTS = FULL_PROFILE.joints.map((j) => j.name);
+/** The electronics package this page runs offline (electronics.ts); a gateway's profile overrides it. */
+const LOCAL_PACKAGE: ElectronicsPackage = PACKAGES[selectedPackageId(FULL_PROFILE.electronics)];
+let gwPackage: ElectronicsPackage | null = null;
+const activePackage = () => (connected && gwPackage) || LOCAL_PACKAGE;
 const HOME: Record<string, number> = Object.fromEntries(JOINTS.map((j) => [j, FULL_PROFILE.home?.[j] ?? 0]));
 /** This page's id for the viewport gaze (kept across reloads of this tab). */
 const PANEL_ID = (() => {
@@ -272,11 +281,18 @@ interface View {
   stage: number[][] | null;
   /** Controller units per channel (standalone only). */
   servo: number[] | null;
+  /** The electronics package's own light groups (grnwave), or null for the native boards. */
+  package: Record<string, RGB[]> | null;
 }
 
 let rig: Rig | null = null;
 let leds: FaceLeds | null = null;
 let chestLights: ChestLights | null = null;
+let pkgLeds: PackageLeds | null = null;
+let boards: BoardsView | null = null;
+let diffusers: Diffusers | null = null;
+let diffusersOn = diffusersFromUrl();
+let builtFor: string | null = null;
 let ghosts: Ghosts | null = null;
 let centres: Centres | null = null;
 let performer: Performer | null = null;
@@ -424,7 +440,7 @@ async function showSpeak(text: string) {
 }
 
 // ------------------------------------------------------------------ standalone performer
-Performer.create(Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31)))
+Performer.create(Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31)), profileJsonWith(PROFILE_JSON, LOCAL_PACKAGE.id))
   .then((p) => {
     performer = p;
     const cat = p.catalog();
@@ -519,7 +535,8 @@ function tickPerformer(t: number) {
   onPadFrame(f.pad);
   for (const o of performer.events()) onPerfOut(o);
   studio.tick(f);
-  view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets };
+  const pkgPx = f.package && Object.keys(f.package).length ? f.package : null;
+  view = { joints: f.joints, eyes: f.eyes, mouth: f.mouth, chest: f.chest, stage: pinDesk ? null : f.stage, servo: f.servo.targets, package: pkgPx };
 }
 
 // ------------------------------------------------------------------ gateway follower
@@ -531,9 +548,11 @@ function onFrames(f: Frames) {
   }
   onPadFrame(f.pad);
   const px = (k: string) => f.lights[k] ?? [];
+  const pkg = activePackage();
   view = {
     joints: f.joints, eyes: px('eyes'), mouth: px('mouth'), chest: px('chest'),
     stage: f.lights.stage ? f.lights.stage.map((c) => c.map((v) => v / 255)) : null, servo: null,
+    package: ownsLights(pkg) ? Object.fromEntries(pkg.lights.map((g) => [g.name, px(g.name)])) : null,
   };
 }
 
@@ -637,7 +656,9 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=
 const panel = new ControlPanel(link);
 panel.gw.subscribe({
   onHello: (h) => {
+    gwPackage = (h.profile as RobotProfile | null | undefined)?.package ?? null;
     setConnected(true);
+    buildPackageLights();
     onGatewayState(h.state);
     void panel.gw.send({ class: 'telemetry', type: 'frames', enabled: true });
   },
@@ -771,8 +792,9 @@ async function load() {
   rig = new Rig(gltf.scene, doc, restFromUrl(), Object.fromEntries(FULL_PROFILE.joints.map((j) => [j.name, j.parent ?? null])));
   leds = new FaceLeds(rig);
   tameHighlights(gltf.scene);
-  chestLights = new ChestLights(rig.get('torso_middle').node, doc.chest_lights ?? []);
+  chestLights = new ChestLights(rig, 'torso_middle', doc.chest_lights ?? []);
   renderLook.attachLeds(leds, chestLights);
+  buildPackageLights();
   ghosts = new Ghosts(rig, PROFILE);
   ghosts.apply(gwState?.stage.outputs ?? null);
   centres = new Centres(rig, FULL_PROFILE.joints, $('centre-labels'));
@@ -837,8 +859,19 @@ function frame() {
   if (view && rig && leds && chestLights) {
     const values = new Map(Object.entries(view.joints));
     rig.apply(values);
-    leds.update(dim(view.eyes, 'eyes'), dim(view.mouth, 'mouth'));
-    chestLights.update(dim(view.chest, 'chest'));
+    if (view.package && pkgLeds) {
+      // The package's LEDs at their real positions; the eye bulbs / mouth pipe glow from them.
+      const dimmed = Object.fromEntries(Object.entries(view.package).map(([k, v]) => [k, dim(v, k)]));
+      pkgLeds.update(dimmed);
+      diffusers?.update(dimmed);
+      const face = faceSlots(dimmed);
+      leds.update(face.eyes, face.mouth);
+    } else {
+      leds.update(dim(view.eyes, 'eyes'), dim(view.mouth, 'mouth'));
+      const chest = dim(view.chest, 'chest');
+      chestLights.update(chest);
+      diffusers?.update({ chest });
+    }
     let speed = 0;
     if (prevJoints && dt > 0) for (const [j, v] of values) speed += Math.abs(v - (prevJoints[j] ?? v)) / dt;
     prevJoints = view.joints;
@@ -1049,11 +1082,97 @@ function escapeHtml(s: string) {
 const ledCanvas = $<HTMLCanvasElement>('ledview');
 const lctx = ledCanvas.getContext('2d')!;
 const BLACK: RGB = [0, 0, 0];
+/**
+ * The Electronics tab and the package's 3D lights/boards, for the package this page runs
+ * (the gateway's once connected). Rebuilt only when that package changes.
+ */
+function buildPackageLights() {
+  const pkg = activePackage();
+  const mountTab = () =>
+    mountElectronics($('electronics-slot'), pkg, {
+      boards: () => boards,
+      connected,
+      diffusers: {
+        on: diffusersOn,
+        count: diffusers?.sources.reduce((n, s) => n + s.windows.length, 0) ?? 0,
+        set: (on) => {
+          diffusersOn = on;
+          applyDiffusers();
+        },
+      },
+    });
+  if (!rig || !chestLights || builtFor === pkg.id) {
+    mountTab();
+    return;
+  }
+  builtFor = pkg.id;
+  pkgLeds?.dispose();
+  boards?.dispose();
+  diffusers?.dispose();
+  pkgLeds = ownsLights(pkg) ? new PackageLeds(rig, pkg.lights) : null;
+  chestLights.setVisible(!ownsLights(pkg));
+  boards = new BoardsView(rig, pkg);
+  diffusers = new Diffusers(rig, diffuserSources(pkg));
+  applyDiffusers();
+  mountTab();
+}
+
+/** Diffuser panes on (the raw pixels under them hidden) or off (the raw pixels). */
+function applyDiffusers() {
+  diffusers?.setEnabled(diffusersOn);
+  chestLights?.setCovered(diffusers?.covered('chest') ?? []);
+  for (const s of diffusers?.sources ?? []) pkgLeds?.setCovered(s.group, diffusers!.covered(s.group));
+}
+
+/** The LED readout for a package with its own boards: eyes, mouth V, then one row per body board. */
+function drawPackageLeds(px: Record<string, RGB[]>, css: (c?: RGB) => string) {
+  const W = ledCanvas.width;
+  if (ledCanvas.height !== 150) ledCanvas.height = 150;
+  const dot = (x: number, y: number, c: RGB | undefined, r: number) => {
+    lctx.beginPath();
+    lctx.arc(x, y, r, 0, Math.PI * 2);
+    lctx.fillStyle = css(c);
+    lctx.fill();
+    lctx.strokeStyle = '#2a2e38';
+    lctx.stroke();
+  };
+  const eyes = px.eyes ?? [];
+  dot(W * 0.8, 24, eyes[0], 9); // the droid's left eye on the viewer's right
+  dot(W * 0.2, 24, eyes[1], 9);
+  const mouth = px.mouth ?? [];
+  for (let i = 0; i < 8; i++) {
+    const arm = i < 4 ? i : 7 - i;
+    dot(W / 2 + (i < 4 ? -1 : 1) * (18 - arm * 5), 6 + arm * 13, mouth[i], 4);
+  }
+  const body = px.body ?? [];
+  const boardsN = Math.floor(body.length / 32);
+  for (let b = 0; b < boardsN; b++) {
+    const y = 72 + b * 26;
+    for (let k = 0; k < 8; k++) dot(20 + k * 12, y, body[b * 32 + k], 4);
+    for (let g = 0; g < 6; g++) {
+      for (let j = 0; j < 4; j++) {
+        lctx.fillStyle = css(body[b * 32 + 8 + g * 4 + j]);
+        lctx.fillRect(122 + g * 28 + (j % 2) * 9, y - 8 + Math.floor(j / 2) * 9, 8, 8);
+      }
+    }
+    lctx.fillStyle = '#5b6170';
+    lctx.fillText('ABC'[b], 4, y + 4);
+  }
+}
+
 function drawLeds() {
   const W = ledCanvas.width;
   const H = ledCanvas.height;
   lctx.clearRect(0, 0, W, H);
   if (!view) return;
+  if (view.package) {
+    const k2 = (OUTPUT_BRIGHTNESS + 1) / 256;
+    const b2 = (v: number) => Math.min(255, Math.round(v * k2 * 1.9));
+    lctx.font = '10px ui-monospace, Menlo, monospace';
+    drawPackageLeds(view.package, (c: RGB = BLACK) => `rgb(${b2(c[0])},${b2(c[1])},${b2(c[2])})`);
+    return;
+  }
+  if (ledCanvas.height !== 96) ledCanvas.height = 96;
   const { eyes, mouth } = view;
   const k = (OUTPUT_BRIGHTNESS + 1) / 256;
   const css = (c: RGB = BLACK) => {

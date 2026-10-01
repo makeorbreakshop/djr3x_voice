@@ -7,6 +7,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::electronics::ElectronicsPackage;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProfileError {
     #[error("reading profile: {0}")]
@@ -42,6 +44,15 @@ pub struct RobotProfile {
     /// listed homes to 0 (its centre).
     #[serde(default)]
     pub home: BTreeMap<String, f64>,
+    /// The selected electronics package (`profiles/electronics/<id>.json`). Its light groups
+    /// become this profile's (`resolve_electronics`). `R3X_ELECTRONICS` overrides it at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub electronics: Option<String>,
+    /// The resolved package (filled by `load`/`from_json`; the gateway's hello carries it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub package: Option<ElectronicsPackage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -258,15 +269,53 @@ impl Default for AudioConfig {
 }
 
 impl RobotProfile {
-    /// Parse and validate.
+    /// Parse, resolve the electronics package from the built-in set, and validate.
     pub fn from_json(s: &str) -> Result<Self, ProfileError> {
-        let p: Self = serde_json::from_str(s)?;
+        let mut p: Self = serde_json::from_str(s)?;
+        if p.package.is_none() {
+            if let Some(id) = p.electronics.clone() {
+                let pkg = ElectronicsPackage::builtin(&id)
+                    .ok_or_else(|| ProfileError::Invalid(vec![format!("unknown electronics package {id}")]))??;
+                p.resolve_electronics(pkg);
+            }
+        }
         p.validate()?;
         Ok(p)
     }
 
+    /// Load `profiles/<name>/robot.json`; the package comes from `../electronics/<id>.json`
+    /// next to it (else the built-in copy). `R3X_ELECTRONICS=<id>` selects another package.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ProfileError> {
-        Self::from_json(&std::fs::read_to_string(path)?)
+        let path = path.as_ref();
+        let mut p: Self = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+        if let Ok(id) = std::env::var("R3X_ELECTRONICS") {
+            if !id.trim().is_empty() {
+                p.electronics = Some(id.trim().to_string());
+                p.package = None;
+            }
+        }
+        if let Some(id) = p.electronics.clone().filter(|_| p.package.is_none()) {
+            let file = path.parent().unwrap_or(Path::new(".")).join("../electronics").join(format!("{id}.json"));
+            let pkg = if file.exists() {
+                ElectronicsPackage::from_json(&std::fs::read_to_string(&file)?)?
+            } else {
+                ElectronicsPackage::builtin(&id)
+                    .ok_or_else(|| ProfileError::Invalid(vec![format!("unknown electronics package {id}")]))??
+            };
+            p.resolve_electronics(pkg);
+        }
+        p.validate()?;
+        Ok(p)
+    }
+
+    /// Select a package: its light groups replace the profile's groups of the same name and
+    /// come first; the profile's other groups (e.g. `stage`) follow.
+    pub fn resolve_electronics(&mut self, pkg: ElectronicsPackage) {
+        let mut lights: Vec<LightGroup> = pkg.lights.iter().map(|l| l.to_light_group()).collect();
+        lights.extend(self.lights.drain(..).filter(|g| pkg.light(&g.name).is_none()));
+        self.lights = lights;
+        self.electronics = Some(pkg.id.clone());
+        self.package = Some(pkg);
     }
 
     pub fn joint(&self, name: &str) -> Option<&Joint> {
@@ -386,6 +435,18 @@ impl RobotProfile {
                 errs.push(format!("light {}: {} channels for {} pixels", g.name, g.channels.len(), g.pixels));
             }
         }
+        if let (Some(id), Some(pkg)) = (&self.electronics, &self.package) {
+            if &pkg.id != id {
+                errs.push(format!("electronics {id} but the resolved package is {}", pkg.id));
+            }
+            for d in &pkg.actuators {
+                for a in d.actuators.iter().filter(|a| a.as_str() != "*") {
+                    if !self.actuators.iter().any(|x| &x.name == a) {
+                        errs.push(format!("electronics {id}: drives unknown actuator {a}"));
+                    }
+                }
+            }
+        }
         if self.emotes.iter().any(|e| e.is_empty()) {
             errs.push("emotes: empty cue id".into());
         }
@@ -420,6 +481,9 @@ mod tests {
         assert_eq!(p.actuators.len(), 18);
         let chest = p.lights.iter().find(|g| g.name == "chest").unwrap();
         assert_eq!((chest.pixels, chest.layout.len()), (33, 33));
+        assert_eq!(p.electronics.as_deref(), Some("r3x_native"));
+        let names: Vec<_> = p.lights.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["eyes", "mouth", "chest", "stage"], "package groups first, then the profile's own");
         assert_eq!(p.emotes.len(), 8);
         // every joint has an actuator in the extended build
         let driven: HashSet<_> = p.actuators.iter().flat_map(|a| a.joints.keys()).collect();
@@ -438,6 +502,26 @@ mod tests {
         p.home.insert("head_pan".into(), 500.0); // outside soft
         let ProfileError::Invalid(errs) = p.validate().unwrap_err() else { panic!() };
         assert_eq!(errs.len(), 7, "{errs:#?}");
+    }
+
+    #[test]
+    fn selecting_grnwave_swaps_the_light_groups() {
+        let raw = std::fs::read_to_string(r3x_path()).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        v["electronics"] = "grnwave_full_led".into();
+        let p = RobotProfile::from_json(&v.to_string()).unwrap();
+        let px: Vec<_> = p.lights.iter().map(|g| (g.name.as_str(), g.pixels)).collect();
+        assert_eq!(px, [("body", 96), ("eyes", 2), ("mouth", 8), ("stage", 11)]);
+        assert!(p.lights.iter().all(|g| g.name == "stage" || g.layout.len() == g.pixels as usize));
+        v["electronics"] = "nope".into();
+        assert!(RobotProfile::from_json(&v.to_string()).is_err());
+    }
+
+    #[test]
+    fn a_resolved_profile_round_trips() {
+        let p = RobotProfile::load(r3x_path()).unwrap();
+        let again = RobotProfile::from_json(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(p, again);
     }
 
     #[test]

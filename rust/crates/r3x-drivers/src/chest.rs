@@ -63,6 +63,7 @@ fn identify(link: &mut dyn Link, cfg: &ChestConfig) -> std::io::Result<bool> {
         match lines.next(link, (now + cfg.ask_every).min(deadline))? {
             Some(l) if l.starts_with("CHEST READY") || l.starts_with("Chest:") => return Ok(true),
             Some(l) if l == "READY" => return Ok(false), // the face board - not ours
+            Some(l) if crate::grnwave::is_grnwave_line(&l) => return Ok(false),
             Some(_) => {}
             None => link.write_all(b"?\n")?,
         }

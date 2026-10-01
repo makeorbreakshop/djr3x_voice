@@ -55,7 +55,8 @@ export function restFromUrl(search = location.search): RestPose {
 export class Joint {
   value = 0; // deg, or mm when prismatic
   readonly axis: THREE.Vector3;
-  private readonly rest: THREE.Vector3;
+  /** The node's position at value 0 (its kit-pose translation from its parent). */
+  readonly rest: THREE.Vector3;
   /** Local rotation at value 0, and the axis it turns about in that rest frame. */
   private readonly restQuat: THREE.Quaternion;
   private spin: THREE.Vector3;
@@ -207,6 +208,28 @@ export class Rig {
 
   /** Joints re-hung to follow the active profile's tree (empty: the model's own). */
   rehung: string[] = [];
+
+  /**
+   * A point in the model's own (kit) frame - the frame of the GLB meshes, and of rig.json's
+   * `chest_lights` and the electronics packages' layouts - as `node`'s local position. The
+   * point is fixed to the part, not to the world: it is mapped with every joint at the kit
+   * pose (no body yaw, no rest offset, no current angle), so whatever is parented to `node`
+   * at that position sits on its part and turns with it, rest offset included.
+   */
+  kitToLocal(node: THREE.Object3D, p: readonly [number, number, number] | THREE.Vector3): THREE.Vector3 {
+    const modelRoot = this.root.getObjectByName('r3x_root') ?? this.root;
+    const byNode = new Map([...this.joints.values()].map((j) => [j.node, j]));
+    const m = new THREE.Matrix4();
+    const local = new THREE.Matrix4();
+    for (let o: THREE.Object3D | null = node; o && o !== modelRoot; o = o.parent) {
+      const j = byNode.get(o);
+      if (j) local.makeTranslation(j.rest);
+      else local.compose(o.position, o.quaternion, o.scale);
+      m.premultiply(local);
+    }
+    const v = p instanceof THREE.Vector3 ? p.clone() : new THREE.Vector3(...p);
+    return v.applyMatrix4(m.invert());
+  }
 
   get(name: string) {
     const j = this.joints.get(name);

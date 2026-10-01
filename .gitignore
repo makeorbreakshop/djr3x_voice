@@ -118,6 +118,9 @@ coverage.xml
 ehthumbs.db
 Thumbs.db
 
+# Third-party reference code without a licence (grnwave's DJ-RexBody sample): never commit
+mech/vendor/grnwave/
+
 # Rolled-aside virtualenvs (see chore(deps) 2026-09-17)
 venv.old-*/
 

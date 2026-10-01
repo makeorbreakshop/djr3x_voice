@@ -7,7 +7,8 @@
  * - An arm root is any other child of a torso ring; its subtree is Arms. An actuator named
  *   after an arm (`heroarm` turns the ring that carries the hero arm) is Arms too.
  * - Everything else under the torso chain is Torso.
- * - Light groups on the face board are Head; other lights are Lights & stage.
+ * - Light groups on the face board (and any package's `eyes` / `mouth`) are Head; other
+ *   lights are Lights & stage.
  */
 
 export const REGIONS = ['Head', 'Arms', 'Torso', 'Lights & stage'] as const;
@@ -51,7 +52,11 @@ export class BodyRegions {
   /** An output (actuator or light group) by name. */
   ofOutput(name: string): Region {
     const light = this.profile.lights.find((l) => l.name === name);
-    if (light) return light.driver.type === 'serial_led' && light.driver.board === 'face' ? 'Head' : 'Lights & stage';
+    if (light) {
+      // Face board, or a package's eyes/mouth on another board (grnwave): the head.
+      const face = (light.driver.type === 'serial_led' && light.driver.board === 'face') || name === 'eyes' || name === 'mouth';
+      return face ? 'Head' : 'Lights & stage';
+    }
     const a = this.profile.actuators.find((x) => x.name === name);
     if (!a) return 'Other';
     if (this.armPrefixes.some((p) => a.name.startsWith(p))) return 'Arms';
