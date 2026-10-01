@@ -9,11 +9,12 @@ const CLIPS = Object.entries(SHOW_FILES).filter(([k]) => k.startsWith('show/clip
 const clip = (id: string) => CLIPS.find((c) => c.id === id)!;
 
 describe('mech model (robot.generated.json)', () => {
-  it('stacks the head on the neck column, per the mech model', () => {
-    expect(MECH.joints.head_pan.parent).toBeNull();
-    expect(MECH.joints.head_lift.parent).toBe('head_pan');
-    expect(MECH.joints.head_tilt.parent).toBe('head_lift');
-    expect(subtrees().get('head_pan')).toEqual(new Set(['head_pan', 'head_lift', 'head_tilt', 'head_roll', 'visor']));
+  it('stacks the head on the central column, per the mech model (lift carries the pan)', () => {
+    expect(MECH.joints.head_lift.parent).toBeNull();
+    expect(MECH.joints.head_pan.parent).toBe('head_lift');
+    expect(MECH.joints.head_tilt.parent).toBe('head_pan');
+    expect(subtrees().get('head_lift')).toEqual(new Set(['head_lift', 'head_pan', 'head_tilt', 'head_roll', 'visor']));
+    expect(subtrees().get('head_pan')).toEqual(new Set(['head_pan', 'head_tilt', 'head_roll', 'visor']));
   });
 
   it('poses links through the chain (lift raises the visor pivot)', () => {
@@ -26,8 +27,12 @@ describe('mech model (robot.generated.json)', () => {
   });
 
   it('carries the profile limits the generator derived', () => {
+    // the column's pan: +-90 in the droid (hard), the animation range pulled inside it
     const pan = GENERATED.joints.find((j) => j.name === 'head_pan')!;
-    expect(pan.animation.max).toBeLessThan(34);
+    expect(MECH.joints.head_pan.mech_limits.max).toBe(90);
+    expect(pan.animation.max).toBeLessThan(MECH.joints.head_pan.mech_limits.max);
+    expect(pan.animation.max).toBeGreaterThan(34); // wider than the old 4:1 neck gear
+    expect(MECH.joints.head_lift.mech_limits).toEqual({ min: -37, max: 45 });
   });
 });
 
@@ -36,24 +41,24 @@ describe('servo torque', () => {
     const tm = new TorqueModel();
     const loads = tm.update({}, 0);
     const by = Object.fromEntries(loads.map((l) => [l.servo, l]));
-    expect(Math.abs(by.pan_servo.nm)).toBeLessThan(1e-6);
-    expect(Math.abs(by.top_servo.nm)).toBeLessThan(1e-6);
-    // the lift holds everything above the slide: m g x pinion lever / efficiency
-    const above = MECH.links.filter((l) => l.joint && ['head_lift', 'head_tilt', 'head_roll', 'visor'].includes(l.joint)).reduce((s, l) => s + l.kg, 0);
-    const lift = MECH.drives.find((d) => d.servo === 'lift_servo')!;
+    expect(Math.abs(by.col_pan_servo.nm)).toBeLessThan(1e-6);
+    expect(Math.abs(by.col_top_servo.nm)).toBeLessThan(1e-6);
+    // the lift holds everything on the carriage: m g x pulley lever / efficiency
+    const above = MECH.links.filter((l) => l.joint && subtrees().get('head_lift')!.has(l.joint)).reduce((s, l) => s + l.kg, 0);
+    const lift = MECH.drives.find((d) => d.servo === 'col_lift_servo')!;
     const expected = (above * 9.80665 * lift.mm_per_servo_deg! * (180 / Math.PI)) / 1000 / lift.eta;
-    expect(by.lift_servo.nm).toBeCloseTo(expected, 4);
+    expect(by.col_lift_servo.nm).toBeCloseTo(expected, 4);
     for (const l of loads) expect(Number.isFinite(l.load)).toBe(true);
   });
 
-  it('a pan acceleration costs I alpha about the pan axis (through 4:1)', () => {
+  it('a pan acceleration costs I alpha about the pan axis (1:1 on the column)', () => {
     const tm = new TorqueModel();
     tm.smoothing = 0;
     const alpha = 400; // deg/s^2
     const h = 0.01;
     let last = tm.update({}, 0);
     for (let i = 1; i <= 3; i++) last = tm.update({ head_pan: 0.5 * alpha * (i * h) ** 2 }, i * h);
-    const pan = last.find((l) => l.servo === 'pan_servo')!;
+    const pan = last.find((l) => l.servo === 'col_pan_servo')!;
     // I_yy of every link above the pan about the (vertical, through the origin) axis
     let I = 0;
     for (const l of MECH.links) {
@@ -61,7 +66,7 @@ describe('servo torque', () => {
       const [x, , z] = l.com!.map((c) => c / 1000);
       I += l.inertia![1] + l.kg * (x * x + z * z);
     }
-    const drive = MECH.drives.find((d) => d.servo === 'pan_servo')!;
+    const drive = MECH.drives.find((d) => d.servo === 'col_pan_servo')!;
     const expected = (I * alpha * (Math.PI / 180)) / drive.servo_deg_per_unit! / drive.eta;
     const weight = MECH.links.filter((l) => l.joint && subtrees().get('head_pan')!.has(l.joint)).reduce((s, l) => s + l.kg, 0) * 9.80665;
     const friction = (0.02 * weight * 0.11) / drive.servo_deg_per_unit! / drive.eta;

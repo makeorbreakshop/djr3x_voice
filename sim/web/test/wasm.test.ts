@@ -105,10 +105,20 @@ describe.skipIf(!built)('wasm performer', () => {
     expect(JSON.parse(w.lintShow(JSON.stringify(PROFILE), showFiles())).errors).toEqual([]);
   });
 
-  it('lints against the Physical rig: look_around reaches past the neck gear', async () => {
+  it('lints against the Physical rig: a look past the column\'s pan range is caught', async () => {
     const w = await load();
+    // the central column pans +-90 (animation +-82.8): the committed looks (+-35) fit it ...
     const errs = JSON.parse(w.lintShow(JSON.stringify(PHYSICAL), showFiles())).errors as string[];
-    expect(errs.some((e) => e.includes('look_around') && e.includes('head_pan'))).toBe(true);
+    expect(errs.filter((e) => e.includes('head_pan'))).toEqual([]);
+    // ... and a look past it is an error on the Physical rig
+    const far = {
+      ...(SHOW['../../../show/clips/look_around.json'] as Record<string, unknown>),
+      id: 'look_far', title: 'Look far',
+      tracks: { head_pan: { mode: 'additive', keys: [[0, 0], [1, -100], [2, 100], [3, 0]] } },
+    };
+    const files = JSON.stringify({ ...JSON.parse(showFiles()), 'show/clips/look_far.json': far });
+    const farErrs = JSON.parse(w.lintShow(JSON.stringify(PHYSICAL), files)).errors as string[];
+    expect(farErrs.some((e) => e.includes('look_far') && e.includes('head_pan'))).toBe(true);
     const p = new w.WasmPerformer(JSON.stringify(PHYSICAL), showFiles(), 3); // the performer loads it
     p.free();
   });

@@ -553,10 +553,27 @@ fn gaze_rolls_toward_the_look_within_the_selected_rig() {
     for i in 1..=180 {
         f = q.tick(i as f64 / 60.0);
     }
-    let lim = physical.joint("head_pan").unwrap().animation.max;
-    assert!((f.targets["head_pan"] - lim).abs() < 1e-6, "stops at the neck gear ({})", f.targets["head_pan"]);
+    // the head leads up to the puppeteer's 60 deg neck lead, or the rig's pan range if narrower
+    let lim = physical.joint("head_pan").unwrap().animation.max.min(60.0);
+    assert!((f.targets["head_pan"] - lim).abs() < 1e-6, "stops at the neck's range ({})", f.targets["head_pan"]);
     assert!(f.targets.get("torso_top").copied().unwrap_or(0.0).abs() < 1e-6, "no spill into the rings");
-    assert!(f.targets["head_roll"] < -3.0, "cant toward the look instead");
+    assert!(f.targets["head_roll"] < -3.0, "cant toward the look instead ({})", f.targets["head_roll"]);
+
+    // a rig whose pan range is narrower than the look clamps the head at it (the old 4:1 neck gear's 31)
+    let mut narrow = physical.clone();
+    for j in narrow.joints.iter_mut().filter(|j| j.name == "head_pan") {
+        j.animation.min = -31.0;
+        j.animation.max = 31.0;
+    }
+    let mut r = Performer::new(Arc::new(show_catalog()), &narrow, PerformerConfig::default()).unwrap();
+    quiet(&mut r);
+    r.command(Command::Puppet { intent: "gaze_yaw".into(), value: 1.0 });
+    let mut f = r.tick(0.0);
+    for i in 1..=180 {
+        f = r.tick(i as f64 / 60.0);
+    }
+    assert!((f.targets["head_pan"] - 31.0).abs() < 1e-6, "stops at a narrow rig's pan range ({})", f.targets["head_pan"]);
+    assert!(f.targets.get("torso_top").copied().unwrap_or(0.0).abs() < 1e-6, "no spill into the rings");
 }
 
 #[test]

@@ -22,7 +22,10 @@ fn generated_profile_validates() {
     assert_eq!(names(&generated), names(&live));
     let acts = |p: &RobotProfile| p.actuators.iter().map(|a| (a.name.clone(), a.channel)).collect::<Vec<_>>();
     assert_eq!(acts(&generated), acts(&live));
-    // The mech model hangs the head column off the base (not the top ring).
-    assert_eq!(generated.joint("head_pan").unwrap().parent, None);
-    assert_eq!(generated.joint("head_lift").unwrap().parent.as_deref(), Some("head_pan"));
+    // The mech model stands the head on the base, not the rings: the central column's lift
+    // carriage carries the pan (head_lift on the base, head_pan on the lift).
+    assert_eq!(generated.joint("head_lift").unwrap().parent, None);
+    assert_eq!(generated.joint("head_pan").unwrap().parent.as_deref(), Some("head_lift"));
+    let tilt = generated.joint("head_tilt").unwrap().parent.clone();
+    assert_eq!(tilt.as_deref(), Some("head_pan"), "the head's gimbal rides the pan");
 }
