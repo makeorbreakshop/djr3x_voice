@@ -725,7 +725,11 @@ def hero_arm(top: Asm):
     top.joints += [js, jw]
 
 
-def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm):
+def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, default: bool = True):
+    """Anderson's mechanisms onto the kit. `base` takes the neck drive as a child (the droid passes its
+    `internals_anderson` variant container); the ring drives' static parts and the upper neck guide's
+    race go into children of their rings marked as the same variant option (internals: anderson_morton,
+    `default`). The ring sectors stay on the rings: the column's drives mesh the same sectors."""
     nd, info = neck_drive(base)
     # the guide's outer race is bolted to the top ring floor: it rides the top ring
     ring = next(p for p in nd.parts if p.id == "neck_guide_ring_outer")
@@ -792,3 +796,21 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm):
             p.note = (p.note + "; " if p.note else "") + "superseded by the R-3X build (excluded from mass and checks)"
     root.notes.append("Profile joints with no mechanism in the R-3X build: torso_middle (not motorised), poker_* / "
                       "throttle_* arms (poseable kit joints only), all claws (rigid).")
+    # the internals variant: Anderson's static ring-drive parts and the neck guide's outer race
+    var = {"group": "internals", "id": "anderson_morton", "default": default}
+    for ring, cid, name, link, ids in (
+            (lower, "r3x_lower_drive", "Anderson's lower-ring drive (servo mount, servo, pinion)", "lower_ring_mount",
+             ("lower_servo_mount", "lower_servo", "lower_pinion")),
+            (middle, "r3x_top_drive", "Anderson's top-ring drive (servo mount, spacer, servo, pinion)", "middle_ring",
+             ("top_servo_mount", "top_servo_spacer", "top_servo", "top_pinion")),
+            (top, "r3x_neck_guide_race", "Anderson's upper neck guide: outer race on the top ring", "top_ring",
+             ("neck_guide_ring_outer",))):
+        mine = [p for p in ring.parts if p.id in ids]
+        if not mine:
+            continue
+        for p in mine:
+            ring.parts.remove(p)
+        ring.children.append(Asm(id=cid, name=name, mount_link=link, variant=dict(var), parts=mine,
+                                 links=[Link(f"{cid}_mount", f"{name} (rigid on {link})", None)]))
+        for p in mine:
+            p.link = f"{cid}_mount"

@@ -191,6 +191,12 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
             cpl = lmap.get((ca.mount or {}).get("parent_link", ""), parent_link)
             n0 = len(out.parts)
             walk(ca, cm, cpl, f"{path}/{ca.id}", None if ref.get("interface") else anchor)
+            # a mated sub-assembly that sits on parts of its parent (the column's Gil plate under the kit's
+            # skirt): `mount.rests_on` names them; a placement join for the connected test
+            for rid in ((ca.mount or {}).get("rests_on") or []):
+                if len(out.parts) > n0:
+                    out.mates.append(Mate(f"placed:{ca.id}:{rid}", "placed", (out.parts[n0].id, ""), (rid, ""), {},
+                                          False, (ca.mount or {}).get("rests_on_note", "rests on its parent's part")))
             if ref.get("interface"):
                 interfaces.append((ca.id, pmap, ref["interface"], cm))
 
@@ -272,7 +278,8 @@ def explained_placement(info, flat) -> list[dict]:
                     "fix": "none in the model; on the print, the usual clean-up of a tight kit joint"})
     ids = {p.id for p in flat.parts}
     gears = [x for x in ("pan_pinion", "pan_sector", "lift_pinion", "lift_rack", "lower_pinion", "lower_sector",
-                         "top_pinion", "top_sector") if x in ids]
+                         "top_pinion", "top_sector", "col_lower_pinion", "col_top_pinion", "col_pan_pinion",
+                         "col_pan_gear") if x in ids]
     if gears:
         out.append({"test": "clearance", "parts": gears,
                     "cause": "a pinion and its sector/rack: the model turns the ring (or slides the rack) but not the "
@@ -285,6 +292,10 @@ def explained_placement(info, flat) -> list[dict]:
                     "cause": "the cosmetic neck spring is rigid in the suite; on the droid it compresses as the head "
                              "comes down (the manifest's stretch)",
                     "fix": "none"})
+    if any(x.startswith("col_") for x in ids):  # the central column (assemblies/column): its own explanations
+        from assemblies.column.assembly import EXPLAINED as COLUMN_EXPLAINED
+
+        out += list(COLUMN_EXPLAINED)
     if morton:
         out.append({"test": "no_overlap", "parts": morton, "max_mm": 1.1,
                     "cause": "Sam Morton's 2020 posts run up to 1.1 mm into his own frame rings (his export: the post "

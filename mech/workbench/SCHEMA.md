@@ -83,6 +83,11 @@ A child can be inlined, or referenced so two modules can be built separately:
 A child mounted as a variant option carries `mount.variant = {group, id, default, reference?}`;
 `reference: true` marks an option kept for comparison only ("reference, not engineered"): the panel
 shows it, the whole-droid suite leaves it out.
+A group may span several nodes (the droid's `internals`: the column under the base, Anderson's ring
+drives under the rings); a `default: true` option anywhere in the tree wins.
+
+A mated sub-assembly may name parts of its parent it stands on, `mount.rests_on: ["b_b_1"]` (with an
+optional `rests_on_note`): the whole-droid suite joins them for its connected test (placement only).
 
 The root may carry `couplings` (from `python -m workbench test <root>`, workbench/droid.py): coupled
 joint limits, the dependent joint's range as a table over the driving one, profile joint names:

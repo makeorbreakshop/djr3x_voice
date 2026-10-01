@@ -43,7 +43,17 @@ GEARS = {
     "lower_servo": {"part": "ring_servo_gear (25T)", "pitch_r": 30.4, "root_w": 4.6, "height": 4.8, "face": 10.0,
                     "src": "root width estimated (0.6 x circular pitch)"},
 }
+# the central column's (assemblies/column): the pan pinion 25T m2 (printed involute, 8 mm face), Anderson's
+# ring pinions on the column's servos; the lift is a GT2 belt (no tooth row: belt tension, see the drive)
+GEARS.update({
+    "col_pan_servo": {"part": "pan gear 25T m2 (column)", "pitch_r": 25.0, "root_w": 3.6, "height": 4.5, "face": 8.0,
+                      "src": "involute m2: root width ~1.15 m, height 2.25 m"},
+    "col_top_servo": dict(GEARS["top_servo"]),
+    "col_lower_servo": dict(GEARS["lower_servo"]),
+})
 TUBE = {"od": 26.0, "wall": 1.5, "guide_y": 616.0}  # Anderson's neck tube; the upper guide's clamp height
+# the column's short neck: cantilevered from the pan hub's top (the cross bolt, y 494; the upper bearing at 469..476)
+TUBE_COLUMN = {"od": 26.0, "wall": 1.5, "guide_y": 476.0}
 
 
 def _rot(axis, deg):
@@ -133,14 +143,17 @@ def analyse(profile: dict) -> list[dict]:
         piv = np.asarray(joints["head_tilt"]["pivot"], float)
         h = (com - piv)[1]
         off = max(math.hypot(*(com - piv)[[0, 2]]), h * math.sin(math.radians(25)))  # worst tilt 25 deg
-        lever = (piv[1] + h * math.cos(math.radians(25)) - TUBE["guide_y"]) / 1000.0
+        tube = TUBE_COLUMN if any(d.get("servo") == "col_pan_servo" for d in mech["drives"]) else TUBE
+        lever = (piv[1] + h * math.cos(math.radians(25)) - tube["guide_y"]) / 1000.0
         I = sum(l["kg"] * ((np.asarray(l["com"]) - piv)[1] / 1000.0) ** 2 for l in head)
         M = m * G * off / 1000.0 + I * math.radians(amax.get("head_tilt", 0.0)) + m * 0.0 * lever
-        D, t = TUBE["od"], TUBE["wall"]
+        tube = TUBE_COLUMN if any(d.get("servo") == "col_pan_servo" for d in mech["drives"]) else TUBE
+        D, t = tube["od"], tube["wall"]
         d_in = D - 2 * t
         Z = math.pi * (D ** 4 - d_in ** 4) / (32 * D)  # mm3
         sigma = M * 1000.0 / Z
-        rows.append({"what": "neck tube 26 x 1.5 Al at the upper guide", "kind": "tube bending", "util": sigma / AL_YIELD_MPA,
+        rows.append({"what": f"neck tube 26 x 1.5 Al at y {tube['guide_y']:g} ({'the pan hub' if tube is TUBE_COLUMN else 'the upper guide'})",
+                     "kind": "tube bending", "util": sigma / AL_YIELD_MPA,
                      "value": f"{sigma:.1f} of {AL_YIELD_MPA:g} MPa",
                      "how": f"head {m:.2f} kg, COM {off:.0f} mm off the axis at 25 deg tilt, + tilt inertia at a_max; Z {Z:.0f} mm3"})
     rows.sort(key=lambda r: -r["util"])

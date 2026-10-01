@@ -125,8 +125,9 @@ _NAMED = {"2000-0025-0002": "GOBILDA_2000_25_2", "35 kg": "SERVO_35KG_270", "60 
 
 def _servo_key(tree: Tree, j: Joint, actuator: dict | None) -> tuple[str | None, str]:
     ids = set((j.drive or {}).get("servos") or [])
-    for p in tree.parts:
-        if p.raw["id"] in ids and p.asm == j.asm:
+    # the joint's own assembly first; then anywhere (a kit ring joint driven by the column's servo)
+    for p in sorted(tree.parts, key=lambda q: q.asm != j.asm):
+        if p.raw["id"] in ids:
             mat = p.raw.get("material") or ""
             if mat.startswith("servo:") and mat[6:] in servos.SERVOS:
                 return mat[6:], f"part {p.raw['id']} material"

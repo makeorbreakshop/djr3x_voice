@@ -16,6 +16,7 @@ and nothing derived from their geometry is committed.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -218,7 +219,17 @@ def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
                           "inferred_note": ""})
 
 
-def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
+# The droid's internals (a variant group, `internals`): "column" = our central column
+# (assemblies/column, the default), "anderson_morton" = Anderson's base turntable, rack lift and
+# long neck tube on Morton's 2020 cage. Both are built; the default is what the suite and rigsync use.
+# R3X_INTERNALS=anderson_morton makes the other one the default.
+INTERNALS = os.environ.get("R3X_INTERNALS", "column")
+
+
+def build_model(with_r3x: bool = True, community: bool = True, internals: str | None = None) -> Asm:
+    internals = internals or INTERNALS
+    if internals not in ("column", "anderson_morton"):
+        raise ValueError(f"internals {internals!r}: column | anderson_morton")
     parts = kit_parts()
     J = kit_arm_joints()
 
@@ -301,15 +312,23 @@ def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
     middle.children = [top]
     base.notes.append("The head is not carried by the rings in the R-3X build: the neck tube runs from the "
                       "pan/lift stage in the base, through all three rings, to the head (see r3x_neck_drive).")
+    anderson = Asm(id="internals_anderson", name="Internals: Anderson's turntable + rack lift + long neck on Morton's cage",
+                   mount_link="base", links=[],
+                   variant={"group": "internals", "id": "anderson_morton", "default": internals == "anderson_morton"},
+                   description="The R-3X Animation neck drive (base turntable, rack lift, 744 mm neck tube) on Sam "
+                               "Morton's 2020 lower cage (or Randall's printed frame), as modelled before the column.")
     if with_r3x:
         from assemblies.r3x_animation.assembly import attach
-        attach(root, base, lower, middle, top, head)
+        attach(root, anderson, lower, middle, top, head, default=internals == "anderson_morton")
+        base.children.append(anderson)
+        _lower_pinion_relief(lower)
     if community:
         from assemblies.community.assembly import morton_frame, mouth_split_parts, randall_frame
-        base.children += [morton_frame(), randall_frame()]
-        for p in base.parts:
-            if p.id == "p_m_3":
-                p.note = "superseded by Henley B_M_3_mod in the Morton frame variant"
+        anderson.children += [morton_frame(), randall_frame()]
+        if internals == "anderson_morton":
+            for p in base.parts:
+                if p.id == "p_m_3":
+                    p.note = "superseded by Henley B_M_3_mod in the Morton frame variant"
         mouth = Asm(id="mouth_split", name="Trevor Zaharichuk Mic-Mouth-Split (alternate mouth)", mount_link="head",
                     variant={"group": "mouth", "id": "mic_mouth_split", "default": False},
                     links=[Link("mouth", "Mouth insert", None)])
@@ -326,7 +345,38 @@ def build_model(with_r3x: bool = True, community: bool = True) -> Asm:
                              profile_joint="visor", drive={"kind": "none"})]
         top.children.append(head)
     use_real_parts(root)
+    if with_r3x and community:
+        from assemblies.column.assembly import build_column, ring_drive
+
+        base.children.append(build_column("base", {"group": "internals", "id": "column", "default": internals == "column"},
+                                          in_droid=True))
+        if internals == "column":  # the rings' drives are the column's (same pinion places, same ratios)
+            for a, jid in ((lower, "torso_lower"), (top, "torso_top")):
+                j = next(j for j in a.joints if j.id == jid)
+                j.drive = ring_drive(jid, j.drive)
     return root
+
+
+def _lower_pinion_relief(lower: Asm):
+    """The lower ring's pinion (Anderson's, and the column's in the same place) turns through the
+    kit's static core LS_IC_1 (r 98.5..110, y 352..407): a relief round its swept disc (r 33 + 1)."""
+    import trimesh as _tm
+
+    from assemblies.r3x_animation.assembly import relief
+
+    core = next((p for p in lower.parts if p.id == "ls_ic_1"), None)
+    if core is None:
+        return
+
+    def gen():
+        m = _tm.creation.cylinder(radius=34.0, height=12.0, sections=64)
+        m.apply_transform(_tm.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
+        m.apply_translation([-9.8, 373.3 + 5.0, -83.0])
+        return m
+
+    cut = Part(id="lower_pinion_envelope", name="lower pinion's swept disc (r 34, y 372.3..384.3)", cls="mech",
+               link="lower_ring_mount", T=np.eye(4), generator=gen, kind="generated", origin="ours")
+    relief(core, cut, 0.0, "the lower ring's pinion meshes Anderson's sector through the static core")
 
 
 SERVO_CASE = {"SERVO_60KG_270": "large", "SERVO_35KG_270": "standard", "DS3218_DUAL": "standard", "SERVO_7KG": "micro"}
