@@ -235,7 +235,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
             "triangles": {"display": n_disp, "source": int(len(m.faces))},
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
-            "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch,
+            "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch, "exposed": p.exposed,
         }))
     fast = []
     written = set()
@@ -305,6 +305,8 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
                           "b": {"part": m.b[0], "feature": m.b[1]}, "params": m.params,
                           "solved": m.solved, "note": m.note}) | {"solved": m.solved} for m in asm.mates],
         "children": children,
+        "designs": asm.designs,
+        "ground": asm.ground,
         "notes": asm.notes,
     })
 

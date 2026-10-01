@@ -233,8 +233,10 @@ def build_model(with_r3x: bool = True, community: bool = True, internals: str | 
     parts = kit_parts()
     J = kit_arm_joints()
 
-    root = Asm(id="r3x_droid", name="DJ R3X (kit shell + R-3X Animation mechanisms)",
-               description="Printable kit as the backbone; mechanisms attached per ring/base.",
+    root = Asm(id="r3x_droid", name="DJ R3X - our build (configurable)",
+               description="The printable kit's shells as the backbone, with a pick of mechanisms per system (internals: "
+                           "our central column or Anderson's turntable on Morton's / Randall's frame; head: Hunter's "
+                           "gimbal or Anderson's tilt; mouth, side panels): see `designs`.",
                links=[Link("ground", "Ground (floor / base plate)", None)])
     base = Asm(id="base", name="Base + pedestal", mount_link="ground",
                links=[Link("base", "Base skirt, top and pedestal (static)", None)])
@@ -350,10 +352,15 @@ def build_model(with_r3x: bool = True, community: bool = True, internals: str | 
 
         base.children.append(build_column("base", {"group": "internals", "id": "column", "default": internals == "column"},
                                           in_droid=True))
-        if internals == "column":  # the rings' drives are the column's (same pinion places, same ratios)
-            for a, jid in ((lower, "torso_lower"), (top, "torso_top")):
-                j = next(j for j in a.joints if j.id == jid)
-                j.drive = ring_drive(jid, j.drive)
+        # the rings' drives follow the `internals` pick: the column's (same pinion places, same ratios) or
+        # Anderson's; the joint's drive is the default's, `variants` holds both (SCHEMA.md "Joint")
+        for a, jid in ((lower, "torso_lower"), (top, "torso_top")):
+            j = next(j for j in a.joints if j.id == jid)
+            anderson = dict(j.drive)
+            column = ring_drive(jid, anderson)
+            opts = [dict(column, variant={"group": "internals", "id": "column"}),
+                    dict(anderson, variant={"group": "internals", "id": "anderson_morton"})]
+            j.drive = dict(column if internals == "column" else anderson, variants=opts)
     return root
 
 
@@ -427,11 +434,94 @@ def use_real_parts(root: Asm):
             p.cad = "placeholder"
 
 
+# The published designs the droid is assembled from (manifest `designs`, the Build view's Library): each
+# names its assemblies and the variant picks that show it; `deep` takes each assembly's whole subtree,
+# `only` / `except` filter by part class, `look` is the view it reads best in.
+DESIGNS = [
+    dict(id="kit", name="Kit shells", author="Patrick Gray / David Ferreira", source="DJ R3X - v2 printable kit",
+         assemblies=["base", "base_panels_closed", "lower_ring", "middle_ring", "top_ring", "head_r3x"],
+         picks={"internals": "anderson_morton", "head_mech": "r3x_anderson", "base_side_panels": "closed"},
+         only=["shell"], look="exterior"),
+    dict(id="anderson", name="R-3X Animation", author="Brian Anderson", source="R-3X Animation (Onshape studios)",
+         assemblies=["r3x_neck_drive", "head_r3x", "r3x_lower_drive", "r3x_top_drive", "r3x_neck_guide_race"],
+         picks={"internals": "anderson_morton", "head_mech": "r3x_anderson"}, **{"except": ["shell"]}, look="mechanism"),
+    dict(id="hunter", name="Head gimbal", author="Hunter Smoke", source="Hunter Smoke head mech files",
+         assemblies=["hunter_head"], picks={"internals": "column"}, deep=True, look="mechanism"),
+    dict(id="morton", name="Lower cage", author="Sam Morton", source="Morton 2020 lower cage",
+         assemblies=["morton_frame"], picks={"internals": "anderson_morton", "base_frame": "morton"}, look="mechanism"),
+    dict(id="randall", name="Printed frame", author="Riane Randall", source="Randall printed frame (reference)",
+         assemblies=["randall_frame"], picks={"internals": "anderson_morton", "base_frame": "randall"}, look="mechanism"),
+    dict(id="mouth", name="Mic-Mouth-Split", author="Trevor Zaharichuk", source="Mic-Mouth-Split",
+         assemblies=["mouth_split"], picks={"internals": "anderson_morton", "head_mech": "r3x_anderson",
+                                            "mouth": "mic_mouth_split"}, look="mechanism"),
+    dict(id="column", name="Central column", author="Ours (after Jason Charlton's lift and pan)",
+         source="mech/assemblies/column", assemblies=["column_internals"], picks={"internals": "column"},
+         look="mechanism"),
+]
+
+
+def _ground(asm) -> dict:
+    """The floor: the lowest modelled part with the default picks, and per `internals` option. The Gil
+    drive (the wheels) under the column's Gil plate and Anderson's stage is not modelled, so the real floor
+    is lower by its height."""
+    from workbench.model import Assembly
+
+    groups: dict[str, str] = {}
+
+    def picks(a):  # the viewer's rule: the first option seen, unless a `default` one exists anywhere
+        v = (a.mount or {}).get("variant")
+        if v:
+            if v.get("default"):
+                groups[v["group"]] = v["id"]
+            else:
+                groups.setdefault(v["group"], v["id"])
+        for c in a.children:
+            if isinstance(c, Assembly):
+                picks(c)
+
+    picks(asm)
+    defaulted = {}
+
+    def fix(a):
+        v = (a.mount or {}).get("variant")
+        if v and v.get("default"):
+            defaulted[v["group"]] = v["id"]
+        for c in a.children:
+            if isinstance(c, Assembly):
+                fix(c)
+
+    fix(asm)
+    groups.update(defaulted)
+
+    def lowest(picks):
+        ys = []
+
+        def walk(a):
+            v = (a.mount or {}).get("variant")
+            if v and picks.get(v["group"]) != v["id"]:
+                return
+            ys.extend(float(p.mesh.bounds[0][1]) for p in a.parts)
+            for c in a.children:
+                if isinstance(c, Assembly):
+                    walk(c)
+
+        walk(asm)
+        return round(min(ys), 1)
+
+    by = {f"internals:{o}": lowest({**groups, "internals": o}) for o in ("column", "anderson_morton")}
+    return {"y": lowest(groups), "by_variant": by, "inferred": True,
+            "inferred_note": "the lowest modelled part; the Gil drive's wheels under the base plate are not modelled, "
+                             "so the real floor is lower by their height"}
+
+
 def build():
     """Workbench entry point (`python -m workbench build kit`): the whole droid as a
     workbench.model.Assembly with meshes at the rest pose."""
     from r3xmech.wb import to_workbench
-    return to_workbench(build_model())
+    asm = to_workbench(build_model())
+    asm.designs = [dict(d) for d in DESIGNS]
+    asm.ground = _ground(asm)
+    return asm
 
 
 def kit_head_parts(origin_y: float = 738.3):

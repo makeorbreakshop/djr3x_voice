@@ -79,6 +79,7 @@ class Part:
     cad: str = "mesh"  # mesh (a reference mesh) | vendor (vendor CAD) | parametric (ours) | placeholder
     catalog: Optional[str] = None  # parts catalog id ("gobilda:2913-0004-0241")
     stretch: Optional[dict] = None  # {"joint", "axis", "anchor", "rest_mm"}: scaled by a prismatic joint (SCHEMA.md)
+    exposed: Optional[bool] = None  # seen from outside the droid (a shell is by default; SCHEMA.md "Part")
 
     def __post_init__(self):
         assert self.cls in CLASSES, self.cls
@@ -236,6 +237,8 @@ class Assembly:
     mates: list = field(default_factory=list)  # mates.Mate
     tests: list = field(default_factory=list)  # suite results (Check with kind "test")
     tolerances: dict = field(default_factory=dict)  # overrides for the suite (TESTS.md)
+    designs: list = field(default_factory=list)  # root only: the published designs it is assembled from (SCHEMA.md)
+    ground: Optional[dict] = None  # root only: {"y", ...} the floor the droid stands on (SCHEMA.md)
 
     # ------------------------------------------------------------------ lookups
     def part(self, pid: str) -> Part:

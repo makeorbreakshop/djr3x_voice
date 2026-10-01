@@ -292,7 +292,18 @@ def relief(target, cutter, grow: float = 0.5, why: str = ""):
         + (f": {why}" if why else ""))
 
 
-SPRING_Y, SPRING_H = 608.5, 55.0  # the sim's spring: on the top cap (TR_N), 55 mm at head lift 0
+# The cosmetic neck spring: on the top cap (TR_N, y 608.5) up to the head's shell. Hunter's head_bottom
+# starts 37 mm under the gimbal centre (hunter_head manifest bbox), so the spring ends at 701.3 - 0.3: no
+# gap for the head to float over (the sim's own spring, rig.ts, is 55 mm). The sim's 10 mm pitch is kept;
+# r 24 (the sim's 21) clears Hunter's coupler (r 20) inside it.
+SPRING_Y = 608.5
+SPRING_H = round(HUNTER_ORIGIN_Y - 37.0 - 0.3 - SPRING_Y, 1)    # 92.5
+SPRING_R = 24.0
+SPRING_TURNS = SPRING_H / 10.0
+
+
+def neck_spring_mesh():
+    return coil_generator(r=SPRING_R, h=SPRING_H, turns=SPRING_TURNS, n=int(SPRING_TURNS * 44))()
 
 
 # ---------------------------------------------------------------------------------------
@@ -385,7 +396,7 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
                      "hardware", "slide", trans(0, y_tube_bot, 0) @ ZUP, None, generator=tube_generator(L),
                      kind="generated", origin="ours", material="aluminium", printed=False,
                      mass_g=L * catalog.PURCHASED["neck_tube"]["g_per_mm"], placement="fitted",
-                     evidence="length = neck-main socket (head) - slide bottom (base stage)",
+                     evidence="length = neck-main socket (head) - slide bottom (base stage)", exposed=True,
                      inferred=True, inferred_note="tube material/wall not in the parts list; stage height assumed",
                      features={"axis": {"type": "axis", "p": [0.0, 0.0, 0.0], "d": [0.0, 0.0, 1.0], "r": 13.0},
                                "top": {"type": "plane", "p": [0.0, 0.0, float(L)], "n": [0.0, 0.0, 1.0]}}))
@@ -394,10 +405,10 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
     # model it): the sim's Visual look draws it procedurally, so this is its twin, stretched by
     # the head lift like the sim's (manifest part `stretch`)
     a.parts.append(P("neck_spring", "Neck coil spring (cosmetic, the sim's)", "shell", "turntable",
-                     trans(0, SPRING_Y, 0), None, generator=coil_generator(h=SPRING_H), kind="generated",
+                     trans(0, SPRING_Y, 0), None, generator=neck_spring_mesh, kind="generated",
                      origin="ours", material="steel (painted, cosmetic)", printed=False, mass_g=40.0,
-                     placement="fitted", evidence="sim/web/src/rig.ts buildNeckSpring: r 21, wire 3.2, 5.5 turns, "
-                     "55 mm on the top cap at y 608.5",
+                     placement="fitted", evidence="after sim/web/src/rig.ts buildNeckSpring (wire 3.2, 10 mm pitch, on the "
+                     "top cap at y 608.5), lengthened to the head's shell (y 701) and opened to r 24 round the coupler",
                      stretch={"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, SPRING_Y, 0],
                               "rest_mm": SPRING_H}))
 
@@ -708,6 +719,10 @@ def hero_arm(top: Asm):
     wp, wd = HA.WRIST_AXIS_MA
     w_pivot = (ma @ np.append(np.asarray(wp, float) + np.asarray(wd) * 213.0, 1.0))[:3]
     w_axis = ma[:3, :3] @ np.asarray(wd, float)
+    for p in top.parts:  # Anderson's arm is the visible arm (it replaces the kit's upright, elbow and wrist)
+        if p.id in ("hero_servomount", "hero_elbow_tube", "hero_forearm", "hero_wrist_body", "hero_wrist_cap",
+                    "hero_hand_arm_side", "hero_hand_finger_side"):
+            p.exposed = True
     js = Joint("hero_shoulder", "Hero arm shoulder (20 kg dual-shaft servo in the elbow)", "revolute",
                "top_ring", "hero_arm", pivot=tuple(np.round(pivot, 2)), axis=tuple(np.round(hinge_axis, 5)),
                limits=(-35, 45), profile_joint="hero_shoulder",

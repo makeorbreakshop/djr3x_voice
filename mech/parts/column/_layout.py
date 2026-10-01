@@ -81,7 +81,8 @@ WHEEL_X = POST_C - 10.0 + VWHEEL["tip_in"] - VWHEEL["od"] / 2       # 19.305
 ECC = dict(l=6.0, od=10.0)                                        # eccentric spacer, 6 mm (OpenBuilds)
 SLED = dict(t=3.0, half_x=33.5,                                   # goBILDA-pattern grid plates (inferred t)
             z_in=POST_C - VWHEEL["w"] / 2 - ECC["l"] - 3.0,       # front/back plates' inner face (25.885)
-            side_x=30.5,                                          # side plates' inner face
+            side_x=30.5,                                          # the right side plate's inner face (the rack: x -35)
+            side_x_l=31.5,                                        # the left one's: 1.5 mm past the pan servo's case
             grid=8.0, grid_r=2.0)                                 # 4 mm holes on an 8 mm grid (goBILDA pattern)
 SLED["z_out"] = SLED["z_in"] + SLED["t"]                          # 28.885: the wheels' spacers start here
 

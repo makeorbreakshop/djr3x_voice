@@ -613,7 +613,15 @@ def build() -> Assembly:
                      f"clearance {pick['clear']} mm.")
     add_steps(asm)
     add_bom(asm)
+    # seen from outside though not shells (manifest `exposed`): the neck post between the body and the head's
+    # shell, and the kit's visor brow, arms and axle ends
+    for p in asm.parts:
+        if p.id in EXPOSED:
+            p.exposed = True
     return asm
+
+
+EXPOSED = {"neck_coupler", "hub_bottom", "hex_shaft", "ujoint", "h_v_1", "h_v_2", "h_v_3", "h_v_4", "h_v_5"}
 
 
 def checks(asm: Assembly):

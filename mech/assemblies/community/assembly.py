@@ -120,5 +120,5 @@ def mouth_split_parts(link="head"):
     for n, id_ in (("Grill", "mouth_grill"), ("LightPipe", "mouth_light_pipe"), ("BackMount", "mouth_back_mount")):
         out.append(_p(id_, f"Mic-Mouth-Split {n} (replaces H_M_1)", "mech", HEAD @ flip, TREVOR / f"{n}.stl",
                       link=link, material="PLA", placement="fitted", replaces=["h_m_1"],
-                      evidence="sim/model/build_r3x.py MOUTH_FLIP_Y fit"))
+                      evidence="sim/model/build_r3x.py MOUTH_FLIP_Y fit", exposed=n != "BackMount"))
     return out

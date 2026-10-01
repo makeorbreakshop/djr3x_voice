@@ -493,17 +493,19 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
         inferred_note="Cable route inferred: the pan and lift servos' and the head's leads (via the clock spring) up "
                       "the column's front opening to the sled, coiled so it follows the lift's 82 mm",
         note="It stretches with head_lift (manifest stretch); zip-tied at both ends.")
-    from assemblies.r3x_animation.assembly import SPRING_H, SPRING_Y
+    from assemblies.r3x_animation.assembly import SPRING_H, SPRING_Y, neck_spring_mesh
 
-    sp = coil_generator(h=SPRING_H)()
+    sp = neck_spring_mesh()
     sp.apply_translation([0, SPRING_Y, 0])
     add("neck_spring", "Neck coil spring (cosmetic, the sim's)", "shell", "column", sp,
         {"kind": "generated", "placement": "fitted",
-         "evidence": "sim/web/src/rig.ts buildNeckSpring: r 21, wire 3.2, 5.5 turns, 55 mm on the top cap at y 608.5"},
+         "evidence": "after sim/web/src/rig.ts buildNeckSpring (wire 3.2, 10 mm pitch, on the top cap at y 608.5), "
+                     "lengthened to the head's shell (y 701) and opened to r 24 round Hunter's coupler"},
         "steel (painted, cosmetic)", False, {"seat": plane((0, SPRING_Y, 0), -UP)}, mass=40.0, mass_note="as the sim's",
         stretch={"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, SPRING_Y, 0], "rest_mm": SPRING_H},
-        note="On the top cap round the neck; stretches with head_lift.")
+        note="On the top cap round the neck, up to the head's shell; stretches with head_lift.")
 
+    P["col_neck_tube"].exposed = True   # seen between the top cap and the head (through the spring)
     asm.parts = list(P.values())
     hw = Hw(P)
     _hardware(hw, P, posts, lift_servo, pan_servo, pan_hub, ring)

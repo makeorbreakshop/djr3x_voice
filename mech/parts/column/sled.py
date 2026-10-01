@@ -72,11 +72,12 @@ def _front_back(sz):
 
 def _side(sx):
     S = L.SLED
-    x0, x1 = sorted((sx * S["side_x"], sx * (S["side_x"] + S["t"])))
+    sx_in = S["side_x_l"] if sx > 0 else S["side_x"]
+    x0, x1 = sorted((sx * sx_in, sx * (sx_in + S["t"])))
     y0, y1 = S["y0"], S["y1"]
     body = box(x0, x1, y0, y1, -S["z_in"], S["z_in"])
-    feats = {"inner": plane((sx * S["side_x"], (y0 + y1) / 2, 0), (-sx, 0, 0)),
-             "outer": plane((sx * (S["side_x"] + S["t"]), (y0 + y1) / 2, 0), (sx, 0, 0))}
+    feats = {"inner": plane((sx * sx_in, (y0 + y1) / 2, 0), (-sx, 0, 0)),
+             "outer": plane((sx * (sx_in + S["t"]), (y0 + y1) / 2, 0), (sx, 0, 0))}
     keep = []
     if sx < 0:  # the hanger's top arm bolts here (two M4)
         _, ys, zs = L.LIFT_SPLINE
@@ -84,8 +85,8 @@ def _side(sx):
         for i, dz in enumerate((-6.0, 6.0)):
             p = (x0, ya, zs + dz)
             body = clearance_hole(body, feats, f"arm{i + 1}", p, (1, 0, 0), "M4", S["t"])
-            keep.append(((sx * S["side_x"], ya, zs + dz), 6.0))
-    body = _grid(body, (sx * S["side_x"], (y0 + y1) / 2, 0), (0, 0, 1), (0, 1, 0), 2 * S["z_in"], y1 - y0, keep)
+            keep.append(((sx * sx_in, ya, zs + dz), 6.0))
+    body = _grid(body, (sx * sx_in, (y0 + y1) / 2, 0), (0, 0, 1), (0, 1, 0), 2 * S["z_in"], y1 - y0, keep)
     return body, feats
 
 
@@ -114,7 +115,7 @@ def _bottom():
 
 def _top():
     S, H, T = L.SLED, L.HOUSING, L.TOP_PLATE_SLED
-    body = box(-S["side_x"], S["side_x"], T["y0"], T["y1"], -S["z_in"], S["z_in"])
+    body = box(-S["side_x"], S["side_x_l"], T["y0"], T["y1"], -S["z_in"], S["z_in"])
     body = body + cyl_y(0, 0, H["r"], H["y0"], H["y1"])
     lo, up = L.Y_BRG_LO, L.Y_BRG_UP
     feats = {"seat_lo": axis((0, H["y0"], 0), (0, 1, 0), H["seat_r"]), "seat_up": axis((0, H["y1"], 0), (0, -1, 0), H["seat_r"]),

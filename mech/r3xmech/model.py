@@ -44,6 +44,7 @@ class Part:
     stretch: dict | None = None   # {"joint", "axis", "anchor", "rest_mm"}: scaled along axis by a prismatic joint
     features: dict = field(default_factory=dict)  # mate features (workbench/mates.py), in the file frame
     explode: tuple = (0, 1, 0)
+    exposed: bool | None = None   # seen from outside the droid (manifest `exposed`)
 
 
 @dataclass

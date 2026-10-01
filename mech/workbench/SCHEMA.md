@@ -81,6 +81,21 @@ A child can be inlined, or referenced so two modules can be built separately:
   } }
 ```
 
+The root may carry `designs` (the published designs the build is assembled from, the Build view's
+Library) and `ground` (the floor):
+
+```jsonc
+"designs": [{ "id": "hunter", "name": "Head gimbal", "author": "Hunter Smoke", "source": "...",
+              "assemblies": ["hunter_head"],          // assembly ids that make it up
+              "picks": {"internals": "column"},        // the variant picks that show it
+              "deep": true,                            // optional: each assembly's whole subtree
+              "only": ["shell"], "except": ["shell"],  // optional: part-class filters
+              "look": "mechanism" }],                  // optional: the view it reads best in
+"ground": { "y": -56.0,                               // the lowest modelled part, default picks (mm)
+            "by_variant": {"internals:anderson_morton": -81.6},
+            "inferred": true, "inferred_note": "the drive's wheels under the base plate are not modelled" }
+```
+
 A child mounted as a variant option carries `mount.variant = {group, id, default, reference?}`;
 `reference: true` marks an option kept for comparison only ("reference, not engineered"): the panel
 shows it, the whole-droid suite leaves it out.
@@ -132,7 +147,10 @@ A rigid body. Every part rides on exactly one link.
   // optional: a part that stretches with a prismatic joint of this assembly (the neck spring with
   // head_lift): scaled along `axis` (the assembly's +Y only, in v1) about `anchor` (assembly frame)
   // by (rest_mm + joint value) / rest_mm. Readers without it draw the part rigid at rest.
-  "stretch": {"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, 608.5, 0], "rest_mm": 55}
+  "stretch": {"joint": "head_lift", "axis": [0, 1, 0], "anchor": [0, 608.5, 0], "rest_mm": 55},
+  // optional: seen from outside the droid (true) or hidden (false). Omitted = a shell is, nothing else is.
+  // Set on the non-shell parts you see on the finished droid (the neck post, the visor, the hero arm).
+  "exposed": true
 }
 ```
 
@@ -158,6 +176,9 @@ A rigid body. Every part rides on exactly one link.
                                             // unit (deg or mm); servo -> joint = servo / this
     "note": "pitch = both horns together, roll = differential"
   },
+  // optional: when the joint's drive depends on a variant pick (the rings' drives follow `internals`), every
+  // option's full drive, each with its `variant` {group, id}; `drive` itself is the default's
+  // "drive": {..., "variants": [{"kind": "gear", "servos": ["col_lower_servo"], ..., "variant": {"group": "internals", "id": "column"}}]}
   "zero": {"how": "text: what 0 looks like and how it is set", "step": "s06"},
   "inferred": false, "inferred_note": ""
 }
@@ -355,4 +376,5 @@ The assembly carries its connections (workbench/mates.py):
   consumer shipped, so still v1 (both optional). Same day: `cad`, `catalog`, `features`,
   `mates`, test checks and the `explained` status (all optional).
 - v1 (2026-10-01): `gears` (optional) and `drive.servo_deg_per_unit` (optional): gear and direct
-  drives connected the way push rods are (a joint turns its pinions; a servo maps to its joint).
+  drives connected the way push rods are (a joint turns its pinions; a servo maps to its joint). Same
+  day: part `exposed`, joint `drive.variants`, root `designs` and `ground` (all optional).
