@@ -41,7 +41,8 @@ TOL = {
     "engage_insert_d": 1.5,     # thread engagement, x nominal diameter
     "engage_plastic_d": 2.0,
     "engage_metal_d": 1.0,
-    "engage_nut_d": 1.05,       # through a lock nut: every thread plus the nylon ring
+    "engage_nut_d": 1.05,       # through a lock nut: every thread plus the nylon ring (a plain nut: its thickness)
+    "engage_nut_thin_d": 0.5,   # a thin nut (DIN 439, 0.5 d): a pivot's jam nut, not a strength joint
     "tool_reach_mm": 60.0,      # straight hex-key access out of every screw head
     "ball_link_deg": 25.0,      # ball-link swivel limit (goBILDA 2913: not published, inferred)
     "servo_travel_deg": 135.0,  # +/- from centre (goBILDA 2000 standard mode: 300 deg)
@@ -94,6 +95,16 @@ class Suite:
         self._pts: dict[str, np.ndarray] = {}
         self._trees: dict[str, cKDTree] = {}
         self.results: list[Check] = []
+        # coupled joint limits (droid.derive_couplings): poses outside them are not reachable
+        self.couplings = list(getattr(asm, "couplings", None) or [])
+        self._prof = {j.id: j.profile_joint for j in asm.joints if j.profile_joint}
+
+    def allowed(self, pose: dict) -> bool:
+        if not self.couplings:
+            return True
+        from .droid import coupling_allows
+
+        return coupling_allows(self.couplings, {self._prof.get(k, k): v for k, v in pose.items()})[0]
 
     # ------------------------------------------------------------------ helpers
     def pts(self, bid, spacing=1.2):
@@ -245,6 +256,9 @@ class Suite:
             d = float(f.spec["thread"].lstrip("M#").split("-")[0]) if f.spec["thread"].startswith("M") else 3.5
             into = m.params.get("into", "plastic")
             need = self.tol[f"engage_{into}_d"] * d
+            nf = next((x for x in self.asm.fasteners if x.id == m.b[0]), None)
+            if into == "nut" and nf is not None and nf.spec.get("thickness_mm"):
+                need = min(need, float(nf.spec["thickness_mm"]))  # a plain nut: all its threads
             got = m.params.get("engage_mm", 0.0)
             if got + 0.05 < need:
                 bad.append(((f.id, m.b[0]), f"{f.id} into {m.b[0]}: {got:.1f} mm engaged, needs {need:.1f} ({into})"))
@@ -540,7 +554,7 @@ class Suite:
                     out.append(("grid", {a.id: float(va), b.id: float(vb)}))
         for cid, pose in _clip_poses({j.profile_joint: j.id for j in joints.values() if j.profile_joint}):
             out.append((f"clip {cid}", pose))
-        return out
+        return [(src, p) for src, p in out if self.allowed(p)]
 
     def motion(self):
         poses = self.poses()
@@ -663,10 +677,12 @@ class Suite:
                 grid = [dict(zip(js, map(float, c))) for c in combos]
             else:
                 grid = [dict(zip(js, map(float, c))) for c in itertools.product(*axes)]
+            grid = [p for p in grid if self.allowed(p)] or grid[:1]
             spec = (js, tuple(len(ax) for ax in axes),
                     tuple((j, joints[j].limits, tuple(joints[j].pivot), tuple(joints[j].axis)) for j in js),
                     tuple((lk.id, lk.rod_length, lk.radius, tuple(lk.zero_dir), tuple(lk.ground_point))
-                          for lk in self.asm.linkages))
+                          for lk in self.asm.linkages),
+                    json.dumps(self.couplings, sort_keys=True), len(grid))
             keys = [("clr", self.scene.hash[a], self.scene.hash[b], spec) for a, b in pairs]
             D = np.full((len(pairs), len(grid)), np.inf)
             todo = []
@@ -726,6 +742,23 @@ class Suite:
                                   "pairs that touch through a mate are not gaps; a gap the motion does not change "
                                   "(parts turning about a shared axis) is left to the overlap test"])
 
+    def coupled(self):
+        """Show clips against the coupled joint limits (keyframes outside them would be clamped by the
+        performer's safety layer, or hit the body)."""
+        if not self.couplings:
+            return
+        from .droid import coupling_allows
+
+        bad = []
+        for cid, pose in _clip_poses({j.profile_joint: j.id for j in self.asm.joints if j.profile_joint}):
+            ok, why = coupling_allows(self.couplings, {self._prof.get(k, k): v for k, v in pose.items()})
+            if not ok:
+                bad.append(((cid,), f"clip {cid}: {why}"))
+        self.verdict("coupled_limits", "Show clips stay inside the coupled joint limits", bad,
+                     f"{len(self.couplings)} coupled limit(s) hold on every clip keyframe",
+                     assumptions=[f"{c['joint']} as a function of {c['depends_on']} ({', '.join(c['swept'])} swept); "
+                                  f"clearance {c['clearance_mm']} mm" for c in self.couplings])
+
     def _dist(self, a, ma, b, mb, far=25.0):
         if len(self.pts(a)) > len(self.pts(b)):
             a, ma, b, mb = b, mb, a, ma
@@ -767,7 +800,7 @@ class Suite:
         for name, fn in (("connected", self.connected), ("mates_hold", self.mates_hold),
                          ("fasteners_real", self.fasteners_real), ("inserts", self.inserts),
                          ("no_overlap", self.overlaps),
-                         ("motion", self.motion), ("printable", self.printable)):
+                         ("motion", self.motion), ("coupled", self.coupled), ("printable", self.printable)):
             t0 = time.perf_counter()
             n0 = len(self.results)
             fn()

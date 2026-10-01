@@ -68,7 +68,8 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
     """(one Assembly in the root frame, info) - see the module doc."""
     out = Assembly(id=root.id, name=root.name, description="whole droid (flattened for the suite)")
     out.links.append(Link("ground", "Ground", None))
-    info = {"assemblies": [], "no_mates": {}, "left_out": [], "interfaces": [], "superseded": []}
+    info = {"assemblies": [], "no_mates": {}, "left_out": [], "interfaces": [], "superseded": [],
+            "bom_by": {}, "have_by": {}, "bom_item": {}}
     ground = [None]
     seen_ids: set[str] = set()
     seen_links = {"ground"}
@@ -146,6 +147,16 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
                                   {f"{a.id}:{k}": v for k, v in (st.pose or {}).items()}, st.guide_page))
         for f in out.fasteners[len(out.fasteners) - len(a.fasteners):]:
             f.step = f"{a.id}:{f.step}" if f.step else f.step
+        for bl in a.bom:
+            if bl.category == "fastener":
+                info["bom_by"].setdefault(bl.key, {})[a.id] = info["bom_by"].get(bl.key, {}).get(a.id, 0) + bl.qty
+                info["bom_item"][bl.key] = bl.item
+        for f in a.fasteners:
+            info["have_by"].setdefault(f.key, {})[a.id] = info["have_by"].get(f.key, {}).get(a.id, 0) + 1
+        for st in a.steps:
+            for u in st.unplaced:
+                if u.get("count"):
+                    info["have_by"].setdefault(u["key"], {})[a.id] = info["have_by"].get(u["key"], {}).get(a.id, 0) + u["count"]
         for bl in a.bom:  # one line per key across the tree (quantities add)
             ex = next((x for x in out.bom if x.key == bl.key), None)
             if ex is None:
@@ -259,6 +270,21 @@ def explained_placement(info, flat) -> list[dict]:
                     "cause": "kit part against kit part, <= 0.4 mm: the kit export's own fit (its pieces are drawn to "
                              "touch; the STL tessellation and the kit's snug joints overlap a few tenths)",
                     "fix": "none in the model; on the print, the usual clean-up of a tight kit joint"})
+    ids = {p.id for p in flat.parts}
+    gears = [x for x in ("pan_pinion", "pan_sector", "lift_pinion", "lift_rack", "lower_pinion", "lower_sector",
+                         "top_pinion", "top_sector") if x in ids]
+    if gears:
+        out.append({"test": "clearance", "parts": gears,
+                    "cause": "a pinion and its sector/rack: the model turns the ring (or slides the rack) but not the "
+                             "pinion with it (a gear ratio, not a joint), so their teeth pass through each other in the "
+                             "sweep; at rest they are phased to mesh",
+                    "fix": "none on the parts (the mesh is checked at rest); gear-driven poses in the sweep are a "
+                           "model limit"})
+    if "neck_spring" in ids:
+        out.append({"test": "clearance", "parts": ["neck_spring", "neck_coupler", "ins_coupler_side", "set_coupler_tube"],
+                    "cause": "the cosmetic neck spring is rigid in the suite; on the droid it compresses as the head "
+                             "comes down (the manifest's stretch)",
+                    "fix": "none"})
     if morton:
         out.append({"test": "no_overlap", "parts": morton, "max_mm": 1.1,
                     "cause": "Sam Morton's 2020 posts run up to 1.1 mm into his own frame rings (his export: the post "
@@ -335,5 +361,144 @@ def overlap_requests(out_dir: Path | None = None) -> Path:
     for k, (it, who, req, fn) in enumerate(rows, 1):
         L.append(f"| {k} | {it['a']} x {it['b']} | {it['depth_mm']} | {it.get('volume_mm3')} | {who} | {req} | {fn} |")
     f = out_dir / "requests.md"
+    f.write_text("\n".join(L) + "\n")
+    return f
+
+
+# joint couplings the whole-droid sweep derives (the dependent joint's limits as a function of the
+# driving one, with the others in the chain swept): profile joint names
+COUPLED = [("throttle_shoulder", "throttle_elbow", ["throttle_wrist"]),
+           # the head low on its lift, nodding forward: the kit mouth reaches the top ring's collars
+           # (TR_N, rings round the neck: pan and the ring's own turn do not change the gap)
+           ("head_lift", "head_tilt", ["head_roll"])]
+
+
+def derive_couplings(suite, flat, clear: float = 1.0, step: float = 5.0) -> list[dict]:
+    """For each COUPLED (a, b, others): over a grid of a x b (others at their ends and zero), the
+    smallest gap between everything those joints move and everything they do not; for each value
+    of a, the contiguous range of b round its rest that keeps >= `clear`. A coupled limit surface
+    as a table [[a, b_min, b_max], ...], like Bret Benz's djr3x-v2 does in software. Cached by the
+    geometry and the joints."""
+    from .geom import _cache_key, cached
+    from .kinematics import link_matrices, solve_linkages
+
+    byp = {j.profile_joint: j for j in flat.joints if j.profile_joint}
+    out = []
+    for a_name, b_name, others in COUPLED:
+        if a_name not in byp or b_name not in byp:
+            continue
+        ja, jb = byp[a_name], byp[b_name]
+        jo = [byp[o] for o in others if o in byp]
+        chain = {ja.id, jb.id} | {j.id for j in jo}
+        # what the dependent joint moves, against what none of the chain moves (a limit of the driving
+        # joint alone is its own range, not a coupling); parts that stretch are not rigid here
+        stretch = {p.id for p in flat.parts if getattr(p, "stretch", None)}
+        moving = [k for k in suite.bodies if jb.id in suite.moving_joints(k) and k not in stretch]
+        still = [k for k in suite.bodies if not (suite.moving_joints(k) & chain) and k not in stretch]
+        va = sorted(set(np.round(np.append(np.arange(ja.limits[0], ja.limits[1] + 1e-9, step), [0.0, ja.limits[1]]), 3)))
+        vb = sorted(set(np.round(np.append(np.arange(jb.limits[0], jb.limits[1] + 1e-9, step), [0.0, jb.limits[1]]), 3)))
+        vo = [sorted({j.limits[0], 0.0, j.limits[1]}) for j in jo]
+        key = _cache_key("coupling-v3", a_name, b_name, [(j.id, tuple(j.limits), tuple(j.pivot), tuple(j.axis)) for j in [ja, jb, *jo]],
+                         sorted(suite.scene.hash[k] for k in moving), sorted(suite.scene.hash[k] for k in still), clear, step)
+        idx = {k: i for i, k in enumerate(suite.scene.ids)}
+
+        def grid():
+            import itertools
+
+            pairs = [(m, s) for m in moving for s in still]
+            # pairs already that close at rest (a joint's own bearing faces, the kit's snug pieces,
+            # a gear mesh) are not what the motion does: leave them to the overlap test
+            ms0 = link_matrices(flat, {})
+            sol0 = solve_linkages(flat, {})
+            mats0 = {x: suite.body_matrix(suite.bodies[x], ms0, sol0) for x in suite.bodies}
+            g0 = suite.scene.gaps(suite.scene.aabbs(mats0), np.array([idx[m] for m, _ in pairs]),
+                                  np.array([idx[s] for _, s in pairs]))
+            near0 = {pairs[t] for t in np.nonzero(g0 < clear + 0.5)[0]
+                     if suite.scene.distance(pairs[t][0], mats0[pairs[t][0]], pairs[t][1], mats0[pairs[t][1]]) < clear}
+            pairs = [p for p in pairs if p not in near0 and frozenset(p) not in suite.mated]
+            ia = np.array([idx[m] for m, _ in pairs])
+            ib = np.array([idx[s] for _, s in pairs])
+            D = np.zeros((len(va), len(vb)))
+            worst = {}
+            for i, a in enumerate(va):
+                for k, b in enumerate(vb):
+                    dmin, who = np.inf, None
+                    for oc in itertools.product(*vo) if vo else [()]:
+                        pose = {ja.id: float(a), jb.id: float(b), **{j.id: float(v) for j, v in zip(jo, oc)}}
+                        ms = link_matrices(flat, pose)
+                        sol = solve_linkages(flat, pose)
+                        mats = {x: suite.body_matrix(suite.bodies[x], ms, sol) for x in suite.bodies}
+                        gaps = suite.scene.gaps(suite.scene.aabbs(mats), ia, ib)
+                        for t in np.nonzero(gaps < clear + 3.0)[0]:
+                            m, s_ = pairs[t]
+                            d = suite.scene.distance(m, mats[m], s_, mats[s_])
+                            if d < dmin:
+                                dmin, who = d, (m, s_)
+                    D[i, k] = dmin
+                    worst[(i, k)] = who
+            return D, worst
+
+        D, worst = cached(key, grid)
+        rows = []
+        k0 = int(np.argmin(np.abs(np.asarray(vb))))
+        for i, a in enumerate(va):
+            ok = D[i] >= clear
+            if not ok.any():
+                rows.append([float(a), None, None])
+                continue
+            k = k0 if ok[k0] else int(np.argmin([abs(vb[x]) if ok[x] else 1e9 for x in range(len(vb))]))
+            lo = hi = k
+            while lo - 1 >= 0 and ok[lo - 1]:
+                lo -= 1
+            while hi + 1 < len(vb) and ok[hi + 1]:
+                hi += 1
+            rows.append([float(a), float(vb[lo]), float(vb[hi])])
+        hits = sorted({w for (i, k), w in worst.items() if w and D[i, k] < clear})
+        out.append({"joint": b_name, "depends_on": a_name, "swept": others, "clearance_mm": clear, "step_deg": step,
+                    "table": rows, "limits": [jb.limits[0], jb.limits[1]],
+                    "because": sorted({f"{m} / {s}" for m, s in hits})[:12],
+                    "note": f"{b_name}'s range as a function of {a_name} ({', '.join(others)} swept to its ends): outside "
+                            f"it the arm comes within {clear} mm of the body"})
+    return out
+
+
+def coupling_allows(couplings: list[dict], pose_by_profile: dict) -> tuple[bool, str]:
+    """(inside every coupling, why not) for a pose keyed by profile joint names."""
+    for c in couplings:
+        a, b = pose_by_profile.get(c["depends_on"]), pose_by_profile.get(c["joint"])
+        if a is None or b is None:
+            continue
+        rows = c["table"]
+        xs = [r[0] for r in rows]
+        k = int(np.clip(np.searchsorted(xs, a), 1, len(xs) - 1))
+        r0, r1 = rows[k - 1], rows[k]
+        if r0[1] is None or r1[1] is None:  # inside a span where no value of the joint clears
+            return False, f"{c['joint']}: no allowed range at {c['depends_on']} {a:+.1f}"
+        w = 0.0 if xs[k] == xs[k - 1] else min(1.0, max(0.0, (a - xs[k - 1]) / (xs[k] - xs[k - 1])))
+        lo = r0[1] + (r1[1] - r0[1]) * w
+        hi = r0[2] + (r1[2] - r0[2]) * w
+        if not (lo - 1e-6 <= b <= hi + 1e-6):
+            return False, f"{c['joint']} {b:+.1f} outside {lo:+.1f}..{hi:+.1f} at {c['depends_on']} {a:+.1f}"
+    return True, ""
+
+
+def bom_discrepancies(info, out: Path) -> Path:
+    """Every fastener key whose BOM quantity (the guide's lists, per sub-assembly) differs from what
+    the model places or lists as unplaced, per sub-assembly: out/bom_check.md."""
+    keys = sorted(set(info["bom_by"]) | set(info["have_by"]))
+    L = ["# BOM vs model, per part number", "",
+         "BOM = the kit guide's parts lists (and hunter_head's BOM), per sub-assembly; model = fasteners placed + "
+         "listed as unplaced in the steps, per sub-assembly. Only the keys that differ.", "",
+         "| key | item | BOM total | model total | BOM by sub-assembly | model by sub-assembly |", "|---|---|---|---|---|---|"]
+    n = 0
+    for k in keys:
+        b, h = info["bom_by"].get(k, {}), info["have_by"].get(k, {})
+        if abs(sum(b.values()) - sum(h.values())) < 1e-6:
+            continue
+        n += 1
+        fmt = lambda d: ", ".join(f"{a} {q:g}" for a, q in sorted(d.items())) or "-"
+        L.append(f"| {k} | {info['bom_item'].get(k, '')} | {sum(b.values()):g} | {sum(h.values()):g} | {fmt(b)} | {fmt(h)} |")
+    L.insert(3, f"{n} keys differ.")
+    f = out / "bom_check.md"
     f.write_text("\n".join(L) + "\n")
     return f

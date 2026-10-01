@@ -328,6 +328,10 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
         "drives": drives,
         "links": links,
         "linkages": {g: lk_body[g] for g in lk_body},
+        # coupled joint limits from the whole-droid suite (workbench/droid.py derive_couplings): the
+        # dependent joint's [min, max] as a function of the driving one, profile joint names; for the
+        # performer's safety layer to enforce
+        "couplings": tree.manifest.get("root", {}).get("couplings", []),
         "total_kg": _rd(sum(x["kg"] for x in links), 3),
     }
     return {"profile": gen, "changes": changes, "tree": tree}

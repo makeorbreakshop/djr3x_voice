@@ -287,6 +287,10 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     t3 = time.time()
     sigs = _Sigs(out)
     node = assembly_json(asm, out, "", export, sigs=sigs)
+    try:  # coupled joint limits the whole-droid suite derived (python -m workbench test <root>)
+        node["couplings"] = json.loads((out / "couplings.json").read_text())["couplings"]
+    except Exception:
+        pass
     sigs.save()
     log(f"files {time.time() - t3:.1f} s: {sigs.written} written, {sigs.skipped} unchanged")
     manifest = {"schema": SCHEMA, "version": VERSION,
@@ -341,6 +345,17 @@ def suite_for(mod, asm, full: bool = False, whole: bool = False, out: Path | Non
         explained += explained_placement(info, flat)
         tol = {**(getattr(mod, "TOLERANCES", None) or {}), "max_grid_poses": 3000}
         s = Suite(flat, tol=tol, explained=explained, full=full)
+        from .droid import derive_couplings
+
+        t1 = time.time()
+        flat.couplings = s.couplings = derive_couplings(s, flat)
+        info["couplings_s"] = round(time.time() - t1, 1)
+        if out is not None:
+            out.mkdir(parents=True, exist_ok=True)
+            _atomic_json({"couplings": flat.couplings}, out / "couplings.json")
+            from .droid import bom_discrepancies
+
+            bom_discrepancies(info, out)
         res = s.run()
         if out is not None:
             write_interference(s, out)
@@ -351,7 +366,9 @@ def suite_for(mod, asm, full: bool = False, whole: bool = False, out: Path | Non
                             f"{len(flat.joints)} joints, {len(flat.mates)} mates ({sum(m.type == 'placed' for m in flat.mates)} placement-only); "
                             f"superseded kit parts left out: {len(info['superseded'])}; left out (unselected variants): "
                             f"{', '.join(info['left_out']) or 'none'}; interface: {'; '.join(info['interfaces']) or 'none'}; "
-                            f"flatten {time.time() - t0:.1f} s (child builds included)",
+                            f"flatten {time.time() - t0:.1f} s (child builds included); coupled limits: "
+                            + ("; ".join(f"{c['joint']}({c['depends_on']})" for c in flat.couplings) or "none")
+                            + f" in {info.get('couplings_s', 0)} s",
                             parts=[], assumptions=[f"{a['path']}: {a['parts']} parts, {a['mates']} mates"
                                                    for a in info["assemblies"]]))
         return res

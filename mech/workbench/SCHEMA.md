@@ -80,6 +80,19 @@ A child can be inlined, or referenced so two modules can be built separately:
   } }
 ```
 
+A child mounted as a variant option carries `mount.variant = {group, id, default, reference?}`;
+`reference: true` marks an option kept for comparison only ("reference, not engineered"): the panel
+shows it, the whole-droid suite leaves it out.
+
+The root may carry `couplings` (from `python -m workbench test <root>`, workbench/droid.py): coupled
+joint limits, the dependent joint's range as a table over the driving one, profile joint names:
+
+```jsonc
+{ "joint": "throttle_elbow", "depends_on": "throttle_shoulder", "swept": ["throttle_wrist"],
+  "clearance_mm": 1.0, "table": [[-50, -10, 45], [10, -10, 35], [50, -10, -10]],  // [a, b_min, b_max]; nulls: no b clears
+  "because": ["ta_fa_1 / b_m_d_2"] }
+```
+
 ## Link
 
 A rigid body. Every part rides on exactly one link.
