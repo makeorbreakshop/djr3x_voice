@@ -1,5 +1,8 @@
-//! Inline performance tags in Claude's replies: `{cue:<id>}` / `{clip:<id>}` (port of
-//! `cantina_os/show/tags.py`).
+//! Inline performance tags in Claude's replies (port of `cantina_os/show/tags.py`): exact
+//! moves `{cue:<id>}` / `{clip:<id>}`, and since 2026-10-01 intentions, as Threepio speaks
+//! them (`threepio/scripts/voice-cues.ts`): `{mood:<id>}` `{gesture:<id>}` `{beat:<id>}`
+//! `{look:<id>}` - the performer plays a varied pick from the intention's pool. Mood, gesture
+//! and beat share one namespace: a tag in the wrong one of the three still resolves.
 //!
 //! - [`TagParser`] strips tags from the stream chunk by chunk (an unclosed `{` is held across
 //!   chunks), so nothing downstream ever sees tag text; at most two tags per reply.
@@ -16,13 +19,16 @@ use regex::Regex;
 
 /// A held-back `{` longer than this without a `}` is plain text, not a tag.
 pub const MAX_TAG_LEN: usize = 64;
-pub const MAX_TAGS_PER_REPLY: usize = 2;
+pub const MAX_TAGS_PER_REPLY: usize = 3;
+/// Intention kinds: fired as `PerfCommand::Intend` (the scheduler hands `intend:<id>`).
+pub const INTENT_KINDS: [&str; 4] = ["mood", "gesture", "beat", "look"];
+const SHARED_KINDS: [&str; 3] = ["mood", "gesture", "beat"];
 /// `SHOW_TAG_CHARS_PER_SEC` default in `claude_service.py` (the docs' 19 is stale).
 pub const DEFAULT_CHARS_PER_SEC: f64 = 13.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
-    /// `cue` | `clip`
+    /// `cue` | `clip` | `mood` | `gesture` | `beat` | `look`
     pub kind: String,
     pub id: String,
     /// Character offset into the clean text.
@@ -31,12 +37,12 @@ pub struct Tag {
 
 fn tag_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^\{\s*(cue|clip)\s*:\s*([a-z][a-z0-9_]*)\s*\}$").unwrap())
+    R.get_or_init(|| Regex::new(r"^\{\s*(cue|clip|mood|gesture|beat|look)\s*:\s*([a-z][a-z0-9_]*)\s*\}$").unwrap())
 }
 
 fn partial_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"^\{\s*(c|cu|cue|cl|cli|clip)?\s*(:\s*[a-z0-9_]*)?\s*$").unwrap())
+    R.get_or_init(|| Regex::new(r"^\{\s*(c|cu|cue|cl|cli|clip|m|mo|moo|mood|g|ge|ges|gest|gestu|gestur|gesture|b|be|bea|beat|l|lo|loo|look)?\s*(:\s*[a-z0-9_]*)?\s*$").unwrap())
 }
 
 /// Incremental, chunking-invariant tag stripper. `valid` = the `(kind, id)` pairs that may be
@@ -129,8 +135,15 @@ impl TagParser {
         match tag_re().captures(&held) {
             None => self.dropped.push(held),
             Some(c) => {
-                let (kind, id) = (c[1].to_string(), c[2].to_string());
-                let known = self.valid.as_ref().is_none_or(|v| v.contains(&(kind.clone(), id.clone())));
+                let (mut kind, id) = (c[1].to_string(), c[2].to_string());
+                let has = |k: &str| self.valid.as_ref().is_none_or(|v| v.contains(&(k.to_string(), id.clone())));
+                let mut known = has(&kind);
+                if !known && SHARED_KINDS.contains(&kind.as_str()) {
+                    if let Some(k) = SHARED_KINDS.iter().find(|k| has(k)) {
+                        kind = (*k).to_string();
+                        known = true;
+                    }
+                }
                 if !known || self.tags.len() >= MAX_TAGS_PER_REPLY {
                     self.dropped.push(held);
                 } else {
@@ -265,7 +278,8 @@ impl TagScheduler {
                     active.remove(&cid);
                 }
             }
-            (me.perform)(item.tag.id.clone(), Some(cid));
+            let id = if INTENT_KINDS.contains(&item.tag.kind.as_str()) { format!("intend:{}", item.tag.id) } else { item.tag.id.clone() };
+            (me.perform)(id, Some(cid));
         });
     }
 }
@@ -273,6 +287,21 @@ impl TagScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Intention tags (Threepio's vocabulary): kept with their kind, mood/gesture/beat share a
+    /// namespace, the listening backchannel is not taggable, at most three per reply.
+    #[test]
+    fn intention_tags_resolve_and_share_a_namespace() {
+        let valid: HashSet<(String, String)> = [("mood", "amused"), ("gesture", "nod"), ("beat", "drop"), ("look", "decks"), ("cue", "yes")]
+            .iter()
+            .map(|(k, i)| (k.to_string(), i.to_string()))
+            .collect();
+        let (clean, tags, dropped) = extract_tags("{mood:amused} Ha! {gesture:drop} wait for it {look:decks} {mood:listen_perk} {cue:yes} ok", Some(Arc::new(valid)));
+        assert_eq!(clean, "Ha! wait for it ok");
+        let got: Vec<(&str, &str)> = tags.iter().map(|t| (t.kind.as_str(), t.id.as_str())).collect();
+        assert_eq!(got, vec![("mood", "amused"), ("beat", "drop"), ("look", "decks")], "a gesture tag naming a beat resolves to the beat");
+        assert_eq!(dropped.len(), 2, "unknown and over the cap: {dropped:?}");
+    }
 
     fn valid(pairs: &[(&str, &str)]) -> Option<Arc<HashSet<(String, String)>>> {
         Some(Arc::new(pairs.iter().map(|(k, i)| (k.to_string(), i.to_string())).collect()))
@@ -284,8 +313,8 @@ mod tests {
         let v = valid(&[("clip", "beat_bop"), ("cue", "excited"), ("clip", "nod")]);
         let (clean, tags, dropped) = extract_tags(text, v.clone());
         assert_eq!(clean, "Oh YEAH, spinning now !");
-        assert_eq!(tags.iter().map(|t| (t.id.as_str(), t.offset)).collect::<Vec<_>>(), [("beat_bop", 0), ("excited", 9)]);
-        assert_eq!(dropped.len(), 3, "unknown + two over the limit: {dropped:?}");
+        assert_eq!(tags.iter().map(|t| (t.id.as_str(), t.offset)).collect::<Vec<_>>(), [("beat_bop", 0), ("excited", 9), ("nod", 22)]);
+        assert_eq!(dropped.len(), 2, "unknown + one over the limit (three per reply): {dropped:?}");
         // any chunking gives the same text and offsets
         for size in 1..8 {
             let mut p = TagParser::new(v.clone());

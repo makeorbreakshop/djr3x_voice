@@ -92,6 +92,10 @@ impl JevResult {
     pub fn noul(&self, key: &str, default: f64) -> f64 {
         self.answers.get(key).and_then(|a| a.noul).unwrap_or(default)
     }
+    /// A choice question's label and its confidence (`(None, 0.0)` when absent).
+    pub fn choice(&self, key: &str) -> (Option<&str>, f64) {
+        self.choice_of(key)
+    }
     fn choice_of(&self, key: &str) -> (Option<&str>, f64) {
         self.answers.get(key).map_or((None, 0.0), |a| (a.choice.as_deref(), a.confidence.unwrap_or(0.0)))
     }

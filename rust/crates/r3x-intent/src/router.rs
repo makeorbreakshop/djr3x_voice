@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::catalogue::{build_look_questions, build_questions, build_state};
+use crate::catalogue::{build_look_questions, build_questions, build_state, reaction_intention, reaction_question};
 use crate::client::{JevClient, DEFAULT_TIMEOUT};
 use crate::decide::{decide, JevResult, RouterDecision, DEFAULT_COMMAND_THRESHOLD, DEFAULT_THRESHOLD};
 
@@ -34,6 +34,9 @@ pub struct RouterConfig {
     pub outcome_wait: Duration,
     /// `JEV_LOOK_THRESHOLD` (0.6): the `look` noul at or above this attaches the camera frame.
     pub look_threshold: f64,
+    /// `JEV_REACT` (true): the speculative requests also ask how a listener would react, and a
+    /// confident answer fires a listening intention (no extra request).
+    pub react: bool,
 }
 
 impl Default for RouterConfig {
@@ -48,6 +51,7 @@ impl Default for RouterConfig {
             verdict_wait: Duration::from_millis(1200),
             outcome_wait: Duration::from_millis(1200),
             look_threshold: 0.6,
+            react: true,
         }
     }
 }
@@ -70,6 +74,7 @@ impl RouterConfig {
             verdict_wait: secs("FAST_ROUTER_WAIT_S", d.verdict_wait),
             outcome_wait: secs("FAST_ROUTER_OUTCOME_WAIT_S", d.outcome_wait),
             look_threshold: f("JEV_LOOK_THRESHOLD", d.look_threshold),
+            react: b("JEV_REACT", d.react),
         }
     }
 
@@ -89,7 +94,22 @@ struct Spec {
     cache: VecDeque<(String, JevResult)>,
     last_at: Option<Instant>,
     last_text: String,
+    /// When this turn last reacted (a reaction at most every [`REACT_EVERY`]).
+    reacted_at: Option<Instant>,
 }
+
+/// A listener reaction, from a speculative answer: the listening intention to play.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reaction {
+    pub intention: &'static str,
+    pub confidence: f64,
+    pub text: String,
+}
+
+/// A reaction label below this confidence is ignored.
+pub const REACT_MIN: f64 = 0.6;
+/// At most one reaction per this, within a turn.
+pub const REACT_EVERY: Duration = Duration::from_millis(2500);
 
 #[derive(Debug, Clone)]
 pub struct TurnOutcome {
@@ -106,13 +126,34 @@ pub struct IntentRouter {
     client: JevClient,
     cfg: RouterConfig,
     questions: Value,
+    /// `questions` plus the listener's reaction: what speculative requests ask when `react`.
+    spec_questions: Value,
     look_questions: Value,
     spec: Mutex<Spec>,
+    reactions: tokio::sync::broadcast::Sender<Reaction>,
 }
 
 impl IntentRouter {
     pub fn new(client: JevClient, cfg: RouterConfig) -> Arc<Self> {
-        Arc::new(Self { client, cfg, questions: build_questions(), look_questions: build_look_questions(), spec: Mutex::default() })
+        let questions = build_questions();
+        let mut spec_questions = questions.clone();
+        if cfg.react {
+            spec_questions["reaction"] = reaction_question();
+        }
+        Arc::new(Self {
+            client,
+            cfg,
+            questions,
+            spec_questions,
+            look_questions: build_look_questions(),
+            spec: Mutex::default(),
+            reactions: tokio::sync::broadcast::channel(16).0,
+        })
+    }
+
+    /// Listener reactions while the guest talks (`react`), as they are decided.
+    pub fn subscribe_reactions(&self) -> tokio::sync::broadcast::Receiver<Reaction> {
+        self.reactions.subscribe()
     }
 
     pub fn from_env() -> Arc<Self> {
@@ -143,6 +184,7 @@ impl IntentRouter {
         s.turn += 1;
         s.cache.clear();
         s.last_text.clear();
+        s.reacted_at = None;
     }
 
     /// A partial transcript. `is_final` (a finalised STT segment) skips the 150 ms debounce;
@@ -172,10 +214,19 @@ impl IntentRouter {
         };
         let me = self.clone();
         tokio::spawn(async move {
-            let Some(result) = me.client.classify(&build_state(&text), &me.questions).await else { return };
+            let Some(result) = me.client.classify(&build_state(&text), &me.spec_questions).await else { return };
             let mut s = me.spec();
             if s.turn != turn {
                 return; // the turn moved on
+            }
+            if me.cfg.react {
+                let (label, conf) = result.choice("reaction");
+                let due = s.reacted_at.is_none_or(|t| t.elapsed() >= REACT_EVERY);
+                if let (Some(intention), true, true) = (label.and_then(reaction_intention), conf >= REACT_MIN, due) {
+                    s.reacted_at = Some(Instant::now());
+                    tracing::info!(intention, confidence = format!("{conf:.2}"), "Jev listener reaction for '{}'", text.chars().take(40).collect::<String>());
+                    let _ = me.reactions.send(Reaction { intention, confidence: conf, text: text.clone() });
+                }
             }
             if s.cache.len() >= MAX_SPECULATIVE {
                 s.cache.pop_front();

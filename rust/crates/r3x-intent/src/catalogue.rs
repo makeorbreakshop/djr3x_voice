@@ -144,6 +144,31 @@ things not in front of the droid (\"have you seen the new movie\"), small talk, 
     Value::Object(q)
 }
 
+/// The listener's reaction to a partial transcript (2026-10-01): asked only on the speculative
+/// requests the router already sends while the guest talks, so it costs no extra call. Each
+/// label (but `none`) maps to a listening intention in `show/intentions.json` (see
+/// [`reaction_intention`]).
+pub fn reaction_question() -> Value {
+    choice("While the speaker is still talking, how would an attentive listener react to what they have said so far?", &[
+        ("none", "Nothing to react to yet: a plain statement, a request, a greeting, small talk, or too little said so far."),
+        ("funny", "A joke, something silly, playful or absurd: a listener would chuckle."),
+        ("sad", "Bad news, something sad or worrying, they feel unwell or are having a hard time: a listener would look concerned."),
+        ("surprising", "Something surprising, impressive or exciting: big news, a wild story, an achievement: a listener would go \"whoa\"."),
+        ("question", "They are asking the droid a question: a listener would look curious and wait for the rest."),
+    ])
+}
+
+/// The listening intention for a reaction label (`None` for `none` or an unknown label).
+pub fn reaction_intention(label: &str) -> Option<&'static str> {
+    match label {
+        "funny" => Some("listen_amused"),
+        "sad" => Some("listen_concern"),
+        "surprising" => Some("listen_wow"),
+        "question" => Some("listen_curious"),
+        _ => None,
+    }
+}
+
 /// The identity line - load-bearing ("put on some cantina tunes" is general_chat without it).
 /// No conversation history, deliberately: it made the router eager.
 pub const ASSISTANT_IDENTITY: &str = "You are DJ R3X, a Star Wars droid DJ in a cantina. You play music, run a DJ mode where \

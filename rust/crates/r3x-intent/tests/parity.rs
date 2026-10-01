@@ -72,7 +72,8 @@ fn synthetic_answers_match_python() {
 #[tokio::test]
 async fn speculation_hits_and_clears_per_turn() {
     let fx = Arc::new(JevFixtures::load(repo().join("fixtures/smoke-voice"), 0.0).unwrap());
-    let cfg = RouterConfig { api_key: "replay".into(), ..Default::default() };
+    // The recorded fixtures predate the listener-reaction question: speculate without it.
+    let cfg = RouterConfig { api_key: "replay".into(), react: false, ..Default::default() };
     let router = IntentRouter::new(JevClient::replay(fx), cfg);
     assert!(router.active());
     router.turn_started();
@@ -106,4 +107,50 @@ async fn live_jev_classifies_a_command() {
     eprintln!("jev {} in {:.0} ms -> {:?} ({})", r.model, r.latency_ms, d.intent, d.reason);
     assert_eq!(r.model, JEV_MODEL);
     assert_eq!(d.intent.as_deref(), Some("stop_music"));
+}
+
+/// While the guest talks, the speculative request also asks how a listener would react; a
+/// confident answer fires its listening intention, at most once per REACT_EVERY, never for
+/// `none` (2026-10-01: Jev reactions at no extra request).
+#[tokio::test]
+async fn a_speculative_answer_fires_a_listener_reaction() {
+    use r3x_intent::catalogue::{build_questions, build_state, reaction_question};
+    use r3x_intent::router::Reaction;
+    let dir = std::env::temp_dir().join(format!("r3x-jev-react-{}-{}", std::process::id(), line!()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut q = build_questions();
+    q["reaction"] = reaction_question();
+    let rec = |text: &str, label: &str, conf: f64| {
+        let key = JevFixtures::key_for("jev-1.13.0", &build_state(text), &q);
+        format!(
+            r#"{{"key":"{key}","status":200,"body":{{"model":"jev-1.13.0","answers":{{"intent":{{"type":"choice","choice":"general_chat","confidence":0.9}},"reaction":{{"type":"choice","choice":"{label}","confidence":{conf}}}}}}}}}"#
+        )
+    };
+    let lines = [
+        rec("my dog ate my homework again", "funny", 0.9),
+        rec("my grandma is in the hospital", "sad", 0.8),
+        rec("I went to the shop today", "none", 0.95),
+        rec("guess what I won the lottery", "surprising", 0.5),
+    ];
+    std::fs::write(dir.join("jev.jsonl"), lines.join("\n")).unwrap();
+    let fx = Arc::new(JevFixtures::load(&dir, 0.0).unwrap());
+    let router = IntentRouter::new(JevClient::replay(fx), RouterConfig { api_key: "replay".into(), ..Default::default() });
+    let mut rx = router.subscribe_reactions();
+    router.turn_started();
+    router.partial("my dog ate my homework again", true);
+    let r: Reaction = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.expect("a reaction").unwrap();
+    assert_eq!(r.intention, "listen_amused");
+    // Within REACT_EVERY: the sad one is held back.
+    router.partial("my grandma is in the hospital", true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(rx.try_recv().is_err(), "one reaction per REACT_EVERY");
+    // A new turn resets it; `none` and an unsure answer never react.
+    router.turn_started();
+    router.partial("I went to the shop today", true);
+    router.partial("guess what I won the lottery", true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(rx.try_recv().is_err(), "none and low confidence: no reaction");
+    router.partial("my grandma is in the hospital", true);
+    let r = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.expect("a reaction").unwrap();
+    assert_eq!(r.intention, "listen_concern");
 }

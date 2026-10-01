@@ -269,7 +269,10 @@ impl Brain {
             Arc::new(move |id, _turn| {
                 let bus = perform_bus.clone();
                 tokio::spawn(async move {
-                    let cmd = Command::Perf(PerfCommand::Play { id: id.clone(), intensity: 1.0, speed: 1.0, layer: None });
+                    let cmd = match id.strip_prefix("intend:") {
+                        Some(i) => Command::Perf(PerfCommand::Intend { id: i.to_string(), intensity: 1.0 }),
+                        None => Command::Perf(PerfCommand::Play { id: id.clone(), intensity: 1.0, speed: 1.0, layer: None }),
+                    };
                     let ack = bus.command(tag_source, None, cmd).await;
                     if !ack.is_accepted() {
                         tracing::info!(id, ?ack, "show tag not performed");
@@ -318,6 +321,7 @@ impl Brain {
             // Subscribed here, not in the task: nothing published right after spawn is missed.
             tokio::spawn(brain.clone().event_loop([bus.subscribe(Domain::Conversation), bus.subscribe(Domain::Music), bus.subscribe(Domain::Ops)])),
             tokio::spawn(brain.clone().warmup_loop()),
+            tokio::spawn(brain.clone().reaction_loop()),
             tokio::spawn(brain.clone().dj_loop()),
             tokio::spawn(brain.clone().dj_step_loop()),
             // The music ducks while the guest talks (and until their reply takes over).
@@ -523,6 +527,25 @@ impl Brain {
     }
 
     /// Pre-warm the Claude connection when engagement becomes INTERACTIVE (30 s cooldown).
+    /// Jev's listener reactions (speculative answers while the guest talks): each plays its
+    /// listening intention, from Jev's tier, only while still listening.
+    async fn reaction_loop(self) {
+        let mut rx = self.inner.router.subscribe_reactions();
+        loop {
+            let r = match rx.recv().await {
+                Ok(r) => r,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return,
+            };
+            let conv = self.inner.bus.get::<r3x_contracts::ConversationState>();
+            if conv.phase != r3x_contracts::ConversationPhase::Listening {
+                continue;
+            }
+            let cmd = Command::Perf(r3x_contracts::PerfCommand::Intend { id: r.intention.into(), intensity: r.confidence.clamp(0.6, 1.0) });
+            let _ = self.inner.bus.command(Source::Jev, conv.conversation_id.clone(), cmd).await;
+        }
+    }
+
     async fn warmup_loop(self) {
         let mut eng = self.inner.bus.watch::<EngagementState>();
         loop {
