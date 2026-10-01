@@ -64,9 +64,12 @@ PARAMS = {
     "servo_centre_us": 1500,
     "printed_wall_mm": 0.8,       # mass model: 2 x 0.4 mm perimeters on every face
     "neck_tube_bore": 26.0,       # the coupler's bore: 26 on Anderson's neck tube (the droid's default); Hunter's own neck is 32
-    "plate_insert_depth": 8.0,    # servo insert holes: 6 mm insert + 2 mm, so an M4 x 10 clears the drill point
+    "plate_insert_depth": 6.0,    # servo insert holes as Hunter drew them (stock, Brandon 2026-09-30); the plate's
+                                  # M3-insert change (parametric agent) brings the walls and the tunnel clearance
     "coupler_top_t": 10.0,        # the coupler's hub plate: 10 (was 5) so the hub screws' 6 mm inserts fit and M4 x 20s
                                   # engage the whole insert and stop 1 mm short of the tube (fastening rule)
+    "coupler_hub_hole": "heat_set",  # decided: through-bolts with nuts ("nut_trap"), which parts/head/neck_coupler
+                                     # refuses today ("no room for nut traps"): inserts until it takes them
     "visor_channel_mm": 1.5,      # clearance channel in the shells along the kit visor's sweep (0 = none)
     "printed_infill": 0.15,
 }
@@ -104,25 +107,17 @@ EXPLAINED = [
               "look wins)",
      "fix": "trim Hunter's shell where each kit part lands (the overlap report gives the depth and place), or "
             "glue the kit part on its surface; nothing moves"},
-    {"test": "inserts", "parts": ["mount_plate", "ins_servo_*"],
-     "cause": "the plate's servo bosses leave 1.0 mm of plastic round four of the 6 mm insert holes (sins1/2/7/8); "
-              "the fastening rule wants max(1.5, 0.5 x 6) = 3 mm",
-     "fix": "parametric plate: grow those bosses (cut_hole grow_boss) to 3 mm round the holes"},
     {"test": "inserts", "parts": ["neck_coupler", "ins_coupler_*"],
      "cause": "on the coupler, goBILDA's 16 mm hub pattern puts each 6 mm insert 0.8 mm from the 15 mm centre relief "
               "(the sonic hub's boss), and the side insert 1.5 mm from an edge: 3 mm is not there",
      "fix": "M3-size pattern is not an option (the hub is M4): keep the inserts and accept 0.8 mm (PLA at 100 % "
             "infill there), or through-bolts with nuts under the hub plate if the tube's bore leaves room - Brandon"},
-    {"test": "no_overlap", "parts": ["hex_shaft", "pin_tilt_*", "nut_tilt_*"],
-     "cause": "the tilt pivots as through-bolts with lock nuts (the decision for pivots): inside the cross there are "
-              "2.3 mm between the wall and the hex post's corners, so a 3.2 mm lock nut runs 0.9 mm into the post and "
-              "the bolt's tip 1.3 mm",
-     "fix": "a thin M4 nut (DIN 439, 2.2 mm, Loctite) and the bolt cut flush with it, or cross walls thick enough "
-            "for inserts (parametric cross); the nut sits on the tilt axis, so it only needs to clear the post"},
-    {"test": "no_overlap", "parts": ["servo_l", "servo_r", "scr_servo_*"],
-     "cause": "the M4 low heads (DIN 7984) sit 0.5-0.7 mm into the goBILDA servo STEP beside its flange holes (socket "
-              "heads went 0.9-1.0 mm in); the plate's inserts are on the flange holes within 0.05 mm",
-     "fix": "a 0.8 mm washer under each head (lifts it clear of the case), then check on the real servo"},
+    {"test": "inserts", "parts": ["mount_plate", "ins_servo_1", "ins_servo_2", "ins_servo_7", "ins_servo_8"],
+     "cause": "the four outer-post servo inserts (Ruthex M3 x 5.7, OD 4.6) have 2.0 mm of plastic to the servo pocket: "
+              "above the 1.5 mm floor, short of the rule's 0.5 x OD = 2.3 mm, and no M3 insert can reach 2.3 because the "
+              "servo case is 4.0 mm from each hole centre (the servo's flange hole spacing fixes it)",
+     "fix": "none: geometry-limited by the servo flange spacing (2.0 >= the 1.5 mm floor). The 1.30 mm of plastic "
+            "over the cable tunnel under the outer bosses is accepted too"},
     {"test": "mates_hold", "parts": ["h_hp_1", "side_left", "side_right"],
      "cause": "the kit headband (H_HP_1) stands 0.5 mm off Hunter's side piece where it lands (the kit drew it on the "
               "kit's own head); the glue rule wants <= 0.5",
@@ -361,7 +356,7 @@ def build() -> Assembly:
 
     step_coupler = step_part("RX_Neck_Coupler_V1")
     coupler, csrc, cfeat = remodel("neck_coupler", M_STEP, "neck_coupler", bore_d=PARAMS["neck_tube_bore"],
-                                    pin_hole="heat_set", hub_hole="heat_set", top_t=PARAMS["coupler_top_t"])
+                                    pin_hole="heat_set", hub_hole=PARAMS["coupler_hub_hole"], top_t=PARAMS["coupler_top_t"])
     csrc["placement"] = "step (the STEP's own coupler instance)"
     csrc["vs_step_bounds_mm"] = round(float(np.abs(coupler.bounds - step_coupler.bounds).max()), 3)
     m, n = printed_mass(coupler)

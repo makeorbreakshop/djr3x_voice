@@ -125,7 +125,7 @@ class Hw:
         if kind_into == "insert" and "depth" in tf:
             avail = max(avail or 0.0, tf["depth"])  # the blind hole under the insert
         grip = float((np.asarray(tf["p"]) - head_at) @ d)
-        need = {"insert": 1.5, "plastic": 2.0, "metal": 1.0, "nut": 1.05}[kind_into] * _nom(thread)
+        need = {"insert": 1.5, "plastic": 2.0, "metal": 1.0, "nut": 1.05, "nut_thin": 0.5}[kind_into] * _nom(thread)
         L = length or screw_len(grip, need, avail)
         if L is None:
             fits = [x for x in STD_LEN if avail is None or x <= grip + avail + 1e-6]
@@ -148,14 +148,28 @@ class Hw:
                   hole_depth_mm=avail)
         return f
 
-    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None, reason="clamp"):
-        """A lock nut; `reason` is why a nut and not an insert (fastening rule): clamp | pivot | captive."""
-        spec = {"type": "lock_nut", "thread": "M4", "reason": reason}
-        r = spec_part("nut", spec)
+    def nut(self, fid, at, d, pid, step, link, linkage=None, role=None, reason="clamp", kind="lock_nut"):
+        """A nut: `kind` lock_nut (nylon ring), nut (ISO 4032) or thin_nut (DIN 439, 2.2 mm); `reason` is
+        why a nut and not an insert (fastening rule): clamp | pivot | captive."""
+        spec = {"type": kind if kind != "thin_nut" else "nut", "thread": "M4", "reason": reason,
+                "thickness_mm": NUT_T["M4"] if kind == "nut" else THIN_NUT_T if kind == "thin_nut" else 5.0}
+        if kind == "thin_nut":
+            spec["standard"] = "DIN 439"
+            import manifold3d as mf
+
+            hexa = mf.Manifold.cylinder(THIN_NUT_T, 7.0 / math.sqrt(3), 7.0 / math.sqrt(3), 6)
+            bore = mf.Manifold.cylinder(THIN_NUT_T + 1, 1.7, 1.7, 32).translate((0, 0, -0.5))
+            mm = (hexa - bore).to_mesh()
+            mesh = trimesh.Trimesh(np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts))
+            cad = "parametric"
+        else:
+            r = spec_part("nut", {"type": kind, "thread": "M4"})
+            mesh, cad = r.mesh, r.status
         d = unit(d)
         feats = {"thread": axis(at, d, 2.0), "face": plane(at, -d)}
-        self.fast.append(Fastener(fid, spec, "lock_nut-M4", [pid], link, step, frame_on_axis(at, d), mesh=r.mesh,
-                                  cad=r.status, features=feats, linkage=linkage, role=role))
+        key = {"lock_nut": "lock_nut-M4", "nut": "nut-M4", "thin_nut": "thin_nut-M4"}[kind]
+        self.fast.append(Fastener(fid, spec, key, [pid], link, step, frame_on_axis(at, d), mesh=mesh,
+                                  cad=cad, features=feats, linkage=linkage, role=role))
         return fid
 
     def washer(self, fid, at, d, pid, hole, step, link, linkage=None, role=None, spec=None):
@@ -396,10 +410,11 @@ def add_hardware(asm, fit, visor):
                      (f.id, "thread", "insert", 5.7), "s07", "head", thread="M3",
                      joins=[f"servo_{side}", "mount_plate", f.id])
             continue
-        # low heads (DIN 7984: a socket head's rim hits the servo case beside the flange), M4 x 10
-        # into the plate's 8 mm insert holes (design default 2026-09-30: +2 mm so it clears the drill point)
+        # low heads (DIN 7984: a socket head's rim hits the servo case beside the flange), M4 x 8: the
+        # stock plate's 6 mm insert holes (a 10 would reach the drill point)
         hw.screw(f"scr_servo_{i + 1}", fl_top, -UP, [(f"servo_{side}", f"fl{i + 1}")], (f.id, "thread", "insert", 6.0),
-                 "s07", "head", kind="shcs_low", length=10, joins=[f"servo_{side}", "mount_plate", f.id])
+                 "s07", "head", kind="shcs_low", thread=servo_bolt, length=8 if servo_bolt == "M4" else None,
+                 joins=[f"servo_{side}", "mount_plate", f.id])
 
     # --- s05 pillow blocks: down through the plate's 4 mm bridge into the tapped posts ----------
     for i, (c, r) in enumerate(sorted(pillow, key=lambda h: (h[0][0], h[0][2]))):
@@ -422,11 +437,19 @@ def add_hardware(asm, fit, visor):
     uj = P["ujoint"].mesh
     for i, (c, r) in enumerate(sorted(c_holes, key=lambda h: (h[0][0], h[0][2]))):
         hw.hole("neck_coupler", f"cp{i + 1}", [c[0], c_top, c[2]], -UP, r)
-        ins = hw.insert(f"ins_coupler_cp{i + 1}", "neck_coupler", f"cp{i + 1}", "s02")
-        # the hub plate is the whole thread: below it is the neck tube's top (the screw must stop short)
-        stop = cf.get("bore_stop")
-        if stop is not None:
-            ins.features["thread"]["depth"] = round(float(c_top - stop["p"][1]) - 0.5, 2)
+        trapped = cf[f"hole_cp{i + 1}"].get("kind") == "nut_trap"
+        depth = float(cf[f"hole_cp{i + 1}"].get("depth", c_top - cf["bore_stop"]["p"][1]))
+        if trapped:
+            # through-bolts with nuts in the plate's traps (fastening rule: the wall round an insert is
+            # too thin here); the nut's far face 0.2 mm inside the plate, over the neck tube's top
+            nut_t = NUT_T["M4"]
+            nut_at = np.array([c[0], c_top - (depth - nut_t - 0.2), c[2]])
+            nid = hw.nut(f"nut_coupler_cp{i + 1}", nut_at, -UP, "neck_coupler", "s04", "neck",
+                         reason="clamp", kind="nut")
+        else:
+            nid = hw.insert(f"ins_coupler_cp{i + 1}", "neck_coupler", f"cp{i + 1}", "s02").id
+            # the hub plate is the whole thread: below it is the neck tube's top (the screw stops short)
+            next(f for f in hw.fast if f.id == nid).features["thread"]["depth"] = round(depth - 0.5, 2)
         hw.hole("hub_bottom", f"cp{i + 1}", [c[0], hb_top, c[2]], -UP, 2.2)
         top = entry_point(uj, np.array([c[0], hb_top + 1.0, c[2]]), -UP, 2.0, probe=40.0)
         clamps = [("hub_bottom", f"cp{i + 1}")]
@@ -435,10 +458,18 @@ def add_hardware(asm, fit, visor):
             hw.hole("ujoint", f"base{i + 1}", top, -UP, 2.2)
             clamps = [("ujoint", f"base{i + 1}")] + clamps
             head = top
-        hw.screw(f"scr_hub_coupler_{i + 1}", head, -UP, clamps, (ins.id, "thread", "insert", None),
-                 "s04", "neck", inferred=True, joins=[c[0] for c in clamps] + ["neck_coupler", ins.id],
-                 note="Through the U-joint's pattern mount and the thru-hole hub into the coupler's heat-set "
-                      "inserts (fastening rule: no self-tapping into prints).")
+        if trapped:
+            grip = float(head[1] - nut_at[1])
+            hw.screw(f"scr_hub_coupler_{i + 1}", head, -UP, clamps + [("neck_coupler", f"cp{i + 1}")],
+                     (nid, "thread", "nut", nut_t), "s04", "neck", inferred=True, length=round(grip + nut_t, 1),
+                     joins=[c[0] for c in clamps] + ["neck_coupler", nid],
+                     note="Through the U-joint's pattern mount, the thru-hole hub and the coupler's plate into a nut "
+                          "in its trap, cut flush with the nut (fastening rule: the plate is too thin round an insert).")
+        else:
+            hw.screw(f"scr_hub_coupler_{i + 1}", head, -UP, clamps, (nid, "thread", "insert", None),
+                     "s04", "neck", inferred=True, joins=[c[0] for c in clamps] + ["neck_coupler", nid],
+                     note="Through the U-joint's pattern mount and the thru-hole hub into the coupler's heat-set "
+                          "inserts.")
 
     # --- servo horns: 1906 hub on the spline, 1916 arm on the hub --------------------------------
     head_side = [p for p in asm.parts if p.link == "head" and not p.linkage]
@@ -609,6 +640,8 @@ def _rod_parts(lk, s):
 
 
 CROSS_WALL = 4.0  # the cross's walls (parts/head/joint_ring.py wall)
+NUT_T = {"M4": 3.2}  # ISO 4032
+THIN_NUT_T = 2.2     # DIN 439 M4
 
 
 def _pivots(hw, P):
@@ -636,8 +669,12 @@ def _pivots(hw, P):
         # fastening rule: a pivot carrying shear is a through-bolt with a lock nut (the cross's
         # pivot holes are clearance, `pivot_hole`), the nut on the wall's inner face
         nut_at = cj_face + d * CROSS_WALL
-        nid = hw.nut(f"nut_tilt_{s}", nut_at, d, "custom_joint_piece", "s04b", "cross", reason="pivot")
-        hw.screw(f"pin_tilt_{s}", outer, d, [], (nid, "thread", "nut", 8.0), "s04b", "cross", inferred=True,
+        # a thin nut (DIN 439, 2.2 mm): 2.3 mm between the wall and the hex post's corners; the bolt
+        # cut to end flush with it
+        nid = hw.nut(f"nut_tilt_{s}", nut_at, d, "custom_joint_piece", "s04b", "cross", reason="pivot", kind="thin_nut")
+        L_flush = round(float((nut_at - outer) @ d) + THIN_NUT_T, 1)
+        hw.screw(f"pin_tilt_{s}", outer, d, [], (nid, "thread", "nut_thin", THIN_NUT_T), "s04b", "cross", inferred=True,
+                 length=L_flush,
                  joins=[f"uj_bearing_{s}", "custom_joint_piece", nid],
                  note="Pivot bolt through the flanged bearing and the cross wall, lock nut inside (shear joint); "
                       "washer spacer (BOM).")
