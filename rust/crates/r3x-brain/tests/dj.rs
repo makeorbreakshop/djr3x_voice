@@ -22,7 +22,10 @@ fn t(title: &str) -> Track {
 }
 
 fn fixtures() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("r3x-brain-dj-{}", std::process::id()));
+    // One folder per call: tests in this file run in parallel in one process (one pid).
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("r3x-brain-dj-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let rec = |prompt: String, text: &str| {
         let req = MessagesRequest::new(150).messages(vec![Message::user(prompt)]);
@@ -36,6 +39,15 @@ fn fixtures() -> std::path::PathBuf {
         + &rec(commentary_prompt(Context::Transition, &t("A"), Some(&t("B"))), "From A to B!");
     std::fs::write(dir.join("claude.jsonl"), body).unwrap();
     dir
+}
+
+/// Every test gets its own fixture folder. Both DJ tests used to write `r3x-brain-dj-<pid>`
+/// (one process, so one pid) at the same time: one rewrote the recorded Claude lines while the
+/// other loaded them, read a truncated file, got empty commentary and dropped it (status
+/// `None` instead of `Ready`) - about one run in four failed, never with --test-threads=1.
+#[test]
+fn every_setup_gets_its_own_fixture_folder() {
+    assert_ne!(fixtures(), fixtures());
 }
 
 type Rec = Arc<Mutex<Vec<Arc<Envelope>>>>;

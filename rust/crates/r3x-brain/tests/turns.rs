@@ -16,7 +16,8 @@ use r3x_llm::{prompt, request, ClaudeFixtures, LlmClient, Message, MessagesReque
 use serde_json::json;
 
 fn fixture_dir() -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("r3x-brain-turns-{}", std::process::id()));
+    // One folder per call: these tests run in parallel in one process (one pid).
+    let dir = std::env::temp_dir().join(format!("r3x-brain-turns-{}-{}", std::process::id(), uuid()));
     std::fs::create_dir_all(&dir).unwrap();
     let turn = prompt::turn_request("sys", vec![Message::user("play something funky")], request::default_tools(), false);
     let result = json!({"success": true, "track": "Funky Town", "requested": "something funky",
@@ -33,6 +34,14 @@ fn fixture_dir() -> std::path::PathBuf {
     ];
     std::fs::write(dir.join("claude.jsonl"), lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
     dir
+}
+
+/// Every caller gets its own fixture folder: the tests here run in parallel in one process, and
+/// two of them sharing `r3x-brain-turns-<pid>` could load the recorded Claude lines while the
+/// other rewrites them (the race that made the DJ tests fail ~1 run in 4).
+#[test]
+fn every_fixture_dir_is_its_own() {
+    assert_ne!(fixture_dir(), fixture_dir());
 }
 
 fn stubs(bus: &Bus) {
