@@ -5,11 +5,12 @@
   "description": "Looks around the room, left then right, body following",
   "tags": ["look around", "scan", "idle"],
   "tier": "free",
-  "duration": 5.2,
+  "duration": 5.31,
   "interruptible_after": 0.5,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.9, -35], [1.9, -35], [3.0, 30], [4.0, 30], [5.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.9, -4], [1.9, -4], [3.0, 2], [4.0, 2], [5.0, 0]]},
-    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.2, -8], [2.0, -8], [3.3, 7], [4.2, 7], [5.2, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.9, -48], [1.9, -48], [3.09, 41.1], [4.11, 41.1], [5.11, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.9, -5], [1.9, -5], [3.09, 2.5], [4.11, 2.5], [5.11, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.2, -14.8], [2, -14.8], [3.41, 13], [4.31, 13], [5.31, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.9, -6], [1.9, -6], [2.49, 3], [3.09, -6], [4.11, -6], [5.11, 0]]}
   }
 }

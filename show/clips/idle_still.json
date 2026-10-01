@@ -5,11 +5,11 @@
   "description": "Settles and holds nearly still for a few seconds",
   "tags": ["still", "rest", "idle"],
   "tier": "free",
-  "duration": 5.0,
+  "duration": 5,
   "interruptible_after": 0.0,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.5, -1.5], [3.5, -1.5], [5.0, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.2, 3], [3.8, 3], [5.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [1.5, 1.5], [3.5, 1.5], [5.0, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.5, -1.5], [3.5, -1.5], [5, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [1.2, 9], [3.8, 9], [5, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [1.5, 1.5], [3.5, 1.5], [5, 0]]}
   }
 }

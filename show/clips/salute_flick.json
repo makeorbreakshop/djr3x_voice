@@ -5,12 +5,12 @@
   "description": "A jaunty two-finger salute: hand up, flicks out",
   "tags": ["hello", "bye", "salute", "see ya"],
   "tier": "free",
-  "duration": 2.2,
-  "interruptible_after": 0.5,
+  "duration": 2.39,
+  "interruptible_after": 0.55,
   "tracks": {
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.65, 26], [0.95, 26], [1.5, 16], [2.2, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.65, 20], [0.95, 20], [1.5, -12], [2.1, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 2], [1.2, -3], [2.2, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.0, -5], [1.6, -5], [2.2, 0]]}
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.72, 29.9], [1.02, 29.9], [1.69, 18.4], [2.39, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.72, 30], [1.02, 30], [1.69, -18], [2.29, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.66, 2.8], [1.32, -4.2], [2.39, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.55, 6], [1.02, 6], [1.45, -8], [1.89, -6], [2.39, 0]]}
   }
 }

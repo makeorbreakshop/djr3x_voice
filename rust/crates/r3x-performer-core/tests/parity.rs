@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{json_eq, read_json, show_catalog};
+use common::{json_eq, read_json};
 use r3x_performer_core::actuation::pipeline::{rig_joints, servo_map, Actuation};
 use r3x_performer_core::behavior::{Activity, PerformContext, Procedural};
 use r3x_performer_core::rng::Rng;
@@ -152,11 +152,22 @@ impl Harness {
     }
 }
 
+/// The show items the traces play, frozen as they were when the traces were last reproduced
+/// (`parity/show_frozen.json`). The traces pin the player, body compositor and idle runner
+/// bit-for-bit, not the library's content: the live `show/` folder is re-tuned freely (the
+/// 2026-10-01 energy pass) without touching a frozen reference nobody can regenerate.
+fn frozen_catalog() -> Catalog {
+    let doc = read_json("rust/crates/r3x-performer-core/tests/parity/show_frozen.json");
+    let files = doc["files"].as_object().expect("files");
+    Catalog::from_files(files.iter().map(|(p, t)| (p.as_str(), t.as_str().unwrap())))
+}
+
 fn replay_show(name: &str) {
     let doc = read_json(&format!(
         "rust/crates/r3x-performer-core/tests/parity/perf_{name}.json"
     ));
-    let cat = Arc::new(show_catalog());
+    let cat = Arc::new(frozen_catalog());
+    assert!(cat.errors.is_empty(), "{:?}", cat.errors);
     let joints: Vec<String> = serde_json::from_value(doc["joints"].clone()).unwrap();
     let base: Pose = joints
         .iter()

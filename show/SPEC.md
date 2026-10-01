@@ -70,7 +70,10 @@ The file name must equal the `id`. Ids are `snake_case`, unique across all three
 - **Params at trigger time:**
   - `intensity` (0–1.5, default 1) scales additive values and the offsets of override values from the current pose;
   - `speed` (0.5–2, default 1) scales time.
-- **Linted against `sim/web/src/actuation/servo_map.json`:** joint limits (rig min/max, with margin) plus `vMax`/`aMax` after the gear ratio. A clip that the channel cannot physically follow fails the test.
+- **Linted against both rigs** (`lint::library_limits` in `r3x-performer-core`, since the 2026-10-01 energy pass):
+  - positions stay inside the range both rigs share: the intersection of the Original (`profiles/r3x/robot.json`) and Physical (`robot.generated.json`) animation ranges;
+  - velocity and acceleration stay inside the Physical build's `v_max`/`a_max` (the servos'), checked at the intention picker's extremes (intensity x`PICK_INTENSITY.1`, speed x`PICK_SPEED.1`) and at every cue's and sequence's own clip params.
+  - A clip that the channel cannot physically follow fails the test. The Original rig's hand-set `v_max` are lower; its servo follower rate-limits a faster clip there.
 
 ## Frame and zeros
 

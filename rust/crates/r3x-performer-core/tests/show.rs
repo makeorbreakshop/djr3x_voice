@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{approx, assert_json_eq, fixture_catalog, repo, show_catalog};
+use common::{approx, assert_json_eq, fixture_catalog, library_limits, original_profile, physical_profile, repo, show_catalog};
 use r3x_performer_core::rng::Rng;
 use r3x_performer_core::show::body::{BodyCompositor, PlayRequest, Pose};
 use r3x_performer_core::show::catalog::{norm, Catalog};
@@ -129,9 +129,12 @@ fn linter_loads_the_show_folder() {
     assert!(cat.list(Kind::Sequence).len() >= 6);
 }
 
+/// The library's lint policy (`lint::library_limits`, the 2026-10-01 energy pass): every clip
+/// stays inside the range BOTH rigs share, and inside the Physical build's velocity and
+/// acceleration (the real servos'), not the Original profile's hand-set, conservative v_max.
 #[test]
 fn linter_every_file_validates_every_id_resolves_every_clip_is_performable() {
-    let res = lint_catalog(&show_catalog(), &joint_limits());
+    let res = lint_catalog(&show_catalog(), &library_limits());
     assert_eq!(res.errors, Vec::<String>::new());
     if !res.warnings.is_empty() {
         eprintln!("show lint warnings:\n  {}", res.warnings.join("\n  "));
@@ -204,6 +207,28 @@ fn linter_soft_limits_are_the_pipelines() {
         (-66.0, 66.0, 150.0, true, true)
     );
     assert!(!l["torso_middle"].base);
+}
+
+#[test]
+fn library_limits_are_the_shared_range_at_the_physical_build_speeds() {
+    let (lib, o, p) = (library_limits(), original_profile(), physical_profile());
+    let orig = joint_limits(); // the servo map: the Original rig
+    assert_eq!(lib.keys().collect::<Vec<_>>(), orig.keys().collect::<Vec<_>>());
+    for (j, l) in &lib {
+        let (a, b) = (&o.joint(j).unwrap().animation, &p.joint(j).unwrap().animation);
+        assert_eq!((l.lo, l.hi), (a.min.max(b.min), a.max.min(b.max)), "{j}: the range both rigs share");
+        let pj = p.joint(j).unwrap();
+        if l.primary {
+            assert_eq!((l.v_max, l.a_max), (pj.v_max, pj.a_max), "{j}: the Physical build's motion limits");
+        }
+        assert!(l.lo >= orig[j].lo - 0.01 && l.hi <= orig[j].hi + 0.01, "{j}: never past the Original rig");
+    }
+    // the cases that matter: the neck and lift keep the Original rig's range, the top ring the
+    // Physical one's; the tilt runs at the servo's speed, not the hand-set 100 deg/s
+    assert_eq!((lib["head_pan"].lo, lib["head_pan"].hi, lib["head_pan"].v_max), (-66.0, 66.0, 210.0));
+    assert_eq!((lib["head_lift"].lo, lib["head_lift"].hi), (-19.0, 19.0));
+    assert!((lib["torso_top"].hi - 23.46).abs() < 1e-9);
+    assert!(lib["head_tilt"].v_max > 200.0);
 }
 
 #[test]

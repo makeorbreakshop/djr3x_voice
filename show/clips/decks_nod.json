@@ -5,12 +5,13 @@
   "description": "Looks down at the decks and nods along to the mix",
   "tags": ["decks", "mix", "nod", "groove"],
   "tier": "free",
-  "duration": 2.4,
-  "interruptible_after": 0.5,
+  "duration": 2.49,
+  "interruptible_after": 0.51,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, 10], [0.8, 14], [1.1, 10], [1.4, 14], [1.7, 10], [2.4, 0]]},
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.5, -8], [1.7, -8], [2.4, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.6, 6], [1.7, 6], [2.4, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, 10], [1.0, -5], [1.4, 10], [1.7, 0], [2.4, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.51, 12], [0.83, 16.8], [1.15, 12], [1.47, 16.8], [1.79, 12], [2.49, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.51, -14], [1.79, -14], [2.49, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.61, 7.8], [1.79, 7.8], [2.49, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.61, 10], [1.04, -5], [1.47, 10], [1.79, 0], [2.49, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.51, 10], [1.79, 10], [2.49, 0]]}
   }
 }

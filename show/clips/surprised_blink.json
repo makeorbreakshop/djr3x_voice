@@ -5,11 +5,11 @@
   "description": "Surprised: visor blinks twice, head pulls back",
   "tags": ["surprised", "what", "blink", "really"],
   "tier": "free",
-  "duration": 1.5,
-  "interruptible_after": 0.3,
+  "duration": 1.54,
+  "interruptible_after": 0.33,
   "tracks": {
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.24, -6.5], [0.48, 0], [0.72, -6.5], [1.1, -4.5], [1.5, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -5], [1.1, -5], [1.5, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, -3], [1.1, -3], [1.5, 0]]}
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.33, -9], [0.6, -2], [0.86, -9], [1.19, -6], [1.54, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.39, -7], [1.14, -7], [1.54, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.44, -4.9], [1.14, -4.9], [1.54, 0]]}
   }
 }

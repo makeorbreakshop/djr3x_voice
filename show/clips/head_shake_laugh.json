@@ -5,12 +5,12 @@
   "description": "Laughs, shaking his head: oh, that's good",
   "tags": ["laugh", "amused", "no way", "ha"],
   "tier": "free",
-  "duration": 2.0,
-  "interruptible_after": 0.4,
+  "duration": 2.12,
+  "interruptible_after": 0.42,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.35, 4.5], [0.7, -4.5], [1.05, 4], [1.4, -2.5], [2.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -5], [1.4, -4], [2.0, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 5], [1.4, 5], [2.0, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.45, 2], [1.4, 2], [2.0, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.36, 5.9], [0.77, -5.9], [1.17, 5.2], [1.52, -3.2], [2.12, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.42, -7], [1.52, -5.6], [2.12, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.31, 10], [1.52, 10], [2.12, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.48, 3.5], [1.52, 3.5], [2.12, 0]]}
   }
 }

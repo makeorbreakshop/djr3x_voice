@@ -5,11 +5,11 @@
   "description": "Firm yes: one decisive nod with a lift",
   "tags": ["yes", "agree", "absolutely", "nod"],
   "tier": "free",
-  "duration": 1.25,
-  "interruptible_after": 0.35,
+  "duration": 1.34,
+  "interruptible_after": 0.36,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -2.5], [0.75, 7], [1.25, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, 1.5], [0.75, -2], [1.25, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 4], [1.25, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -3.6], [0.84, 10.2], [1.34, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.3, 2.4], [0.84, -3.2], [1.34, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -4], [0.84, 10], [1.34, 0]]}
   }
 }

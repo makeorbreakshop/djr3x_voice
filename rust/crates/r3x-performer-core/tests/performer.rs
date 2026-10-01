@@ -57,8 +57,14 @@ fn the_profile_describes_the_same_body_as_the_servo_map() {
             "{j}"
         );
     }
+    // The library is held to the shared range at the Physical build's speeds
+    // (`lint::library_limits`, tests/show.rs). Against this (Original) profile alone it must
+    // still be clean in everything but velocity: its v_max are hand-set below the servos',
+    // and its follower rate-limits a faster clip safely. Ranges, joints and accelerations
+    // (equal in both profiles) are all held here too.
     let lint = lint_catalog(&show_catalog(), &b);
-    assert_eq!(lint.errors, Vec::<String>::new());
+    let errors: Vec<&String> = lint.errors.iter().filter(|e| !e.contains(": peak velocity ")).collect();
+    assert_eq!(errors, Vec::<&String>::new());
 
     let ext = Actuation::new(
         &rig_joints(),

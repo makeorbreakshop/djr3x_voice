@@ -5,13 +5,13 @@
   "description": "Double take: glances, looks back, then snaps round to stare",
   "tags": ["what", "double take", "wait what"],
   "tier": "free",
-  "duration": 3.15,
-  "interruptible_after": 0.8,
+  "duration": 3.53,
+  "interruptible_after": 0.9,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.4, 14], [0.8, 0], [1.2, 0], [1.72, 26], [2.6, 26], [3.15, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.2, 0], [1.45, -9], [2.6, -7], [3.1, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.2, 0], [1.72, 6], [2.6, 4], [3.1, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -2], [0.8, 0], [1.72, -5], [2.6, -5], [3.1, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.4, -2], [0.8, 0], [1.2, 0], [1.72, -5], [2.6, -5], [3.15, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.45, 14], [0.9, 0], [1.3, 0], [1.97, 32], [2.85, 32], [3.53, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.45, 6], [0.9, 0], [1.3, 0], [1.62, -10], [2.85, -8], [3.47, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.3, 0], [1.97, 9.6], [2.85, 6.4], [3.47, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.45, -3.2], [0.9, 0], [1.97, -8], [2.85, -8], [3.47, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.45, -2.4], [0.9, 0], [1.3, 0], [1.97, -6], [2.85, -6], [3.53, 0]]}
   }
 }

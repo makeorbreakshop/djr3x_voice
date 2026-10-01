@@ -5,11 +5,11 @@
   "description": "Leans in, attentive: lift up, chin up, visor open",
   "tags": ["interested", "listen", "tell me"],
   "tier": "free",
-  "duration": 3.0,
-  "interruptible_after": 0.5,
+  "duration": 3.08,
+  "interruptible_after": 0.58,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.5, 7], [2.4, 7], [3.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, -4], [2.4, -4], [3.0, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.4, -7], [2.4, -7], [3.0, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.58, 11.9], [2.48, 11.9], [3.08, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.58, -6], [2.48, -6], [3.08, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.47, -9], [2.48, -9], [3.08, 0]]}
   }
 }

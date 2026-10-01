@@ -5,13 +5,13 @@
   "description": "Smug: leans back, chin up, visor half shut, a little cock",
   "tags": ["smug", "cool", "nailed it", "show off"],
   "tier": "free",
-  "duration": 2.4,
+  "duration": 2.56,
   "interruptible_after": 0.5,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 5], [1.8, 5], [2.4, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, -8], [1.8, -8], [2.4, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 8], [1.8, 8], [2.4, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.7, 4], [1.8, 4], [2.4, 0]]},
-    "torso_top": {"mode": "additive", "keys": [[0, 0], [0.9, 4], [1.8, 4], [2.4, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.6, 8], [1.8, 8], [2.56, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, -11.2], [1.8, -11.2], [2.56, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.7, 16], [1.93, 16], [2.56, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.7, 5], [1.8, 5], [2.56, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [0.9, 8], [1.8, 8], [2.56, 0]]}
   }
 }

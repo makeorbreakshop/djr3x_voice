@@ -8,8 +8,8 @@
   "duration": 2.4,
   "interruptible_after": 0.5,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 6], [1.1, 2], [1.7, 6], [2.4, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 6], [1.8, 6], [2.4, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.7, -3], [1.8, -3], [2.4, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 8.4], [1.1, 2.8], [1.7, 8.4], [2.4, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 14], [1.8, 14], [2.4, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.7, -4.9], [1.8, -4.9], [2.4, 0]]}
   }
 }

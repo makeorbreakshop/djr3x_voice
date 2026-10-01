@@ -5,13 +5,13 @@
   "description": "Shrug: head tips aside and the hand turns out, who knows",
   "tags": ["dunno", "who knows", "shrug", "beats me"],
   "tier": "free",
-  "duration": 2.0,
-  "interruptible_after": 0.5,
+  "duration": 2.25,
+  "interruptible_after": 0.6,
   "tracks": {
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.6, 15], [1.4, 15], [2.0, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -40], [1.4, -40], [2.0, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.5, -5], [1.4, -5], [2.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, 3], [1.4, 3], [2.0, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.4, -5], [1.4, -5], [2.0, 0]]}
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.73, 20], [1.53, 20], [2.25, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.73, -55.2], [1.53, -55.2], [2.25, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.6, -6.5], [1.53, -6.5], [2.25, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, 4.5], [1.53, 4.5], [2.25, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.48, -8], [1.53, -8], [2.25, 0]]}
   }
 }

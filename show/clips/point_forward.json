@@ -5,12 +5,14 @@
   "description": "Points the hero arm out at the crowd, body turns with it",
   "tags": ["point", "you", "crowd"],
   "tier": "cheap",
-  "duration": 3.0,
-  "interruptible_after": 1.0,
+  "duration": 3.47,
+  "interruptible_after": 1.21,
   "tracks": {
-    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.25, -4], [0.95, 36], [1.17, 33], [2.3, 33], [3.0, 0]]},
-    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.95, -20], [2.3, -20], [3.0, 0]]},
-    "torso_top": {"mode": "additive", "keys": [[0, 0], [0.9, 6], [2.3, 6], [3.0, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, -3], [2.3, -3], [3.0, 0]]}
+    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.32, -6], [1.15, 34], [1.41, 30], [2.54, 30], [3.47, 0]]},
+    "hero_wrist": {"mode": "override", "keys": [[0, 0], [1.15, -30], [2.54, -30], [3.47, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.09, 12], [2.54, 12], [3.47, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.85, -4.8], [2.54, -4.8], [3.47, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.38, 6], [1.15, -8], [2.54, -6], [3.47, 0]]},
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [1.09, 8], [2.54, 8], [3.47, 0]]}
   }
 }

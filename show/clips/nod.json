@@ -5,11 +5,11 @@
   "description": "Quick yes-nod: small lift, chin dips and pops back",
   "tags": ["yes", "agree", "ok", "backchannel"],
   "tier": "free",
-  "duration": 1.1,
-  "interruptible_after": 0.35,
+  "duration": 1.28,
+  "interruptible_after": 0.41,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.17, -1.5], [0.54, 7], [0.9, -1.5], [1.1, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.54, -2.5], [1.1, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.5, 3], [1.1, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.18, -1.5], [0.63, 8], [1.08, -1.5], [1.28, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.63, -4], [1.28, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.2, -3], [0.63, 9], [1.28, 0]]}
   }
 }

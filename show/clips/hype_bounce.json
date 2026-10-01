@@ -5,12 +5,12 @@
   "description": "Fired up: bounces on the lift, chin up, arm pumps with it",
   "tags": ["hype", "yeah", "lets go", "bounce"],
   "tier": "free",
-  "duration": 1.8,
-  "interruptible_after": 0.4,
+  "duration": 2.03,
+  "interruptible_after": 0.49,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.35, 4.5], [0.7, 0.5], [1.05, 4.5], [1.4, 0.5], [1.8, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -4], [0.7, 1], [1.05, -4], [1.4, 1], [1.8, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.25, -7], [1.4, -5], [1.8, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.4, 10], [0.75, 3], [1.1, 10], [1.8, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.43, 4.5], [0.84, 0.5], [1.25, 4.5], [1.63, 0.5], [2.03, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.43, -5.2], [0.84, 1.3], [1.25, -5.2], [1.63, 1.3], [2.03, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.37, -9], [0.84, -4], [1.25, -10], [1.63, -5], [2.03, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.49, 14], [0.9, 4.2], [1.31, 14], [2.03, 0]]}
   }
 }

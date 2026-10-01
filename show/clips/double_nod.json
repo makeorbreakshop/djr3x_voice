@@ -5,10 +5,11 @@
   "description": "Two quick nods: an emphatic yes",
   "tags": ["yes", "definitely", "agree"],
   "tier": "free",
-  "duration": 1.75,
-  "interruptible_after": 0.4,
+  "duration": 2.08,
+  "interruptible_after": 0.47,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.17, -1.5], [0.52, 6], [0.86, -1], [1.2, 6], [1.54, -1], [1.75, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.52, -2], [0.86, 0], [1.2, -2], [1.75, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.19, -1.7], [0.62, 6.9], [1.04, -1.1], [1.45, 6.9], [1.87, -1.1], [2.08, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.62, -3.2], [1.04, 0], [1.45, -3.2], [2.08, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.62, 8], [1.04, 2], [1.45, 8], [2.08, 0]]}
   }
 }

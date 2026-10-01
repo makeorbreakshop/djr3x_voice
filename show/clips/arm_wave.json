@@ -5,11 +5,14 @@
   "description": "Friendly wave: arm up, hand waves three times",
   "tags": ["hello", "hi", "bye", "wave"],
   "tier": "free",
-  "duration": 3.4,
-  "interruptible_after": 0.8,
+  "duration": 3.87,
+  "interruptible_after": 0.86,
   "tracks": {
-    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.7, 38], [2.7, 38], [3.4, 0]]},
-    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.7, 0], [1.12, 25], [1.7, -25], [2.28, 25], [2.7, 0], [3.4, 0]]},
-    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.0, 5], [2.7, 5], [3.4, 0]]}
+    "hero_shoulder": {"mode": "override", "keys": [[0, 0], [0.75, 33], [3.06, 33], [3.87, 0]]},
+    "hero_wrist": {"mode": "override", "keys": [[0, 0], [0.75, 0], [1.23, 24], [1.91, -24], [2.58, 24], [3.06, 0], [3.87, 0]]},
+    "torso_top": {"mode": "additive", "keys": [[0, 0], [1.09, 9], [3.06, 9], [3.87, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.54, -8], [3.06, -6], [3.87, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.65, -4], [3.06, -4], [3.87, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.75, 5], [3.06, 5], [3.87, 0]]}
   }
 }

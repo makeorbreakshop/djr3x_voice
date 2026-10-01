@@ -5,13 +5,13 @@
   "description": "A showman's bow: hand flourishes round, then a deep dip",
   "tags": ["bow", "thanks", "flourish", "showman"],
   "tier": "free",
-  "duration": 2.5,
+  "duration": 2.7,
   "interruptible_after": 0.6,
   "tracks": {
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.65, 22], [1.15, 12], [1.9, 12], [2.5, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -20], [1.3, 30], [1.9, 30], [2.5, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, -4], [1.3, 14], [1.9, 14], [2.5, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.2, -8], [1.9, -8], [2.5, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.1, 8], [1.9, 8], [2.5, 0]]}
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.66, 24.2], [1.26, 13.2], [2.05, 13.2], [2.7, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -30], [1.45, 45], [2.05, 45], [2.7, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.6, -4.6], [1.45, 16.1], [2.05, 16.1], [2.7, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.32, -12.8], [2.05, -12.8], [2.7, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, -8], [1.2, 18], [2.05, 18], [2.7, 0]]}
   }
 }

@@ -5,13 +5,13 @@
   "description": "Curious look: head cocks aside, visor lifts, leans up",
   "tags": ["curious", "huh", "interested"],
   "tier": "free",
-  "duration": 2.1,
-  "interruptible_after": 0.5,
+  "duration": 2.13,
+  "interruptible_after": 0.53,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.45, 8], [1.6, 8], [2.1, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, 5], [1.6, 5], [2.1, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -7], [1.6, -7], [2.1, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.45, 3], [1.6, 3], [2.1, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.5, -7], [1.6, -7], [2.1, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.48, 16], [1.63, 16], [2.13, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.43, 6], [1.63, 6], [2.13, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.32, -9], [1.63, -9], [2.13, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.48, 4.9], [1.63, 4.9], [2.13, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.53, -8], [1.63, -8], [2.13, 0]]}
   }
 }

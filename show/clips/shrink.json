@@ -5,13 +5,13 @@
   "description": "Embarrassed: shrinks down, chin tucks, arm draws in",
   "tags": ["embarrassed", "oops", "shrink", "awkward"],
   "tier": "free",
-  "duration": 2.2,
-  "interruptible_after": 0.5,
+  "duration": 2.23,
+  "interruptible_after": 0.53,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.55, -7], [1.6, -7], [2.2, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.5, 7], [1.6, 7], [2.2, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.4, 8], [1.6, 8], [2.2, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.6, -4], [1.6, -4], [2.2, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.7, -10], [1.6, -10], [2.2, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.58, -11.9], [1.63, -11.9], [2.23, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.53, 10.2], [1.63, 10.2], [2.23, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.42, 18], [1.63, 18], [2.23, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.63, -5], [1.63, -5], [2.23, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.73, -14], [1.63, -14], [2.23, 0]]}
   }
 }

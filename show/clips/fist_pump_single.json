@@ -5,12 +5,13 @@
   "description": "One quick fist pump, yes!",
   "tags": ["yeah", "yes", "pump", "nice"],
   "tier": "free",
-  "duration": 1.7,
-  "interruptible_after": 0.4,
+  "duration": 1.82,
+  "interruptible_after": 0.45,
   "tracks": {
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.65, 24], [1.05, 16], [1.7, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.6, -25], [1.05, -25], [1.7, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.65, 4], [1.05, 1], [1.7, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.65, -3], [1.05, 2], [1.7, 0]]}
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.74, 31.9], [1.17, 21.3], [1.82, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [0.68, -40], [1.17, -40], [1.82, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.74, 6.4], [1.17, 1.6], [1.82, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.74, -4.1], [1.17, 2.7], [1.82, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.34, 6], [0.74, -10], [1.17, -6], [1.82, 0]]}
   }
 }

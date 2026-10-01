@@ -5,11 +5,11 @@
   "description": "A small shrug: lift pops, head cocks, eh",
   "tags": ["dunno", "eh", "whatever", "shrug"],
   "tier": "free",
-  "duration": 1.4,
-  "interruptible_after": 0.3,
+  "duration": 1.41,
+  "interruptible_after": 0.31,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 4], [0.9, 4], [1.4, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.4, 4], [0.9, 4], [1.4, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.35, -5], [0.9, -5], [1.4, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.41, 6], [0.91, 6], [1.41, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.41, 5], [0.91, 5], [1.41, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.36, -7], [0.91, -7], [1.41, 0]]}
   }
 }

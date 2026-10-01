@@ -5,11 +5,11 @@
   "description": "Visor snaps open with a lift pop: surprise, reveal",
   "tags": ["surprise", "wow", "reveal"],
   "tier": "free",
-  "duration": 1.85,
-  "interruptible_after": 0.4,
+  "duration": 1.98,
+  "interruptible_after": 0.51,
   "tracks": {
-    "visor": {"mode": "override", "keys": [[0, 0], [0.15, 3], [0.48, -11], [0.7, -8], [1.45, -8], [1.85, -2]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.48, 8], [0.9, 5], [1.85, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.48, -6], [1.2, -4], [1.85, 0]]}
+    "visor": {"mode": "override", "keys": [[0, 0], [0.24, 6], [0.63, -10], [0.85, -7], [1.58, -7], [1.98, -2]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.61, 12], [1.03, 7.5], [1.98, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.61, -8.1], [1.33, -5.4], [1.98, 0]]}
   }
 }

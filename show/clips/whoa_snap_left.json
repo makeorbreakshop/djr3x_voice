@@ -5,12 +5,12 @@
   "description": "Surprised: head snaps toward something on his left",
   "tags": ["surprised", "whoa", "what was that", "snap"],
   "tier": "free",
-  "duration": 1.8,
-  "interruptible_after": 0.4,
+  "duration": 1.93,
+  "interruptible_after": 0.53,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.4, 12], [1.2, 12], [1.8, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 4], [1.2, 4], [1.8, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.26, -8], [1.2, -8], [1.8, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -3], [1.2, -3], [1.8, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.53, 19.8], [1.33, 19.8], [1.93, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.53, 6], [1.33, 6], [1.93, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.35, -10], [1.33, -10], [1.93, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.53, -4.8], [1.33, -4.8], [1.93, 0]]}
   }
 }

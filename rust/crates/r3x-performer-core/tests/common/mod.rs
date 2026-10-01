@@ -2,7 +2,10 @@
 //! (`2` equals `2.0`, SPEC "Cross-language parity").
 #![allow(dead_code)]
 
+use r3x_contracts::RobotProfile;
 use r3x_performer_core::show::catalog::Catalog;
+use r3x_performer_core::show::lint::{self, JointLimit};
+use std::collections::BTreeMap;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -17,6 +20,21 @@ pub fn read_json(rel: &str) -> Value {
         &std::fs::read_to_string(repo(rel)).unwrap_or_else(|e| panic!("{rel}: {e}")),
     )
     .unwrap()
+}
+
+/// The two rigs' profiles: Original (`robot.json`) and Physical (`robot.generated.json`,
+/// the real build, generated from the mech model).
+pub fn original_profile() -> RobotProfile {
+    RobotProfile::load(repo("profiles/r3x/robot.json")).unwrap()
+}
+pub fn physical_profile() -> RobotProfile {
+    RobotProfile::load(repo("profiles/r3x/robot.generated.json")).unwrap()
+}
+
+/// What the committed library is held to (`lint::library_limits`): positions inside the
+/// range both rigs share, velocity and acceleration inside the Physical build's.
+pub fn library_limits() -> BTreeMap<String, JointLimit> {
+    lint::library_limits(&original_profile(), &physical_profile()).unwrap()
 }
 
 /// The repo's `show/` folder, loaded the way the sim's loader does.

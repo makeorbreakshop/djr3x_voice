@@ -8,10 +8,10 @@
   "duration": 2.7,
   "interruptible_after": 1.0,
   "tracks": {
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -2], [1.0, 16], [2.0, 16], [2.7, 0]]},
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.0, -10], [2.0, -10], [2.7, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.0, 8], [2.0, 8], [2.7, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [1.0, 10], [2.0, 10], [2.7, 0]]},
-    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [1.0, 40], [2.0, 40], [2.7, 0]]}
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.3, -2], [1, 16], [2, 16], [2.7, 0]]},
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [1, -14], [2, -14], [2.7, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, -4], [1, 18], [2, 18], [2.7, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [1, 11], [2, 11], [2.7, 0]]},
+    "hero_wrist": {"mode": "additive", "keys": [[0, 0], [1, 52], [2, 52], [2.7, 0]]}
   }
 }

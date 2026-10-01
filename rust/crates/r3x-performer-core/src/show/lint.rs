@@ -7,6 +7,10 @@
 //!   (joint-side limits, i.e. after the gear ratio or rack pinion);
 //! - extended joints need `"requires": "extended"`; coupled joints (claw fingers) must be
 //!   driven through the channel's primary joint.
+//!
+//! Which limits: the caller's. The committed library is held to [`library_limits`] (the
+//! range both rigs share, at the Physical build's speeds); Studio lints an edit against the
+//! active profile ([`joint_limits_from_profile`]).
 
 use super::catalog::{norm, Catalog};
 use super::curve::track_peaks;
@@ -140,6 +144,46 @@ pub fn joint_limits_from_profile(p: &RobotProfile) -> Result<BTreeMap<String, Jo
                 },
             );
         }
+    }
+    Ok(out)
+}
+
+/// The limits the committed animation library (`show/`) is authored and tested against:
+/// the policy since the 2026-10-01 energy pass. Two rigs play the same files, so
+///
+/// - **positions** are the range BOTH rigs share: the intersection of `original`'s and
+///   `physical`'s animation ranges. A clip must look the same on either; nothing is authored
+///   past the narrower rig (the Physical neck pans +-124 but the Original rig +-66, the
+///   Physical top ring turns +-23.5 but the Original +-27). Scaling motion to the rig's own
+///   range is a later, separate step.
+/// - **velocity and acceleration** are `physical`'s: the real build, whose limits rigsync
+///   derives from the servo specs (`profiles/r3x/robot.generated.json`). The Original
+///   profile's v_max are hand-set and conservative (the head tilt 100 deg/s vs the
+///   servo's 225); a clip faster than them still plays safely there, because the Original
+///   rig's servo follower rate-limits every channel to its own v_max.
+/// - channel, primary and base come from `original`, which carries the full channel table.
+///
+/// Not [`joint_limits`] (the servo map, i.e. the Original rig) and not one profile's
+/// [`joint_limits_from_profile`]: each of those alone would either hold the library to
+/// speeds the hardware does not have, or let it use range the other rig does not have.
+/// The runtime's Studio still lints an edit against the ACTIVE profile, which is right for
+/// a bench preview.
+pub fn library_limits(
+    original: &RobotProfile,
+    physical: &RobotProfile,
+) -> Result<BTreeMap<String, JointLimit>, String> {
+    let mut out = joint_limits_from_profile(original)?;
+    let phys = joint_limits_from_profile(physical)?;
+    for (j, lim) in out.iter_mut() {
+        let p = phys
+            .get(j)
+            .ok_or_else(|| format!("{j}: not in the physical profile"))?;
+        // both joints exist: joint_limits_from_profile resolved them above
+        let (o, q) = (&original.joint(j).unwrap().animation, &physical.joint(j).unwrap().animation);
+        lim.lo = o.min.max(q.min);
+        lim.hi = o.max.min(q.max);
+        lim.v_max = p.v_max;
+        lim.a_max = p.a_max;
     }
     Ok(out)
 }

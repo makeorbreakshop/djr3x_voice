@@ -5,12 +5,12 @@
   "description": "Smug: tosses the head aside with the chin up, too cool",
   "tags": ["smug", "toss", "whatever", "cool"],
   "tier": "free",
-  "duration": 1.8,
-  "interruptible_after": 0.4,
+  "duration": 2.02,
+  "interruptible_after": 0.57,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.35, 9], [1.2, 9], [1.8, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.35, -6], [1.2, -6], [1.8, 0]]},
-    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.4, -5], [1.2, -5], [1.8, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.3, 6], [1.2, 6], [1.8, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.51, 18], [1.42, 18], [2.02, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.51, -9], [1.42, -9], [2.02, 0]]},
+    "head_roll": {"mode": "additive", "keys": [[0, 0], [0.57, -6.5], [1.42, -6.5], [2.02, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.51, -4], [0.92, 14], [1.42, 14], [2.02, 0]]}
   }
 }

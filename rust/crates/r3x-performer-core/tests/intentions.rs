@@ -2,30 +2,52 @@
 //! and every pick performable. Listen reactions fire over the listening idle while the guest
 //! talks, so they are held to a tighter contract: small, short, head and visor only, inside
 //! the channel limits even at the picker's fastest, strongest pick.
+//!
+//! Limits are the library's (`lint::library_limits`): positions inside the range both rigs
+//! share, velocity and acceleration inside the Physical build's, checked at the picker's
+//! extremes ([`PICK_INTENSITY`]`.1`, [`PICK_SPEED`]`.1`): velocity scales with intensity x
+//! speed, acceleration with intensity x speed^2.
 
 mod common;
 
-use common::{repo, show_catalog};
+use common::{library_limits, repo, show_catalog};
 use r3x_contracts::RobotProfile;
 use r3x_performer_core::performer::{Command, Out, PerformerConfig};
 use r3x_performer_core::show::body::{BodyCompositor, PlayRequest, Pose};
 use r3x_performer_core::show::catalog::Catalog;
 use r3x_performer_core::show::curve::track_peaks;
 use r3x_performer_core::show::expand::children;
-use r3x_performer_core::show::intentions::IntentKind;
-use r3x_performer_core::show::lint::joint_limits;
+use r3x_performer_core::show::intentions::{IntentKind, PICK_INTENSITY, PICK_SPEED};
 use r3x_performer_core::show::player::RunLayer;
-use r3x_performer_core::show::types::{Body, Clip, Source, TrackMode};
+use r3x_performer_core::show::types::{clamp_intensity, clamp_speed, Action, Body, Clip, Entry, Source, TrackMode};
 use r3x_performer_core::Performer;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-/// The picker's extremes (`show::intentions`): intensity x0.8-1.05, speed x0.9-1.12.
-const PICK_INTENSITY_MAX: f64 = 1.05;
-const PICK_SPEEDS: [f64; 2] = [0.9, 1.12];
-/// Clips authored to touch a soft limit at intensity 1, frozen by the parity traces
-/// (`tests/parity/perf_*.json`); above intensity 1 the servo pulse clamp holds them.
-const AT_THE_LIMIT_BY_DESIGN: [&str; 1] = ["arm_throw"];
+/// The picker's extremes (`show::intentions`): the strongest pick and both speed ends (the
+/// slowest pick holds a clip longest, the fastest one is the hardest on the servos).
+const PICK_INTENSITY_MAX: f64 = PICK_INTENSITY.1;
+const PICK_SPEEDS: [f64; 2] = [PICK_SPEED.0, PICK_SPEED.1];
+
+/// Every clip an item plays, with the intensity and speed it plays at when the item runs at
+/// `(i, s)`: a cue's or sequence's own clip params multiply the run's (`player.rs`).
+fn played(cat: &Catalog, id: &str, i: f64, s: f64, out: &mut Vec<(Arc<Clip>, f64, f64)>) {
+    let Some(it) = cat.get(id) else { return };
+    let entries = match &it.body {
+        Body::Clip(c) => return out.push((c.clone(), clamp_intensity(i), clamp_speed(s))),
+        Body::Cue(c) => &c.actions,
+        Body::Sequence(q) => &q.track,
+    };
+    for e in entries {
+        match &e.entry {
+            Entry::Act(Action::Clip { id, intensity, speed }) => {
+                played(cat, id, i * intensity.unwrap_or(1.0), s * speed.unwrap_or(1.0), out)
+            }
+            Entry::Ref(_, id) => played(cat, id, i, s, out),
+            _ => {}
+        }
+    }
+}
 
 /// The clips an item plays: itself, or every clip under a cue / sequence.
 fn clips_of(cat: &Catalog, id: &str) -> Vec<Arc<Clip>> {
@@ -57,15 +79,16 @@ fn every_intention_pool_is_rich_enough_to_vary() {
 #[test]
 fn listen_reactions_are_small_short_head_only_and_hold_at_the_fastest_pick() {
     let cat = show_catalog();
-    let limits = joint_limits();
+    let limits = library_limits();
     // Per joint, how far a backchannel may move (deg; mm for head_lift), as (lo, hi).
     // Listening already holds the visor open at -8 (limit -12) and a 4-8 deg roll cant
-    // toward the guest (limit 10), so those two get the least room.
+    // toward the guest (limit 10), so those two get the least room. The visor may drop
+    // further: down is the brow's whole story (a squint, a frown, a blink).
     let cap = |j: &str| match j {
-        "head_tilt" | "head_pan" => Some((-5.0, 5.0)),
+        "head_tilt" | "head_pan" => Some((-7.0, 7.0)),
         "head_roll" => Some((-1.5, 1.5)),
-        "head_lift" => Some((-4.0, 4.0)),
-        "visor" => Some((-3.0, 8.0)),
+        "head_lift" => Some((-5.0, 5.0)),
+        "visor" => Some((-3.0, 12.0)),
         _ => None,
     };
     let s = *PICK_SPEEDS.last().unwrap();
@@ -97,7 +120,7 @@ fn listen_reactions_are_small_short_head_only_and_hold_at_the_fastest_pick() {
 #[test]
 fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
     let cat = show_catalog();
-    let limits = joint_limits();
+    let limits = library_limits();
     let ids: BTreeSet<&String> = cat.intentions.values().flat_map(|i| i.pool.iter()).collect();
     let mut played = 0;
     let mut bad = BTreeSet::new();
@@ -108,7 +131,7 @@ fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
                 b.play(PlayRequest {
                     run_id: "r".into(),
                     clip: clip.clone(),
-                    intensity: Some(if AT_THE_LIMIT_BY_DESIGN.contains(&clip.id.as_str()) { 1.0 } else { PICK_INTENSITY_MAX }),
+                    intensity: Some(PICK_INTENSITY_MAX),
                     speed: Some(speed),
                     layer: RunLayer::Gesture,
                     owns: None,
@@ -138,13 +161,44 @@ fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
     assert!(played > 100, "{played}");
 }
 
+/// Every clip a pick can play, at the strongest, fastest pick (with a cue's or sequence's own
+/// clip params on top), stays inside the Physical build's velocity and acceleration; so does
+/// every clip the idle policy and the shows play, at their own params.
+#[test]
+fn every_clip_at_its_extreme_play_stays_inside_the_physical_speed_limits() {
+    let cat = show_catalog();
+    let limits = library_limits();
+    let mut plays = vec![];
+    for i in cat.intentions.values() {
+        for item in &i.pool {
+            played(&cat, item, PICK_INTENSITY_MAX, PICK_SPEED.1, &mut plays);
+        }
+    }
+    for it in cat.items.values().filter(|it| !matches!(it.body, Body::Clip(_))) {
+        played(&cat, &it.id, 1.0, 1.0, &mut plays);
+    }
+    let mut bad = BTreeSet::new();
+    for (clip, i, s) in &plays {
+        for (j, tr) in &clip.tracks {
+            let pk = track_peaks(tr);
+            let lim = &limits[j];
+            let (v, a) = (pk.v * i * s, pk.a * i * s * s);
+            if v > lim.v_max + 1e-6 || a > lim.a_max + 1e-6 {
+                bad.insert(format!("{}.{j} at x{i:.2} intensity, x{s:.2} speed: v {v:.0}/{} a {a:.0}/{}", clip.id, lim.v_max, lim.a_max));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.iter().cloned().collect::<Vec<_>>().join("\n  "));
+    assert!(plays.len() > 150, "{}", plays.len());
+}
+
 /// The real performer, listening: every listen intention fires, plays, and keeps the composed
 /// targets inside the joint ranges on top of the listening pose.
 #[test]
 fn listen_intentions_play_over_the_listening_pose_inside_the_joint_ranges() {
     let profile = RobotProfile::load(repo("profiles/r3x/robot.json")).unwrap();
     let mut p = Performer::new(Arc::new(show_catalog()), &profile, PerformerConfig::default()).unwrap();
-    let limits = joint_limits();
+    let limits = library_limits();
     let cat = show_catalog();
     let listen: Vec<String> = cat.intentions.values().filter(|i| i.kind == IntentKind::Listen).map(|i| i.id.clone()).collect();
     p.command(Command::ListeningStarted);

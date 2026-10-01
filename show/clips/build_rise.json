@@ -5,12 +5,12 @@
   "description": "The build: rises slowly, chin lifting, visor opening",
   "tags": ["build", "anticipation", "rise", "here it comes"],
   "tier": "free",
-  "duration": 2.5,
+  "duration": 2.63,
   "interruptible_after": 0.6,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.6, 8], [2.0, 8], [2.5, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [1.6, -8], [2.0, -8], [2.5, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.5, -8], [2.0, -8], [2.5, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [1.6, 15], [2.0, 15], [2.5, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [1.6, 14], [2, 14], [2.63, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [1.6, -12], [2, -12], [2.63, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [1.5, -10], [2, -10], [2.63, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [1.6, 21.8], [2, 21.8], [2.63, 0]]}
   }
 }

@@ -5,11 +5,11 @@
   "description": "The build: bobs that get quicker and bigger",
   "tags": ["build", "anticipation", "bob", "faster"],
   "tier": "free",
-  "duration": 2.5,
+  "duration": 2.67,
   "interruptible_after": 0.6,
   "tracks": {
-    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 1], [0.8, 0], [1.15, 1.5], [1.45, 0], [1.75, 2], [2.0, 0], [2.5, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -1], [0.8, 0], [1.15, -2], [1.45, 0], [1.75, -3], [2.0, 0], [2.5, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [1.4, -4], [2.0, -8], [2.5, 0]]}
+    "head_lift": {"mode": "additive", "keys": [[0, 0], [0.4, 2], [0.8, 0], [1.15, 3], [1.45, 0], [1.81, 4], [2.17, 0], [2.67, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.4, -2], [0.8, 0], [1.15, -4], [1.45, 0], [1.81, -6], [2.17, 0], [2.67, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [1.4, -5], [2.17, -10], [2.67, 0]]}
   }
 }

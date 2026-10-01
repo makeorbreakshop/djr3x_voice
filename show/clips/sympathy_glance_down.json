@@ -8,9 +8,9 @@
   "duration": 2.4,
   "interruptible_after": 0.5,
   "tracks": {
-    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.7, -8], [1.8, -8], [2.4, 0]]},
-    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, 8], [1.8, 8], [2.4, 0]]},
-    "visor": {"mode": "additive", "keys": [[0, 0], [0.6, 8], [1.8, 8], [2.4, 0]]},
-    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.8, -8], [1.8, -8], [2.4, 0]]}
+    "head_pan": {"mode": "additive", "keys": [[0, 0], [0.7, -14], [1.8, -14], [2.4, 0]]},
+    "head_tilt": {"mode": "additive", "keys": [[0, 0], [0.7, 11.2], [1.8, 11.2], [2.4, 0]]},
+    "visor": {"mode": "additive", "keys": [[0, 0], [0.8, 16], [1.8, 16], [2.4, 0]]},
+    "hero_shoulder": {"mode": "additive", "keys": [[0, 0], [0.8, -12], [1.8, -12], [2.4, 0]]}
   }
 }
