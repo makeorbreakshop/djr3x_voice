@@ -79,6 +79,9 @@ interface PartObj {
   fullState?: 'loading' | 'done';
 }
 
+/** A build step as Assemble shows it: the manifest's (limited to the focus) or derived from the structure. */
+export type AStep = MStep & { derived?: boolean; node?: AsmNode; assembly?: string };
+
 export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
 
 interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null; lazy?: string }
@@ -115,7 +118,7 @@ const INSPECTION = { key: 1.6, fill: 0.5, rim: 0.9, hemi: 0.22, env: 0.75 };
  *  "moves with the joint you are on". */
 const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff3b30, warn: 0xf2c230 };
 /** The context around a scope, and the shells over the mechanism in Inspect. */
-const GHOST = { color: 0x7f858e, mech: 0.08, shell: 0.045, inspectShell: 0.08 };
+const GHOST = { color: 0x7f858e, mech: 0.1, shell: 0.065, inspectShell: 0.1 };
 const GHOST_FINISH: Finish = { color: GHOST.color, metalness: 0, roughness: 1 };
 const KEY_DIR = new THREE.Vector3(0.9, 1.7, 1.3).normalize();
 
@@ -241,6 +244,9 @@ export class Workbench {
     this.host.renderer.shadowMap.autoUpdate = !on;
     this.host.renderer.shadowMap.needsUpdate = true;
     this.host.setCleanImage?.(on);
+    // ghosts (renderOrder 2) draw nearest first and write depth: only the nearest ghost surface shows,
+    // so overlapping shells read as one faint layer instead of a haze; the rest back to front as usual
+    this.host.renderer.setTransparentSort(on ? ghostSort : null);
     this.shadowQ = '';
     if (on) this.host.setDroidVisible(false);
     const c = this.host.controls;
@@ -1045,12 +1051,93 @@ export class Workbench {
   }
 
   /** Steps of the focused assembly, those touching the scope's parts when a scope is set. */
-  get steps(): MStep[] {
-    const all = this.focus?.asm.steps ?? [];
+  get steps(): AStep[] {
+    return this.assembly().list;
+  }
+
+  private asmCache: { sig: string; list: AStep[]; fast: Map<string, number> } | null = null;
+
+  /**
+   * Assemble: the build order of what is in focus (the whole droid without a focus). Each assembly's
+   * own `steps` (SCHEMA.md "Step") in tree order, limited to the focus's parts; where an assembly has
+   * none (or leaves parts out), steps derived from its structure - the fixed frame first, then each
+   * moving group as it hangs on the one before, its fasteners with the step that places their last
+   * part - marked `derived`. `fast` is each fastener's step.
+   */
+  assembly(): { list: AStep[]; fast: Map<string, number> } {
+    if (!this.top) return { list: [], fast: new Map() };
     const sc = this.scope;
-    if (!sc || sc.kind === 'assembly') return all;
-    const hit = all.filter((s) => (s.parts ?? []).some((p) => sc.parts.has(p)));
-    return hit.length ? hit : all;
+    const sig = `${this.loadSeq}|${JSON.stringify(this.variants)}|${sc ? `${sc.kind}:${sc.id}` : ''}`;
+    if (this.asmCache?.sig === sig) return this.asmCache;
+    const inScope = (id: string) => {
+      const po = this.parts.get(id);
+      return !!po && !this.variantHidden.has(po.node) && !po.part.replaced_by && (!sc || sc.parts.has(id));
+    };
+    const list: AStep[] = [];
+    const fast = new Map<string, number>();
+    const placed = new Set<string>();
+    this.forEachNode((n) => {
+      if (!this.nodeShown(n)) return;
+      const mine = n.asm.parts.filter((p) => inScope(p.id));
+      if (!mine.length) return;
+      const nf = (n.asm.fasteners ?? []).filter((f) => f.placed && f.joins.some((p) => inScope(p)));
+      for (const st of n.asm.steps ?? []) {
+        const parts = (st.parts ?? []).filter((p) => inScope(p) && !placed.has(p));
+        const fs = (st.fasteners ?? []).filter((f) => nf.some((x) => x.id === f) && !fast.has(f));
+        if (!parts.length && !fs.length) continue;
+        parts.forEach((p) => placed.add(p));
+        fs.forEach((f) => fast.set(f, list.length));
+        list.push({ ...st, parts, fasteners: fs, context: (st.context ?? []).filter((p) => inScope(p)), node: n, assembly: assemblyLabel(n.asm.name) });
+      }
+      // what the steps leave out: the frame, then each moving group in the order it hangs
+      const left = mine.filter((p) => !placed.has(p.id));
+      if (left.length) {
+        const order: string[] = [];
+        const roots = n.asm.links.filter((l) => !n.asm.joints.some((j) => j.child_link === l.id && j.type !== 'fixed'));
+        const visit = (id: string) => {
+          if (order.includes(id)) return;
+          order.push(id);
+          for (const j of n.asm.joints) if (j.parent_link === id) visit(j.child_link);
+        };
+        roots.forEach((l) => visit(l.id));
+        n.asm.links.forEach((l) => visit(l.id));
+        for (const link of order) {
+          const parts = left.filter((p) => p.link === link).map((p) => p.id);
+          if (!parts.length) continue;
+          const l = n.asm.links.find((x) => x.id === link);
+          parts.forEach((p) => placed.add(p));
+          list.push({
+            id: `derived:${n.key}:${link}`, n: list.length + 1, title: assemblyLabel(l?.name ?? link), parts, fasteners: [],
+            derived: true, node: n, assembly: assemblyLabel(n.asm.name),
+          });
+        }
+      }
+      // fasteners no step names: with the step that places the last part they join
+      for (const f of nf) {
+        if (fast.has(f.id)) continue;
+        const at = Math.max(...f.joins.map((p) => list.findIndex((st) => st.parts?.includes(p))));
+        if (at >= 0) {
+          fast.set(f.id, at);
+          (list[at].fasteners ??= []).push(f.id);
+        }
+      }
+    });
+    list.forEach((st, i) => (st.n = i + 1));
+    this.asmCache = { sig, list, fast };
+    return this.asmCache;
+  }
+
+  /** Assemble: parts still to come drawn very faint instead of hidden. */
+  stepFaint = false;
+  /** Assemble: advancing by itself. */
+  playing = false;
+  private stepAt = 0;
+
+  setPlaying(on: boolean) {
+    this.playing = on;
+    if (on && this.step >= this.steps.length - 1) this.setStep(0);
+    this.stepAt = performance.now();
+    this.emit();
   }
 
   // ------------------------------------------------------------------ pose
@@ -1165,6 +1252,7 @@ export class Workbench {
     const sc = this.scope;
     if (sc && sc.kind !== 'library') this.applyScope(sc.kind === 'system' ? this.systemScope(sc.id) : this.variantHidden.has(sc.owner) ? null : this.assemblyScope(sc.owner), false);
     else {
+      this.buildPlan();
       this.refresh();
       this.emit();
     }
@@ -1178,12 +1266,14 @@ export class Workbench {
     this.check = null;
     if (this.step >= 0) {
       const s = steps[this.step];
-      if (s.pose && this.focus) {
-        this.focus.pose = { ...this.focus.pose, ...s.pose };
+      const node = s.node ?? this.focus;
+      if (s.pose && node) {
+        node.pose = { ...node.pose, ...s.pose };
         this.pose();
       }
-      if (this.step > prev && !reducedMotion()) this.anim = { from: performance.now(), dur: 700, step: this.step };
-    }
+      if (this.step > prev && !reducedMotion()) this.anim = { from: performance.now(), dur: 950, step: this.step };
+      this.stepAt = performance.now();
+    } else this.playing = false;
     this.refresh();
     if (this.active && this.step >= 0) this.frameStep();
     this.emit();
@@ -1406,6 +1496,10 @@ export class Workbench {
     }
     if ((this.host.quality?.() ?? 'balanced') !== this.shadowQ) this.fitShadow();
     this.detailByView(now);
+    if (this.playing && this.step >= 0 && !this.anim && now - this.stepAt > 2600) {
+      if (this.step < this.steps.length - 1) this.setStep(this.step + 1);
+      else this.setPlaying(false);
+    }
     if (this.anim) {
       const k = Math.min(1, (now - this.anim.from) / this.anim.dur);
       this.applyOffsets(1 - k);
@@ -1463,8 +1557,10 @@ export class Workbench {
       if (look === 'exterior' && !outside) visible = false;
       if (look === 'mechanism' && shell && !scope) visible = false;
       if (!inScope && !ghosts) visible = false;
+      // Assemble: what is still to come is hidden (or very faint); the step's context lightly ghosted
       const f = first.get(id);
-      if (cur && f !== undefined && f > this.step && !ctx.has(id)) visible = false;
+      const toCome = !!cur && f !== undefined && f > this.step;
+      if (toCome && !ctx.has(id) && !this.stepFaint) visible = false;
       po.holder.visible = visible;
       po.mesh.visible = visible;
       const m = po.mat;
@@ -1482,7 +1578,10 @@ export class Workbench {
       } else {
         finish = mechanismFinish(p);
       }
-      if (cur && !inStep.has(id) && !ctx.has(id)) opacity = Math.min(opacity, 0.16); // Steps: the rest recedes
+      if (toCome) {
+        finish = GHOST_FINISH;
+        opacity = Math.min(opacity, ctx.has(id) ? 0.22 : 0.06);
+      }
       m.color.setHex(finish.color);
       m.metalness = finish.metalness;
       m.roughness = finish.roughness;
@@ -1508,16 +1607,16 @@ export class Workbench {
       em.clippingPlanes = clip;
     }
     const fastIn = new Set(cur?.fasteners ?? []);
-    const stepIds = steps.map((st) => st.id);
+    const fastAt = this.assembly().fast;
     for (const [id, fo] of this.fast) {
       const joinsVisible = fo.f.joins.some((p) => this.parts.get(p)?.mesh.visible && (!scope || scope.has(p)));
       let visible = this.fasteners && look !== 'exterior' && joinsVisible && !this.hidden.has(id);
-      if (cur && stepIds.indexOf(fo.f.step) > this.step) visible = false;
+      if (cur && (fastAt.get(id) ?? -1) > this.step) visible = false;
       if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p))) visible = false;
       fo.obj.visible = visible;
       fo.mat.color.setHex(MATERIAL.fastener.color);
       fo.mat.emissive.setHex(0);
-      setLook(fo.mat, cur && !fastIn.has(id) ? 0.25 : 1, clip);
+      setLook(fo.mat, 1, clip);
       rim(fo.mat, this.selected === id ? HIGHLIGHT.selected : HIGHLIGHT.step, this.selected === id ? 0.9 : cur && fastIn.has(id) ? 0.7 : 0);
       fo.obj.castShadow = visible;
     }
@@ -1542,14 +1641,19 @@ export class Workbench {
   private buildPlan() {
     this.plan = null;
     const sc = this.scope;
-    if (!sc || !this.top) return;
+    if (!this.top) return;
+    // nothing in focus: the whole droid, level by level (assemblies apart, then their moving
+    // groups, then the pieces), the inner levels at half the distance so the structure reads
+    const whole = !sc;
+    const K = whole ? 0.5 : 1;
     const centre = (po: PartObj) => {
       const g = po.mesh.geometry;
       if (!g.boundingBox) g.computeBoundingBox();
       const c = g.boundingBox!.isEmpty() ? new THREE.Vector3() : g.boundingBox!.getCenter(new THREE.Vector3());
       return c.add(po.sBase ?? po.base).applyMatrix4(this.restLink.get(po.part.id) ?? new THREE.Matrix4());
     };
-    const mine = [...sc.parts].map((id) => this.parts.get(id)).filter((po): po is PartObj => !!po && !this.variantHidden.has(po.node));
+    const ids = sc ? [...sc.parts] : [...this.parts.keys()];
+    const mine = ids.map((id) => this.parts.get(id)).filter((po): po is PartObj => !!po && !this.variantHidden.has(po.node) && !po.part.replaced_by);
     if (!mine.length) return;
     const all = new THREE.Box3();
     const cen = new Map<PartObj, THREE.Vector3>();
@@ -1560,7 +1664,7 @@ export class Workbench {
     }
     const scopeC = all.getCenter(new THREE.Vector3());
     const plan = new Map<string, THREE.Vector3>();
-    const nodes = new Set(sc.joints.map((x) => x.node));
+    const nodes = new Set(sc ? sc.joints.map((x) => x.node) : []);
     if (!nodes.size) for (const po of mine) nodes.add(po.node);
     const half = (pts: THREE.Vector3[], c: THREE.Vector3, d: THREE.Vector3) => pts.reduce((m, p) => Math.max(m, Math.abs(p.clone().sub(c).dot(d))), 0);
     for (const n of nodes) {
@@ -1589,13 +1693,15 @@ export class Workbench {
           dir = v.clone().addScaledVector(axis, -v.dot(axis));
           if (dir.length() < 8) dir.set(0, 0, 1).addScaledVector(axis, -axis.z);
         } else {
+          // a turn pulls along its axis when coaxial with its frame (a ring, the pan) - and always for the
+          // whole droid, where a sideways pull reads as parts flying off
           const radial = v.clone().addScaledVector(axis, -v.dot(axis));
-          dir = radial.length() < 10 ? axis.clone().multiplyScalar(v.dot(axis) < 0 ? -1 : 1) : v.clone();
+          dir = radial.length() < 10 || whole ? axis.clone().multiplyScalar(v.dot(axis) < 0 ? -1 : 1) : v.clone();
         }
         dir.normalize();
         const kidPts = kids.map((po) => cen.get(po)!);
         const parPts = parent.map((po) => cen.get(po)!);
-        const dist = Math.min(140, half(parPts, pc, dir) * 0.6 + half(kidPts, lc, dir) + 30);
+        const dist = K * Math.min(140, half(parPts, pc, dir) * 0.6 + half(kidPts, lc, dir) + 30);
         const off = offOf(j.parent_link).clone().addScaledVector(dir, dist);
         linkOff.set(link, off);
         return off;
@@ -1608,11 +1714,31 @@ export class Workbench {
           if (moving && ps.length > 1) {
             const v = cen.get(po)!.clone().sub(lc);
             const d = v.length();
-            if (d > 2) off.addScaledVector(v.normalize(), Math.min(60, 0.7 * d + 12));
+            if (d > 2) off.addScaledVector(v.normalize(), K * Math.min(60, 0.7 * d + 12));
           }
           plan.set(po.part.id, off);
         }
       }
+    }
+    // the whole droid: each assembly pulls away from the one it is mounted on, carrying its children
+    if (whole) {
+      const byNode = new Map<AsmNode, PartObj[]>();
+      for (const po of mine) (byNode.get(po.node) ?? byNode.set(po.node, []).get(po.node)!).push(po);
+      const mean = (pts: THREE.Vector3[]) => pts.reduce((v, p) => v.add(p), new THREE.Vector3()).divideScalar(Math.max(1, pts.length));
+      // The droid is a stack around its column: each assembly (base skirt, column, rings, head) lifts
+      // above the one under it, in the order they sit (by their lowest part), with a gap - the column
+      // stays, the shells and rings rise off it, the head rides on top. Arms ride their rings.
+      const order = [...byNode.keys()].map((n) => ({ n, lo: Math.min(...byNode.get(n)!.map((po) => cen.get(po)!.y)) }))
+        .sort((x, y) => x.lo - y.lo);
+      const nodeOff = new Map<AsmNode, THREE.Vector3>();
+      let rise = 0;
+      for (const { n } of order) {
+        const own = byNode.get(n)!.map((po) => cen.get(po)!);
+        nodeOff.set(n, new THREE.Vector3(0, rise, 0));
+        rise += Math.min(110, half(own, mean(own), new THREE.Vector3(0, 1, 0)) * 0.25 + 45);
+      }
+      const offN = (n: AsmNode) => nodeOff.get(n) ?? new THREE.Vector3();
+      for (const po of mine) plan.set(po.part.id, (plan.get(po.part.id) ?? new THREE.Vector3()).add(offN(po.node)));
     }
     // the focus's parts that live in other assemblies (a drive servo on the column) back away from it
     for (const po of mine) {
@@ -1627,6 +1753,14 @@ export class Workbench {
       if (rest) o.applyMatrix3(new THREE.Matrix3().setFromMatrix4(rest).invert());
     }
     this.plan = plan;
+  }
+
+  /** Where a part arrives from in Assemble (link frame): its explode direction, 50-120 mm out. */
+  private arrival(po: PartObj): THREE.Vector3 {
+    const o = this.plan?.get(po.part.id)?.clone() ?? new THREE.Vector3(...(po.part.explode ?? [0, 1, 0]));
+    if (o.lengthSq() < 1e-6) o.set(0, 1, 0);
+    const len = Math.min(120, Math.max(50, o.length() * 1.5));
+    return o.normalize().multiplyScalar(len);
   }
 
   /** A part's explode offset at `k`, in its link's frame. */
@@ -1646,7 +1780,8 @@ export class Workbench {
     const inStep = new Set(cur?.parts ?? []);
     const fastIn = new Set(cur?.fasteners ?? []);
     for (const po of this.parts.values()) {
-      const step = inStep.has(po.part.id) ? new THREE.Vector3(...(po.part.explode ?? [0, 0, 0])).multiplyScalar((po.part.explode_mm ?? 0) * insert * 1.2) : null;
+      // a step's new parts come in from where the explode would take them (at least 50 mm out)
+      const step = inStep.has(po.part.id) && insert > 0 ? this.arrival(po).multiplyScalar(insert) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);
     }
@@ -1654,7 +1789,7 @@ export class Workbench {
     for (const fo of this.fast.values()) {
       const owner = this.parts.get(fo.f.joins[0]);
       const mine = !scope || fo.f.joins.some((p) => scope.has(p));
-      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 30 : 0);
+      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 40 : 0); // driven in along its axis
       const m = fo.base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -back));
       if (owner && mine) {
         const d = this.offsetOf(owner, this.explode);
@@ -1855,6 +1990,14 @@ function rim(m: THREE.MeshStandardMaterial, color: number, strength: number) {
   u.set(c.r, c.g, c.b, strength);
 }
 
+type RenderItem = { groupOrder: number; renderOrder: number; z: number; id: number };
+function ghostSort(a: RenderItem, b: RenderItem) {
+  if (a.groupOrder !== b.groupOrder) return a.groupOrder - b.groupOrder;
+  if (a.renderOrder !== b.renderOrder) return a.renderOrder - b.renderOrder;
+  if (a.z !== b.z) return a.renderOrder === 2 ? a.z - b.z : b.z - a.z;
+  return a.id - b.id;
+}
+
 /** Opacity and clipping; recompiles the material only when its program would change. */
 function setLook(m: THREE.MeshStandardMaterial, opacity: number, clip: THREE.Plane[] | null) {
   const transparent = opacity < 1;
@@ -1863,7 +2006,7 @@ function setLook(m: THREE.MeshStandardMaterial, opacity: number, clip: THREE.Pla
   const program = transparent !== m.transparent || (clip?.length ?? 0) !== (m.clippingPlanes?.length ?? 0);
   m.transparent = transparent;
   m.opacity = opacity;
-  m.depthWrite = !transparent;
+  m.depthWrite = true; // a ghost too: with the nearest-first sort (ghostSort) only its front surface draws
   m.clippingPlanes = clip;
   if (program) m.needsUpdate = true;
 }
