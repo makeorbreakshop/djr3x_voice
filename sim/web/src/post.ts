@@ -517,9 +517,10 @@ export class PostPipeline {
 
   private filmSaved: { grain: number; vignette: number; aberration: number } | null = null;
 
-  /** Inspection (Build): no grain or lens fringing, a light vignette; off restores the film. */
+  /** Inspection (Build): no bloom, grain or lens fringing, a light vignette; off restores the film. */
   setClean(on: boolean) {
     const u = this.film.uniforms;
+    const was = !!this.filmSaved;
     if (on && !this.filmSaved) {
       this.filmSaved = { grain: u.uGrain.value, vignette: u.uVignette.value, aberration: u.uAberration.value };
       u.uGrain.value = 0;
@@ -531,6 +532,7 @@ export class PostPipeline {
       u.uAberration.value = this.filmSaved.aberration;
       this.filmSaved = null;
     }
+    if (was !== !!this.filmSaved) this.build(); // the bloom pass in or out
     this.pacer.touch();
   }
 
@@ -566,7 +568,8 @@ export class PostPipeline {
     if (ao) this.ao.setQualityMode(ao);
     this.composer.addPass(ao ? this.ao : this.renderPass);
     if (this.hot) this.composer.addPass(this.hot);
-    if (this.bloomOn) this.composer.addPass(this.bloom);
+    // bloom is the show's (the LEDs): never in a clean inspection image (Build), whatever the levels say
+    if (this.bloomOn && !this.filmSaved) this.composer.addPass(this.bloom);
     this.composer.addPass(this.output);
     this.composer.addPass(this.smaa);
     this.composer.addPass(this.lut);
@@ -612,11 +615,14 @@ export class PostPipeline {
     this.lastFrame = this.pacer.fps(now) === Infinity ? now : -1;
     this.film.uniforms.uTime.value = STILL ? 0 : now / 1000;
     this.probe?.frameStart();
-    if (this.envScale === 1) {
+    // a clean inspection image (Build) keeps the room environment near its own level: the Flat
+    // preset's 1.8x turned the brushed aluminium white
+    const envScale = this.filmSaved ? Math.min(this.envScale, 1.15) : this.envScale;
+    if (envScale === 1) {
       this.composer.render();
     } else {
       const e = this.scene.environmentIntensity;
-      this.scene.environmentIntensity = e * this.envScale;
+      this.scene.environmentIntensity = e * envScale;
       this.composer.render();
       this.scene.environmentIntensity = e;
     }

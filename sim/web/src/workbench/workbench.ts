@@ -74,6 +74,9 @@ interface PartObj {
   base: THREE.Vector3;
   /** Where the mesh sits at the current stretch (parts with `stretch`), else `base`. */
   sBase?: THREE.Vector3;
+  /** The full-detail GLB (manifest `mesh_full`), swapped in when in focus or close; `fullState`. */
+  full?: string;
+  fullState?: 'loading' | 'done';
 }
 
 export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
@@ -576,7 +579,8 @@ export class Workbench {
       } else {
         (node.links.get(p.link) ?? group).add(mesh);
       }
-      parts.push({ part: p, node, holder, mesh, mat, base: b, lazy: lazy ? url : undefined });
+      const full = p.mesh_full ? joinUrl(base, p.mesh_full) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`) : undefined;
+      parts.push({ part: p, node, holder, mesh, mat, base: b, lazy: lazy ? url : undefined, full });
     }));
     const fastMat = this.material(MATERIAL.fastener);
     await Promise.all((asm.fasteners ?? []).filter((f) => f.placed && f.mesh && f.transform).map(async (f) => {
@@ -682,6 +686,52 @@ export class Workbench {
         this.refresh();
       });
     }
+  }
+
+  /** Swap the full-detail meshes in for these parts (those that have one, are loaded and shown). */
+  upgrade(ids: Iterable<string>) {
+    const geometry = this.geometryFn;
+    if (!geometry) return;
+    const seq = this.loadSeq;
+    for (const id of ids) {
+      const po = this.parts.get(id);
+      if (!po?.full || po.fullState || po.lazy || this.variantHidden.has(po.node)) continue;
+      po.fullState = 'loading';
+      void geometry(po.full).then((geo) => {
+        if (seq !== this.loadSeq) return;
+        po.fullState = 'done';
+        po.mesh.getObjectByName('edges')?.removeFromParent();
+        po.mesh.geometry = geo;
+        this.addEdges(po.mesh, geo, po.part.class === 'shell');
+        this.drainEdges(seq);
+        this.markShadow();
+        this.host.interact();
+      }, () => (po.fullState = undefined));
+    }
+  }
+
+  /** Parts big on screen get their full detail (checked a few times a second while the view moves). */
+  private lastDetail = { at: 0, sig: '' };
+  private detailByView(now: number) {
+    if (now - this.lastDetail.at < 400) return;
+    const cam = this.host.camera;
+    const sig = cam.position.toArray().map((v) => v.toFixed(3)).join() + this.host.controls.target.toArray().map((v) => v.toFixed(3)).join();
+    if (sig === this.lastDetail.sig) return;
+    this.lastDetail = { at: now, sig };
+    const tanV = Math.tan((cam.fov * Math.PI) / 360) / Math.max(0.2, cam.zoom);
+    const want: string[] = [];
+    const c = new THREE.Vector3();
+    for (const [id, po] of this.parts) {
+      if (!po.full || po.fullState || !po.mesh.visible) continue;
+      const g = po.mesh.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      const bs = g.boundingSphere!;
+      c.copy(bs.center).applyMatrix4(po.mesh.matrixWorld);
+      const r = bs.radius * po.mesh.matrixWorld.getMaxScaleOnAxis();
+      const d = Math.max(1e-3, c.distanceTo(cam.position));
+      if (r / (d * tanV) > 0.6) want.push(id); // spans over 60 % of the view's height: close up
+    }
+    if (want.length) this.upgrade(want);
   }
 
   /** Feature edges wait in a queue and are built a few milliseconds at a time (drainEdges). */
@@ -858,6 +908,7 @@ export class Workbench {
     this.check = null;
     this.refresh();
     this.fitShadow(); // a library design may have moved the ground (its picks)
+    if (sc) this.upgrade(sc.parts); // in focus: full detail
     this.emit();
     if (frame && this.active) this.frame(sc !== null, true);
   }
@@ -1122,6 +1173,7 @@ export class Workbench {
       moving = true;
     }
     if ((this.host.quality?.() ?? 'balanced') !== this.shadowQ) this.fitShadow();
+    this.detailByView(now);
     if (this.anim) {
       const k = Math.min(1, (now - this.anim.from) / this.anim.dur);
       this.applyOffsets(1 - k);

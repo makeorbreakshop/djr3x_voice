@@ -4,6 +4,8 @@ body:not([data-mode="build"]) [data-build] { display: none !important; }
 /* In Build the droid is not drawn: his camera presets, overlays and controller stand aside. */
 body[data-mode="build"] :is(#sc-view, #sc-overlays, #sc-pad, #caption, #centre-labels, #frame-stats.hide-in-build),
 body[data-mode="build"] #scene-panel .rail :is([data-scene-open="sc-view"], [data-scene-open="sc-overlays"], [data-scene-open="sc-pad"]) { display: none !important; }
+/* Build lights itself (workbench.ts INSPECTION): the set's work light does not apply */
+body[data-mode="build"] #scene-work { display: none !important; }
 body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .state-badge[data-state="build"]::before { background: #57d38c; }
 
@@ -51,12 +53,13 @@ body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top:
 .bb-looks button[aria-checked="true"] { background: #262a35; color: var(--text); border-color: #3a404d; }
 
 /* head: assembly picker (+ rebuild), sub-assembly picker, status only when there is one */
-.build-head { padding: 10px 0 0; display: grid; gap: 6px; }
+.build-head { padding: 10px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .bh-row { display: flex; gap: 6px; }
 .bh-row select { flex: 1; min-width: 0; margin: 0; }
 .bh-row button.icon { width: 32px; height: 32px; }
-.bh-title { flex: 1; min-width: 0; margin: 0; color: var(--text); display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
-.bh-title small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.bh-title { flex: 1 1 0; min-width: 0; overflow: hidden; margin: 0; color: var(--text); display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+.bh-title .bh-name { flex: 0 0 auto; white-space: nowrap; }
+.bh-title small { flex: 0 1 auto; color: var(--muted); font-size: 12px; font-weight: 400; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bh-title button.ic { margin-left: -2px; }
 .bp-load { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 .bp-load > summary { cursor: pointer; color: var(--muted); font-size: 12px; width: max-content; }

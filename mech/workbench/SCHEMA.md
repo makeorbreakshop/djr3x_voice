@@ -131,7 +131,9 @@ A rigid body. Every part rides on exactly one link.
   "class": "shell | mech | servo | fastener | bearing | hardware",
   "link": "head",
   "transform": Transform,               // part mesh -> assembly frame at zero pose
-  "mesh": "parts/head_mount_plate.glb", // display mesh (decimated), in the part's own frame
+  "mesh": "parts/head_mount_plate.glb", // display mesh, overview level (reduced), in the part's own frame
+  "mesh_full": "parts/full/head_mount_plate.glb", // optional: the full-detail level, same frame; readers swap
+                                         // it in for parts in focus or close (geom.display_lods)
   "mesh_sig": "3f1c0a9e2b7d",           // optional: the mesh's content hash (a reader may cache the GLB on it)
   "export": {"stl": "export/head_mount_plate.stl", "3mf": "export/head_mount_plate.3mf"}, // full detail
   "source": {"file": "RX Head Mech Base Plate V4.stl", "kind": "step | stl | dxf | generated",
@@ -141,7 +143,7 @@ A rigid body. Every part rides on exactly one link.
   "explode": [0, 1, 0],                 // unit direction the part leaves along
   "explode_mm": 60,                     // how far at explode = 1
   "bbox": [[minx,miny,minz],[maxx,maxy,maxz]],   // assembly frame, zero pose
-  "triangles": {"display": 4000, "source": 51000},
+  "triangles": {"display": 4000, "full": 12000, "source": 51000},
   "inferred": false, "inferred_note": "",
   "note": "",
   // optional: a part that stretches with a prismatic joint of this assembly (the neck spring with

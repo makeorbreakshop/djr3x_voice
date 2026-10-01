@@ -23,14 +23,17 @@ GENERATOR = "mech/workbench 0.1"
 # Display meshes (the GLBs Build and the Mechanical view load): a triangle budget per class, scaled by
 # the part's size (k x bbox diagonal in mm, between a floor and a cap). Full detail stays in the
 # STL/3MF exports and in the suite's collision meshes; only the display GLB is decimated.
+# These are the overview level (the whole droid at once); a reduced part also gets a full-detail GLB
+# (`mesh_full`) the viewer swaps in when it is in focus or close (geom.display_lods).
 DISPLAY_BUDGET = {  # class: (triangles per mm of diagonal, floor, cap)
     "shell": (40.0, 800, 30000),
-    "mech": (25.0, 400, 12000),
-    "servo": (20.0, 300, 3000),
-    "bearing": (20.0, 200, 2000),
-    "hardware": (20.0, 200, 3000),
-    "fastener": (8.0, 120, 600),
+    "mech": (30.0, 600, 16000),
+    "servo": (40.0, 1500, 8000),
+    "bearing": (40.0, 600, 4000),
+    "hardware": (40.0, 600, 6000),
+    "fastener": (16.0, 300, 1500),
 }
+LOD_VERSION = 2  # part of every display GLB's signature: bump when the display levels change
 
 
 def display_budget(mesh: trimesh.Trimesh, cls: str, override: int | None = None) -> int:
@@ -172,11 +175,12 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
     centre = (m.bounds[0] + m.bounds[1]) / 2
     target = display_budget(m, p.cls, p.decimate_to)
     h = mesh_hash(m)
-    sig = f"{h}:{target}:{EXPORT_VERSION}"
+    sig = f"{h}:{target}:{EXPORT_VERSION}:L{LOD_VERSION}"
     mesh_rel = f"{prefix}parts/{p.id}.glb"
+    full_rel = f"{prefix}parts/full/{p.id}.glb"
     exports = {}
     todo = []
-    if not sigs.fresh(mesh_rel, sig, out):
+    if not sigs.fresh(mesh_rel, sig, out) or (sigs.d.get(full_rel + "#faces") and not sigs.fresh(full_rel, sig, out)):
         todo.append("glb")
     if export:
         exports["stl"] = f"{prefix}export/{p.id}.stl"
@@ -190,11 +194,15 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
     if todo or n_disp is None:
         local = m.copy()
         local.apply_translation(-centre)
-        disp = geom.decimate(local, target) if target else local
+        disp, full = geom.display_lods(local, target, p.cad == "parametric") if target else (local, None)
         n_disp = int(len(disp.faces))
         if "glb" in todo:
             _glb(disp, out / mesh_rel)
             sigs.mark(mesh_rel, sig)
+            if full is not None:
+                _glb(full, out / full_rel)
+                sigs.mark(full_rel, sig)
+            sigs.d[full_rel + "#faces"] = int(len(full.faces)) if full is not None else 0
         if "stl" in todo:
             (out / exports["stl"]).parent.mkdir(parents=True, exist_ok=True)
             local.export(out / exports["stl"])
@@ -209,7 +217,9 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
         sigs.d[mesh_rel + "#faces"] = n_disp
     import hashlib
 
-    return centre, n_disp, mesh_rel, exports, hashlib.sha1(sig.encode()).hexdigest()[:12]
+    n_full = int(sigs.d.get(full_rel + "#faces") or 0)
+    full_out = (full_rel, n_full) if n_full and (out / full_rel).exists() else None
+    return centre, n_disp, mesh_rel, exports, hashlib.sha1(sig.encode()).hexdigest()[:12], full_out
 
 
 def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = True, loaded_children=None,
@@ -222,19 +232,19 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as ex:
         files = list(ex.map(lambda p: _part_files(p, prefix, out, export, sigs), asm.parts))
     parts = []
-    for p, (centre, n_disp, mesh_rel, exports, msig) in zip(asm.parts, files):
+    for p, (centre, n_disp, mesh_rel, exports, msig, full) in zip(asm.parts, files):
         m = p.mesh
         parts.append(_clean({
             "id": p.id, "name": p.name, "class": p.cls, "link": p.link,
             "transform": Transform(tuple(centre)).json(),
-            "mesh": mesh_rel, "mesh_sig": msig, "export": exports, "source": p.source,
+            "mesh": mesh_rel, "mesh_sig": msig, "mesh_full": full[0] if full else None, "export": exports, "source": p.source,
             "material": p.material, "printed": p.printed,
             "explode": vec(np.asarray(p.explode, float) / (np.linalg.norm(p.explode) or 1)),
             "explode_mm": p.explode_mm,
             "mass_g": round(p.mass_g, 1) if p.mass_g else None, "mass_note": p.mass_note,
             "linkage": p.linkage, "role": p.role,
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
-            "triangles": {"display": n_disp, "source": int(len(m.faces))},
+            "triangles": _clean({"display": n_disp, "full": full[1] if full else None, "source": int(len(m.faces))}),
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
             "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch, "exposed": p.exposed,
             "replaced_by": p.replaced_by,
@@ -254,9 +264,9 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
                 fm = f.mesh if f.mesh is not None else geom.fastener_mesh(f.spec)
                 from .collide import mesh_hash
 
-                fsig = f"{mesh_hash(fm)}:{EXPORT_VERSION}"
+                fsig = f"{mesh_hash(fm)}:{EXPORT_VERSION}:L{LOD_VERSION}"
                 if not sigs.fresh(rel, fsig, out):
-                    _glb(geom.decimate(fm, display_budget(fm, "fastener")), out / rel)
+                    _glb(geom.reduce_mesh(fm, display_budget(fm, "fastener")), out / rel)
                     sigs.mark(rel, fsig)
                 written.add(rel)
             node["mesh"] = rel
@@ -385,6 +395,8 @@ def prune(out: Path, node: dict, export: bool, sigs: "_Sigs") -> int:
     def walk(n):
         for p in n.get("parts", []):
             keep.add(p.get("mesh", ""))
+            if p.get("mesh_full"):
+                keep.add(p["mesh_full"])
             keep.update((p.get("export") or {}).values())
         for f in n.get("fasteners", []):
             if f.get("mesh"):

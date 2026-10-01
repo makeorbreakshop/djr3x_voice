@@ -623,7 +623,7 @@ export function mountBuildPanel(wb: Workbench) {
     const sc = wb.scope;
     const title = sc ? sc.label : openAsm === OUR_BUILD ? 'Our build' : assemblyLabel(m?.root.name ?? openAsm);
     const sub = sc?.kind === 'library' ? sc.item?.by ?? '' : '';
-    $('bp-title').innerHTML = `${esc(title)}${sub ? ` <small>${esc(sub)}</small>` : ''}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
+    $('bp-title').innerHTML = `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
   }
 
   /** Parts of the focus: the scope's, else everything fitted under the focused node. */

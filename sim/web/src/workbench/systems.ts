@@ -283,9 +283,10 @@ export function exteriorFinish(p: MPart, nodeId: string): Finish {
 
 /** Material-true: aluminium, steel, brass, one dark neutral for printed parts, servos near black. */
 export const MATERIAL = {
-  aluminium: { color: 0xe2e5e9, metalness: 0.3, roughness: 0.4 },
-  steel: { color: 0x9a9fa7, metalness: 0.7, roughness: 0.32 },
-  brass: { color: 0xd0a650, metalness: 0.75, roughness: 0.32 },
+  // brushed / clear-anodised 6061: a mid silver, rough enough that the room never mirrors in it
+  aluminium: { color: 0xa9afb7, metalness: 0.55, roughness: 0.55 },
+  steel: { color: 0x8a9098, metalness: 0.7, roughness: 0.42 },
+  brass: { color: 0xb8904a, metalness: 0.7, roughness: 0.4 },
   printed: { color: 0x4d5057, metalness: 0.0, roughness: 0.62 },
   servo: { color: 0x26282c, metalness: 0.2, roughness: 0.45 },
   black: { color: 0x1e1f22, metalness: 0.0, roughness: 0.7 },

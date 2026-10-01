@@ -20,7 +20,7 @@ import type { Workbench } from '../workbench/workbench';
 import { LoadMeter } from './meter';
 import { MechView, type ModelView } from './mechview';
 import { fittedNodes, ServoView } from './servos';
-import { TorqueModel } from './torque';
+import { ServoFollower, TorqueModel } from './torque';
 
 const KEY = 'r3x.model';
 type PageMode = 'show' | 'bench' | 'studio' | 'build';
@@ -43,6 +43,8 @@ export class MechRig {
   private mode: PageMode = 'show';
   private pick: Record<string, ModelView> = {};
   private buildTorque = new TorqueModel();
+  /** Build's poses jump (sliders): the load is of a servo chasing them within its limits. */
+  private follower = new ServoFollower();
   private scopeKey = '';
 
   constructor(private readonly host: MechRigHost) {
@@ -145,7 +147,7 @@ export class MechRig {
       if (this.meter.visible && wb.top) {
         const pose: Record<string, number> = {};
         for (const n of fittedNodes(wb)) for (const j of n.asm.joints) if (j.profile_joint) pose[j.profile_joint] = n.pose[j.id] ?? 0;
-        const loads = this.buildTorque.update(pose, t);
+        const loads = this.buildTorque.update(this.follower.step(pose, t), t);
         // in a scope: only the servos that drive its joints
         const sc = wb.scope;
         const scKey = sc ? `${sc.kind}:${sc.id}` : '';

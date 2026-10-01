@@ -318,6 +318,93 @@ def decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
     return out
 
 
+# ------------------------------------------------------------------ display levels of detail
+
+#: Display tolerance (mm) of a parametric part's overview: the tessellation re-fitted within this
+#: of the true surface - a 12 mm wheel keeps ~34 segments - which is what a coarser tessellation
+#: would give; its full level is the tessellation itself (0.01 mm, 0.1 rad), never reduced.
+PARAMETRIC_TOL = 0.05
+#: The full-detail level (fetched when a system is in focus or close) of a vendor or purchased mesh.
+FULL_CAP = 60000
+
+
+def _quadric(m: trimesh.Trimesh, t: int) -> trimesh.Trimesh | None:
+    """Quadric decimation to about `t` faces, or None when the simplifier refuses or misses badly."""
+    if len(m.faces) <= max(8, t):
+        return None
+    try:
+        with _SIMPLIFY_LOCK:  # the simplifier's mesh lives in process globals
+            out = m.simplify_quadric_decimation(face_count=max(8, int(t)))
+    except Exception:
+        return None
+    return out if 0 < len(out.faces) <= 1.5 * max(8, t) else None
+
+
+def _within(m: trimesh.Trimesh, tol: float) -> trimesh.Trimesh:
+    """`m` re-fitted to within `tol` mm of itself (manifold3d's edge collapse, which keeps edges
+    and round profiles); a mesh that is not a closed manifold comes back as it is."""
+    try:
+        import manifold3d as mf
+
+        M = mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                tri_verts=np.asarray(m.faces, np.uint32)))
+        if M.status() != mf.Error.NoError:
+            return m
+        o = M.simplify(float(tol)).to_mesh()
+        out = trimesh.Trimesh(np.asarray(o.vert_properties)[:, :3], np.asarray(o.tri_verts), process=False)
+        return out if 0 < len(out.faces) < len(m.faces) else m
+    except Exception:
+        return m
+
+
+def reduce_mesh(mesh: trimesh.Trimesh, target: int, tol: float | None = None) -> trimesh.Trimesh:
+    """A display copy of `mesh`: each connected component re-fitted within `tol` mm (default: 0.15 %
+    of the part's size, 0.05-0.5 mm), then - only if the whole is still over `target` faces - quadric
+    decimation per component with a share of the budget. A component that will not reduce keeps its
+    shape; only a tiny one (under 2 % of the part, or 1.5 mm) may become its convex hull. No vertex
+    clustering: that is what made wheels into blobs. Welded first (a STEP's faces arrive unshared)."""
+    m = mesh.copy()
+    m.merge_vertices()
+    m.update_faces(m.nondegenerate_faces())
+    m.remove_unreferenced_vertices()
+    if not len(m.faces):
+        return mesh
+    diag = float(np.linalg.norm(m.extents)) or 1.0
+    tol = tol if tol is not None else min(0.5, max(0.05, 0.0015 * diag))
+    comps = m.split(only_watertight=False) if len(m.faces) > 64 else [m]
+    comps = [c for c in comps if len(c.faces)] or [m]
+    comps = [_within(c, tol) for c in comps]
+    total = sum(len(c.faces) for c in comps)
+    if total > 1.3 * target:
+        out = []
+        for c in comps:
+            share = max(24, int(target * len(c.faces) / total))
+            d = _quadric(c, share)
+            if d is None and len(c.faces) > 4 * share and float(np.linalg.norm(c.extents)) < max(1.5, 0.02 * diag):
+                try:
+                    d = c.convex_hull
+                except Exception:
+                    d = None
+            out.append(d if d is not None and len(d.faces) < len(c.faces) else c)
+        comps = out
+    return trimesh.util.concatenate(comps) if len(comps) > 1 else comps[0]
+
+
+def display_lods(mesh: trimesh.Trimesh, overview: int, parametric: bool) -> tuple[trimesh.Trimesh, trimesh.Trimesh | None]:
+    """(overview mesh, full-detail mesh or None when the overview is already it).
+    Parametric: the overview is the tessellation within PARAMETRIC_TOL (no triangle budget), the full
+    level the tessellation itself. Vendor and purchased meshes: reduce_mesh at the class budget for
+    the overview, within 0.02 mm and FULL_CAP for the full level."""
+    if parametric:
+        full = mesh
+        over = reduce_mesh(mesh, 10**9, PARAMETRIC_TOL)
+    else:
+        diag = float(np.linalg.norm(mesh.extents)) or 1.0
+        full = reduce_mesh(mesh, FULL_CAP, max(0.02, 0.0002 * diag)) if len(mesh.faces) > 20000 else mesh
+        over = reduce_mesh(full, overview)
+    return over, (full if len(full.faces) > 1.2 * len(over.faces) else None)
+
+
 def sample(mesh: trimesh.Trimesh, spacing: float = 1.5, cap: int = 25000) -> np.ndarray:
     """Surface points at roughly `spacing` mm (for distance checks)."""
     n = int(min(cap, max(300, mesh.area / (spacing * spacing))))

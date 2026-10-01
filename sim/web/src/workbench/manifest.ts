@@ -22,6 +22,8 @@ export interface MPart {
   link: string;
   transform: MTransform;
   mesh: string;
+  /** The full-detail display GLB, when `mesh` (the overview level) is reduced from it. */
+  mesh_full?: string;
   export?: { stl?: string; '3mf'?: string };
   source?: { file?: string; kind?: string; entity?: string; placement?: string; fit?: string; [k: string]: unknown };
   material?: string;
@@ -33,7 +35,7 @@ export interface MPart {
   linkage?: string;
   role?: string;
   bbox: [Vec3, Vec3];
-  triangles?: { display: number; source: number };
+  triangles?: { display: number; full?: number; source: number };
   inferred?: boolean;
   inferred_note?: string;
   note?: string;

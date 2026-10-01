@@ -278,6 +278,61 @@ export class TorqueModel {
   }
 }
 
+// ------------------------------------------------------------------ servo follower (Build)
+
+/**
+ * What a servo would actually do chasing a pose that jumps: a slider drag or a typed value moves a
+ * joint by many degrees in one frame, and the raw second difference of that is an acceleration no
+ * servo makes (a single frame read "neck pan 270 %"). The follower moves each joint toward its
+ * target at a bounded speed and acceleration (trapezoidal, stops on the target), so the torque
+ * model sees motion a real servo could make: a fast drag is a full-acceleration move, a held pose
+ * is gravity only, and a pose that truly needs more than the servo has still reads over the limit.
+ */
+export class ServoFollower {
+  private pos: Record<string, number> = {};
+  private vel: Record<string, number> = {};
+  private last = -1;
+
+  /** Limits per joint unit: deg/s, deg/s^2 (mm for a prismatic joint, by name). */
+  constructor(readonly limits = { speed: 360, accel: 2400, mmSpeed: 150, mmAccel: 1000 }, readonly mm = new Set(['head_lift'])) {}
+
+  reset() {
+    this.pos = {};
+    this.vel = {};
+    this.last = -1;
+  }
+
+  step(target: Record<string, number>, t: number): Record<string, number> {
+    const dt = this.last < 0 ? 0 : Math.min(0.1, Math.max(0, t - this.last));
+    this.last = t;
+    const out: Record<string, number> = {};
+    for (const [k, goal] of Object.entries(target)) {
+      if (!(k in this.pos) || dt === 0) {
+        this.pos[k] ??= goal;
+        this.vel[k] ??= 0;
+        out[k] = this.pos[k];
+        continue;
+      }
+      const lin = this.mm.has(k);
+      const vmax = lin ? this.limits.mmSpeed : this.limits.speed;
+      const amax = lin ? this.limits.mmAccel : this.limits.accel;
+      const d = goal - this.pos[k];
+      // the speed that still stops on the target, then accelerate toward it within the limit
+      const want = Math.sign(d) * Math.min(vmax, Math.sqrt(2 * amax * Math.abs(d)));
+      const v0 = this.vel[k];
+      const v = v0 + Math.max(-amax * dt, Math.min(amax * dt, want - v0));
+      let p = this.pos[k] + v * dt;
+      if ((goal - p) * d <= 0 && Math.abs(v) <= amax * dt * 1.5) {
+        p = goal; // arrived (or would overshoot at a crawl): settle
+        this.vel[k] = 0;
+      } else this.vel[k] = v;
+      this.pos[k] = p;
+      out[k] = p;
+    }
+    return out;
+  }
+}
+
 // ------------------------------------------------------------------ clip analysis (Studio lint)
 
 export interface ClipTrack { joint: string; value: (u: number) => number }
