@@ -37,11 +37,14 @@ pub struct RigGeometry {
     /// The head rides the top ring (Original), so gaze past the neck can spill to the rings.
     /// False (Physical: the head column stands on the base) = turning a ring moves no gaze.
     pub head_on_rings: bool,
+    /// The middle ring rides the lower one (Original's stacked rings). False (Physical: each
+    /// ring turns on the static core) = turning the lower ring moves nothing above it.
+    pub rings_stacked: bool,
 }
 
 impl Default for RigGeometry {
     fn default() -> Self {
-        RigGeometry { pan: (-66.0, 66.0), tilt: (-16.0, 21.0), roll: (-10.0, 10.0), head_on_rings: true }
+        RigGeometry { pan: (-66.0, 66.0), tilt: (-16.0, 21.0), roll: (-10.0, 10.0), head_on_rings: true, rings_stacked: true }
     }
 }
 
@@ -64,6 +67,7 @@ impl RigGeometry {
             tilt: range("head_tilt", d.tilt),
             roll: range("head_roll", d.roll),
             head_on_rings: on_rings,
+            rings_stacked: p.joint("torso_middle").and_then(|j| j.parent.as_deref()) == Some("torso_lower"),
         }
     }
 }

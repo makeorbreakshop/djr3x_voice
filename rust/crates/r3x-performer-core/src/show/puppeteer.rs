@@ -371,6 +371,12 @@ impl Puppeteer {
         let body = expo(body_yaw);
         add(pose, "torso_lower", body * BODY_YAW_LOWER);
         add(pose, "torso_top", body * BODY_YAW_TOP);
+        // The body turns under the head: when the head rides the rings the neck takes the turn
+        // back, so the gaze stays where the right stick put it (2026-10-01: turning the body
+        // swung the head with it, which read as one piece).
+        if self.rig.head_on_rings {
+            add(pose, "head_pan", -body * (BODY_YAW_LOWER + BODY_YAW_TOP));
+        }
 
         let lean = expo(lean);
         add(pose, "head_lift", lean * 7.0);
@@ -401,13 +407,18 @@ impl Puppeteer {
         // +roll: right-handed about +Z, the crown toward the droid's right (-X).
         add(pose, "head_roll", expo(roll) * ROLL);
 
-        // Hands. Aiming turns the arm's ring; when the head rides the rings it would turn too,
-        // so the neck takes it back and the gaze holds where the operator left it.
+        // Hands. Aiming turns only that arm's ring (the real rings turn independently on the
+        // static core): on stacked rings (Original) the middle ring takes the lower one's turn
+        // back so nothing above moves; when the head rides the top ring, the neck takes the hero
+        // ring's turn back so the gaze holds.
         let (hero_ring, poker_ring) = (expo(hero_aim) * HERO_AIM, expo(poker_aim) * POKER_AIM);
         add(pose, "torso_top", hero_ring);
         add(pose, "torso_lower", poker_ring);
+        if self.rig.rings_stacked {
+            add(pose, "torso_middle", -poker_ring);
+        }
         if self.rig.head_on_rings {
-            add(pose, "head_pan", -(hero_ring + poker_ring));
+            add(pose, "head_pan", -hero_ring);
         }
         let up = expo(hero_raise);
         add(pose, "hero_shoulder", if up >= 0.0 { -up * HERO_UP } else { -up * HERO_DOWN });
@@ -467,9 +478,40 @@ mod tests {
         // The head on the base (the column rig): turning a ring does not move it, no counter-turn.
         let mut p = Puppeteer::default();
         p.rig.head_on_rings = false;
+        p.rig.rings_stacked = false;
         let pose = settle(&mut p, &operator(&[(op_axis::POKER_AIM, -1.0)]));
         assert!((get(&pose, "torso_lower") + POKER_AIM).abs() < 0.1);
         assert_eq!(get(&pose, "head_pan"), 0.0);
+        assert_eq!(get(&pose, "torso_middle"), 0.0, "independent rings: nothing to take back");
+    }
+
+    /// Aiming one arm moves only its ring (2026-10-01: "if I'm using the modifier, I just want
+    /// to move just that ring"). On stacked rings the middle ring cancels the lower one's turn,
+    /// so the throttle arm, the top ring, the hero arm and the head stay where they were.
+    #[test]
+    fn aiming_the_poker_arm_on_stacked_rings_moves_only_its_ring() {
+        let mut p = Puppeteer::default();
+        assert!(p.rig.rings_stacked && p.rig.head_on_rings);
+        let pose = settle(&mut p, &operator(&[(op_axis::POKER_AIM, 1.0)]));
+        assert!((get(&pose, "torso_lower") - POKER_AIM).abs() < 0.1);
+        assert!((get(&pose, "torso_middle") + POKER_AIM).abs() < 0.1, "the middle ring takes it back");
+        assert_eq!(get(&pose, "torso_top"), 0.0);
+        assert_eq!(get(&pose, "head_pan"), 0.0, "the head never saw it");
+    }
+
+    /// Turning the body (left stick, no modifier) no longer swings the gaze: when the head
+    /// rides the rings the neck takes the turn back, so the head stays the right stick's.
+    #[test]
+    fn turning_the_body_holds_the_gaze() {
+        let mut p = Puppeteer::default();
+        let pose = settle(&mut p, &operator(&[(0, 1.0)]));
+        let rings = get(&pose, "torso_lower") + get(&pose, "torso_top");
+        assert!((rings - (BODY_YAW_LOWER + BODY_YAW_TOP)).abs() < 0.5, "the body turned: {rings}");
+        assert!((get(&pose, "head_pan") + rings).abs() < 0.5, "the neck took it back: {}", get(&pose, "head_pan"));
+        let mut p = Puppeteer::default();
+        p.rig.head_on_rings = false;
+        let pose = settle(&mut p, &operator(&[(0, 1.0)]));
+        assert_eq!(get(&pose, "head_pan"), 0.0, "head on the column: nothing to take back");
     }
 
     #[test]
