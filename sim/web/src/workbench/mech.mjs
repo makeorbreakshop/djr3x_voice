@@ -17,6 +17,24 @@ export function mechOut() {
   return {
     name: 'r3x-mech-out',
     configureServer(server) {
+      // Live reload: when the workbench rewrites a manifest (`workbench build <asm> --sketch --watch`),
+      // tell the page; Build reloads the open assembly in place (camera, joints and picks kept).
+      let timer = null;
+      const changed = new Set();
+      try {
+        fs.watch(OUT, { recursive: true }, (_e, name) => {
+          const rel = String(name || '').split(path.sep).join('/');
+          if (!rel.endsWith('manifest.json')) return;
+          changed.add(rel);
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            server.ws.send({ type: 'custom', event: 'r3x:mech-manifest', data: { paths: [...changed], t: Date.now() } });
+            changed.clear();
+          }, 120);
+        });
+      } catch (e) {
+        server.config.logger.warn(`mech/out not watched (${e.message}): Build will not live-reload`);
+      }
       server.middlewares.use('/mech/out/', (req, res, next) => {
         const rel = decodeURIComponent((req.url || '').split('?')[0]).replace(/^\/+/, '');
         const full = path.resolve(OUT, rel);

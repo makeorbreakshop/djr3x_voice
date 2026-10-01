@@ -260,8 +260,12 @@ export class Workbench {
 
   // ------------------------------------------------------------------ loading
 
-  load(url: string): Promise<void> {
-    this.loading = this.doLoad(url).catch((e) => {
+  /** The open manifest's URL (Build reloads it when the workbench rewrites it). */
+  url = '';
+
+  load(url: string, keep = false): Promise<void> {
+    this.url = url;
+    this.loading = this.doLoad(url, keep ? this.snapshot() : null).catch((e) => {
       this.error = String(e instanceof Error ? e.message : e);
       console.warn('build: load failed', e);
     }).finally(() => {
@@ -273,8 +277,21 @@ export class Workbench {
   }
 
   private loadSeq = 0;
+  private geoCache = new Map<string, Promise<THREE.BufferGeometry>>();
 
-  private async doLoad(url: string) {
+  /** Reload the open assembly in place (a rebuilt manifest): the camera, the joint values, the
+   * variant picks and the focused sub-assembly stay as they were. */
+  reload(): Promise<void> {
+    return this.url ? this.load(this.url, true) : Promise.resolve();
+  }
+
+  private snapshot() {
+    const poses: Record<string, Pose> = {};
+    this.forEachNode((n) => (poses[n.asm.id] = { ...n.pose }));
+    return { poses, variants: { ...this.variants }, focus: this.focus?.asm.id ?? null };
+  }
+
+  private async doLoad(url: string, keep: ReturnType<Workbench['snapshot']> | null = null) {
     this.error = '';
     const seq = ++this.loadSeq;
     const m = await loadManifest(url);
@@ -282,7 +299,9 @@ export class Workbench {
     this.clear();
     this.manifest = m;
     const loader = new GLTFLoader();
-    const geoCache = new Map<string, Promise<THREE.BufferGeometry>>();
+    // a live reload keeps the meshes it already has (keyed by URL + content hash); a fresh load starts over
+    const geoCache = keep ? this.geoCache : new Map<string, Promise<THREE.BufferGeometry>>();
+    this.geoCache = geoCache;
     const geometry = (u: string) => {
       let g = geoCache.get(u);
       if (!g) {
@@ -332,10 +351,19 @@ export class Workbench {
         else if (!(v.group in this.variants)) this.variants[v.group] = v.id;
       }
     });
+    if (keep) {
+      for (const [g, id] of Object.entries(keep.variants)) if (g in this.variants) this.variants[g] = id;
+      this.forEachNode((n) => {
+        const p = keep.poses[n.asm.id];
+        if (!p) return;
+        for (const j of n.asm.joints ?? []) if (j.id in p) n.pose[j.id] = Math.min(j.limits.max, Math.max(j.limits.min, p[j.id]));
+        if (keep.focus === n.asm.id) this.focus = n;
+      });
+    }
     this.applyVariantNodes();
     this.pose();
     this.refresh();
-    if (this.active) this.frame();
+    if (this.active && !keep) this.frame();
   }
 
   /** The suite's interference.json next to the manifest: each pair's shared solid (a GLB) or,
@@ -435,7 +463,10 @@ export class Workbench {
     }
     const base = asm.base ?? '/';
     await Promise.all(asm.parts.map(async (p) => {
-      const geo = await geometry(joinUrl(base, p.mesh));
+      // the mesh's content hash (workbench build) keys the geometry cache, so a live reload refetches only
+      // the parts whose mesh changed
+      const sig = (p as { mesh_sig?: string }).mesh_sig;
+      const geo = await geometry(joinUrl(base, p.mesh) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`));
       const mat = this.material(p.class);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = p.id;

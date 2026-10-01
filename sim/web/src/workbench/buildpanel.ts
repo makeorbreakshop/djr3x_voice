@@ -230,6 +230,16 @@ export function mountBuildPanel(wb: Workbench) {
     render();
   }
 
+  // Live reload (dev server, src/workbench/mech.mjs): a rebuilt manifest reloads the open assembly in
+  // place. A child's manifest (Hunter's head under the droid) counts too, so any manifest reloads it.
+  if (import.meta.hot) {
+    import.meta.hot.on('r3x:mech-manifest', (d: { paths: string[]; t: number }) => {
+      if (!wb.url) return;
+      const t0 = performance.now();
+      void wb.reload().then(() => ((window as unknown as { __r3xBuildReloadAt?: number }).__r3xBuildReloadAt = Date.now()) && console.info(`build: reloaded ${d.paths.join(', ')} in ${Math.round(performance.now() - t0)} ms (file written ${Date.now() - d.t} ms ago)`));
+    });
+  }
+
   /** Build opens: fetch the index and the last assembly once. */
   window.addEventListener('r3x:mode', (e) => {
     if ((e as CustomEvent).detail === 'build' && !loadedOnce) void refreshIndex();
