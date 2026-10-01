@@ -101,6 +101,26 @@ if [ "$STOP_ONLY" = 1 ]; then
   exit 0
 fi
 
+# cargo re-copies target/release/<bin> on every build, a no-op included, and macOS checks an
+# executable at a new directory entry on its first launch (~0.6 s for the 50 MB runtime, every
+# time). Launch through a hard link to the identical file in deps/ (same size and nanosecond
+# mtime: cargo's copy keeps both), re-made only when cargo actually rebuilt it; else the copy.
+launch_bin() {
+  local name="$1" rel="$ROOT/rust/target/release" want f link
+  link="$rel/launch/$name"
+  want="$(stat -f '%z %Fm' "$rel/$name" 2>/dev/null)" || { echo "$rel/$name"; return 0; }
+  for f in "$rel/deps/$(echo "$name" | tr - _)"-*; do
+    case "${f##*/}" in *.*) continue ;; esac
+    { [ -x "$f" ] && [ "$(stat -f '%z %Fm' "$f")" = "$want" ]; } || continue
+    if [ "$(stat -f %i "$f")" != "$(stat -f %i "$link" 2>/dev/null)" ]; then
+      { mkdir -p "$rel/launch" && ln -f "$f" "$link"; } 2>/dev/null || break
+    fi
+    echo "$link"
+    return 0
+  done
+  echo "$rel/$name"
+}
+
 # ---------------------------------------------------------------- preflight
 command -v npm >/dev/null || die "npm not found - install Node.js first"
 if [ "$BACKEND" = 1 ] && [ "$LEGACY" = 1 ]; then
@@ -121,24 +141,18 @@ elif [ "$BACKEND" = 1 ]; then
     die "port $GATEWAY_PORT is taken by something that is not r3x-runtime: $(lsof -nP -iTCP:"$GATEWAY_PORT" -sTCP:LISTEN | tail -n +2)"
   fi
 fi
-if [ ! -d "$WEB/node_modules" ]; then
-  say "installing panel dependencies (first run)"
-  npm --prefix "$WEB" install --silent
-fi
-WASM="$WEB/src/wasm/r3x_performer_bg.wasm"
-if [ ! -f "$WASM" ] || [ -n "$(find "$ROOT/rust/crates/r3x-performer-core" "$ROOT/rust/crates/r3x-performer-wasm" "$ROOT/rust/crates/r3x-motion" -newer "$WASM" -name '*.rs' -print -quit 2>/dev/null)" ]; then
-  command -v wasm-pack >/dev/null || die "wasm-pack not found - cargo install wasm-pack"
-  say "building the panel's WASM performer"
-  npm --prefix "$WEB" run -s build:wasm >/dev/null 2>&1 || die "WASM build failed - run: npm --prefix sim/web run build:wasm"
-fi
-[ -f "$WEB/public/model/r3x.glb" ] || say "no 3D model yet - the panel works, but build R3X with sim/model/build.sh to see him"
 mkdir -p "$ROOT/logs"
 
-# ---------------------------------------------------------------- panel
 PANEL_PID=""
 RUNTIME_PID=""
+BUILD_PID=""
 cleanup() {
   trap - EXIT INT TERM
+  # A build still running (Ctrl-C while compiling): background jobs ignore SIGINT here.
+  if [ -n "$BUILD_PID" ] && kill -0 "$BUILD_PID" 2>/dev/null; then
+    pkill -TERM -P "$BUILD_PID" 2>/dev/null || true
+    kill -TERM "$BUILD_PID" 2>/dev/null || true
+  fi
   if [ -n "$RUNTIME_PID" ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
     say "stopping r3x-runtime"
     kill -INT "$RUNTIME_PID" 2>/dev/null || true
@@ -157,6 +171,33 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
+
+# The runtime build starts first and runs in the background while the panel's WASM builds,
+# the panel starts and the browser opens; the runtime waits for it below. (An unchanged tree
+# is a ~0.5 s no-op, hidden behind the panel.)
+RUST_BACKEND=0
+[ "$BACKEND" = 1 ] && [ "$LEGACY" = 0 ] && RUST_BACKEND=1
+BUILD_LOG="$ROOT/logs/build.log"
+if [ "$RUST_BACKEND" = 1 ]; then
+  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime -p r3x-cli --features r3x-runtime/mouse \
+    >"$BUILD_LOG" 2>&1 </dev/null &
+  BUILD_PID=$!
+fi
+
+if [ ! -d "$WEB/node_modules" ]; then
+  say "installing panel dependencies (first run)"
+  npm --prefix "$WEB" install --silent
+fi
+WASM="$WEB/src/wasm/r3x_performer_bg.wasm"
+if [ ! -f "$WASM" ] || [ -n "$(find "$ROOT/rust/crates/r3x-performer-core" "$ROOT/rust/crates/r3x-performer-wasm" "$ROOT/rust/crates/r3x-motion" -newer "$WASM" -name '*.rs' -print -quit 2>/dev/null)" ]; then
+  command -v wasm-pack >/dev/null || die "wasm-pack not found - cargo install wasm-pack"
+  say "building the panel's WASM performer"
+  # Its own target dir: sharing rust/target would wait on the runtime build's cargo lock.
+  CARGO_TARGET_DIR="$ROOT/rust/target/wasm-panel" npm --prefix "$WEB" run -s build:wasm >/dev/null 2>&1 || die "WASM build failed - run: npm --prefix sim/web run build:wasm"
+fi
+[ -f "$WEB/public/model/r3x.glb" ] || say "no 3D model yet - the panel works, but build R3X with sim/model/build.sh to see him"
+
+# ---------------------------------------------------------------- panel
 
 # Start fresh: a panel left on the port (another terminal, a test, a crashed launcher) is
 # replaced, so the page is always served by this checkout and paired with this runtime.
@@ -185,10 +226,10 @@ for pid in $(pgrep -f "ffmpeg.*avfoundation" 2>/dev/null); do
 done
 npm --prefix "$WEB" run dev -- --port "$PANEL_PORT" --strictPort >"$ROOT/logs/panel.log" 2>&1 &
 PANEL_PID=$!
-for _ in $(seq 1 60); do
+for _ in $(seq 1 150); do
   port_busy "$PANEL_PORT" && break
   kill -0 "$PANEL_PID" 2>/dev/null || die "panel failed to start - see logs/panel.log"
-  sleep 0.25
+  sleep 0.1
 done
 port_busy "$PANEL_PORT" || die "panel did not come up on $PANEL_PORT - see logs/panel.log"
 # The backend's websockets need a token and an allowed Origin. One local token for both
@@ -234,25 +275,25 @@ if [ "$LEGACY" = 0 ]; then
   # (feature `mouse`; needs Accessibility for Terminal.app, without it the click is simply off).
   MOUSE_ARGS=()
   [ "$CLICK_ANYWHERE" = 1 ] && MOUSE_ARGS=(--mouse)
-  # Cargo only recompiles what changed; say so only when that takes a noticeable while.
-  ( sleep 2; say "compiling changed code (only after an update; the very first build takes a few minutes)" ) &
-  BUILD_NOTE=$!
-  cargo build --release --manifest-path "$ROOT/rust/Cargo.toml" -p r3x-runtime -p r3x-cli --features r3x-runtime/mouse -q \
-    || { kill "$BUILD_NOTE" 2>/dev/null; die "r3x-runtime did not build"; }
-  # The note may have printed and exited already (a build over 2 s): under `set -e` a failed
-  # kill here used to end the launcher silently, before the runtime ever started.
-  kill "$BUILD_NOTE" 2>/dev/null || true; wait "$BUILD_NOTE" 2>/dev/null || true
+  # The build started at the top; wait for it, saying so only when it is still compiling.
+  if kill -0 "$BUILD_PID" 2>/dev/null; then
+    say "compiling changed code (only after an update; the very first build takes a few minutes) - log: logs/build.log"
+  fi
+  wait "$BUILD_PID" || { BUILD_PID=""; tail -30 "$BUILD_LOG" >&2; die "r3x-runtime did not build (above: the end of logs/build.log)"; }
+  BUILD_PID=""
+  RUNTIME_BIN="$(launch_bin r3x-runtime)"
+  CLI_BIN="$(launch_bin r3x-cli)"
   LOG="$ROOT/logs/r3x-runtime.log"
   set -m  # own process group (pgid = its pid), so cleanup can stop its children too
-  "$ROOT/rust/target/release/r3x-runtime" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
+  "$RUNTIME_BIN" --standalone ${MOUSE_ARGS[@]+"${MOUSE_ARGS[@]}"} --session-log "$ROOT/logs" \
     ${RUNTIME_ARGS[@]+"${RUNTIME_ARGS[@]}"} >"$LOG" 2>&1 </dev/null &
   RUNTIME_PID=$!
   set +m
   say "r3x-runtime starting on :$GATEWAY_PORT - log: logs/r3x-runtime.log (tail -f it, or ./r3x --logs)"
-  for _ in $(seq 1 240); do
+  for _ in $(seq 1 600); do
     port_busy "$GATEWAY_PORT" && break
     kill -0 "$RUNTIME_PID" 2>/dev/null || { tail -20 "$LOG" >&2; RUNTIME_PID=""; die "r3x-runtime exited during startup (above: the end of $LOG)"; }
-    sleep 0.25
+    sleep 0.1
   done
   port_busy "$GATEWAY_PORT" || die "r3x-runtime did not open :$GATEWAY_PORT - see $LOG"
   if [ "$LOGS" = 1 ]; then
@@ -263,7 +304,7 @@ if [ "$LEGACY" = 0 ]; then
     kill "$TAIL_PID" 2>/dev/null || true
   else
     set +e
-    "$ROOT/rust/target/release/r3x-cli" --url "ws://127.0.0.1:$GATEWAY_PORT/"
+    "$CLI_BIN" --url "ws://127.0.0.1:$GATEWAY_PORT/"
     set -e
   fi
   exit 0
