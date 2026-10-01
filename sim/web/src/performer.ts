@@ -36,7 +36,7 @@ export type PerfCmd =
   | { cmd: 'emote'; slot: number }
   | { cmd: 'pad'; axes: number[]; buttons: [boolean, number][] }
   | { cmd: 'mode'; mode: SystemMode }
-  | { cmd: 'listening_started' | 'listening_stopped' | 'llm_chunk' | 'speech_ended' | 'puppet_release' | 'jog_release' }
+  | { cmd: 'listening_started' | 'listening_stopped' | 'heard' | 'llm_chunk' | 'speech_ended' | 'puppet_release' | 'jog_release' }
   | { cmd: 'speech_started'; timings?: number[]; tags?: [number, string][] }
   | { cmd: 'amplitude'; value: number }
   | { cmd: 'music'; playing: boolean }

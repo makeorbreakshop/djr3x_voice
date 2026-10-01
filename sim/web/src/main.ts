@@ -417,7 +417,9 @@ async function converse() {
       await sleep(0.8);
     }
     perf({ cmd: 'listening_started' });
-    await sleep(2.4);
+    await sleep(1.4);
+    perf({ cmd: 'heard' }); // a phrase lands: the listening nod
+    await sleep(1.0);
     perf({ cmd: 'listening_stopped' });
     await sleep(0.9 + Math.random() * 0.8);
     await sayLine();
