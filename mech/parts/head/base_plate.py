@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import math
 
-from ._common import Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane, resolve_hole_types
+from ._common import INSERTS, Print, cut_hole, finish, hole_d, hole_features, hole_group_params, plane, resolve_hole_types
 from .servos import servo as servo_spec
 
 REFERENCE = "RX Head Mech Base Plate V4.stl"
@@ -39,6 +39,14 @@ LABEL = "RX Head Mech Base Plate V4 (parametric)"
 
 DESIGNED = {"fl": "clearance", "pb": "clearance", "sins": "heat_set"}   # flange onto the head's inserts; pillow
 INSERT_CANDIDATES = ()   # blocks' tapped posts; the servos' screws already go into the kit's M4 inserts
+
+# The `inserts` preset's servo bosses (coordinator, 2026-09-30, option a): the servo case is 4.0 mm
+# from each flange hole's centre, so the kit's 6 mm M4 insert leaves 1.0 mm of wall and no M4 insert
+# reaches 1.5. M3 inserts (4.0 hole: 2.0 mm wall), M3 screws through the servo's 4.5 mm flange holes.
+# The holes are flat-bottomed: a printed blind hole needs no drill point, and without one the
+# standard 5.7 mm insert's 6.7 mm hole stops 1.3 mm over the outer posts' cable tunnel (a shorter
+# M3 x 4 would clear too, but cannot give the screw 1.5 d of thread).
+PRESET_SERVO = dict(servo_bolt="M3", insert="M3", insert_depth=None, insert_point=False)
 
 DEFAULTS = dict(
     # print fit, mm added to every hole diameter and to the servo pocket (both ways)
@@ -85,8 +93,10 @@ DEFAULTS = dict(
     gusset_bar=10.0,         # 45 deg gussets, bar and post feet
     foot_fillet_r=5.0,       # bars' front/back feet into the deck
     tunnel=(18.0, 20.0, 5.0),  # arched cable tunnel through each outer post: width (Z), height, corner r
-    insert_depth=6.0,        # heat-set insert hole depth (+ a 118 deg drill point)
-    insert="M4-kit",         # the servo bosses' inserts: the BOM's 6 x 6 mm M4
+    insert_depth=6.0,        # heat-set insert hole depth (None: the insert's length + 1)
+    insert="M4-kit",         # the servo bosses' inserts: the BOM's 6 x 6 mm M4 (an INSERTS key)
+    insert_point=True,       # a 118 deg drill point under each insert hole, as Hunter drew them
+    servo_bolt="M4",         # the servo screws' thread (the inserts' size)
     **hole_group_params(DESIGNED),
 )
 
@@ -97,9 +107,12 @@ def make(params: dict | None = None, **kw):
                            Locations, Mode, Plane, Polyline, Pos, Rectangle, Rot, extrude, fillet,
                            make_face, mirror)
 
+    user = dict(params or {})
+    user.update(kw)
     P = dict(DEFAULTS)
-    P.update(params or {})
-    P.update(kw)
+    if user.get("inserts") and user.get("sins_hole") is None:
+        P.update(PRESET_SERVO)               # the preset's servo bosses, unless the caller sets them
+    P.update(user)
     unknown = set(P) - set(DEFAULTS)
     if unknown:
         raise TypeError(f"unknown base_plate parameters: {sorted(unknown)}")
@@ -247,7 +260,6 @@ def make(params: dict | None = None, **kw):
     feats: dict = {}
     bolt = P["bolt"]
     d_clear = hole_d(bolt, "clearance", fit)
-    d_ins = hole_d(bolt, "heatset", fit)
 
     def through_y(x, z, ytop, depth):
         return Pos(x, ytop - depth / 2, z) * Rot(90, 0, 0) * Cylinder(d_clear / 2, depth + 0.02)
@@ -272,19 +284,24 @@ def make(params: dict | None = None, **kw):
             continue
         body -= through_y(x, z, ty, t)
         hole_features(feats, f"pb{i + 1}", (x, ty, z), (0, -1, 0), d_clear / 2, depth=t, bolt=bolt, kind="clearance")
-    # 6. servo inserts: blind, 118 deg drill point
-    depth = P["insert_depth"]
-    tip = (d_ins / 2) / math.tan(math.radians(59))
+    # 6. servo inserts: blind, with a 118 deg drill point as drawn
+    sbolt = P["servo_bolt"]
+    ins_spec = INSERTS[P["insert"]]
+    d_sins = ins_spec["d"] + fit
+    depth = P["insert_depth"] if P["insert_depth"] is not None else ins_spec["length"] + 1.0
+    tip = (d_sins / 2) / math.tan(math.radians(59))
     ins = sorted([(s * (P["servo_x"] + dxp), zc + dzp) for s in (-1, 1)
                   for dxp in (-pat_l / 2, pat_l / 2) for dzp in (-pat_w / 2, pat_w / 2)])
     for i, (x, z) in enumerate(ins):
         if types["sins"] != "heat_set":
-            body = cut_hole(body, feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), bolt, types["sins"], depth, fit)
+            body = cut_hole(body, feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), sbolt, types["sins"], depth, fit)
             continue
-        drill = Pos(x, by - depth / 2 + 0.01, z) * Rot(90, 0, 0) * Cylinder(d_ins / 2, depth + 0.02)
-        drill += Pos(x, by - depth, z) * Rot(90, 0, 0) * Cone(d_ins / 2, 0, tip, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        drill = Pos(x, by - depth / 2 + 0.01, z) * Rot(90, 0, 0) * Cylinder(d_sins / 2, depth + 0.02)
+        if P["insert_point"]:
+            drill += Pos(x, by - depth, z) * Rot(90, 0, 0) * Cone(d_sins / 2, 0, tip, align=(Align.CENTER, Align.CENTER, Align.MIN))
         body -= drill
-        hole_features(feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), d_ins / 2, depth=depth, bolt=bolt, kind="heat_set")
+        hole_features(feats, f"sins{i + 1}", (x, by, z), (0, -1, 0), d_sins / 2, depth=depth, bolt=sbolt, kind="heat_set")
+        feats[f"hole_sins{i + 1}"].update(insert=ins_spec["source"], insert_length=ins_spec["length"])
 
     feats["underside"] = plane((0, y0, 0), (0, -1, 0))
     feats["top"] = plane((0, ty, 0), (0, 1, 0))

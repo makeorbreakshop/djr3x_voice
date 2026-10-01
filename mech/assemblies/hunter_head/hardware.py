@@ -53,6 +53,11 @@ def _nom(thread):
     return float(thread[1:])
 
 
+# the servo bosses' inserts by thread (None: Hw.insert's default, the kit's 6 x 6 mm M4)
+SERVO_INSERT = {"M3": {"type": "insert", "thread": "M3", "length_mm": 5.7, "od_mm": 4.6,
+                       "note": "Ruthex RX-M3x5.7 (hole 4.0; OD 4.6 from its datasheet, not on file)"}}
+
+
 def screw_len(grip: float, need: float, avail: float | None = None) -> int | None:
     """Smallest standard length engaging at least `need` past the grip (and not bottoming)."""
     for L in STD_LEN:
@@ -322,7 +327,13 @@ def add_hardware(asm, fit, visor):
     plate_top = float(plate.bounds[1][1])
     # the plate's 6 flange holes (M4 clearance, into the head bottom), servo insert holes, pillow holes
     flange = holes_at(plate, 1, -3.11 + 1.0, 1.8, 2.6)
-    servo_ins = holes_at(plate, 1, plate_top - 2.0, 2.7, 3.3)
+    # the servo inserts: from the parametric plate's features (their size follows its `inserts` preset:
+    # the kit's 6 mm M4, or M3 in 4.0 mm holes), else measured on the mesh
+    pf = P["mount_plate"].features
+    sins = [k for k in sorted(pf) if k.startswith("hole_sins")]
+    servo_ins = [(np.asarray(pf[k]["p"], float), float(pf[k]["r"])) for k in sins] or \
+        holes_at(plate, 1, plate_top - 2.0, 2.7, 3.3)
+    servo_bolt = (pf[sins[0]].get("bolt") if sins else None) or "M4"
     pillow = holes_at(plate, 1, 25.0 - 0.0, 1.8, 2.6)
     bottom = P["head_bottom"].mesh
     b_ins = holes_at(bottom, 1, fit["boss_top_head"] - 1.5, 2.7, 3.3)
@@ -344,7 +355,7 @@ def add_hardware(asm, fit, visor):
         hw.insert(f"ins_bottom_{i + 1}", "head_bottom", f"ins{i + 1}", "s01")
     for i, (c, r) in enumerate(sorted(servo_ins, key=lambda h: (h[0][0], h[0][2]))):
         hw.hole("mount_plate", f"sins{i + 1}", [c[0], plate_top, c[2]], -UP, r)
-        hw.insert(f"ins_servo_{i + 1}", "mount_plate", f"sins{i + 1}", "s01")
+        hw.insert(f"ins_servo_{i + 1}", "mount_plate", f"sins{i + 1}", "s01", spec=SERVO_INSERT.get(servo_bolt))
 
     # the plate's underside rests on the head bottom's six boss tops
     P["head_bottom"].features["boss_top"] = plane([0, fit["boss_top_head"], 0], UP)
@@ -378,6 +389,13 @@ def add_hardware(asm, fit, visor):
         if fl_top is None:
             fl_top = p + UP * 2.5
         hw.hole(f"servo_{side}", f"fl{i + 1}", fl_top, -UP, 2.2)
+        if servo_bolt == "M3":
+            # the plate's inserts preset (option a, 2026-09-30): M3 socket heads through the servo's 4.5 mm
+            # flange holes into the 5.7 mm M3 inserts; the length is chosen for 1.5 d of thread
+            hw.screw(f"scr_servo_{i + 1}", fl_top, -UP, [(f"servo_{side}", f"fl{i + 1}")],
+                     (f.id, "thread", "insert", 5.7), "s07", "head", thread="M3",
+                     joins=[f"servo_{side}", "mount_plate", f.id])
+            continue
         # low heads (DIN 7984: a socket head's rim hits the servo case beside the flange), M4 x 10
         # into the plate's 8 mm insert holes (design default 2026-09-30: +2 mm so it clears the drill point)
         hw.screw(f"scr_servo_{i + 1}", fl_top, -UP, [(f"servo_{side}", f"fl{i + 1}")], (f.id, "thread", "insert", 6.0),

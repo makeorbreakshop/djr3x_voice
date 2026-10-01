@@ -420,7 +420,10 @@ def build() -> Assembly:
              (0, 0, 0), 0, m, n, note="The gimbal cross: tilt axis (X) in the U-joint bearings, "
                                       "roll axis (Z) in the pillow-block bearings.", **cjkw))
 
-    plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate", insert_depth=PARAMS["plate_insert_depth"])
+    # the servo bosses: the inserts preset's M3 (option a, 2026-09-30: the kit's 6 mm M4 leaves 1.0 mm of
+    # wall to the servo case); PARAMS["plate_inserts"] = False keeps Hunter's stock M4 holes
+    pkw = {"inserts": True} if PARAMS.get("plate_inserts", True) else {"insert_depth": PARAMS["plate_insert_depth"]}
+    plate, psrc, pfeat = remodel("base_plate", M_PLATE, "mount_plate", **pkw)
     step_plate = step_part("Head_Mounting_Plate")
     dev = float(np.abs(plate.bounds - step_plate.bounds).max())
     psrc["placement"] = "fitted (the reference V4 STL's frame, on the head bottom's inserts)"

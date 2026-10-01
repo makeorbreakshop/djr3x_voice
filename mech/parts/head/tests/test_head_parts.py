@@ -225,3 +225,26 @@ def test_clearance_cut_cache(tmp_path, monkeypatch):
     assert len(calls) == 3 and abs(moved.volume - 960.0) < 1e-3
     _shell.apply_clearance_cuts(Box(10, 10, 10), [cut], I)         # no params: never cached
     assert len(calls) == 4
+
+
+def test_plate_servo_inserts_preset():
+    """As designed: Hunter's 6 mm M4 holes (1.0 mm to the servo pocket). The inserts preset: M3 in 4.0 mm
+    flat-bottomed holes, 2.0 mm to the pocket (the rule's 1.5) and 1.3 mm over the outer posts' tunnel."""
+    from build123d import Vector
+
+    mod = importlib.import_module("parts.head.base_plate")
+    stock = mod.make()
+    f = stock.features["hole_sins1"]
+    assert f["bolt"] == "M4" and math.isclose(2 * f["r"], 6.0) and f["depth"] == 6.0
+    p = mod.make({"inserts": True})
+    assert p.is_valid and len(p.solids()) == 1
+    for k in [k for k in p.features if k.startswith("hole_sins")]:
+        f = p.features[k]
+        x, y, z = f["p"]
+        assert f["bolt"] == "M3" and math.isclose(2 * f["r"], 4.0) and math.isclose(f["depth"], 6.7)
+        toward = 1 if abs(x) < 40 else -1                  # the servo pocket's side
+        sx = 1 if x > 0 else -1
+        ym = y - f["depth"] / 2
+        assert p.is_inside(Vector(x + sx * toward * (f["r"] + 1.95), ym, z))      # >= 1.5 (2.0) of wall
+        assert p.is_inside(Vector(x, y - f["depth"] - 1.25, z))                  # a floor under every hole
+    assert mod.make({"inserts": True, "sins_hole": "heat_set"}).features["hole_sins1"]["bolt"] == "M4"
