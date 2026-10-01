@@ -252,8 +252,7 @@ function onPadFrame(p: PadFrame | null | undefined) {
     toggleController(true);
   }
   padOverlay.update(p);
-  // Build's pad jog reads the runtime's pad from here when the browser cannot see the DS3
-  // itself (USB on macOS); while Build holds the pad the runtime keeps sending it raw.
+  // Build follows the puppeteer while the pad is in use (mechrig/index.ts).
   mechRig.feedPad(p);
 }
 /** Wired WINDOW_SUBSYSTEMS (panel-major), as the chest service reports them. */
@@ -476,21 +475,21 @@ function onPerfOut(o: PerfOut) {
 const aimAt = (p: THREE.Vector3) => rig?.aimAt(p) ?? null;
 
 let hadPad = false;
-let padParked = false;
+/** Build, connected: the runtime's raw pad (it holds the DS3 over HID) for this panel's performer. */
+let runtimePad: PadFrame | null = null;
 function pollGamepad() {
-  // Build's pad jog (mechrig/padjog.ts) has the pad: park the puppeteer at neutral once.
-  if (mechRig.padOwns) {
-    if (!padParked) perf({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
-    padParked = true;
-    return;
-  }
-  padParked = false;
+  // The same puppeteer everywhere: offline the embedded performer conducts; connected, only
+  // Build (and Studio's local preview) tick it here, and it is the one that gets the pad.
+  const toLocal = (c: PerfCmd) => (connected ? performer?.command(c) : perf(c));
   const pad = [...(navigator.getGamepads?.() ?? [])].find((g) => g && g.mapping === 'standard');
+  const raw = !pad && inBuild && connected ? runtimePad : null;
   if (pad) {
-    perf({ cmd: 'pad', axes: [...pad.axes], buttons: pad.buttons.map((b) => [b.pressed, b.value] as [boolean, number]) });
+    toLocal({ cmd: 'pad', axes: [...pad.axes], buttons: pad.buttons.map((b) => [b.pressed, b.value] as [boolean, number]) });
+  } else if (raw) {
+    toLocal({ cmd: 'pad', axes: raw.axes, buttons: raw.buttons.map((v) => [v > 0, v] as [boolean, number]) });
   } else if (hadPad) {
     // The performer has no "pad gone": park it at neutral.
-    perf({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
+    toLocal({ cmd: 'pad', axes: [0, 0, 0, 0], buttons: [] });
   }
   if (!!pad !== hadPad) {
     hadPad = !!pad;
@@ -499,7 +498,9 @@ function pollGamepad() {
 }
 
 function tickPerformer(t: number) {
-  if (!performer || (connected && !studioLocal)) return studio.tick(null);
+  // Build ticks this panel's performer even when connected: it is sim only, and it is where the
+  // claimed pad puppets the mechanism (never the robot).
+  if (!performer || (connected && !studioLocal && !inBuild)) return studio.tick(null);
   if (speaking || audio.micOn) {
     let a = 0;
     if (audio.active) a = agc.next(audio.rmsInt16());
@@ -524,6 +525,10 @@ function tickPerformer(t: number) {
 // ------------------------------------------------------------------ gateway follower
 function onFrames(f: Frames) {
   if (studioLocal) return; // Studio previews on the embedded performer
+  if (inBuild) {
+    runtimePad = f.pad ?? null; // Build puppets this panel's performer with it
+    return;
+  }
   onPadFrame(f.pad);
   const px = (k: string) => f.lights[k] ?? [];
   view = {
@@ -656,7 +661,7 @@ const studio = new Studio({
     fitView();
     if (open && !was && studioLocal) studioPerformer();
     else if (was && !studioLocal) {
-      performer?.command({ cmd: 'alive', breathing: true, saccades: true, gaze_wander: true, speech_bob: true });
+      performer?.command({ cmd: 'alive', breathing: true, saccades: true, gaze_wander: true, speech_bob: true, expressive_roll: true });
       if (!connected) performer?.command({ cmd: 'autonomy', on: autonomy });
     }
   },
@@ -665,7 +670,7 @@ const studio = new Studio({
 function studioPerformer() {
   performer?.command({ cmd: 'stop', all: true });
   performer?.command({ cmd: 'autonomy', on: false });
-  performer?.command({ cmd: 'alive', breathing: false, saccades: false, gaze_wander: false, speech_bob: false });
+  performer?.command({ cmd: 'alive', breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false });
 }
 // Offline there is no StageManager: the mode switch is local (Studio only; Show/Bench need the runtime).
 document.querySelectorAll<HTMLButtonElement>('[data-stage-mode]').forEach((b) => b.addEventListener('click', (e) => {
@@ -696,7 +701,7 @@ const workbench = new Workbench({
 });
 mountBuildPanel(workbench);
 renderLook.rescan(); // Build's Inspection lights take the viewer's Lighting levels too
-// One rig from the mech model (src/mechrig/): Scene > Model, servo load meters, Build pad jog.
+// One rig from the mech model (src/mechrig/): Scene > Model, servo load meters, Build follows the puppet.
 const mechRig = new MechRig({ scene, workbench, droid: () => droid, interact: () => post.pacer.interact() });
 // Rig: Original | Physical (the profile animation runs on), in the R3X panel.
 mountRigSelector({
@@ -714,7 +719,8 @@ mountRigSelector({
     setTimeout(() => (el.hidden = true), 5000);
   },
 });
-/** In Build this panel holds the gamepad (its own jog layer), so the runtime's pad operator
+/** In Build this panel holds the gamepad (its own performer gets it: the same puppet, posing
+ * the mechanism on the workbench), so the runtime's pad operator
  * layer stands down (stage `claim_pad`); leaving Build hands it back. Checked on every state
  * update, so a reconnect re-claims and a claim this tab left behind is returned. */
 let inBuild = false;

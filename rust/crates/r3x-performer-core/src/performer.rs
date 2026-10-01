@@ -406,6 +406,9 @@ pub struct Performer {
     home_pose: BTreeMap<String, f64>,
     /// A whole-body Home holds `home_pose` under the jog until something moves the body.
     home_hold: bool,
+    /// The rig layer: the selected rig's neck, and the automatic expressive roll.
+    pub rig: crate::show::gaze::RigGeometry,
+    pub expressive: crate::show::gaze::ExpressiveRoll,
     goal_seq: u64,
     goal_deadband: f64,
     out: Vec<Out>,
@@ -439,7 +442,13 @@ impl Performer {
             player: ShowPlayer::new(catalog.clone(), cfg.player),
             body: BodyCompositor::new(),
             idle: IdleRunner::new(catalog.idle.clone(), 0.0),
-            puppet: Puppeteer::default(),
+            puppet: {
+                let mut p = Puppeteer::default();
+                p.rig = crate::show::gaze::RigGeometry::from_profile(profile);
+                p
+            },
+            rig: crate::show::gaze::RigGeometry::from_profile(profile),
+            expressive: Default::default(),
             procedural,
             actuation,
             host,
@@ -769,7 +778,7 @@ impl Performer {
         self.jog.clear();
         self.puppet.release();
         self.command(Command::Autonomy { on: false });
-        self.procedural.layers = AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false };
+        self.procedural.layers = AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false };
         self.home_hold = true;
         Ok(())
     }
@@ -1120,6 +1129,13 @@ impl Performer {
             .procedural
             .update(t, dt, &ctx, &mut self.rng, &self.joints);
         self.body.apply(&mut pose, t, Some(&self.puppet));
+        // ---- rig layer: automatic expressive roll on whatever the head is doing
+        if self.procedural.layers.expressive_roll && !self.frozen && !self.home_hold && self.joints.iter().any(|j| j == "head_roll") {
+            let beat = (self.music || self.dj).then_some(self.bpm);
+            self.expressive.apply(&mut pose, dt, t, beat, self.puppet.energy_gain(), &self.rig);
+        } else {
+            self.expressive.reset();
+        }
         if self.home_hold && !self.frozen {
             pose.extend(self.home_pose.iter().map(|(j, v)| (j.clone(), *v)));
         }

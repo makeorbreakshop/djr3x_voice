@@ -60,6 +60,8 @@ pub struct AliveLayers {
     pub gaze_wander: bool,
     /// L4: speech bob, accents and wobble.
     pub speech_bob: bool,
+    /// Automatic head roll: cant toward the look, lag on fast pans, beat accents (show/gaze.rs).
+    pub expressive_roll: bool,
 }
 
 impl Default for AliveLayers {
@@ -69,6 +71,7 @@ impl Default for AliveLayers {
             saccades: true,
             gaze_wander: true,
             speech_bob: true,
+            expressive_roll: true,
         }
     }
 }
@@ -82,6 +85,7 @@ impl AliveLayers {
             saccades: on("saccades"),
             gaze_wander: on("gaze_wander"),
             speech_bob: on("speech_bob"),
+            expressive_roll: on("expressive_roll"),
         }
     }
 }
@@ -528,7 +532,7 @@ mod tests {
         let max = r.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         assert!(max > 0.5 && max <= 2.0, "{max}");
 
-        let mut p = Procedural { layers: AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false }, ..Default::default() };
+        let mut p = Procedural { layers: AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false }, ..Default::default() };
         for act in [Activity::Idle, Activity::Listening, Activity::Thinking] {
             assert!(run(&mut p, act, 5.0, ctx(Some((20.0, 0.0)), 1.0)).iter().all(|v| *v == 0.0));
         }

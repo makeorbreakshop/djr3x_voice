@@ -4,11 +4,13 @@
  * - Scene panel "Model" (Visual / Mechanical / X-ray), remembered per page mode, Visual by
  *   default: Mechanical draws the built droid assembly (mechview.ts) in place of the visual
  *   model, driven by the same performer frames; X-ray ghosts its shells.
- * - Servo load (torque.ts): a meter in Bench, an overlay in Studio, under the pad jog in Build.
- * - Build: the DS3 jogs the workbench (padjog.ts); while it does, the puppeteer gets no pad.
+ * - Servo load (torque.ts): a meter in Bench and Build, an overlay in Studio.
+ * - Build, three layers: the pad is the same puppet as everywhere (intent); the performer's
+ *   rig layer turns it into joints (gaze, expressive roll); while the pad is in use the
+ *   workbench mechanism follows those joints, linkages solved. Joints | Servos (servos.ts) poses
+ *   joints or real actuators directly when the pad is idle.
  *
- * main.ts calls `frame()` once per drawn frame and routes the gamepad through `padOwns` and
- * `feedPad`; nothing else here touches the rest of the page.
+ * main.ts calls `frame()` once per drawn frame and `feedPad` with each pad frame.
  */
 
 import type * as THREE from 'three';
@@ -17,7 +19,7 @@ import type { PadFrame } from '../generated/PadFrame';
 import type { Workbench } from '../workbench/workbench';
 import { LoadMeter } from './meter';
 import { MechView, type ModelView } from './mechview';
-import { PadJog } from './padjog';
+import { fittedNodes, ServoView } from './servos';
 import { TorqueModel } from './torque';
 
 const KEY = 'r3x.model';
@@ -35,14 +37,16 @@ export class MechRig {
   readonly view: MechView;
   readonly meter = new LoadMeter();
   readonly torque = new TorqueModel();
-  readonly jog: PadJog;
+  readonly servos: ServoView;
+  /** Last time the pad did anything (performance.now ms): Build follows the puppet until 1.5 s after. */
+  private padActiveAt = -Infinity;
   private mode: PageMode = 'show';
   private pick: Record<string, ModelView> = {};
-  private jogTorque = new TorqueModel();
+  private buildTorque = new TorqueModel();
 
   constructor(private readonly host: MechRigHost) {
     this.view = new MechView(host.scene);
-    this.jog = new PadJog(host.workbench);
+    this.servos = new ServoView(host.workbench);
     try {
       this.pick = JSON.parse(localStorage.getItem(KEY) ?? '{}') as Record<string, ModelView>;
     } catch {
@@ -57,13 +61,15 @@ export class MechRig {
     this.setMode(this.mode);
   }
 
-  /** The Build pad layer has the pad: the puppeteer must not read it. */
-  get padOwns() {
-    return this.jog.owns;
+  /** True while the pad is being used (Build: the mechanism follows the puppet). */
+  get puppeting() {
+    return performance.now() - this.padActiveAt < 1500;
   }
 
   feedPad(p: PadFrame | null | undefined) {
-    this.jog.feed(p);
+    if (!p) return;
+    const live = Object.values(p.intents ?? {}).some((v) => Math.abs(v) > 0.02) || p.buttons.some((b) => b > 0.05);
+    if (live) this.padActiveAt = performance.now();
   }
 
   private get model(): ModelView {
@@ -115,19 +121,26 @@ export class MechRig {
       sec.title = mechOn ? `${v.stats.parts} parts, ${v.stats.fasteners} fasteners; rods solved per frame`
         : 'The performer drives either model. Mechanical is the CAD assembly from mech/out.';
     }
-    this.meter.visible = this.mode === 'bench' || this.mode === 'studio' || (this.mode === 'build' && this.jog.owns);
+    this.meter.visible = this.mode === 'bench' || this.mode === 'studio' || this.mode === 'build';
     this.meter.el.classList.toggle('overlay', this.mode === 'studio');
   }
 
-  /** Per drawn frame: pose the mech from the performer's joints, update the loads, run the pad jog. */
+  /** Per drawn frame: pose the mech from the performer's joints and update the loads. In Build,
+   *  the workbench follows the performer while the pad is in use. */
   frame(joints: Record<string, number> | null | undefined, t: number) {
-    const build = this.host.workbench.active;
-    const jogWas = this.jog.owns;
-    const jogPose = this.jog.tick();
-    if (this.jog.owns !== jogWas) this.sync();
-    if (this.jog.owns) this.host.interact(); // full frame rate while a pad can jog
-    if (build) {
-      if (jogPose && this.meter.visible) this.meter.update(this.jogTorque.update(jogPose, t), 'pad jog');
+    const wb = this.host.workbench;
+    if (wb.active) {
+      const live = this.puppeting && !!joints && !this.servos.dragging;
+      if (live) {
+        this.followPuppet(joints!);
+        this.host.interact();
+      }
+      this.servos.render();
+      if (this.meter.visible && wb.top) {
+        const pose: Record<string, number> = {};
+        for (const n of fittedNodes(wb)) for (const j of n.asm.joints) if (j.profile_joint) pose[j.profile_joint] = n.pose[j.id] ?? 0;
+        this.meter.update(this.buildTorque.update(pose, t), live ? 'puppet' : 'build');
+      }
       return;
     }
     const d = this.host.droid();
@@ -135,6 +148,20 @@ export class MechRig {
     if (!joints) return;
     if (this.view.showing) this.view.apply(joints);
     if (this.meter.visible) this.meter.update(this.torque.update(joints, t), this.mode === 'studio' ? 'studio' : 'bench');
+  }
+
+  /** The workbench mechanism takes the performer's joints (one re-pose per frame). */
+  private followPuppet(joints: Record<string, number>) {
+    const wb = this.host.workbench;
+    let first: { n: (typeof wb.top & object); id: string } | null = null;
+    for (const n of fittedNodes(wb)) {
+      for (const j of n.asm.joints) {
+        if (!j.profile_joint || !(j.profile_joint in joints)) continue;
+        n.pose[j.id] = joints[j.profile_joint];
+        first ??= { n, id: j.id };
+      }
+    }
+    if (first) wb.setJoint(first.n, first.id, first.n.pose[first.id]);
   }
 
   private mountSection() {

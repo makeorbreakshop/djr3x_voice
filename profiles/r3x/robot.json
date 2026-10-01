@@ -1464,7 +1464,8 @@
     "breathing": true,
     "saccades": true,
     "gaze_wander": true,
-    "speech_bob": true
+    "speech_bob": true,
+    "expressive_roll": true
   },
   "home": {}
 }

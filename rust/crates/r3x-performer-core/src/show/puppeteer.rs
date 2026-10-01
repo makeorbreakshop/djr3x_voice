@@ -112,6 +112,8 @@ pub struct Puppeteer {
     dpad_visor: f64,
     /// A release in progress: the command it started from and the seconds since.
     release: Option<(Command, f64)>,
+    /// The selected rig's neck (limits, whether the head rides the rings): the gaze solver's.
+    pub rig: super::gaze::RigGeometry,
 }
 
 impl Default for Puppeteer {
@@ -128,6 +130,7 @@ impl Default for Puppeteer {
             dpad_lift: 0.0,
             dpad_visor: 0.0,
             release: None,
+            rig: super::gaze::RigGeometry::default(),
         }
     }
 }
@@ -261,15 +264,21 @@ impl Puppeteer {
                 pose.insert(j.into(), get(pose, j) + v);
             }
         }
-        // Gaze: the head leads; whatever would take the neck past its limit goes to the rings.
+        // Gaze: the head leads, inside the rig's neck range. Past it, if the head rides the rings
+        // (Original) the rest goes to the rings; if it stands on the base (Physical) turning a
+        // ring would not move the gaze, so a little of it becomes a cant toward the look.
         let yaw = expo(gaze_yaw) * GAZE_YAW;
         let pan = get(pose, "head_pan");
         let want = pan + yaw;
-        let neck = want.clamp(-NECK, NECK);
+        let neck = want.clamp(self.rig.pan.0.max(-NECK), self.rig.pan.1.min(NECK));
         let spill = want - neck;
         add(pose, "head_pan", neck - pan);
-        add(pose, "torso_top", spill * 0.6);
-        add(pose, "torso_lower", spill * 0.4);
+        if self.rig.head_on_rings {
+            add(pose, "torso_top", spill * 0.6);
+            add(pose, "torso_lower", spill * 0.4);
+        } else {
+            add(pose, "head_roll", (-spill * 0.08).clamp(-4.0, 4.0));
+        }
         add(pose, "head_tilt", -expo(gaze_pitch) * GAZE_PITCH);
 
         add(pose, "head_lift", expo(lift) * LIFT);

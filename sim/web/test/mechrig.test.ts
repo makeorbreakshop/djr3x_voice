@@ -103,70 +103,55 @@ describe('clip loads (Studio lint)', () => {
   });
 });
 
-describe('Build pad jog', () => {
-  const mkWb = () => {
-    const joint = (id: string, profile: string, min: number, max: number) =>
-      ({ id, name: id, type: id === 'head_lift' ? 'prismatic' : 'revolute', parent_link: 'a', child_link: 'b', pivot: [0, 0, 0], axis: [0, 1, 0], unit: 'deg', limits: { min, max }, profile_joint: profile });
-    const head = { asm: { id: 'head', joints: [joint('head_tilt', 'head_tilt', -20, 25), joint('visor', 'visor', -15, 30)] }, pose: {} as Record<string, number>, parent: null as unknown, children: [] };
-    const alt = { asm: { id: 'alt', mount: { variant: { group: 'head_mech', id: 'alt', default: false } }, joints: [joint('head_tilt', 'head_tilt', -5, 5)] }, pose: {} as Record<string, number>, parent: null as unknown, children: [] };
-    const neck = { asm: { id: 'neck', joints: [joint('head_pan', 'head_pan', -33.8, 33.8), joint('head_lift', 'head_lift', -37, 37)] }, pose: {} as Record<string, number>, parent: null, children: [head, alt] };
-    head.parent = neck;
-    alt.parent = neck;
-    const nodes = [neck, head, alt];
-    const wb = {
-      active: true, top: neck, variants: {} as Record<string, string>, homes: 0,
-      forEachNode(fn: (n: unknown) => void) { nodes.forEach(fn); },
-      setJoint(n: { pose: Record<string, number> }, j: string, v: number) { n.pose[j] = v; },
-      home() { this.homes++; nodes.forEach((n) => (n.pose = {})); },
+describe('Build Servos view (actuator layer)', () => {
+  // Hunter's gimbal from the generated mech block: tilt then roll about the gimbal centre, the
+  // two push rods from the head's horns to the neck post (body frame, mm).
+  const gimbal = () => {
+    const piv = MECH.joints.head_tilt.pivot;
+    const lk = (id: string) => {
+      const l = MECH.linkages[`hunter_head/${id}`];
+      return { ...l, horn: { ...l.horn, link: 'head' }, ground: { ...l.ground, link: 'neck' } };
     };
-    return { wb, neck, head, alt };
-  };
-  const pad = (axes: number[], pressed: number[] = []) => {
-    const buttons = Array(17).fill(0);
-    for (const b of pressed) buttons[b] = 1;
-    return { axes, buttons, intents: {}, mode: 'idle' } as unknown as import('../src/generated/PadFrame').PadFrame;
+    const joint = (id: string, parent: string, child: string, axis: [number, number, number], lim: number) => ({
+      id, name: id, type: 'revolute' as const, parent_link: parent, child_link: child, pivot: piv, axis, unit: 'deg',
+      limits: { min: -lim, max: lim }, profile_joint: id,
+      drive: { kind: 'push_rod_pair', servos: ['servo_l', 'servo_r'], linkages: ['rod_l', 'rod_r'] },
+    });
+    const asm = {
+      id: 'hunter_head', name: 'g', links: [{ id: 'neck', name: 'n', joint: null }, { id: 'cross', name: 'c', joint: 'head_tilt' }, { id: 'head', name: 'h', joint: 'head_roll' }],
+      joints: [joint('head_tilt', 'neck', 'cross', [1, 0, 0], 20), joint('head_roll', 'cross', 'head', [0, 0, 1], 12)],
+      linkages: [lk('rod_l'), lk('rod_r')], parts: [],
+    };
+    return { asm, pose: {} as Record<string, number>, parent: null, children: [], links: new Map(), rodZero: new Map(), rods: new Map() } as never;
   };
 
-  it('left stick pans at 60 % of v_max, clamped to the mech range; unfitted heads are skipped', async () => {
-    const { PadJog } = await import('../src/mechrig/padjog');
-    const { wb, neck, head, alt } = mkWb();
-    const jog = new PadJog(wb as never);
-    jog.feed(pad([1, 0, 0, 0]));
-    let t = 0;
-    jog.tick(t);
-    for (let i = 0; i < 10; i++) jog.tick((t += 50));
-    const v = GENERATED.joints.find((j) => j.name === 'head_pan')!.v_max;
-    expect(neck.pose.head_pan).toBeCloseTo(0.6 * v * 0.5, 3);
-    for (let i = 0; i < 100; i++) jog.tick((t += 50));
-    expect(neck.pose.head_pan).toBe(33.8);
-    jog.feed(pad([0, 1, 0, 0], [7]));
-    jog.tick((t += 50));
-    expect(head.pose.head_tilt).toBeGreaterThan(0); // stick down tips the face down
-    expect(alt.pose.head_tilt ?? 0).toBe(0);
-    expect(neck.pose.head_lift).toBeGreaterThan(0); // R2 lifts
-    expect(jog.owns).toBe(true);
+  it('lists one slider per real actuator; the gimbal pair is two servos over two joints', async () => {
+    const { actuators } = await import('../src/mechrig/servos');
+    const acts = actuators([gimbal()]);
+    expect(acts.map((a) => a.servo)).toEqual(['servo_l', 'servo_r']);
+    expect(acts[0].joints.map((j) => j.id)).toEqual(['head_tilt', 'head_roll']);
   });
 
-  it('D-pad cycles Head -> Body -> each joint; triangle homes', async () => {
-    const { PadJog } = await import('../src/mechrig/padjog');
-    const { wb, head } = mkWb();
-    const jog = new PadJog(wb as never);
-    let t = 0;
-    const press = (b: number) => {
-      jog.feed(pad([0, 0, 0, 0], [b]));
-      jog.tick((t += 20));
-      jog.feed(pad([0, 0, 0, 0]));
-      jog.tick((t += 20));
-    };
-    press(15); // Body has no joints here, so the next option is the first joint
-    expect(jog.sel).toBe(1);
-    press(15);
-    press(15); // Head, head_pan, head_lift, head_tilt (no Body group: none of its joints here)
-    jog.feed(pad([0, 0, 0, 0], [12]));
-    for (let i = 0; i < 5; i++) jog.tick((t += 50));
-    expect(head.pose.head_tilt).toBeGreaterThan(0);
-    press(3);
-    expect(wb.homes).toBe(1);
-    expect(head.pose.head_tilt ?? 0).toBe(0);
+  it('gimbal L alone gives a combined tilt + roll; R stays where it was; round trip', async () => {
+    const { actuators, servoAngle, solveServo } = await import('../src/mechrig/servos');
+    const node = gimbal() as { pose: Record<string, number> };
+    const [l, r] = actuators([node as never]);
+    expect(Math.abs(servoAngle(l)!)).toBeLessThan(0.01); // built at rest
+    const sol = solveServo(l, 10)!;
+    expect(sol).not.toBeNull();
+    expect(Math.abs(sol.head_tilt)).toBeGreaterThan(1);
+    expect(Math.abs(sol.head_roll)).toBeGreaterThan(1);
+    Object.assign(node.pose, sol);
+    expect(servoAngle(l)!).toBeCloseTo(10, 2);
+    expect(servoAngle(r)!).toBeCloseTo(0, 2);
+    // then R the same way as L: the differential turns that mostly into roll
+    Object.assign(node.pose, solveServo(r, 10)!);
+    expect(Math.abs(node.pose.head_roll)).toBeGreaterThan(Math.abs(node.pose.head_tilt));
+  });
+
+  it('flags what the linkage cannot reach instead of clamping it', async () => {
+    const { actuators, solveServo } = await import('../src/mechrig/servos');
+    const [l] = actuators([gimbal()]);
+    expect(solveServo(l, 170)).toBeNull();
   });
 });

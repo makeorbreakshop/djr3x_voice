@@ -5,6 +5,7 @@ pub mod body;
 pub mod catalog;
 pub mod curve;
 pub mod expand;
+pub mod gaze;
 pub mod idle;
 pub mod lint;
 pub mod player;

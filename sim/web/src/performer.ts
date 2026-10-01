@@ -49,7 +49,7 @@ export type PerfCmd =
   | { cmd: 'autonomy'; on: boolean }
   | { cmd: 'jog'; joint: string; value: number | null }
   | { cmd: 'eyes'; pattern: string; duration?: number }
-  | { cmd: 'alive'; breathing: boolean; saccades: boolean; gaze_wander: boolean; speech_bob: boolean };
+  | { cmd: 'alive'; breathing: boolean; saccades: boolean; gaze_wander: boolean; speech_bob: boolean; expressive_roll?: boolean };
 
 export interface RunInfo {
   run_id: string;

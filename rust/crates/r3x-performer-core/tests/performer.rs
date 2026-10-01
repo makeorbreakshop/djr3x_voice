@@ -372,6 +372,7 @@ fn alive_layers_toggle_off() {
         saccades: false,
         gaze_wander: false,
         speech_bob: false,
+        expressive_roll: false,
     }));
     let a = p.tick(0.0).targets;
     let b = p.tick(1.0).targets;
@@ -388,6 +389,7 @@ fn puppet_release_fades_out_over_400_ms() {
         saccades: false,
         gaze_wander: false,
         speech_bob: false,
+        expressive_roll: false,
     }));
     let rest = p.tick(0.0).targets["hero_shoulder"];
     p.command(Command::Puppet {
@@ -441,7 +443,7 @@ fn idle_performs_after_quiet() {
 #[test]
 fn studio_preview_scrubs_on_the_real_body_path() {
     let mut p = performer();
-    p.command(Command::Alive(AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false }));
+    p.command(Command::Alive(AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false }));
     p.command(Command::Autonomy { on: false });
     run(&mut p, 0.0, 0.5);
     let base = p.tick(0.5).targets["head_pan"];
@@ -479,7 +481,7 @@ fn home_eases_every_joint_home_inside_its_limits() {
     p.command(Command::Freeze { on: false });
     p.home(&[]).unwrap();
     assert!(p.player.running().is_empty() && p.homing());
-    assert_eq!(p.procedural.layers, AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false });
+    assert_eq!(p.procedural.layers, AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false });
     assert!(!p.idle.enabled);
 
     let dt = 1.0 / 50.0;
@@ -509,4 +511,50 @@ fn home_eases_every_joint_home_inside_its_limits() {
     // Anything that moves the body again ends the hold.
     p.perform("nod", Source::Ui, Params::default(), None).unwrap();
     assert!(!p.homing());
+}
+
+/// The rig layer: a puppeted gaze to the side cants the head toward the look (the automatic
+/// expressive roll), and on the Physical rig (head on the base) the gaze never spills into
+/// the rings and stops at the neck gear's range.
+#[test]
+fn gaze_rolls_toward_the_look_within_the_selected_rig() {
+    let quiet = |p: &mut Performer| {
+        p.command(Command::Alive(AliveLayers {
+            breathing: false,
+            saccades: false,
+            gaze_wander: false,
+            speech_bob: false,
+            expressive_roll: true,
+        }))
+    };
+    let mut p = performer();
+    quiet(&mut p);
+    p.command(Command::Puppet { intent: "gaze_yaw".into(), value: 0.6 });
+    let mut f = p.tick(0.0);
+    for i in 1..=120 {
+        f = p.tick(i as f64 / 60.0);
+    }
+    let (pan, roll) = (f.targets["head_pan"], f.targets["head_roll"]);
+    assert!(pan > 20.0, "looks to the left ({pan})");
+    assert!(roll < -1.5, "cants toward the look ({roll})");
+    p.command(Command::Alive(AliveLayers { expressive_roll: false, ..AliveLayers::default() }));
+    quiet(&mut p);
+    p.command(Command::Alive(AliveLayers { breathing: false, saccades: false, gaze_wander: false, speech_bob: false, expressive_roll: false }));
+    let f = p.tick(2.1);
+    assert!(f.targets["head_roll"].abs() < 1e-9, "the layer switches off");
+
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json");
+    let physical = RobotProfile::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut q = Performer::new(Arc::new(show_catalog()), &physical, PerformerConfig::default()).unwrap();
+    quiet(&mut q);
+    assert!(!q.rig.head_on_rings);
+    q.command(Command::Puppet { intent: "gaze_yaw".into(), value: 1.0 });
+    let mut f = q.tick(0.0);
+    for i in 1..=180 {
+        f = q.tick(i as f64 / 60.0);
+    }
+    let lim = physical.joint("head_pan").unwrap().animation.max;
+    assert!((f.targets["head_pan"] - lim).abs() < 1e-6, "stops at the neck gear ({})", f.targets["head_pan"]);
+    assert!(f.targets.get("torso_top").copied().unwrap_or(0.0).abs() < 1e-6, "no spill into the rings");
+    assert!(f.targets["head_roll"] < -3.0, "cant toward the look instead");
 }
