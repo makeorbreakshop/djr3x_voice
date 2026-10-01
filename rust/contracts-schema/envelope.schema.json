@@ -2529,12 +2529,19 @@
           "description": "Motion outputs enabled (PS hold toggles).",
           "type": "boolean"
         },
-        "bank": {
-          "description": "The bank held: `l1` | `r1`.",
-          "type": [
-            "string",
-            "null"
-          ]
+        "grip": {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "description": "Claw grip 0..1: hero, poker.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
         },
         "last": {
           "description": "The last thing a button did, for a moment (\"Nod\", \"DJ mode on\", \"refused: ...\").",
@@ -2542,6 +2549,19 @@
             "string",
             "null"
           ]
+        },
+        "latched": {
+          "default": [],
+          "description": "Modifiers latched by a double tap (`l1`, `r1`, `r2`); a single tap unlatches.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "layer": {
+          "default": "",
+          "description": "The active layer's key in `pad.json` (`base`, `l1`, `r1`, `l1r1`, `r2`, `r2l1`, `r2r1`,\n`r2l1r1`): the held and latched modifiers, settled for a moment.",
+          "type": "string"
         },
         "menu": {
           "anyOf": [
@@ -2554,10 +2574,23 @@
           ],
           "description": "The open menu, if any."
         },
-        "rolling": {
+        "pickup": {
           "default": false,
-          "description": "L1+R1 held: the right stick's X rolls the head instead of turning the gaze.",
+          "description": "The left stick just changed hands and waits to be brought back to where its new target\nis before it moves it (no jump).",
           "type": "boolean"
+        },
+        "pinned": {
+          "default": [],
+          "description": "Arms left where they are (L3 in an arm layer) instead of easing home.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stick": {
+          "$ref": "#/$defs/StickTarget",
+          "default": "body",
+          "description": "What the left stick drives right now."
         },
         "talking": {
           "description": "L2 held: push-to-talk.",
@@ -4101,6 +4134,31 @@
             "state"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "StickTarget": {
+      "description": "What a layer's left stick drives.",
+      "oneOf": [
+        {
+          "const": "body",
+          "description": "Turn (x) and lean (y).",
+          "type": "string"
+        },
+        {
+          "const": "hero",
+          "description": "The hero arm: x spins the top ring to aim it, y raises it.",
+          "type": "string"
+        },
+        {
+          "const": "poker",
+          "description": "The poker arm: x spins the lower ring to aim it, y moves the claw tip up/down (IK).",
+          "type": "string"
+        },
+        {
+          "const": "arms",
+          "description": "Both arms together: x aims, y raises.",
+          "type": "string"
         }
       ]
     },

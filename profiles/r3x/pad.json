@@ -1,48 +1,462 @@
 {
-  "$comment": "DualShock 3 operator mapping, read by the runtime (r3x-pad controls) and the panel's controller overlay. Base layer is fixed in code (sticks, d-pad lift/visor, L2 talk, R2 arm, face tap/hold = emote slots 1-4/5-8, L3 alive layers, R3 cancel, Start freeze, PS hold arm, Select menu). Banks: hold L1 or R1 and press. Face order: cross, circle, square, triangle. D-pad order: up, right, down, left. A binding is {label, play: <clip|cue|sequence id>} or {label, sfx: <sound id>} or {label, emote: <slot 0-7>}.",
+  "$comment": "DualShock 3 operator mapping, read by the runtime (r3x-pad controls) and the panel's controller overlay. Layers: hold (or double-tap to latch) L1, R1 and R2 in any combination; the layer settles after chord_grace_s. Fixed in every layer: right stick = head, L2 = talk (hold), L3 click = pin/unpin the arm the left stick drives (base: nothing), R3 click = look at guests on/off, L3+R3 = reset everything, Start = freeze, Select tap = cancel, Select hold = menu, PS hold = motors on/off. Face order: cross, circle, square, triangle; d-pad order: up, right, down, left. A binding is {label, play|sfx|emote|act|ctl}; see PadBinding. A button whose tap is a held control (grip) has no hold binding.",
   "tap_hold_s": 0.35,
   "arm_hold_s": 1.0,
-  "banks": {
-    "l1": {
-      "name": "Gestures",
+  "double_tap_s": 0.3,
+  "chord_grace_s": 0.08,
+  "layers": {
+    "base": {
+      "name": "Body",
+      "stick": "body",
       "face_tap": [
-        { "label": "Nod", "play": "nod" },
-        { "label": "Head shake", "play": "head_shake" },
-        { "label": "Double take", "play": "double_take" },
-        { "label": "Fist pump", "play": "fist_pump" }
+        {
+          "label": "Yes",
+          "emote": 0
+        },
+        {
+          "label": "No",
+          "emote": 1
+        },
+        {
+          "label": "Greet",
+          "emote": 2
+        },
+        {
+          "label": "Excited",
+          "emote": 3
+        }
       ],
       "face_hold": [
-        { "label": "Curious tilt", "play": "tilt_curious" },
-        { "label": "Shrug", "play": "shrug" },
-        { "label": "Bow", "play": "bow" },
-        { "label": "Recoil", "play": "recoil" }
+        {
+          "label": "Thinking",
+          "emote": 4
+        },
+        {
+          "label": "Hype drop",
+          "emote": 5
+        },
+        {
+          "label": "Glitch",
+          "emote": 6
+        },
+        {
+          "label": "Applause",
+          "emote": 7
+        }
       ],
       "dpad": [
-        { "label": "Look up", "play": "look_up_think" },
-        { "label": "Glance right", "play": "glance_right" },
-        { "label": "Look around", "play": "look_around" },
-        { "label": "Glance left", "play": "glance_left" }
+        {
+          "label": "Lift up",
+          "ctl": "lift+"
+        },
+        {
+          "label": "Visor up",
+          "ctl": "visor+"
+        },
+        {
+          "label": "Lift down",
+          "ctl": "lift-"
+        },
+        {
+          "label": "Visor down",
+          "ctl": "visor-"
+        }
+      ]
+    },
+    "l1": {
+      "name": "Hero arm",
+      "stick": "hero",
+      "face_tap": [
+        {
+          "label": "Grip (press harder)",
+          "ctl": "grip"
+        },
+        {
+          "label": "Keep grip",
+          "ctl": "grip_hold"
+        },
+        {
+          "label": "Wave",
+          "play": "arm_wave"
+        },
+        {
+          "label": "Point",
+          "play": "point_forward"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": ""
+        },
+        {
+          "label": "Claw snap",
+          "play": "claw_snap"
+        },
+        {
+          "label": "Throw",
+          "play": "arm_throw"
+        },
+        {
+          "label": "Fist pump",
+          "play": "fist_pump"
+        }
+      ],
+      "dpad": [
+        {
+          "label": "Pin arm",
+          "ctl": "pin"
+        },
+        {
+          "label": "Twist right",
+          "ctl": "twist+"
+        },
+        {
+          "label": "Send home",
+          "ctl": "home"
+        },
+        {
+          "label": "Twist left",
+          "ctl": "twist-"
+        }
       ]
     },
     "r1": {
-      "name": "Sounds",
+      "name": "Poker arm",
+      "stick": "poker",
       "face_tap": [
-        { "label": "Hi there", "sfx": "hi_there" },
-        { "label": "Having fun", "sfx": "having_fun" },
-        { "label": "Yahoo", "sfx": "yahoo" },
-        { "label": "Request line open", "sfx": "request_line_open" }
+        {
+          "label": "Grip (press harder)",
+          "ctl": "grip"
+        },
+        {
+          "label": "Keep grip",
+          "ctl": "grip_hold"
+        },
+        {
+          "label": "Shrug",
+          "play": "shrug"
+        },
+        {
+          "label": "Double take",
+          "play": "double_take"
+        }
       ],
       "face_hold": [
-        { "label": "Roger control", "sfx": "roger_control" },
-        { "label": "Bad feeling", "sfx": "bad_feeling" },
-        { "label": "Loose wire", "sfx": "loose_wire" },
-        { "label": "DJ pilot", "sfx": "dj_pilot" }
+        {
+          "label": ""
+        },
+        {
+          "label": "Recoil",
+          "play": "recoil"
+        },
+        {
+          "label": "Curious tilt",
+          "play": "tilt_curious"
+        },
+        {
+          "label": "Look around",
+          "play": "look_around"
+        }
       ],
       "dpad": [
-        { "label": "Air horn", "sfx": "air_horn" },
-        { "label": "Scratch", "sfx": "scratch" },
-        { "label": "Once again", "sfx": "once_again" },
-        { "label": "Synth", "sfx": "synth" }
+        {
+          "label": "Reach out",
+          "ctl": "reach+"
+        },
+        {
+          "label": "Pin arm",
+          "ctl": "pin"
+        },
+        {
+          "label": "Reach in",
+          "ctl": "reach-"
+        },
+        {
+          "label": "Send home",
+          "ctl": "home"
+        }
+      ]
+    },
+    "l1r1": {
+      "name": "Both arms",
+      "stick": "arms",
+      "face_tap": [
+        {
+          "label": "Grip both",
+          "ctl": "grip"
+        },
+        {
+          "label": "Keep grip",
+          "ctl": "grip_hold"
+        },
+        {
+          "label": "Shrug",
+          "play": "shrug"
+        },
+        {
+          "label": "Bow",
+          "play": "bow"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": ""
+        },
+        {
+          "label": "Power up",
+          "play": "power_up"
+        },
+        {
+          "label": "Beat bop",
+          "play": "beat_bop"
+        },
+        {
+          "label": "Groove",
+          "play": "ring_twist_groove"
+        }
+      ],
+      "dpad": [
+        {
+          "label": "Pin arms",
+          "ctl": "pin"
+        },
+        {
+          "label": "Roll right",
+          "ctl": "roll+"
+        },
+        {
+          "label": "Send home",
+          "ctl": "home"
+        },
+        {
+          "label": "Roll left",
+          "ctl": "roll-"
+        }
+      ]
+    },
+    "r2": {
+      "name": "Sounds 1",
+      "stick": "body",
+      "face_tap": [
+        {
+          "label": "Hi There",
+          "sfx": "hi_there"
+        },
+        {
+          "label": "Having Fun",
+          "sfx": "having_fun"
+        },
+        {
+          "label": "Yahoo",
+          "sfx": "yahoo"
+        },
+        {
+          "label": "Request Line Open",
+          "sfx": "request_line_open"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": "Roger Control",
+          "sfx": "roger_control"
+        },
+        {
+          "label": "Bad Feeling",
+          "sfx": "bad_feeling"
+        },
+        {
+          "label": "Loose Wire",
+          "sfx": "loose_wire"
+        },
+        {
+          "label": "DJ Pilot",
+          "sfx": "dj_pilot"
+        }
+      ],
+      "dpad": [
+        {
+          "label": "Once Again",
+          "sfx": "once_again"
+        },
+        {
+          "label": "On the Decks",
+          "sfx": "on_the_decks"
+        },
+        {
+          "label": "Outer Rim",
+          "sfx": "outer_rim"
+        },
+        {
+          "label": "Travelers",
+          "sfx": "travelers"
+        }
+      ]
+    },
+    "r2l1": {
+      "name": "Sounds 2",
+      "stick": "body",
+      "face_tap": [
+        {
+          "label": "Astromech Joke",
+          "sfx": "astromech_joke"
+        },
+        {
+          "label": "Brought to you by",
+          "sfx": "brought_to_you_by"
+        },
+        {
+          "label": "Dream",
+          "sfx": "dream"
+        },
+        {
+          "label": "Endor Travel",
+          "sfx": "endor_travel"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": "Events",
+          "sfx": "events"
+        },
+        {
+          "label": "This is your captain",
+          "sfx": "this_is_your_cap"
+        },
+        {
+          "label": ""
+        },
+        {
+          "label": ""
+        }
+      ],
+      "dpad": [
+        {
+          "label": ""
+        },
+        {
+          "label": ""
+        },
+        {
+          "label": ""
+        },
+        {
+          "label": ""
+        }
+      ]
+    },
+    "r2r1": {
+      "name": "DJ",
+      "stick": "body",
+      "face_tap": [
+        {
+          "label": "Air horn",
+          "sfx": "air_horn"
+        },
+        {
+          "label": "Scratch",
+          "sfx": "scratch"
+        },
+        {
+          "label": "Synth",
+          "sfx": "synth"
+        },
+        {
+          "label": "Next track",
+          "act": "music.next"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": "Play music",
+          "act": "music.play"
+        },
+        {
+          "label": "Stop music",
+          "act": "music.stop"
+        },
+        {
+          "label": "DJ mode on/off",
+          "act": "dj"
+        },
+        {
+          "label": "Stop everything",
+          "act": "stop.all"
+        }
+      ],
+      "dpad": [
+        {
+          "label": "Energy up",
+          "act": "energy.up"
+        },
+        {
+          "label": "Next track",
+          "act": "music.next"
+        },
+        {
+          "label": "Energy down",
+          "act": "energy.down"
+        },
+        {
+          "label": "Energy reset",
+          "act": "energy.reset"
+        }
+      ]
+    },
+    "r2l1r1": {
+      "name": "System",
+      "stick": "body",
+      "face_tap": [
+        {
+          "label": "Idle motion on/off",
+          "act": "alive"
+        },
+        {
+          "label": "Autonomy on/off",
+          "act": "autonomy"
+        },
+        {
+          "label": "Vision on/off",
+          "act": "vision"
+        },
+        {
+          "label": "Arms home",
+          "act": "arms.home"
+        }
+      ],
+      "face_hold": [
+        {
+          "label": "Interactive",
+          "act": "eng.interactive"
+        },
+        {
+          "label": "Ambient",
+          "act": "eng.ambient"
+        },
+        {
+          "label": "Idle",
+          "act": "eng.idle"
+        },
+        {
+          "label": "Stop everything",
+          "act": "stop.all"
+        }
+      ],
+      "dpad": [
+        {
+          "label": "Show mode",
+          "act": "mode.show"
+        },
+        {
+          "label": "Bench mode",
+          "act": "mode.bench"
+        },
+        {
+          "label": "Studio mode",
+          "act": "mode.studio"
+        },
+        {
+          "label": ""
+        }
       ]
     }
   }

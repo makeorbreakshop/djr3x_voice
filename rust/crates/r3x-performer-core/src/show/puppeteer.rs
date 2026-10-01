@@ -4,7 +4,9 @@
 //! signals at the end instead.
 //!
 //! Continuous intents in [-1, 1]: gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor,
-//! arm_raise, energy, roll. Discrete: 8 cue slots and a mode (idle / engaged / dj).
+//! arm_raise, energy, roll, then the hands (2026-10-01): hero_aim / hero_raise / hero_twist /
+//! hero_grip and poker_aim / poker_raise / poker_reach / poker_grip (grips 0..1). Discrete: 8
+//! cue slots and a mode (idle / engaged / dj).
 //!
 //! Gamepad (standard mapping): left stick = body_yaw / lean, right stick = gaze, d-pad =
 //! lift / visor, RT - LT = arm_raise, LB/RB = energy down/up, A B X Y = cue slots 1-4
@@ -16,7 +18,7 @@
 use super::body::{get, Pose};
 use serde::{Deserialize, Serialize};
 
-pub const CONTINUOUS: [&str; 9] = [
+pub const CONTINUOUS: [&str; 17] = [
     "gaze_yaw",
     "gaze_pitch",
     "lift",
@@ -26,6 +28,14 @@ pub const CONTINUOUS: [&str; 9] = [
     "arm_raise",
     "energy",
     "roll",
+    "hero_aim",
+    "hero_raise",
+    "hero_twist",
+    "hero_grip",
+    "poker_aim",
+    "poker_raise",
+    "poker_reach",
+    "poker_grip",
 ];
 pub const MODES: [PuppetMode; 3] = [PuppetMode::Idle, PuppetMode::Engaged, PuppetMode::Dj];
 pub const SLOT_COUNT: usize = 8;
@@ -40,7 +50,7 @@ pub enum PuppetMode {
 }
 
 /// One value per [`CONTINUOUS`] intent, in that order.
-pub type Command = [f64; 9];
+pub type Command = [f64; 17];
 
 pub fn intent_index(name: &str) -> Option<usize> {
     CONTINUOUS.iter().position(|k| *k == name)
@@ -77,6 +87,44 @@ const ARM_UP: f64 = 34.0;
 const ARM_DOWN: f64 = 20.0;
 /// Head roll at full stick, deg (inside the soft range, +/-10).
 const ROLL: f64 = 9.0;
+/// Ring turn that aims an arm at full stick, deg: the hero arm rides the top ring, the poker
+/// arm the lower one (which carries everything above it).
+const HERO_AIM: f64 = 25.0;
+const POKER_AIM: f64 = 25.0;
+const HERO_TWIST: f64 = 80.0;
+/// Hero arm at full stick, deg of shoulder. The arm rests raised, and a + shoulder swings it
+/// forward and down (measured in the sim, 2026-10-01: +1 took the claw from 0.68 to 0.55 m),
+/// so stick up = - shoulder, inside the soft range (-30..40).
+const HERO_UP: f64 = 28.0;
+const HERO_DOWN: f64 = 34.0;
+/// Poker claw tip at full stick: swung this far around the shoulder (deg); at full d-pad,
+/// reached this far in or out (mm; out stops at full stretch, a few mm past rest).
+const POKER_SWING: f64 = 30.0;
+const POKER_REACH_MM: f64 = 40.0;
+/// Claw fingers at full grip, deg (`claw_snap` closes to 25).
+const CLAW_CLOSED: f64 = 25.0;
+const HERO_CLAWS: [&str; 3] = ["hero_claw_l", "hero_claw_r", "hero_claw_t"];
+const POKER_CLAWS: [&str; 2] = ["poker_claw_upper", "poker_claw_lower"];
+
+/// The axes of an operator feed (`r3x-pad` controls): the standard four sticks, then
+/// already-shaped intents. A pad with more than [`op_axis::ROLL`] + 1 axes is an operator feed;
+/// a browser's standard four-axis pad keeps the triggers and d-pad mapping.
+pub mod op_axis {
+    /// Head roll, from the operator's d-pad (eased).
+    pub const ROLL: usize = 4;
+    pub const HERO_AIM: usize = 5;
+    pub const HERO_RAISE: usize = 6;
+    pub const HERO_TWIST: usize = 7;
+    pub const HERO_GRIP: usize = 8;
+    pub const POKER_AIM: usize = 9;
+    pub const POKER_RAISE: usize = 10;
+    pub const POKER_REACH: usize = 11;
+    pub const POKER_GRIP: usize = 12;
+    /// Lift and visor, eased by the operator layer (its d-pad bindings).
+    pub const LIFT: usize = 13;
+    pub const VISOR: usize = 14;
+    pub const COUNT: usize = 15;
+}
 
 /// A standard-mapping gamepad snapshot.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -119,8 +167,8 @@ pub struct Puppeteer {
 impl Default for Puppeteer {
     fn default() -> Self {
         Puppeteer {
-            cmd: [0.0; 9],
-            target: [0.0; 9],
+            cmd: [0.0; 17],
+            target: [0.0; 17],
             mode: PuppetMode::Idle,
             fired: Vec::new(),
             gamepad: false,
@@ -216,8 +264,36 @@ impl Puppeteer {
                 0.0
             }
         };
+        if pad.axes.len() >= op_axis::COUNT {
+            // An operator feed (`r3x-pad` controls): everything arrives shaped - layers,
+            // pickup, easing home and the d-pad are the operator layer's.
+            let raw = |i: usize| clamp1(pad.axes[i]);
+            let energy = self.target[ENERGY];
+            self.target = [
+                ax(2),
+                -ax(3),
+                raw(op_axis::LIFT),
+                ax(0),
+                -ax(1),
+                raw(op_axis::VISOR),
+                0.0,
+                energy,
+                -raw(op_axis::ROLL),
+                dead(raw(op_axis::HERO_AIM)),
+                dead(raw(op_axis::HERO_RAISE)),
+                raw(op_axis::HERO_TWIST),
+                raw(op_axis::HERO_GRIP).max(0.0),
+                dead(raw(op_axis::POKER_AIM)),
+                dead(raw(op_axis::POKER_RAISE)),
+                raw(op_axis::POKER_REACH),
+                raw(op_axis::POKER_GRIP).max(0.0),
+            ];
+            self.prev_buttons = pad.buttons.iter().map(|b| b.0).collect();
+            return;
+        }
         self.dpad_lift += (dir(12, 13) - self.dpad_lift) * rate;
         self.dpad_visor += (dir(15, 14) - self.dpad_visor) * rate;
+        let t = self.target;
         self.target = [
             ax(2),
             -ax(3),
@@ -229,7 +305,16 @@ impl Puppeteer {
             self.target[ENERGY],
             // A fifth axis is roll (the runtime's operator layer: right X while L1+R1 are
             // held), mirrored like the sticks; a standard four-axis pad leaves roll to the UI.
-            if pad.axes.len() > 4 { -ax(4) } else { self.target[ROLL_I] },
+            if pad.axes.len() > 4 { -ax(4) } else { t[ROLL_I] },
+            // A standard pad has no hands: the UI's sliders keep them.
+            t[9],
+            t[10],
+            t[11],
+            t[12],
+            t[13],
+            t[14],
+            t[15],
+            t[16],
         ];
         if edge(4) {
             self.target[ENERGY] = clamp1(self.target[ENERGY] - 0.25);
@@ -258,7 +343,8 @@ impl Puppeteer {
         if !self.enabled {
             return;
         }
-        let [gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor, arm_raise, _, roll] = self.cmd;
+        let [gaze_yaw, gaze_pitch, lift, body_yaw, lean, visor, arm_raise, _, roll, hero_aim, hero_raise, hero_twist, hero_grip, poker_aim, poker_raise, poker_reach, poker_grip] =
+            self.cmd;
         fn add(pose: &mut Pose, j: &str, v: f64) {
             if v != 0.0 {
                 pose.insert(j.into(), get(pose, j) + v);
@@ -314,6 +400,27 @@ impl Puppeteer {
         add(pose, "hero_wrist", arm * 20.0);
         // +roll: right-handed about +Z, the crown toward the droid's right (-X).
         add(pose, "head_roll", expo(roll) * ROLL);
+
+        // Hands. Aiming turns the arm's ring; when the head rides the rings it would turn too,
+        // so the neck takes it back and the gaze holds where the operator left it.
+        let (hero_ring, poker_ring) = (expo(hero_aim) * HERO_AIM, expo(poker_aim) * POKER_AIM);
+        add(pose, "torso_top", hero_ring);
+        add(pose, "torso_lower", poker_ring);
+        if self.rig.head_on_rings {
+            add(pose, "head_pan", -(hero_ring + poker_ring));
+        }
+        let up = expo(hero_raise);
+        add(pose, "hero_shoulder", if up >= 0.0 { -up * HERO_UP } else { -up * HERO_DOWN });
+        add(pose, "hero_wrist", hero_twist.clamp(-1.0, 1.0) * HERO_TWIST);
+        let (shoulder, wrist) = super::arm_ik::POKER.solve(expo(poker_raise) * POKER_SWING, poker_reach.clamp(-1.0, 1.0) * POKER_REACH_MM);
+        add(pose, "poker_shoulder", shoulder);
+        add(pose, "poker_wrist", wrist);
+        for c in HERO_CLAWS {
+            add(pose, c, hero_grip.clamp(0.0, 1.0) * CLAW_CLOSED);
+        }
+        for c in POKER_CLAWS {
+            add(pose, c, poker_grip.clamp(0.0, 1.0) * CLAW_CLOSED);
+        }
     }
 
     /// Energy as a gain: 0.4x at -1, 1x at 0, 1.6x at +1.
@@ -325,6 +432,66 @@ impl Puppeteer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn operator(set: &[(usize, f64)]) -> PadState {
+        let mut axes = vec![0.0; op_axis::COUNT];
+        for &(i, v) in set {
+            axes[i] = v;
+        }
+        PadState { axes, buttons: vec![(false, 0.0); 17] }
+    }
+
+    fn settle(p: &mut Puppeteer, pad: &PadState) -> Pose {
+        for _ in 0..200 {
+            p.update(0.01, Some(pad));
+        }
+        let mut pose = Pose::new();
+        p.apply(&mut pose);
+        pose
+    }
+
+    /// The operator feed drives the hands (2026-10-01): aim turns the arm's ring, raise lifts
+    /// it, grip closes the claw; the neck takes back what the rings turn when the head rides them.
+    #[test]
+    fn an_operator_feed_drives_the_hands() {
+        let mut p = Puppeteer::default();
+        p.rig.head_on_rings = true;
+        let pose = settle(&mut p, &operator(&[(op_axis::HERO_AIM, 1.0), (op_axis::HERO_RAISE, 1.0), (op_axis::HERO_GRIP, 1.0)]));
+        assert!((get(&pose, "torso_top") - HERO_AIM).abs() < 0.1);
+        assert!((get(&pose, "head_pan") + HERO_AIM).abs() < 0.1, "the gaze holds");
+        assert!((get(&pose, "hero_shoulder") + HERO_UP).abs() < 0.1, "stick up = - shoulder (the claw rises)");
+        for c in HERO_CLAWS {
+            assert!((get(&pose, c) - CLAW_CLOSED).abs() < 0.1, "{c} closed");
+        }
+        assert_eq!(get(&pose, "poker_claw_upper"), 0.0, "only the hero claw");
+        // The head on the base (the column rig): turning a ring does not move it, no counter-turn.
+        let mut p = Puppeteer::default();
+        p.rig.head_on_rings = false;
+        let pose = settle(&mut p, &operator(&[(op_axis::POKER_AIM, -1.0)]));
+        assert!((get(&pose, "torso_lower") + POKER_AIM).abs() < 0.1);
+        assert_eq!(get(&pose, "head_pan"), 0.0);
+    }
+
+    #[test]
+    fn poker_raise_moves_the_claw_tip_through_the_ik() {
+        let mut p = Puppeteer::default();
+        let pose = settle(&mut p, &operator(&[(op_axis::POKER_RAISE, 1.0)]));
+        let (s, w) = (get(&pose, "poker_shoulder"), get(&pose, "poker_wrist"));
+        let ik = super::super::arm_ik::POKER;
+        let ((x0, y0), (x, y)) = (ik.tip(0.0, 0.0), ik.tip(s, w));
+        let swing = libm::atan2(y, x).to_degrees() - libm::atan2(y0, x0).to_degrees();
+        assert!((swing - POKER_SWING).abs() < 0.5, "tip swung up {POKER_SWING} deg: {swing:.1}");
+    }
+
+    /// A browser's standard pad (four axes) never touches the hands: the UI's sliders keep them.
+    #[test]
+    fn a_standard_pad_leaves_the_hands_to_the_sliders() {
+        let mut p = Puppeteer::default();
+        p.set("hero_raise", 0.5);
+        let pad = PadState { axes: vec![0.0; 4], buttons: vec![(false, 0.0); 17] };
+        settle(&mut p, &pad);
+        assert!((p.cmd[10] - 0.5).abs() < 1e-3);
+    }
 
     #[test]
     fn roll_is_an_additive_head_roll_that_a_pad_leaves_alone_and_release_fades() {

@@ -413,6 +413,8 @@ details.debug small { opacity: .7; }
   border: 1px solid var(--line); color: var(--accent); text-transform: uppercase; }
 .padov-chip.talk { color: #111; background: #57d38c; border-color: #57d38c; }
 .padov-chip.warn { color: #111; background: var(--warn); border-color: var(--warn); }
+.padov-chip.layer { color: #111; background: var(--accent, #6fb7ff); border-color: var(--accent, #6fb7ff); }
+.padov-chips { flex-wrap: wrap; }
 .padov-body { display: grid; gap: 8px; }
 .padov.nopad .padov-body { opacity: .5; }
 .padov-svg { width: 100%; height: auto; display: block; }

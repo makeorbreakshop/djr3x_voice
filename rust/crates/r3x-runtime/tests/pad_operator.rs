@@ -38,7 +38,8 @@ async fn a_claimed_pad_stands_down_until_returned() {
     raw.send_replace(pad(&[b::R2]));
     settle().await;
     let f = feed.borrow().clone().expect("driving");
-    assert!(f.puppet.buttons[b::R2].0);
+    assert_eq!(f.puppet.axes[2], 0.3, "the right stick (head) goes to the puppeteer");
+    assert!(f.puppet.buttons.iter().all(|x| !x.0), "R2 is a modifier now, never the arm");
 
     assert!(bus.command(Source::Ui, None, claim(Some("panel-a"))).await.is_accepted());
     raw.send_replace(pad(&[b::START]));

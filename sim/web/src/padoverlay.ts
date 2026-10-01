@@ -1,7 +1,8 @@
 // The controller overlay: a DualShock 3 over the 3D view that lights what the operator is
 // pressing and says what each control does to R3X right now. With the runtime's operator
-// layer (`pad.controls` in frames) it follows it: the base layer, the L1/R1 bank being held
-// (labels from profiles/r3x/pad.json), the Select menu, and what the last button did.
+// layer (`pad.controls` in frames) it follows it: the layer the held or latched L1/R1/R2 pick
+// (labels from profiles/r3x/pad.json), what the left stick drives, pinned arms and grips, the
+// Select menu, and what the last button did.
 // Without it (the sim's own pad) it shows the embedded puppeteer's mapping. It lives in the
 // Scene panel's Controller section (main.ts wires `G` and the first-pad auto-open) and only
 // redraws while that panel is open.
@@ -9,7 +10,9 @@
 import type { PadFrame } from './generated/PadFrame';
 import type { PadControls } from './generated/PadControls';
 import type { PadMapping } from './generated/PadMapping';
-import type { PadBank } from './generated/PadBank';
+import type { PadLayer } from './generated/PadLayer';
+import type { PadLayers } from './generated/PadLayers';
+import type { StickTarget } from './generated/StickTarget';
 import padJson from '../../../profiles/r3x/pad.json?raw';
 
 const MAPPING = JSON.parse(padJson) as PadMapping;
@@ -27,12 +30,19 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Short labels drawn on the pad itself, per control. */
 type Tags = Record<'l2' | 'l1' | 'r2' | 'r1' | 'dpad' | 'face' | 'faceSub' | 'select' | 'start' | 'ps' | 'lstick' | 'lclick' | 'rstick' | 'rclick', string>;
 
-/** The runtime's base layer (r3x-pad controls.rs). */
-const BASE: Tags = {
-  l2: 'L2 Talk', l1: `L1 ${MAPPING.banks.l1.name}`, r2: 'R2 Arm', r1: `R1 ${MAPPING.banks.r1.name}`,
-  dpad: 'Lift · Visor', face: 'Emotes', faceSub: 'hold: 5-8', select: 'MENU', start: 'FREEZE', ps: 'hold: arm',
-  lstick: 'Body', lclick: 'click: idle', rstick: 'Gaze · L1+R1 roll', rclick: 'click: cancel',
-};
+const STICK: Record<StickTarget, string> = { body: 'Body', hero: 'Hero arm', poker: 'Poker arm', arms: 'Both arms' };
+/** `r2l1r1` -> "R2+L1+R1". */
+const comboName = (key: string) => (key === 'base' ? 'no modifier' : (key.match(/l1|r1|r2/g) ?? []).map((m) => m.toUpperCase()).join('+'));
+
+/** The runtime's operator layer (r3x-pad controls.rs), for the layer `layer`. */
+function runtimeTags(layer: PadLayer, stick: StickTarget): Tags {
+  const arm = stick !== 'body';
+  return {
+    l2: 'L2 Talk', l1: `L1 ${MAPPING.layers.l1.name}`, r2: `R2 ${MAPPING.layers.r2.name}`, r1: `R1 ${MAPPING.layers.r1.name}`,
+    dpad: layer.name, face: layer.name, faceSub: 'tap · hold', select: 'tap cancel · hold menu', start: 'FREEZE', ps: 'hold: motors',
+    lstick: STICK[stick], lclick: arm ? 'click: pin' : 'click: arms home', rstick: 'Head', rclick: 'click: look · L3+R3 reset',
+  };
+}
 
 /** The embedded performer's own mapping (show/puppeteer.rs), when no runtime is driving. */
 const LEGACY: Tags = {
@@ -170,8 +180,8 @@ export class PadOverlay {
   }
 
   // ---------------------------------------------------------------- legend layouts
-  private bankLayout(bank: PadBank) {
-    this.legend.append(el('div', 'padov-title', `${bank.name} bank: tap · hold`));
+  private layerLayout(key: string, bank: PadLayer) {
+    this.legend.append(el('div', 'padov-title', `${bank.name} (${comboName(key)}): tap · hold`));
     FACES.forEach((i, k) => {
       const row = el('div', 'padov-row padov-bank');
       row.append(el('span', 'padov-ctl', FACE_SYM[k]), el('span', 'padov-does', bank.face_tap[k].label), el('span', 'padov-does padov-hold', bank.face_hold[k].label));
@@ -196,16 +206,18 @@ export class PadOverlay {
 
   private relayout(p: PadFrame | null) {
     const c = p?.controls;
-    const bank = c?.bank === 'l1' ? MAPPING.banks.l1 : c?.bank === 'r1' ? MAPPING.banks.r1 : null;
-    const key = !c ? 'legacy' : c.menu ? `menu:${c.menu.path.join('/')}:${c.menu.items.join('|')}:${c.menu.cursor}` : bank ? `bank:${c.bank}` : 'base';
+    const layerKey = (c?.layer || 'base') as keyof PadLayers;
+    const bank = MAPPING.layers[layerKey] ?? MAPPING.layers.base;
+    const stick = c?.stick ?? 'body';
+    const key = !c ? 'legacy' : c.menu ? `menu:${c.menu.path.join('/')}:${c.menu.items.join('|')}:${c.menu.cursor}` : `layer:${layerKey}:${stick}`;
     if (key === this.layoutKey) return;
     this.layoutKey = key;
     this.legend.replaceChildren();
     this.live = [];
-    const tags = c ? BASE : LEGACY;
+    const tags = c ? runtimeTags(bank, stick) : LEGACY;
     for (const [k, t] of this.tags) t.textContent = tags[k];
     if (c?.menu) this.menuLayout(c);
-    else if (bank) this.bankLayout(bank);
+    else if (c) this.layerLayout(layerKey, bank);
   }
 
   private render(p: PadFrame | null) {
@@ -215,7 +227,11 @@ export class PadOverlay {
     const chips: [string, string][] = [];
     if (p) chips.push([p.mode, '']);
     if (c?.talking) chips.push(['talking', 'talk']);
-    if (c?.rolling) chips.push(['roll', '']);
+    if (c && c.layer && c.layer !== 'base') chips.push([MAPPING.layers[c.layer as keyof PadLayers]?.name ?? c.layer, 'layer']);
+    for (const m of c?.latched ?? []) chips.push([`${m.toUpperCase()} latched`, 'layer']);
+    if (c?.pickup) chips.push(['bring the stick to the arm', 'warn']);
+    for (const a of c?.pinned ?? []) chips.push([`${a} pinned`, '']);
+    (c?.grip ?? [0, 0]).forEach((g, i) => { if (g > 0.02) chips.push([`${i ? 'poker' : 'hero'} grip ${Math.round(g * 100)}%`, '']); });
     if (c && !c.armed) chips.push(['disarmed', 'warn']);
     this.chips.replaceChildren(...chips.map(([t, k]) => el('span', `padov-chip ${k}`, t)));
     this.toast.textContent = c?.last ?? '';

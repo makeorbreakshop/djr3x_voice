@@ -8,8 +8,11 @@
 //! A panel can take the pad (`StageCommand::ClaimPad`, sent while it is in Build): the layer
 //! then stands down as if the pad were unplugged, until the claim is returned.
 //!
-//! Feedback: pad LEDs = state (1 idle, 2 engaged, 3 DJ, all four = frozen); a short rumble
-//! = done, a long one = refused. Reports `pad`: running while a pad streams.
+//! Feedback: pad LEDs = the layer while one is active (LED 1 = L1, 2 = R1, 3 = R2, 4 = something
+//! latched), else the state (1 idle, 2 engaged, 3 DJ; all four = frozen). Rumble: a tick on
+//! every layer change, two for a latch, one long for an unlatch, a short one for pin/unpin and
+//! for a command that landed, a long one for a refusal. Reports `pad`: running while a pad
+//! streams.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -17,10 +20,11 @@ use std::time::{Duration, Instant};
 
 use r3x_bus::Bus;
 use r3x_contracts::{
-    Ack, Command, DjState, Engagement, EngagementState, Event, IntentCommand, MusicCommand, OperatingMode, PadMapping,
-    PerfCommand, PerfEvent, PerfLayer, RobotProfile, ServiceStatus, Source, StageCommand, StageState, StopTarget,
+    Ack, Command, DjState, Engagement, EngagementState, Event, GazeSource, IntentCommand, MusicCommand, OperatingMode,
+    PadControls, PadMapping, PerfCommand, PerfEvent, PerfLayer, RobotProfile, ServiceStatus, ServicesState, Source, StageCommand,
+    StageState, StopTarget,
 };
-use r3x_pad::controls::{Action, Controls, MenuItem};
+use r3x_pad::controls::{Action, Controls, Cue, MenuItem};
 use r3x_pad::{FeedbackHandle, PadEvent, PadReader};
 use r3x_performer_core::show::puppeteer::PadState;
 use r3x_performer_core::show::types::Kind;
@@ -103,6 +107,7 @@ pub fn spawn_operator(
         last: Arc::new(Mutex::new(None)),
         saved_alive: None,
         energy: 0.0,
+        gaze_before: None,
         shows,
         talking: false,
         epoch: Instant::now(),
@@ -127,6 +132,8 @@ struct Operator {
     /// The alive layers and autonomy as they were before L3 stilled them.
     saved_alive: Option<(Vec<(String, bool)>, bool)>,
     energy: f64,
+    /// The gaze source before R3 turned "look at guests" on.
+    gaze_before: Option<GazeSource>,
     shows: (Vec<String>, Vec<String>),
     talking: bool,
     epoch: Instant,
@@ -150,7 +157,7 @@ impl Operator {
                     }
                     self.controls.reset();
                     feed.send_replace(other.filter(|_| claimed).map(|raw| {
-                        let puppet = PadState { axes: vec![0.0; 5], buttons: vec![(false, 0.0); r3x_pad::ds3::std_btn::COUNT] };
+                        let puppet = PadState { axes: vec![0.0; r3x_performer_core::show::puppeteer::op_axis::COUNT], buttons: vec![(false, 0.0); r3x_pad::ds3::std_btn::COUNT] };
                         PadInput { puppet, raw, controls: Default::default() }
                     }));
                     continue;
@@ -160,10 +167,13 @@ impl Operator {
             let now = self.epoch.elapsed().as_secs_f64();
             let mut step = self.controls.step(now, &pad, &menu);
             for a in std::mem::take(&mut step.actions) {
-                self.act(a);
+                self.act(a, now);
+            }
+            for c in std::mem::take(&mut step.cues) {
+                self.cue(c);
             }
             step.view.last = self.last.lock().ok().and_then(|g| g.as_ref().filter(|(_, at)| at.elapsed().as_secs_f64() < LAST_S).map(|(s, _)| s.clone()));
-            self.leds();
+            self.leds(&step.view);
             feed.send_replace(Some(PadInput { puppet: step.puppet, raw: pad, controls: step.view }));
         }
     }
@@ -172,9 +182,16 @@ impl Operator {
         self.bus.get::<StageState>()
     }
 
-    /// LEDs: all four = frozen, else 1 idle / 2 engaged / 3 DJ.
-    fn leds(&self) {
-        let leds = if self.stage().frozen {
+    /// LEDs: the layer while one is active (1 = L1, 2 = R1, 3 = R2, 4 = latched), else all four
+    /// = frozen, else 1 idle / 2 engaged / 3 DJ.
+    fn leds(&self, view: &PadControls) {
+        let layer: u8 = [("l1", 0b0001), ("r1", 0b0010), ("r2", 0b0100)]
+            .iter()
+            .filter(|(m, _)| view.layer.contains(m))
+            .fold(0, |acc, (_, bit)| acc | bit);
+        let leds = if layer != 0 {
+            layer | if view.latched.is_empty() { 0 } else { 0b1000 }
+        } else if self.stage().frozen {
             0b1111
         } else if self.bus.get::<DjState>().active {
             0b0100
@@ -212,7 +229,27 @@ impl Operator {
         tokio::spawn(async move { buzz(&fb, Duration::from_millis(90)).await });
     }
 
-    fn act(&mut self, a: Action) {
+    /// Rumble for the layer engine's cues (see the module doc).
+    fn cue(&self, c: Cue) {
+        let fb = self.feedback.clone();
+        let pattern: &'static [u64] = match c {
+            Cue::Layer => &[35],
+            Cue::Latch(true) => &[60, 80, 60],
+            Cue::Latch(false) => &[160],
+            Cue::Pin(_) => &[70],
+        };
+        tokio::spawn(async move {
+            for (i, ms) in pattern.iter().enumerate() {
+                if i % 2 == 0 {
+                    buzz(&fb, Duration::from_millis(*ms)).await;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(*ms)).await;
+                }
+            }
+        });
+    }
+
+    fn act(&mut self, a: Action, now: f64) {
         use Command::{Intent, Perf, Stage};
         match a {
             Action::Talk(on) => {
@@ -225,11 +262,12 @@ impl Operator {
                     tokio::spawn(async move { buzz(&fb, Duration::from_millis(60)).await });
                 }
             }
-            Action::Emote(slot) => {
-                let name = self.profile.emotes.get(usize::from(slot)).cloned().unwrap_or_else(|| format!("emote {}", slot + 1));
-                self.send(Perf(PerfCommand::Emote { slot }), Some(name));
-            }
-            Action::Play(id) => self.send(Perf(PerfCommand::Play { id: id.clone(), intensity: 1.0, speed: 1.0, layer: None }), Some(id)),
+            // An emote is its profile cue played at the button's pressure (a light press, a small one).
+            Action::Emote { slot, intensity } => match self.profile.emotes.get(usize::from(slot)).cloned() {
+                Some(id) => self.send(Perf(PerfCommand::Play { id: id.clone(), intensity, speed: 1.0, layer: None }), Some(id)),
+                None => self.send(Perf(PerfCommand::Emote { slot }), Some(format!("emote {}", slot + 1))),
+            },
+            Action::Play { id, intensity } => self.send(Perf(PerfCommand::Play { id: id.clone(), intensity, speed: 1.0, layer: None }), Some(id)),
             Action::Sfx(id) => {
                 // The sfx player follows `perf.sfx` events (a show's sfx cue is the same event).
                 self.bus.publish(Source::Ui, None, Event::Perf(PerfEvent::Sfx { id: id.clone() }));
@@ -239,7 +277,20 @@ impl Operator {
                 self.send(Perf(PerfCommand::Stop(StopTarget::Layer { layer: PerfLayer::Gesture })), Some("cancelled".into()));
                 self.send(Perf(PerfCommand::Stop(StopTarget::Layer { layer: PerfLayer::Show })), None);
             }
-            Action::ToggleAlive => self.toggle_alive(),
+            Action::Reset => {
+                self.send(Perf(PerfCommand::Stop(StopTarget::Layer { layer: PerfLayer::Gesture })), Some("reset: everything home".into()));
+                self.send(Perf(PerfCommand::Stop(StopTarget::Layer { layer: PerfLayer::Show })), None);
+            }
+            Action::LookToggle => {
+                let cur = self.stage().gaze;
+                let (source, text) = if cur == GazeSource::Vision {
+                    (self.gaze_before.take().unwrap_or(GazeSource::Off), "gaze: free")
+                } else {
+                    self.gaze_before = Some(cur);
+                    (GazeSource::Vision, "looking at guests")
+                };
+                self.send(Stage(StageCommand::SetGaze { source, owner: None }), Some(text.into()));
+            }
             Action::ToggleFreeze => {
                 let on = !self.stage().frozen;
                 self.send(Stage(StageCommand::Freeze { on }), Some(if on { "frozen" } else { "unfrozen" }.into()));
@@ -251,7 +302,7 @@ impl Operator {
                 }
                 self.note(if armed { "motion ARMED" } else { "motion disarmed" }.into());
             }
-            Action::Menu(id) => self.menu_pick(&id),
+            Action::Menu(id) => self.menu_pick(&id, now),
         }
     }
 
@@ -284,8 +335,11 @@ impl Operator {
             s.layers.iter().map(|(k, v)| MenuItem::leaf(format!("{}: {}", k.replace('_', " "), on(*v)), format!("layer.{k}"))).collect();
         layers.push(MenuItem::leaf(format!("autonomy: {}", on(s.autonomy)), "autonomy"));
         let list = |ids: &[String]| ids.iter().map(|id| MenuItem::leaf(id.replace('_', " "), format!("play.{id}"))).collect::<Vec<_>>();
+        let alive = s.autonomy || s.layers.values().any(|on| *on);
         vec![
             MenuItem::leaf(format!("DJ mode: {}", on(dj)), "dj"),
+            MenuItem::leaf(format!("Idle motion: {}", on(alive)), "alive"),
+            MenuItem::leaf("Arms home", "arms.home"),
             MenuItem::sub("Music", vec![MenuItem::leaf("Play", "music.play"), MenuItem::leaf("Next track", "music.next"), MenuItem::leaf("Stop", "music.stop")]),
             MenuItem::sub("Shows", list(&self.shows.0)),
             MenuItem::sub("Cues", list(&self.shows.1)),
@@ -314,7 +368,7 @@ impl Operator {
         ]
     }
 
-    fn menu_pick(&mut self, id: &str) {
+    fn menu_pick(&mut self, id: &str, now: f64) {
         use Command::{Intent, Perf, Stage};
         let s = self.stage();
         let label = |t: &str| Some(t.to_string());
@@ -328,6 +382,16 @@ impl Operator {
             "music.stop" => self.send(Intent(IntentCommand::Music(MusicCommand::Stop)), label("music: stop")),
             "autonomy" => self.send(Stage(StageCommand::SetAutonomy { enabled: !s.autonomy }), label(if s.autonomy { "autonomy off" } else { "autonomy on" })),
             "stop.all" => self.send(Perf(PerfCommand::Stop(StopTarget::All)), label("stopped everything")),
+            "alive" => self.toggle_alive(),
+            "arms.home" => {
+                self.controls.home_arms(now);
+                self.note("arms home".into());
+            }
+            "vision" => {
+                let on = self.bus.get::<ServicesState>().services.get("vision").is_some_and(|h| h.status == ServiceStatus::Running);
+                let line = if on { "vision off" } else { "vision on" };
+                self.send(Intent(IntentCommand::Console { line: line.into() }), Some(line.into()));
+            }
             "energy.up" | "energy.down" | "energy.reset" => {
                 self.energy = match id {
                     "energy.up" => (self.energy + ENERGY_STEP).min(1.0),

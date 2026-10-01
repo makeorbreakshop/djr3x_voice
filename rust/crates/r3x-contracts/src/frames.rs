@@ -43,10 +43,26 @@ pub struct PadFrame {
 /// What the operator layer is doing, for the overlay.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PadControls {
-    /// The bank held: `l1` | `r1`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub bank: Option<String>,
+    /// The active layer's key in `pad.json` (`base`, `l1`, `r1`, `l1r1`, `r2`, `r2l1`, `r2r1`,
+    /// `r2l1r1`): the held and latched modifiers, settled for a moment.
+    #[serde(default)]
+    pub layer: String,
+    /// Modifiers latched by a double tap (`l1`, `r1`, `r2`); a single tap unlatches.
+    #[serde(default)]
+    pub latched: Vec<String>,
+    /// What the left stick drives right now.
+    #[serde(default)]
+    pub stick: StickTarget,
+    /// The left stick just changed hands and waits to be brought back to where its new target
+    /// is before it moves it (no jump).
+    #[serde(default)]
+    pub pickup: bool,
+    /// Arms left where they are (L3 in an arm layer) instead of easing home.
+    #[serde(default)]
+    pub pinned: Vec<String>,
+    /// Claw grip 0..1: hero, poker.
+    #[serde(default)]
+    pub grip: [f64; 2],
     /// The open menu, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -55,13 +71,25 @@ pub struct PadControls {
     pub talking: bool,
     /// Motion outputs enabled (PS hold toggles).
     pub armed: bool,
-    /// L1+R1 held: the right stick's X rolls the head instead of turning the gaze.
-    #[serde(default)]
-    pub rolling: bool,
     /// The last thing a button did, for a moment ("Nod", "DJ mode on", "refused: ...").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub last: Option<String>,
+}
+
+/// What a layer's left stick drives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum StickTarget {
+    /// Turn (x) and lean (y).
+    #[default]
+    Body,
+    /// The hero arm: x spins the top ring to aim it, y raises it.
+    Hero,
+    /// The poker arm: x spins the lower ring to aim it, y moves the claw tip up/down (IK).
+    Poker,
+    /// Both arms together: x aims, y raises.
+    Arms,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -72,35 +100,76 @@ pub struct PadMenuView {
     pub cursor: usize,
 }
 
-/// The operator mapping (`profiles/<robot>/pad.json`): the two hold banks.
+fn default_double_tap() -> f64 {
+    0.3
+}
+fn default_chord_grace() -> f64 {
+    0.08
+}
+
+/// The operator mapping (`profiles/<robot>/pad.json`): one layer per combination of the held
+/// (or latched) modifiers L1, R1 and R2. The right stick (head), L2 (talk), L3/R3, Start,
+/// Select and PS are the same in every layer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PadMapping {
-    /// A face button held this long fires its hold binding instead of its tap one.
+    /// A button held this long fires its hold binding instead of its tap one.
     pub tap_hold_s: f64,
     /// PS held this long toggles motion arming.
     pub arm_hold_s: f64,
-    pub banks: PadBanks,
+    /// Two taps of a modifier inside this latch its layer.
+    #[serde(default = "default_double_tap")]
+    pub double_tap_s: f64,
+    /// A change of modifiers must hold this long before the left stick changes hands, so
+    /// pressing L1 then R1 never passes through the L1 layer.
+    #[serde(default = "default_chord_grace")]
+    pub chord_grace_s: f64,
+    pub layers: PadLayers,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
-pub struct PadBanks {
-    pub l1: PadBank,
-    pub r1: PadBank,
+pub struct PadLayers {
+    pub base: PadLayer,
+    pub l1: PadLayer,
+    pub r1: PadLayer,
+    pub l1r1: PadLayer,
+    pub r2: PadLayer,
+    pub r2l1: PadLayer,
+    pub r2r1: PadLayer,
+    pub r2l1r1: PadLayer,
+}
+
+impl PadLayers {
+    /// The layer for the modifiers (l1, r1, r2), and its key.
+    pub fn get(&self, l1: bool, r1: bool, r2: bool) -> (&'static str, &PadLayer) {
+        match (l1, r1, r2) {
+            (false, false, false) => ("base", &self.base),
+            (true, false, false) => ("l1", &self.l1),
+            (false, true, false) => ("r1", &self.r1),
+            (true, true, false) => ("l1r1", &self.l1r1),
+            (false, false, true) => ("r2", &self.r2),
+            (true, false, true) => ("r2l1", &self.r2l1),
+            (false, true, true) => ("r2r1", &self.r2r1),
+            (true, true, true) => ("r2l1r1", &self.r2l1r1),
+        }
+    }
 }
 
 /// Face order: cross, circle, square, triangle. D-pad order: up, right, down, left.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
-pub struct PadBank {
+pub struct PadLayer {
     pub name: String,
+    #[serde(default)]
+    pub stick: StickTarget,
     pub face_tap: [PadBinding; 4],
     pub face_hold: [PadBinding; 4],
     pub dpad: [PadBinding; 4],
 }
 
+/// One button's job. Exactly one of `play`, `sfx`, `emote`, `act`, `ctl` (none = unbound).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct PadBinding {
     pub label: String,
-    /// A clip, cue or sequence id.
+    /// A clip, cue or sequence id; how hard the button is pressed sets its intensity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub play: Option<String>,
@@ -108,8 +177,19 @@ pub struct PadBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sfx: Option<String>,
-    /// An emote slot (0-7).
+    /// An emote slot (0-7); pressure sets its intensity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub emote: Option<u8>,
+    /// A menu action id (`dj`, `music.next`, `music.stop`, `energy.up`, `alive`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub act: Option<String>,
+    /// A built-in control, active while held: `lift+`/`lift-`, `visor+`/`visor-`,
+    /// `roll+`/`roll-`, `twist+`/`twist-` (hero wrist), `reach+`/`reach-` (poker claw tip),
+    /// `grip` (the claw closes as hard as the button is pressed), `grip_hold` (keep the grip),
+    /// `pin` (leave this arm where it is), `home` (send it home).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ctl: Option<String>,
 }
