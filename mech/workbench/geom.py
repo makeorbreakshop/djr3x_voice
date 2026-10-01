@@ -233,16 +233,81 @@ def ray_depth(mesh: trimesh.Trimesh, origin, direction) -> list[float]:
 
 # ------------------------------------------------------------------ display
 
+def cluster(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
+    """Vertex clustering: vertices snapped to a grid and merged (the cell grows until the mesh is
+    within ~1.5 x target faces). Coarse but it always reduces; for display meshes only."""
+    V = np.asarray(mesh.vertices, float)
+    F = np.asarray(mesh.faces)
+    diag = float(np.linalg.norm(np.ptp(V, axis=0))) or 1.0
+    cell = diag / max(4.0, np.sqrt(max(target, 4) / 2.0))
+    best = mesh
+    for _ in range(12):
+        key = np.floor((V - V.min(0)) / cell).astype(np.int64)
+        _, inv = np.unique(key, axis=0, return_inverse=True)
+        inv = inv.ravel()
+        n = inv.max() + 1
+        nv = np.zeros((n, 3))
+        np.add.at(nv, inv, V)
+        nv /= np.bincount(inv, minlength=n)[:, None]
+        nf = inv[F]
+        ok = (nf[:, 0] != nf[:, 1]) & (nf[:, 1] != nf[:, 2]) & (nf[:, 0] != nf[:, 2])
+        nf = nf[ok]
+        if len(nf):
+            nf = np.unique(np.sort(nf, axis=1), axis=0, return_index=True)[1]
+            nf = inv[F][ok][np.sort(nf)]
+            best = trimesh.Trimesh(nv, nf, process=False)
+            if len(nf) <= 1.5 * target:
+                return best
+        cell *= 1.4
+    return best
+
+
 def decimate(mesh: trimesh.Trimesh, target: int) -> trimesh.Trimesh:
+    """A display copy of `mesh` with about `target` faces (quadric decimation). A vendor STEP mesh is
+    often many disjoint solids that will not decimate as one: then each connected component gets a
+    share of the budget by its face count, and a component that still refuses (or is tiny and
+    over its share) becomes its convex hull. Full detail stays with the caller."""
     if len(mesh.faces) <= target:
         return mesh
-    try:
-        out = mesh.simplify_quadric_decimation(face_count=target)
-        if len(out.faces) > 0:
+
+    def one(m, t):
+        try:
+            out = m.simplify_quadric_decimation(face_count=max(4, int(t)))
+            if len(out.faces) > 0 and len(out.faces) <= 1.5 * t:
+                return out
+        except Exception:
+            out = m
+        c = cluster(m, t)  # quadric decimation refuses some vendor meshes (non-manifold): vertex clustering
+        return c if len(c.faces) and len(c.faces) < len(out.faces) else out
+
+    out = one(mesh, target)
+    if len(out.faces) <= 1.3 * target:
+        return out
+    comps = mesh.split(only_watertight=False)
+    if len(comps) <= 1:
+        try:
+            return mesh.convex_hull if len(mesh.faces) > 4 * target else out
+        except Exception:
             return out
-    except Exception:
-        pass
-    return mesh
+    total = sum(len(c.faces) for c in comps)
+    pieces = []
+    for c in comps:
+        share = max(12.0, target * len(c.faces) / total)
+        d = one(c, share)
+        if len(d.faces) > 1.5 * share:
+            try:
+                d = c.convex_hull
+                if len(d.faces) > 1.5 * share:
+                    d = one(d, share)
+            except Exception:
+                pass
+        pieces.append(d)
+    out = trimesh.util.concatenate(pieces)
+    if len(out.faces) > 2 * target:  # the simplified pieces together, once more
+        again = one(out, target)
+        if len(again.faces) < len(out.faces):
+            out = again
+    return out
 
 
 def sample(mesh: trimesh.Trimesh, spacing: float = 1.5, cap: int = 25000) -> np.ndarray:

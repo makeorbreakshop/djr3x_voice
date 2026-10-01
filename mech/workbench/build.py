@@ -20,9 +20,25 @@ from .model import SCHEMA, VERSION, Assembly, Transform, rollup, vec
 MECH = Path(__file__).resolve().parents[1]
 OUT = MECH / "out"
 GENERATOR = "mech/workbench 0.1"
-# Display meshes: only the big cosmetic shells are decimated (with a floor); mechanical parts keep
-# their full tessellation so holes and bosses stay round. Normals are creased at load (30 deg).
-DISPLAY_FACES = {"shell": 80000}
+# Display meshes (the GLBs Build and the Mechanical view load): a triangle budget per class, scaled by
+# the part's size (k x bbox diagonal in mm, between a floor and a cap). Full detail stays in the
+# STL/3MF exports and in the suite's collision meshes; only the display GLB is decimated.
+DISPLAY_BUDGET = {  # class: (triangles per mm of diagonal, floor, cap)
+    "shell": (40.0, 800, 30000),
+    "mech": (25.0, 400, 12000),
+    "servo": (20.0, 300, 3000),
+    "bearing": (20.0, 200, 2000),
+    "hardware": (20.0, 200, 3000),
+    "fastener": (8.0, 120, 600),
+}
+
+
+def display_budget(mesh: trimesh.Trimesh, cls: str, override: int | None = None) -> int:
+    if override:
+        return int(override)
+    k, lo, hi = DISPLAY_BUDGET.get(cls, DISPLAY_BUDGET["hardware"])
+    diag = float(np.linalg.norm(mesh.extents)) if len(mesh.vertices) else 0.0
+    return int(min(hi, max(lo, k * diag)))
 
 
 def log(msg):
@@ -45,12 +61,48 @@ def load_module(name: str):
 
 
 def _glb(mesh: trimesh.Trimesh, path: Path):
+    """A display GLB: positions quantized to normalized int16 (KHR_mesh_quantization; the node's
+    translation + scale dequantize them), indices uint16 where they fit, no normals (the readers
+    crease their own). ~8 bytes a vertex + 6-12 a triangle."""
+    import json as _json
+
     path.parent.mkdir(parents=True, exist_ok=True)
     mesh = mesh.copy()
     mesh.remove_unreferenced_vertices()
     mesh.update_faces(mesh.nondegenerate_faces())
-    mesh.visual = trimesh.visual.ColorVisuals(mesh)
-    path.write_bytes(trimesh.exchange.gltf.export_glb(trimesh.Scene(mesh), include_normals=True))
+    V = np.asarray(mesh.vertices, np.float64)
+    F = np.asarray(mesh.faces, np.int64)
+    if not len(V) or not len(F):
+        V, F = np.zeros((3, 3)), np.array([[0, 1, 2]])
+    lo, hi = V.min(0), V.max(0)
+    c = (lo + hi) / 2
+    h = np.maximum((hi - lo) / 2, 1e-6)
+    q = np.round((V - c) / h * 32767).clip(-32767, 32767).astype(np.int16)
+    pos = np.zeros((len(q), 4), np.int16)  # 8-byte stride (vertex attributes align to 4)
+    pos[:, :3] = q
+    idx = F.astype(np.uint16 if len(V) < 65536 else np.uint32).ravel()
+    pb, ib = pos.tobytes(), idx.tobytes()
+    ib += b"\0" * (-len(ib) % 4)
+    gl = {
+        "asset": {"version": "2.0", "generator": GENERATOR},
+        "extensionsUsed": ["KHR_mesh_quantization"], "extensionsRequired": ["KHR_mesh_quantization"],
+        "scene": 0, "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0, "translation": [float(x) for x in c], "scale": [float(x) for x in h]}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4}]}],
+        "buffers": [{"byteLength": len(pb) + len(ib)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(pb), "byteStride": 8, "target": 34962},
+                        {"buffer": 0, "byteOffset": len(pb), "byteLength": len(idx) * idx.itemsize, "target": 34963}],
+        "accessors": [{"bufferView": 0, "componentType": 5122, "normalized": True, "count": len(q), "type": "VEC3",
+                       "min": [int(x) for x in q.min(0)], "max": [int(x) for x in q.max(0)]},
+                      {"bufferView": 1, "componentType": 5123 if idx.dtype == np.uint16 else 5125, "count": len(idx),
+                       "type": "SCALAR"}],
+    }
+    js = _json.dumps(gl, separators=(",", ":")).encode()
+    js += b" " * (-len(js) % 4)
+    binc = pb + ib
+    out = (b"glTF" + (2).to_bytes(4, "little") + (12 + 8 + len(js) + 8 + len(binc)).to_bytes(4, "little")
+           + len(js).to_bytes(4, "little") + b"JSON" + js + len(binc).to_bytes(4, "little") + b"BIN\0" + binc)
+    path.write_bytes(out)
 
 
 def _atomic_json(obj, path: Path):
@@ -81,7 +133,7 @@ def _clean(d: dict) -> dict:
     return {k: _jsonable(v) for k, v in d.items() if not _empty(v) or k in ("link",)}
 
 
-EXPORT_VERSION = 1  # bump when the export format changes: every file is rewritten
+EXPORT_VERSION = 3  # bump when the export format changes: every file is rewritten (3: LOD + quantized GLBs)
 
 
 class _Sigs:
@@ -117,7 +169,7 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
 
     m = p.mesh
     centre = (m.bounds[0] + m.bounds[1]) / 2
-    target = p.decimate_to or DISPLAY_FACES.get(p.cls)
+    target = display_budget(m, p.cls, p.decimate_to)
     h = mesh_hash(m)
     sig = f"{h}:{target}:{EXPORT_VERSION}"
     mesh_rel = f"{prefix}parts/{p.id}.glb"
@@ -154,7 +206,9 @@ def _part_files(p, prefix: str, out: Path, export: bool, sigs: "_Sigs"):
                 log(f"3mf export skipped for {p.id}: {e}")
                 exports.pop("3mf", None)
         sigs.d[mesh_rel + "#faces"] = n_disp
-    return centre, n_disp, mesh_rel, exports, h[:12]
+    import hashlib
+
+    return centre, n_disp, mesh_rel, exports, hashlib.sha1(sig.encode()).hexdigest()[:12]
 
 
 def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = True, loaded_children=None,
@@ -200,7 +254,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
 
                 fsig = f"{mesh_hash(fm)}:{EXPORT_VERSION}"
                 if not sigs.fresh(rel, fsig, out):
-                    _glb(fm, out / rel)
+                    _glb(geom.decimate(fm, display_budget(fm, "fastener")), out / rel)
                     sigs.mark(rel, fsig)
                 written.add(rel)
             node["mesh"] = rel
@@ -291,8 +345,9 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
         node["couplings"] = json.loads((out / "couplings.json").read_text())["couplings"]
     except Exception:
         pass
+    removed = prune(out, node, export, sigs)
     sigs.save()
-    log(f"files {time.time() - t3:.1f} s: {sigs.written} written, {sigs.skipped} unchanged")
+    log(f"files {time.time() - t3:.1f} s: {sigs.written} written, {sigs.skipped} unchanged, {removed} stale removed")
     manifest = {"schema": SCHEMA, "version": VERSION,
                 "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                 "generator": GENERATOR, "root": node}
@@ -307,6 +362,41 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     _atomic_json(index, index_path)
     log(f"wrote {out / 'manifest.json'} ({time.time() - t0:.1f} s)")
     return out / "manifest.json"
+
+
+def prune(out: Path, node: dict, export: bool, sigs: "_Sigs") -> int:
+    """Delete the meshes and exports under out/ that this manifest no longer references (parts moved
+    to another sub-assembly, a renamed or removed part, a variant restructured), and empty folders.
+    Interference, requests and clearance outputs are left alone; without --export so are exports."""
+    keep: set[str] = set()
+
+    def walk(n):
+        for p in n.get("parts", []):
+            keep.add(p.get("mesh", ""))
+            keep.update((p.get("export") or {}).values())
+        for f in n.get("fasteners", []):
+            if f.get("mesh"):
+                keep.add(f["mesh"])
+        for c in n.get("children", []):
+            if "parts" in c or "children" in c:
+                walk(c)
+
+    walk(node)
+    exts = {".glb", ".stl", ".3mf"} if export else {".glb"}
+    n = 0
+    for f in sorted(out.rglob("*")):
+        rel = f.relative_to(out).as_posix()
+        if not f.is_file() or f.suffix not in exts or rel.split("/")[0] in ("interference", "requests", "clearance"):
+            continue
+        if rel not in keep:
+            f.unlink()
+            sigs.d.pop(rel, None)
+            sigs.d.pop(rel + "#faces", None)
+            n += 1
+    for d in sorted((x for x in out.rglob("*") if x.is_dir()), key=lambda x: -len(x.parts)):
+        if not any(d.iterdir()):
+            d.rmdir()
+    return n
 
 
 def write_interference(suite, out: Path):
