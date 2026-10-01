@@ -473,6 +473,7 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
     swap_parametric(a.parts, swapped)
     if swapped:
         a.notes.append("Parametric (mech/parts/anderson) in place of the vendored STLs: " + "; ".join(swapped))
+
     return a, dict(tube_top=y_tube_top, tube_len=L)
 
 
@@ -651,55 +652,75 @@ def hero_arm(top: Asm):
     foot = p0 + d_hat * ((pivot - p0) @ d_hat)
     radial = np.array([pivot[0], 0, pivot[2]]); radial /= np.linalg.norm(radial)
     inward = -(radial - a_hat * (radial @ a_hat)); inward /= np.linalg.norm(inward)
-    down = np.cross(inward, a_hat)
-    # dual-shaft servo (servo.stl: 40x50x20, shafts on Y at x=-10, z=10) centred on the hinge
-    T_hs = basis(inward, a_hat, down) @ trans(10, 0, -10)
-    T_hs = trans(pivot) @ T_hs
-    Tm = basis(x_hat, a_hat, d_hat, origin_to=foot, origin_from=(-26, -30, 0))
-    on_axis = lambda s: basis(x_hat, a_hat, d_hat, origin_to=foot + d_hat * s)  # noqa: E731
-    T_tube = trans(pivot) @ basis(x_hat, -a_hat, -d_hat) @ trans(0, -25, 0)
+    # Anderson's hero arm put together from his files (parts/anderson/hero_arm.py): the static group in
+    # the servomount's frame (servomount, dual-shaft servo, body tube in its collar), the arm group in
+    # the main arm's (main arm, elbow covers = the kit's discs, wrist, cap, wrist servo, hand), the hinge
+    # on the kit discs' axis; the arm at the kit's forearm direction (theta 41.6 deg at rest)
+    from parts.anderson import hero_arm as HA
+
+    sm = HA.sm_in_world(pivot, a_hat, inward)
+    theta0 = HA.theta_of(d_hat, a_hat, inward)
+    ma = sm @ HA.arm_in_sm(theta0)
+    W = lambda k: sm @ HA.STATIC[k]  # noqa: E731
+    A = lambda k: ma @ HA.ARM[k]  # noqa: E731
+    ev = "parts/anderson/hero_arm.py (his files' mates)"
     top.parts += [
-        servo_part("hero_shoulder_servo", "DS3218_DUAL", "top_ring", T_hs, f("hero", "servo"),
-                   evidence="output shafts (Y) on the kit hinge-disc axis HA_LE_1-HA_RE_1"),
-        P("hero_forearm", "mainarm (61 mm forearm, replaces HA_SB_1/HA_SP_1/HA_SP_2)", "mech", "hero_arm", Tm,
-          f("hero", "mainarm"), placement="fitted", replaces=["ha_sb_1", "ha_sp_1", "ha_sp_2"],
-          evidence="bore axis (-26, -30) on the kit forearm axis (HA_SP_2 PCA); horn holes along Y = hinge axis"),
-        P("hero_wrist_ring", "Part 1 (wrist ring)", "mech", "hero_arm", on_axis(180), f("wrist", "Part 1"),
-          placement="inferred", inferred=True, inferred_note="stacked on the forearm end"),
-        P("hero_wrist_body", "wrist (houses the 7 kg servo)", "mech", "hero_arm", on_axis(186), f("wrist", "wrist"),
-          placement="inferred", replaces=["ha_w_2"], inferred=True, inferred_note="stacked on the forearm end"),
-        P("hero_wrist_servo_holder", "Part 1 (1) micro-servo holder", "mech", "hero_arm", on_axis(190),
-          f("wrist", "Part 1 (1)"), placement="inferred", inferred=True, inferred_note="inside the wrist"),
-        P("hero_wrist_servo", "Servo " + catalog.SERVOS["SERVO_7KG"]["listing"], "servo", "hero_arm", on_axis(195),
-          None, generator=lambda: trimesh.creation.box((23, 12, 25)), kind="generated", origin="catalog",
-          material="servo:SERVO_7KG", mass_g=catalog.SERVOS["SERVO_7KG"]["mass_g"], printed=False,
-          placement="inferred", inferred=True, inferred_note="micro servo stand-in box, not in the CAD"),
-        P("hero_hand_arm_side", "hand-arm-side (wrist bearing half, fixed)", "mech", "hero_arm", on_axis(229),
-          f("wrist", "hand-arm-side"), placement="inferred", inferred=True, inferred_note="stacked"),
-        P("hero_hand_finger_side", "hand-finger-side (turns; carries the fingers)", "mech", "hero_hand", on_axis(229),
-          f("wrist", "hand-finger-side"), placement="fitted", replaces=["ha_w_1"],
-          evidence="shares the hand-arm-side frame (z -5..7.8 | 7.8..44); finger pin holes on X"),
-        # Anderson's elbow (servomount C-channel + body tube + the dual-shaft servo) replaces the kit's
-        # elbow blocks and elbow disc (coordinator, 2026-09-30). His servomount is not placed: its
-        # frame relative to the servo is not in his files, and the collar-on-tube reading overlapped
-        # the servo and the main arm by 35 cm3 at any roll (reported for the parametric agent).
-        P("hero_elbow_tube", "bodytube (32 mm, along the hinge axis)", "mech", "top_ring",
-          T_tube, f("hero", "bodytube"), replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4", "ha_le_1"],
-          placement="inferred", inferred=True, inferred_note="axle housing toward the body (assembly PNG 03)"),
+        P("hero_servomount", "servomount (the elbow's C-channel)", "mech", "top_ring", W("servomount"),
+          f("hero", "servomount"), placement="fitted", evidence=ev,
+          replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4", "ha_le_1", "ha_re_1"]),
+        servo_part("hero_shoulder_servo", "DS3218_DUAL", "top_ring", W("servo"), f("hero", "servo"),
+                   evidence="its shafts on the hinge, the ears spanning the channel (hero_arm.py)", placement="fitted"),
+        P("hero_elbow_tube", "bodytube (into the body, square to the hinge)", "mech", "top_ring", W("bodytube"),
+          f("hero", "bodytube"), placement="fitted", evidence=ev),
+        P("hero_forearm", "mainarm (the arm's upright, replaces HA_SB_1/HA_SP_1/HA_SP_2)", "mech", "hero_arm",
+          A("mainarm"), f("hero", "mainarm"), placement="fitted", replaces=["ha_sb_1", "ha_sp_1", "ha_sp_2"],
+          evidence=ev + "; the hinge 38.5 mm below the foot"),
+        P("hero_elbow_cover_l", "elbow cover (Anderson's copy of the kit disc HA_LE_1)", "shell", "hero_arm",
+          A("elbow_cover_a"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev),
+        P("hero_elbow_cover_r", "elbow cover (Anderson's copy of the kit disc HA_RE_1)", "shell", "hero_arm",
+          A("elbow_cover_b"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev),
+        P("hero_wrist_body", "wrist", "mech", "hero_arm", A("wrist"), f("wrist", "wrist"), placement="fitted",
+          replaces=["ha_w_2"], evidence=ev),
+        # his STL names are swapped: the STLs' "Part 1 (1)" is the cap, "Part 1" the wrist servo
+        P("hero_wrist_cap", "wrist cap", "mech", "hero_arm", A("wrist_cap"), f("wrist", "Part 1 (1)"),
+          placement="fitted", evidence=ev),
+        P("hero_wrist_servo", "Servo " + catalog.SERVOS["SERVO_7KG"]["listing"], "servo", "hero_arm",
+          A("wrist_servo"), f("wrist", "Part 1"), material="servo:SERVO_7KG",
+          mass_g=catalog.SERVOS["SERVO_7KG"]["mass_g"], printed=False, placement="fitted",
+          evidence=ev + "; his micro-servo stand-in (the STLs' 'Part 1')"),
+        P("hero_hand_arm_side", "hand-arm-side (wrist bearing half, fixed)", "mech", "hero_arm", A("hand_arm_side"),
+          f("wrist", "hand-arm-side"), placement="fitted", evidence=ev),
+        P("hero_hand_finger_side", "hand-finger-side (turns; carries the fingers)", "mech", "hero_hand",
+          A("hand_finger_side"), f("wrist", "hand-finger-side"), placement="fitted", replaces=["ha_w_1"], evidence=ev),
     ]
-    js = Joint("hero_shoulder", "Hero arm shoulder (20 kg dual-shaft servo in the elbow disc)", "revolute",
-               "top_ring", "hero_arm", pivot=tuple(np.round(pivot, 2)), axis=tuple(np.round(a_hat, 5)),
+    # the kit's fingers ride the hand: they keep their place relative to it. The hand used to sit on the
+    # kit forearm axis 229 mm from the foot (the kit pose's fit of HA_W_1); move them with it
+    x_hat = np.cross(a_hat, d_hat)
+    p0 = frames.apply(Tk, (60.5, 635.9, 336.8))
+    foot = p0 + d_hat * ((pivot - p0) @ d_hat)
+    old_hand = basis(x_hat, a_hat, d_hat, origin_to=foot + d_hat * 229)
+    delta = A("hand_finger_side") @ np.linalg.inv(old_hand)
+    for p in top.parts:
+        if p.link == "hero_hand" and p.origin == "kit":
+            p.T = delta @ p.T
+            p.evidence = (p.evidence + "; " if p.evidence else "") + "moved with Anderson's hand (hero_arm.py)"
+    hinge_axis = sm[:3, 0]                                     # the servomount's +X: theta grows about it
+    wp, wd = HA.WRIST_AXIS_MA
+    w_pivot = (ma @ np.append(np.asarray(wp, float) + np.asarray(wd) * 213.0, 1.0))[:3]
+    w_axis = ma[:3, :3] @ np.asarray(wd, float)
+    js = Joint("hero_shoulder", "Hero arm shoulder (20 kg dual-shaft servo in the elbow)", "revolute",
+               "top_ring", "hero_arm", pivot=tuple(np.round(pivot, 2)), axis=tuple(np.round(hinge_axis, 5)),
                limits=(-35, 45), profile_joint="hero_shoulder",
                drive={"kind": "direct", "servos": ["hero_shoulder_servo"], "gear_ratio": 1.0},
-               zero={"how": "arm up at the front-left (kit pose)"},
-               evidence=["axis through the kit hinge-disc centres HA_LE_1 (83.4,528.4,220.9) / HA_RE_1 (-1.8,528.4,234.0), "
-                         "disc normals agree (PCA)", "servo.stl double output shaft on that axis (elbow-covers-dnp = the kit discs)"],
+               zero={"how": f"the kit pose: arm at theta {theta0:.1f} deg (hero_arm.py), so the range is "
+                            f"{theta0 - 35:.1f}..{theta0 + 45:.1f}"},
+               evidence=["hinge = the kit discs' axis (HA_LE_1 / HA_RE_1 centres) = the servo's shafts (hero_arm.py)"],
                confidence="high")
-    jw = Joint("hero_wrist", "Hero wrist roll (7 kg servo in the new wrist)", "revolute", "hero_arm", "hero_hand",
-               pivot=tuple(np.round(foot + d_hat * 229, 2)), axis=tuple(np.round(d_hat, 5)), limits=(-90, 90),
+    jw = Joint("hero_wrist", "Hero wrist roll (micro servo in the wrist)", "revolute", "hero_arm", "hero_hand",
+               pivot=tuple(np.round(w_pivot, 2)), axis=tuple(np.round(w_axis, 5)), limits=(-90, 90),
                profile_joint="hero_wrist", drive={"kind": "direct", "servos": ["hero_wrist_servo"], "gear_ratio": 1.0},
                zero={"how": "claw as in the kit pose"},
-               evidence=["axis = R30 wrist discs (hand-arm-side / hand-finger-side) on the forearm axis (HA_SP_2 PCA)"],
+               evidence=["the wrist axis of the main arm (hero_arm.py WRIST_AXIS_MA), the hand at z 213"],
                confidence="high")
     top.joints += [js, jw]
 
