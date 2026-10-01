@@ -944,10 +944,10 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-10-01T01:01:48+00:00",
+    "generated_at": "2026-10-01T01:38:17+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-10-01T01:01:39+00:00",
+      "generated_at": "2026-10-01T01:38:13+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
@@ -1282,9 +1282,9 @@
           168.53
         ],
         "axis": [
-          0.746161,
+          -0.746161,
           0.0,
-          -0.665765
+          0.665765
         ],
         "child_link": "top_ring/hero_arm",
         "mech_limits": {
@@ -1318,9 +1318,9 @@
         "type": "revolute",
         "parent": "hero_shoulder",
         "pivot": [
-          271.29,
-          685.42,
-          291.11
+          283.27,
+          695.44,
+          308.82
         ],
         "axis": [
           0.497698,
@@ -1824,19 +1824,19 @@
         "id": "hunter_head/neck",
         "name": "Neck post (coupler, hubs, hex shaft, U-joint body)",
         "joint": "head_lift",
-        "kg": 0.0625,
+        "kg": 0.0628,
         "com": [
           0.0,
-          729.86,
+          729.73,
           -0.03
         ],
         "inertia": [
-          8.675e-05,
-          1.123e-05,
-          8.923e-05,
-          5.299e-10,
+          8.699e-05,
+          1.125e-05,
+          8.948e-05,
+          5.26e-10,
           1.836e-08,
-          -7.149e-08
+          -7.129e-08
         ],
         "parts": 7,
         "catalogue_parts": 7
@@ -2117,42 +2117,42 @@
         "id": "top_ring/top_ring",
         "name": "Top ring (RX-24)",
         "joint": "torso_top",
-        "kg": 1.4221,
+        "kg": 1.4761,
         "com": [
-          37.23,
-          530.32,
-          36.87
+          36.94,
+          529.98,
+          40.61
         ],
         "inertia": [
-          0.01467,
-          0.02756,
-          0.01539,
-          0.0003111,
-          -0.00586,
-          0.0001142
+          0.01535,
+          0.02738,
+          0.01458,
+          0.0003586,
+          -0.006037,
+          0.0001759
         ],
-        "parts": 21,
+        "parts": 22,
         "catalogue_parts": 1
       },
       {
         "id": "top_ring/hero_arm",
         "name": "Hero arm",
         "joint": "hero_shoulder",
-        "kg": 0.486,
+        "kg": 0.5054,
         "com": [
-          210.83,
-          609.68,
-          223.35
+          217.18,
+          614.27,
+          232.78
         ],
         "inertia": [
-          0.001939,
-          0.001515,
-          0.001816,
-          -0.0007304,
-          -0.0006692,
-          -0.0008036
+          0.002143,
+          0.00172,
+          0.001993,
+          -0.0007971,
+          -0.0007431,
+          -0.0008744
         ],
-        "parts": 14,
+        "parts": 15,
         "catalogue_parts": 1
       },
       {
@@ -2161,17 +2161,17 @@
         "joint": "hero_wrist",
         "kg": 0.0836,
         "com": [
-          282.07,
-          712.1,
-          299.93
+          300.36,
+          705.97,
+          331.24
         ],
         "inertia": [
-          9.694e-05,
-          3.945e-05,
-          9.743e-05,
-          -1.269e-05,
-          -1.751e-06,
-          -1.026e-05
+          7.388e-05,
+          9.846e-05,
+          6.148e-05,
+          -5.968e-06,
+          -3.071e-05,
+          -6.879e-06
         ],
         "parts": 12,
         "catalogue_parts": 0
@@ -2574,6 +2574,6 @@
         "note": "head_tilt's range as a function of head_lift (head_roll swept to its ends): outside it the arm comes within 1.0 mm of the body"
       }
     ],
-    "total_kg": 12.91
+    "total_kg": 12.983
   }
 }

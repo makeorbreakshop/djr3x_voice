@@ -1,6 +1,6 @@
 # Robot profile: mech model vs `robot.json`
 
-Generated 2026-10-01T01:01:48+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-01T01:01:39+00:00; assemblies r3x_droid, base, base_panels_closed, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: base_panels_open, base_panels_port, head_r3x, randall_frame).
+Generated 2026-10-01T01:38:17+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-01T01:38:13+00:00; assemblies r3x_droid, base, base_panels_closed, r3x_neck_drive, hunter_head, morton_frame, lower_ring, middle_ring, top_ring; not fitted: base_panels_open, base_panels_port, head_r3x, randall_frame).
 
 `robot.generated.json` is NOT live. To try it: runtime `R3X_PROFILE=profiles/r3x/robot.generated.json`, sim `?profile=generated`. To adopt it: `mech/.venv/bin/python -m rigsync --apply` (backs up robot.json).
 
@@ -67,8 +67,8 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 | throttle_elbow | throttle_shoulder | throttle_shoulder | -211.33, 242.1, 3.26 | 1, 0, 0.0227 | none | MG996R | clear |
 | throttle_wrist | throttle_elbow | throttle_elbow | -210, 321.6, 182.58 | 1, 0, 0.0227 | none | MG90S | clear |
 | torso_top | torso_middle | torso_middle | 0, 0, 0 | 0, 1, 0 | gear - gear 4.25:1 | SERVO_35KG_270 | clear |
-| hero_shoulder | torso_top | torso_top | 158.1, 528.4, 168.53 | 0.746, 0, -0.666 | direct - direct | DS3218_DUAL | clear |
-| hero_wrist | hero_shoulder | hero_shoulder | 271.29, 685.42, 291.11 | 0.498, 0.664, 0.558 | direct - direct | SERVO_7KG | clear |
+| hero_shoulder | torso_top | torso_top | 158.1, 528.4, 168.53 | -0.746, 0, 0.666 | direct - direct | DS3218_DUAL | clear |
+| hero_wrist | hero_shoulder | hero_shoulder | 283.27, 695.44, 308.82 | 0.498, 0.664, 0.558 | direct - direct | SERVO_7KG | clear |
 | head_lift | torso_top | head_pan | 0, 0, 0 | 0, 1, 0 | gear - rack: 0.475 mm per servo deg | SERVO_60KG_270 | clear |
 | head_pan | head_lift | - | 0, 0, 0 | 0, 1, 0 | gear - gear 4:1 | SERVO_35KG_270 | clear |
 | head_tilt | head_pan | head_lift | 0, 738.3, 0 | 1, 0, 0 | push_rod_pair - push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg | GOBILDA_2000_25_2 | max +31.5 |
@@ -77,7 +77,7 @@ Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttl
 
 ## Mass properties (per link, from the CAD)
 
-Total 12.91 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
+Total 12.983 kg. Printed parts: volume x density x fill; purchased parts: catalogue mass; inertia from each part's mesh as a uniform solid (a lower bound for printed parts).
 
 | link | moved by | kg | COM mm | Ixx Iyy Izz kg m² |
 |---|---|---|---|---|
@@ -86,7 +86,7 @@ Total 12.91 kg. Printed parts: volume x density x fill; purchased parts: catalog
 | r3x_neck_drive/neck_stage | ground | 0.616 | -2, -49, 14 | 5.20e-03 9.61e-03 4.66e-03 |
 | r3x_neck_drive/turntable | head_pan | 1.081 | -16, 76, -20 | 6.25e-02 4.60e-03 6.15e-02 |
 | r3x_neck_drive/slide | head_lift | 0.409 | -2, 279, -10 | 2.72e-02 1.56e-04 2.71e-02 |
-| hunter_head/neck | head_lift | 0.062 | 0, 730, -0 | 8.67e-05 1.12e-05 8.92e-05 |
+| hunter_head/neck | head_lift | 0.063 | 0, 730, -0 | 8.70e-05 1.13e-05 8.95e-05 |
 | hunter_head/cross | head_tilt | 0.003 | 0, 738, 0 | 8.76e-07 1.04e-06 1.96e-07 |
 | hunter_head/head | head_roll | 1.403 | 2, 783, 1 | 9.50e-03 1.48e-02 1.23e-02 |
 | hunter_head/visor | visor | 0.158 | 1, 802, 23 | 5.79e-04 1.75e-03 1.91e-03 |
@@ -99,9 +99,9 @@ Total 12.91 kg. Printed parts: volume x density x fill; purchased parts: catalog
 | middle_ring/throttle_upper | throttle_shoulder | 0.186 | -211, 410, -2 | 1.03e-03 1.31e-04 9.78e-04 |
 | middle_ring/throttle_fore | throttle_elbow | 0.127 | -211, 281, 92 | 5.21e-04 4.85e-04 1.57e-04 |
 | middle_ring/throttle_hand | throttle_wrist | 0.130 | -210, 396, 225 | 2.83e-04 8.83e-05 2.34e-04 |
-| top_ring/top_ring | torso_top | 1.422 | 37, 530, 37 | 1.47e-02 2.76e-02 1.54e-02 |
-| top_ring/hero_arm | hero_shoulder | 0.486 | 211, 610, 223 | 1.94e-03 1.52e-03 1.82e-03 |
-| top_ring/hero_hand | hero_wrist | 0.084 | 282, 712, 300 | 9.69e-05 3.94e-05 9.74e-05 |
+| top_ring/top_ring | torso_top | 1.476 | 37, 530, 41 | 1.54e-02 2.74e-02 1.46e-02 |
+| top_ring/hero_arm | hero_shoulder | 0.505 | 217, 614, 233 | 2.14e-03 1.72e-03 1.99e-03 |
+| top_ring/hero_hand | hero_wrist | 0.084 | 300, 706, 331 | 7.39e-05 9.85e-05 6.15e-05 |
 
 ## Servos
 
