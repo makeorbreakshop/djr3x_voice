@@ -1,14 +1,15 @@
 # r3x_servo wire protocol v1
 
-Host (`r3x-drivers`, `servo::r3x`) <-> motion controller firmware (`firmware/servo`, RP2040;
-logic in `rust/crates/r3x-servo-ctl`, host-tested against this driver).
+Host (`r3x-drivers`, `servo::r3x`) <-> motion controller firmware (`firmware/servo`: Teensy 4.1,
+or the RP2040 build; logic in `rust/crates/r3x-servo-ctl`, host-tested against this driver).
 Implements plan D6 / `sim/docs/motion-control.md` §8: the host sends **goals at event time**
 plus a heartbeat; the controller runs the follower, calibration and pulses. Reference codec:
 `src/servo/proto.rs` (its tests are the conformance vectors).
 
 ## Framing
 
-USB CDC serial (baud ignored; 115200 on a UART bridge).
+USB CDC serial (baud ignored; 115200 on a UART bridge). Exception, Teensy 4.1 build only:
+134 baud = reboot into the bootloader for flashing (rail and pulses off first).
 
 ```
 wire   = COBS(packet) 0x00

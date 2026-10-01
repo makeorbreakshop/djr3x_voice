@@ -1,0 +1,14 @@
+[build]
+target = "thumbv7em-none-eabihf"  # i.MX RT1062: Cortex-M7
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+  # The M7's FPU is double precision (FPv5-D16); the bare target assumes single only.
+  # r3x-servo-ctl / r3x-motion run in f64, so this keeps the follower in hardware.
+  "-C", "target-cpu=cortex-m7",
+  "-C", "link-arg=-Tt4link.x",
+]
+
+[alias]
+# `cargo hex`: release build -> r3x-servo-teensy41.hex (Intel HEX, what the Teensy loaders take).
+hex = "objcopy --release -- -O ihex r3x-servo-teensy41.hex"

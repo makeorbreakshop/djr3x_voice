@@ -1,6 +1,6 @@
 //! The r3x_servo motion controller (plan D6, `rust/crates/r3x-drivers/PROTOCOL.md`), as a
-//! hardware-free state machine. `firmware/servo` runs it on an RP2040; `tests/sim.rs`
-//! runs it on the host with a fake clock against the real host driver.
+//! hardware-free state machine. `firmware/servo` runs it on a Teensy 4.1 or an RP2040;
+//! `tests/sim.rs` runs it on the host with a fake clock against the real host driver.
 #![no_std]
 
 pub mod controller;

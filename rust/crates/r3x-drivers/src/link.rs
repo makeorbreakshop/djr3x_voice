@@ -17,6 +17,8 @@ pub struct PortInfo {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
     pub manufacturer: Option<String>,
+    /// USB product string, where the OS reports one.
+    pub product: Option<String>,
 }
 
 /// Lists and opens ports; the fake in tests, [`SerialOpener`] for real.
@@ -38,6 +40,7 @@ impl Opener for SerialOpener {
                     vid: Some(u.vid),
                     pid: Some(u.pid),
                     manufacturer: u.manufacturer,
+                    product: u.product,
                 },
                 _ => PortInfo { name: p.port_name, ..Default::default() },
             })
@@ -72,15 +75,29 @@ impl Link for SerialLink {
 const LED_BOARD_VIDS: [u16; 5] = [0x2341, 0x2A03, 0x1A86, 0x0403, 0x10C4];
 const NAME_HINTS: [&str; 5] = ["usbmodem", "usbserial", "ttyacm", "ttyusb", "wchusbserial"];
 
+/// USB product string of the r3x_servo motion controller, on every board it runs on.
+pub const SERVO_PRODUCT: &str = "r3x-servo";
+/// VID:PID the motion controller enumerates with: RP2040 build (Raspberry Pi CDC) and
+/// Teensy 4.1 build (PJRC's Teensy USB serial). For OSes that report no product string.
+const SERVO_BOARD_IDS: [(u16, u16); 2] = [(0x2E8A, 0x000A), (0x16C0, 0x0483)];
+
+/// The motion controller's port: never an LED board, so never probed (a probe would write
+/// LED text into it and hold the port the servo driver opens by `R3X_SERVO_PORT`).
+pub fn is_servo_controller(p: &PortInfo) -> bool {
+    p.product.as_deref() == Some(SERVO_PRODUCT)
+        || matches!((p.vid, p.pid), (Some(v), Some(d)) if SERVO_BOARD_IDS.contains(&(v, d)))
+}
+
 /// Candidate LED-board ports, best first: known VID, then name hint, then an "arduino"
 /// manufacturer. `exclude` holds ports another driver owns; a macOS `tty.` twin of an
-/// excluded or listed `cu.` port is dropped too (both names are the same device).
+/// excluded or listed `cu.` port is dropped too (both names are the same device). The servo
+/// motion controller is never a candidate, whichever board it runs on.
 pub fn probe_led_ports(ports: &[PortInfo], exclude: &[String]) -> Vec<String> {
     let twin = |n: &str| n.replace("/dev/tty.", "/dev/cu.");
     let excluded = |n: &str| exclude.iter().any(|e| e == n || twin(e) == twin(n));
     let mut scored: Vec<(u8, &str)> = ports
         .iter()
-        .filter(|p| !excluded(&p.name))
+        .filter(|p| !excluded(&p.name) && !is_servo_controller(p))
         .filter(|p| !(p.name.starts_with("/dev/tty.") && ports.iter().any(|q| q.name == twin(&p.name))))
         .filter_map(|p| {
             let lname = p.name.to_lowercase();
@@ -359,5 +376,25 @@ mod tests {
             probe_led_ports(&ports, &["/dev/tty.usbmodem2201".into()]),
             vec!["/dev/cu.usbmodem1101", "/dev/cu.usbserial-10"]
         );
+    }
+
+    #[test]
+    fn probe_skips_the_servo_controller_on_any_board() {
+        let usb = |name: &str, vid: u16, pid: u16, product: Option<&str>| PortInfo {
+            name: name.into(),
+            vid: Some(vid),
+            pid: Some(pid),
+            product: product.map(Into::into),
+            ..Default::default()
+        };
+        let ports = [
+            usb("/dev/cu.usbmodem101", 0x2E8A, 0x000A, None), // RP2040 build
+            usb("/dev/cu.usbmodem201", 0x16C0, 0x0483, Some("r3x-servo")), // Teensy 4.1 build
+            usb("/dev/cu.usbmodem301", 0x1234, 0x5678, Some("r3x-servo")), // any future board
+            usb("/dev/cu.usbmodem401", 0x2341, 0x0043, Some("Arduino Uno")), // an LED board
+        ];
+        assert_eq!(probe_led_ports(&ports, &[]), vec!["/dev/cu.usbmodem401"]);
+        // The Teensy's ID alone is enough where the OS reports no product string.
+        assert!(is_servo_controller(&usb("/dev/ttyACM0", 0x16C0, 0x0483, None)));
     }
 }

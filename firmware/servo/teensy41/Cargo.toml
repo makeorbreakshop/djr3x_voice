@@ -1,0 +1,37 @@
+[package]
+name = "r3x-servo-fw-teensy41"
+description = "r3x_servo motion controller firmware for the Teensy 4.1 (i.MX RT1062). Logic: rust/crates/r3x-servo-ctl."
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+rust-version = "1.91"
+
+[dependencies]
+r3x-servo-ctl = { path = "../../../rust/crates/r3x-servo-ctl" }
+
+teensy4-bsp = { version = "0.6", features = ["rt"] }
+teensy4-panic = "0.3"  # panic: blink the LED (no debug probe on a Teensy)
+rtic = { version = "2", features = ["thumbv7-backend"] }
+rtic-monotonics = { version = "2", features = ["imxrt_gpt1"] }
+imxrt-ral = { version = "0.6", features = ["imxrt1062"] }  # chip select for rtic-monotonics; QuadTimer registers
+usb-device = "0.3"
+usbd-serial = "0.2"
+heapless = "0.8"
+cortex-m = "0.7"
+imxrt-iomuxc = "0.3"  # `alternate` for the PWM_X / QuadTimer pads the HAL has no pin traits for
+embedded-hal = "1"
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"
+codegen-units = 1
+incremental = false
+
+[profile.dev]
+opt-level = 1
+
+# Not part of the host workspace in rust/.
+[workspace]
+resolver = "3"  # MSRV-aware: pick dependency versions that build on rust-version

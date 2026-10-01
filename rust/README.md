@@ -24,7 +24,7 @@ crates/
   r3x-vision      camera (AVFoundation via ffmpeg), YuNet + SFace on ort, gallery enrolment,
                   presence, Claude scene description; `r3x-vision` tool binary
   r3x-motion      no_std follower + soft-limit braking + servo calibration (performer and firmware)
-  r3x-servo-ctl   no_std servo controller logic (PROTOCOL.md); firmware/servo runs it on an RP2040
+  r3x-servo-ctl   no_std servo controller logic (PROTOCOL.md); firmware/servo runs it on a Teensy 4.1 (or an RP2040)
   r3x-performer-core, ...   see the plan, section 5
 contracts-schema/ generated JSON Schema (do not edit)
 ```
@@ -219,7 +219,8 @@ photos leave-one-out 0.747-0.889, 5,749 LFW impostors max 0.472.
 ## Servo controller (Phase 8)
 
 ```bash
-cd ../firmware/servo && cargo build --release     # RP2040 firmware (thumbv6m, flip-link); see its README
+cd ../firmware/servo/teensy41 && cargo build --release   # Teensy 4.1 firmware (thumbv7em); `cargo hex` for the loader
+cd ../firmware/servo/rp2040 && cargo build --release     # RP2040 build (thumbv6m, flip-link); see firmware/servo/README.md
 cargo test -p r3x-servo-ctl                       # controller on a fake clock, incl. end to end with the host driver
 ```
 
