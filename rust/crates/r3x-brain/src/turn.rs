@@ -139,12 +139,15 @@ impl Brain {
             self.inner.session.lock().unwrap().add(Role::Assistant, full.clone());
         }
         self.emit_reply(&turn, &full);
-        for (tool, params, h) in dispatched {
+        // Nothing said before the tools (adaptive thinking acts first): the follow-up line
+        // hears the guest, so anything else they asked still gets answered.
+        let silent = full.trim().is_empty().then(|| transcript.clone());
+        for (i, (tool, params, h)) in dispatched.into_iter().enumerate() {
             let result = h.await.unwrap_or_else(|e| serde_json::json!({"success": false, "error": e.to_string()}));
             self.publish_result(&turn, &tool, &params, &result, Source::Claude);
             let me = self.clone();
-            let turn = turn.clone();
-            tokio::spawn(async move { me.after_claude_tool(&turn, &tool, &params, &result).await });
+            let (turn, silent) = (turn.clone(), silent.clone());
+            tokio::spawn(async move { me.after_claude_tool(&turn, &tool, &params, &result, silent.as_deref(), i == 0).await });
         }
     }
 
@@ -246,11 +249,12 @@ impl Brain {
 
     /// Claude called a tool: record its result for the next turn and, unless the eyes or a
     /// routine speak for themselves, generate the verbal-feedback line.
-    async fn after_claude_tool(&self, turn: &str, tool: &str, params: &Map<String, Value>, result: &Value) {
+    async fn after_claude_tool(&self, turn: &str, tool: &str, params: &Map<String, Value>, result: &Value, silent: Option<&str>, first: bool) {
         if VISION_TOOLS.contains(&tool) {
             return self.after_vision(turn, result).await;
         }
-        if VISUAL_ONLY_TOOLS.contains(&tool) {
+        let plan = feedback_plan(tool, false, silent, first);
+        if VISUAL_ONLY_TOOLS.contains(&tool) && plan.is_none() {
             return;
         }
         let success = result.get("success").and_then(Value::as_bool).unwrap_or(true);
@@ -263,11 +267,28 @@ impl Brain {
                 content = format!("Error: {msg}");
             }
         }
-        self.inner.session.lock().unwrap().add(Role::User, format!("Tool execution result for {tool}: {content}"));
-        if !needs_verbal_feedback(tool, false) {
-            return;
-        }
+        let history = {
+            let mut s = self.inner.session.lock().unwrap();
+            s.add(Role::User, format!("Tool execution result for {tool}: {content}"));
+            s.messages()
+        };
+        let Some(guest_said) = plan else { return };
         let Some(llm) = self.inner.llm.clone() else { return };
+        if guest_said.is_some() {
+            // The turn said nothing: follow it up in the conversation itself (persona, history,
+            // the result; tools not callable), so the line answers whatever else they asked.
+            let note = crate::silent_tool_note(tool, &content);
+            let req = prompt::turn_request(&self.inner.system, with_last_user(history, note, None), self.inner.tools.clone(), true);
+            match llm.create(&req).await {
+                Ok(m) if !m.text().trim().is_empty() => {
+                    let text = m.text();
+                    self.inner.session.lock().unwrap().add(Role::Assistant, text.clone());
+                    return self.emit_reply(turn, &text);
+                }
+                Ok(m) => tracing::warn!(stop_reason = ?m.stop_reason, "silent-turn follow-up came back empty; plain feedback instead"),
+                Err(e) => tracing::error!("silent-turn follow-up failed: {e}; plain feedback instead"),
+            }
+        }
         let req = prompt::verbal_feedback_request(self.inner.feedback_persona.as_deref(), tool, &Value::Object(params.clone()), result, success);
         let text = match llm.create(&req).await {
             Ok(m) if !m.text().is_empty() => m.text(),
@@ -354,6 +375,22 @@ fn with_last_user(mut history: Vec<r3x_llm::Message>, text: String, image: Optio
     history
 }
 
+/// Whether a tool Claude called gets a spoken follow-up line, and whether that line hears what
+/// the guest said: `None` = no line; `Some(None)` = the usual line; `Some(Some(said))` = a line
+/// that also answers the guest. `silent` = the guest's words when the turn spoke nothing before
+/// its tools (adaptive thinking acts first); only the first tool hears them, and a visual-only
+/// tool (the eyes) gets a line only then.
+fn feedback_plan(tool: &str, router_acted: bool, silent: Option<&str>, first: bool) -> Option<Option<String>> {
+    if VISION_TOOLS.contains(&tool) || router_acted {
+        return None;
+    }
+    let hear = silent.filter(|_| first).map(str::to_string);
+    if VISUAL_ONLY_TOOLS.contains(&tool) {
+        return hear.map(Some);
+    }
+    needs_verbal_feedback(tool, router_acted).then_some(hear)
+}
+
 /// A safety refusal (HTTP 200, `stop_reason: refusal`): its category, else "unspecified".
 fn refused(m: &r3x_llm::FinalMessage) -> Option<String> {
     (m.stop_reason.as_deref() == Some("refusal"))
@@ -363,6 +400,21 @@ fn refused(m: &r3x_llm::FinalMessage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Adaptive thinking acts first and says nothing before a tool. The follow-up line then
+    /// hears the guest (only the turn's first tool, so a question is answered once), and a
+    /// visual-only tool (the eyes) gets a line it never needed when the turn spoke.
+    #[test]
+    fn a_silent_turn_gives_its_first_tool_a_line_that_hears_the_guest() {
+        let said = "what's my name? then play some music";
+        assert_eq!(feedback_plan("play_music", false, Some(said), true), Some(Some(said.to_string())));
+        assert_eq!(feedback_plan("play_music", false, Some(said), false), Some(None), "second tool: no repeat");
+        assert_eq!(feedback_plan("play_music", false, None, true), Some(None), "the turn spoke: as before");
+        assert_eq!(feedback_plan("set_eye_color", false, None, true), None, "eyes after words: silent, as before");
+        assert_eq!(feedback_plan("set_eye_color", false, Some("turn your eyes blue"), true), Some(Some("turn your eyes blue".into())));
+        assert_eq!(feedback_plan("play_music", true, Some(said), true), None, "the router acted: Claude already narrates");
+        assert_eq!(feedback_plan("analyze_scene", false, Some(said), true), None, "vision has its own follow-up");
+    }
 
     #[test]
     fn the_frame_rides_on_the_last_user_message_only() {

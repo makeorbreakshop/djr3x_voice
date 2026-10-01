@@ -24,16 +24,23 @@ pub fn accepts_temperature(model: &str) -> bool {
 /// never lands in the spoken text before a tool call).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Thinking {
-    #[default]
     BetweenTools,
+    /// The default: measured faster than `between_tools` for R3X's turns (median first output
+    /// 1.13 s vs 1.52 s, total 1.28 s vs 2.00 s; `r3x-brain` example `thinking_bench`), and its
+    /// reasoning stays out of the spoken text.
+    #[default]
     Adaptive,
 }
+
+/// Tokens added to `max_tokens` for an adaptive-thinking request: thinking counts against the
+/// cap, and R3X's caps (150-200) are sized for the spoken text alone.
+pub const THINKING_HEADROOM: u32 = 512;
 
 impl Thinking {
     pub fn parse(v: Option<&str>) -> Self {
         match v.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
-            Some("adaptive") => Thinking::Adaptive,
-            _ => Thinking::BetweenTools,
+            Some("between_tools") => Thinking::BetweenTools,
+            _ => Thinking::Adaptive,
         }
     }
 }
@@ -204,7 +211,15 @@ impl MessagesRequest {
     pub fn to_body_with(&self, requested: &str, wire: &str, effort: &str, thinking: Thinking, stream: bool) -> Value {
         let mut b = Map::new();
         b.insert("model".into(), json!(wire));
-        b.insert("max_tokens".into(), json!(self.max_tokens));
+        // Models that take a thinking mode always get it (and the effort), with or without a
+        // temperature: left unset they think at their default (high) inside R3X's small caps.
+        let thinking_model = BETWEEN_TOOLS_MODELS.contains(&requested);
+        let headroom = if thinking == Thinking::Adaptive && thinking_model {
+            THINKING_HEADROOM
+        } else {
+            0
+        };
+        b.insert("max_tokens".into(), json!(self.max_tokens + headroom));
         if let Some(s) = &self.system {
             let v = if self.cache_system {
                 json!([{"type": "text", "text": s, "cache_control": {"type": "ephemeral"}}])
@@ -226,6 +241,8 @@ impl MessagesRequest {
         }
         if let Some(t) = self.temperature {
             b.extend(generation_params_with(requested, wire, t, effort, thinking));
+        } else if thinking_model {
+            b.extend(generation_params_with(requested, wire, 1.0, effort, thinking));
         }
         if stream {
             b.insert("stream".into(), json!(true));
@@ -293,8 +310,35 @@ mod tests {
         assert_eq!(Value::Object(p), json!({"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}));
         let p = generation_params_with("claude-sonnet-5-5", "claude-sonnet-5-5", 0.4, "low", Thinking::BetweenTools);
         assert_eq!(Value::Object(p), json!({"thinking": {"type": "between_tools"}, "output_config": {"effort": "low"}}));
-        assert_eq!(Thinking::parse(Some("adaptive")), Thinking::Adaptive);
-        assert_eq!(Thinking::parse(None), Thinking::BetweenTools, "the default is unchanged");
+        assert_eq!(Thinking::parse(Some("between_tools")), Thinking::BetweenTools);
+        assert_eq!(Thinking::parse(None), Thinking::Adaptive, "adaptive by default (measured faster, 2026-09-30)");
+    }
+
+    /// Adaptive thinking counts against `max_tokens`: a spoken-reply cap of 160 could be spent
+    /// thinking and leave no text, so adaptive requests get headroom on top of the cap.
+    #[test]
+    fn adaptive_requests_get_thinking_headroom() {
+        let req = MessagesRequest::new(160).user("x").temperature(0.4);
+        let a = req.to_body_with("claude-sonnet-5-5", "claude-sonnet-5-5", "low", Thinking::Adaptive, false);
+        assert_eq!(a["max_tokens"], json!(160 + THINKING_HEADROOM));
+        let b = req.to_body_with("claude-sonnet-5-5", "claude-sonnet-5-5", "low", Thinking::BetweenTools, false);
+        assert_eq!(b["max_tokens"], json!(160));
+        let other = req.to_body_with("claude-haiku-4-5", "claude-haiku-4-5", "low", Thinking::Adaptive, false);
+        assert_eq!(other["max_tokens"], json!(160), "only models that take the thinking mode");
+    }
+
+    /// A request without a temperature (scene descriptions, memory summaries) used to send no
+    /// thinking config at all, so Sonnet 5.5 ran its default (adaptive at effort high) inside a
+    /// 150-200 token cap: room to think and none left to answer. Those models always get the
+    /// mode, the effort and the headroom.
+    #[test]
+    fn untempered_requests_still_get_the_mode_and_effort() {
+        let req = MessagesRequest::new(200).user("describe");
+        let a = req.to_body_with("claude-sonnet-5-5", "claude-sonnet-5-5", "low", Thinking::Adaptive, false);
+        assert_eq!((a["thinking"].clone(), a["output_config"].clone()), (json!({"type": "adaptive"}), json!({"effort": "low"})));
+        assert_eq!(a["max_tokens"], json!(200 + THINKING_HEADROOM));
+        let h = req.to_body_with("claude-haiku-4-5", "claude-haiku-4-5", "low", Thinking::Adaptive, false);
+        assert!(h.get("thinking").is_none() && h.get("temperature").is_none(), "other models: unchanged");
     }
 
     #[test]

@@ -442,3 +442,42 @@ async fn a_newer_turn_silences_older_replies() {
     tokio::time::sleep(Duration::from_secs(10)).await;
     assert_eq!(spoken(&rec), ["Okay!"], "the story's reply arrived after the newer turn began: dropped");
 }
+
+/// Adaptive thinking acts first and says nothing before a tool. The follow-up is then a turn of
+/// the conversation itself (the persona, the history, the tool's result; tools not callable),
+/// so "what's my name? then play something funky" gets both, from what R3X already knows.
+#[tokio::test(start_paused = true)]
+async fn a_silent_command_is_followed_up_in_the_conversation() {
+    let dir = std::env::temp_dir().join(format!("r3x-brain-silent-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ask = "what's my name? then play something funky";
+    let params = json!({"track": "something funky"});
+    let turn = prompt::turn_request("sys", vec![Message::user(ask)], request::default_tools(), false);
+    let result = json!({"success": true, "track": "Funky Town", "requested": "something funky",
+        "selected": r3x_intent::catalogue::naming_phrase("something funky"), "action": "play", "message": "Now playing: Funky Town"});
+    let note = r3x_brain::silent_tool_note("play_music", &r3x_llm::pyjson::dumps(&result, false, false));
+    let follow = prompt::turn_request("sys", vec![Message::user(note)], vec![], true);
+    let lines = [
+        json!({"key": ClaudeFixtures::key_for("stream", &turn), "method": "stream", "chunks": [],
+               "final": {"content": [{"type": "tool_use", "id": "t1", "name": "play_music", "input": params}], "stop_reason": "tool_use"}}),
+        json!({"key": ClaudeFixtures::key_for("create", &follow), "method": "create", "wait": 0.3,
+               "final": {"content": [{"type": "text", "text": "You're Brandon, and Funky Town is rolling!"}]}}),
+    ];
+    std::fs::write(dir.join("claude.jsonl"), lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+    let bus = Bus::default();
+    bus.update(Source::System, |s: &mut StageState| s.brain = true);
+    stubs(&bus);
+    let rec = log(&bus);
+    let deps = BrainDeps {
+        llm: Some(LlmClient::replay(Arc::new(ClaudeFixtures::load(&dir, 1.0).unwrap()), "claude-sonnet-5-5")),
+        router: IntentRouter::new(JevClient::new("", Duration::from_millis(800)), RouterConfig::default()),
+        memory: None,
+        latency: None,
+        ptt: None,
+        chooser: random_chooser(),
+    };
+    let _brain = Brain::spawn(&bus, BrainConfig::default(), deps).unwrap();
+    assert!(bus.command(Source::Cli, None, Command::Intent(IntentCommand::Say { text: ask.into() })).await.is_accepted());
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert_eq!(spoken(&rec), ["You're Brandon, and Funky Town is rolling!"]);
+}

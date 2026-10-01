@@ -67,6 +67,17 @@ pub fn vision_failure_note(question: &str, reason: &str) -> String {
     )
 }
 
+/// The follow-up to a turn that ran a tool without saying anything first (adaptive thinking
+/// acts first): the tool's result as the session records it, plus the ask for one line that
+/// also answers anything else the guest said. Sent as a turn of the conversation (persona and
+/// history included), so the answer uses what R3X already knows.
+pub fn silent_tool_note(tool: &str, result: &str) -> String {
+    format!(
+        "Tool execution result for {tool}: {result}\n[You ran this without saying anything first. In one short line, in \
+character, tell them it is done, and answer anything else they asked or said.]"
+    )
+}
+
 /// The user text of a turn that carries the camera frame (Jev asked to look): it tells Claude
 /// the image is what R3X sees now, so he answers from it in one reply.
 pub fn look_turn_text(msg: &str) -> String {

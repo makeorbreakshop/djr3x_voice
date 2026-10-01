@@ -11,6 +11,14 @@ use r3x_llm::{prompt, LlmClient, Message, StreamEvent};
 
 const PROMPTS: &[&str] = &["Stop.", "play some music", "turn your eyes blue", "tell me a joke", "what's your favourite song?", "Stop playing music. Stop"];
 
+/// One timed turn.
+struct Row {
+    mode: Thinking,
+    first: f64,
+    total: f64,
+    out_tokens: u64,
+}
+
 #[tokio::main]
 async fn main() {
     let reps: usize = std::env::args().nth(1).and_then(|r| r.parse().ok()).unwrap_or(2);
@@ -23,15 +31,31 @@ async fn main() {
         let first = llm.create(&prompt::turn_request(persona.trim(), vec![Message::user("hi, I'm Brandon")], default_tools(), false)).await;
         let said = first.as_ref().map(|m| m.text()).unwrap_or_default();
         println!("turn 1: {:?} -> {said:?}", first.as_ref().map(|m| m.stop_reason.clone()));
+        let said_again = said.clone();
         let history = vec![Message::user("hi, I'm Brandon"), Message::assistant(said), Message::user("what's my name? then play some music")];
         let second = llm.create(&prompt::turn_request(persona.trim(), history, default_tools(), false)).await;
         match second {
-            Ok(m) => println!("turn 2: ok {:?} -> {:?} tools {:?}", m.stop_reason, m.text(), m.tool_uses().iter().map(|t| t.name.clone()).collect::<Vec<_>>()),
+            Ok(m) => {
+                println!("turn 2: ok {:?} -> {:?} tools {:?}", m.stop_reason, m.text(), m.tool_uses().iter().map(|t| t.name.clone()).collect::<Vec<_>>());
+                // The follow-up to a turn that said nothing: a turn of the conversation itself.
+                let result = r#"{"success": true, "track": "Cantina Band", "action": "play", "message": "Now playing: Cantina Band"}"#;
+                let follow = vec![
+                    Message::user("hi, I'm Brandon"),
+                    Message::assistant(said_again.clone()),
+                    Message::user("what's my name? then play some music"),
+                    Message::user(r3x_brain::silent_tool_note("play_music", result)),
+                ];
+                let req = prompt::turn_request(persona.trim(), follow, default_tools(), true);
+                match llm.create(&req).await {
+                    Ok(f) => println!("follow-up line: {:?} ({:?})", f.text(), f.stop_reason),
+                    Err(e) => println!("follow-up: ERROR {e}"),
+                }
+            }
             Err(e) => println!("turn 2: ERROR {e}"),
         }
         return;
     }
-    let mut rows: Vec<(Thinking, &str, f64, f64, String, Vec<String>, u64)> = vec![];
+    let mut rows: Vec<Row> = vec![];
     for rep in 0..reps {
         for p in PROMPTS {
             for mode in [Thinking::BetweenTools, Thinking::Adaptive] {
@@ -72,19 +96,19 @@ async fn main() {
                 let total = t0.elapsed().as_secs_f64();
                 let first = first.unwrap_or(total);
                 println!("rep{rep} {:<13} {:<30} first {first:5.2}s total {total:5.2}s out {out_tokens:4} tools {tools:?}\n    {:?}", format!("{mode:?}"), format!("{p:?}"), text.chars().take(140).collect::<String>());
-                rows.push((mode, p, first, total, text, tools, out_tokens));
+                rows.push(Row { mode, first, total, out_tokens });
             }
         }
     }
     for mode in [Thinking::BetweenTools, Thinking::Adaptive] {
-        let r: Vec<_> = rows.iter().filter(|r| r.0 == mode).collect();
+        let r: Vec<_> = rows.iter().filter(|r| r.mode == mode).collect();
         let med = |mut v: Vec<f64>| {
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             v.get(v.len() / 2).copied().unwrap_or(0.0)
         };
-        let firsts = med(r.iter().map(|x| x.2).collect());
-        let totals = med(r.iter().map(|x| x.3).collect());
-        let outs: u64 = r.iter().map(|x| x.6).sum();
+        let firsts = med(r.iter().map(|x| x.first).collect());
+        let totals = med(r.iter().map(|x| x.total).collect());
+        let outs: u64 = r.iter().map(|x| x.out_tokens).sum();
         println!("{mode:?}: n={} median first {firsts:.2}s, median total {totals:.2}s, output tokens {outs}", r.len());
     }
 }
