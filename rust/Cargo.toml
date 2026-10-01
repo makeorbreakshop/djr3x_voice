@@ -27,3 +27,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 axum = { version = "0.8", features = ["ws"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+# `./r3x` builds release on every launch, so a one-line edit used to cost 18-50 s of rustc
+# (r3x-runtime alone is ~28 s of codegen, re-run from scratch). Incremental release reuses
+# the unchanged codegen units: measured 18.5 -> 3.7 s for an edit in r3x-runtime, 47 -> 19 s
+# for one in r3x-bus. Cargo applies it to workspace crates only (registry dependencies stay
+# fully optimized). For a benchmark-grade build: CARGO_PROFILE_RELEASE_INCREMENTAL=false.
+[profile.release]
+incremental = true
