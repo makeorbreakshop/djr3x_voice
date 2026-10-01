@@ -21,12 +21,12 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  assemblyLabel, exposed, exteriorFinish, finishProblem, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
+  assemblyLabel, exposed, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
-  type MAssembly, type MCheck, type MFastener, type MGear, type Manifest, type MLinkage, type MPart, type MStep,
+  type MAssembly, type MCheck, type MFastener, type MGear, type MJoint, type Manifest, type MLinkage, type MPart, type MStep,
 } from './manifest';
 
 export type { Look } from './systems';
@@ -116,6 +116,7 @@ const INSPECTION = { key: 1.6, fill: 0.5, rim: 0.9, hemi: 0.22, env: 0.75 };
 const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff3b30, warn: 0xf2c230 };
 /** The context around a scope, and the shells over the mechanism in Inspect. */
 const GHOST = { color: 0x7f858e, mech: 0.08, shell: 0.045, inspectShell: 0.08 };
+const GHOST_FINISH: Finish = { color: GHOST.color, metalness: 0, roughness: 1 };
 const KEY_DIR = new THREE.Vector3(0.9, 1.7, 1.3).normalize();
 
 export class Workbench {
@@ -264,6 +265,7 @@ export class Workbench {
       [c.minAzimuthAngle, c.maxAzimuthAngle] = this.saved.az;
       this.sweep = null;
       this.fly = null;
+      this.stopDemo();
     }
     // After the camera limits are back: showing the droid may bring the booth (and its limits) back.
     if (!on) this.host.setDroidVisible(true);
@@ -391,6 +393,8 @@ export class Workbench {
     // under the bloom threshold instead.
     // The head mech's frame sits where the droid's head is (its mount, mm in the body frame).
     this.focus = this.top; // (the root's position: applyVariantNodes, from the mount and the ground)
+    this.pose(); // rest
+    this.recordRest();
     if (keep) {
       this.forEachNode((n) => {
         const p = keep.poses[n.key];
@@ -436,13 +440,17 @@ export class Workbench {
     } catch {
       return;
     }
-    const fill = (c: number) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.55, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    // the overlaps of parts our build replaced (the kit's hero arm under Anderson's) are not ours
+    const out = (id: string) => !!this.parts.get(this.pid(id))?.part.replaced_by;
+    this.interference = this.interference.filter((it) => !out(it.a) && !out(it.b));
+    // markers draw over whatever look is on (Checks shows them), each with an outline
+    const fill = (c: number) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false });
     const hot = fill(HIGHLIGHT.fail);
     const known = fill(HIGHLIGHT.warn);
-    const line = (c: number) => new THREE.LineBasicMaterial({ color: c });
+    const line = (c: number) => new THREE.LineBasicMaterial({ color: c, depthTest: false, transparent: true });
     const hotLine = line(0x5c0b06);
     const knownLine = line(0x5a4706);
-    const hull = (c: number) => new THREE.MeshBasicMaterial({ color: c, side: THREE.BackSide });
+    const hull = (c: number) => new THREE.MeshBasicMaterial({ color: c, side: THREE.BackSide, depthTest: false, transparent: true });
     await Promise.all(this.interference.map(async (it, k) => {
       const obj = new THREE.Group();
       if (it.mesh) {
@@ -462,10 +470,62 @@ export class Workbench {
       }
       obj.name = `interference:${k}`;
       obj.userData.interference = k;
+      obj.traverse((o) => (o.renderOrder = 30));
+      // placed by updateMarkers (it rides part a's link); its rest placement is its own transform
+      obj.updateMatrix();
+      obj.userData.rest = obj.matrix.clone();
+      obj.matrixAutoUpdate = false;
       this.ifGroup.add(obj);
     }));
-    // Shown only in Inspect (see refresh); the toggle there starts on.
-    this.interferenceOn = true;
+    this.updateMarkers();
+  }
+
+  /** Where each part's link frame was at the rest pose (relative to the droid's frame): the
+   *  overlaps were computed there, so a marker follows its part by the link's move since. */
+  private restLink = new Map<string, THREE.Matrix4>();
+  private recordRest() {
+    this.restLink.clear();
+    const inv = this.top!.group.matrixWorld.clone().invert();
+    for (const po of this.allParts) this.restLink.set(po.part.id, inv.clone().multiply(po.mesh.parent!.matrixWorld));
+  }
+
+  /** How part `id`'s link has moved since rest (droid frame), or null. */
+  private linkMove(id: string, inv: THREE.Matrix4): THREE.Matrix4 | null {
+    const po = this.parts.get(this.pid(id));
+    const rest = po && this.restLink.get(po.part.id);
+    if (!po || !rest) return null;
+    return inv.clone().multiply(po.mesh.parent!.matrixWorld).multiply(rest.clone().invert());
+  }
+
+  /** Overlap pair `k` at the current pose: 'rest' (as computed), 'moved' with its parts (still valid),
+   *  or 'apart' - the two parts moved relative to each other, so the rest-pose result does not apply. */
+  pairState(k: number): 'rest' | 'moved' | 'apart' {
+    const it = this.interference[k];
+    if (!it || !this.top) return 'rest';
+    const inv = this.top.group.matrixWorld.clone().invert();
+    const a = this.linkMove(it.a, inv);
+    const b = this.linkMove(it.b, inv);
+    if (!a || !b) return 'rest';
+    const same = (x: THREE.Matrix4, y: THREE.Matrix4) => x.elements.every((v, i) => Math.abs(v - y.elements[i]) < (i >= 12 ? 0.5 : 1e-3));
+    if (!same(a, b)) return 'apart';
+    return same(a, new THREE.Matrix4()) ? 'rest' : 'moved';
+  }
+
+  /** Markers ride part a's link; a pair whose parts moved apart (or an exploded view) shows none. */
+  private updateMarkers() {
+    if (!this.top || !this.ifGroup.children.length) return;
+    this.top.group.updateMatrixWorld(true);
+    const inv = this.top.group.matrixWorld.clone().invert();
+    for (const o of this.ifGroup.children) {
+      const k = o.userData.interference as number;
+      const it = this.interference[k];
+      const mv = it && this.linkMove(it.a, inv);
+      const on = !!it && this.interferenceOn && this.explode < 0.01 && (this.pairSel === null ? this.pairInScope(it) : this.pairSel === k)
+        && this.pairState(k) !== 'apart';
+      o.visible = on;
+      if (on && mv) o.matrix.copy(mv).multiply(o.userData.rest as THREE.Matrix4);
+    }
+    this.ifGroup.updateMatrixWorld(true);
   }
 
   /** Overlap pairs in focus: those touching the scope's parts (every pair without a scope). */
@@ -479,19 +539,24 @@ export class Workbench {
     return this.parts.has(id) ? id : id.includes('/') ? id.slice(id.indexOf('/') + 1) : id;
   }
 
-  setInterference(on: boolean) {
+  /** Checks tab open: the overlap markers draw (the scope's, or only the selected pair's). Looks never do. */
+  setMarkers(on: boolean) {
+    if (on === this.interferenceOn) return;
     this.interferenceOn = on;
-    if (on && this.look !== 'inspect') this.look = 'inspect';
-    if (on) this.home();
+    if (!on) this.pairSel = null;
     this.refresh();
     this.emit();
   }
+
+  /** The overlap pair picked in Checks (-1/null: none). */
+  pairSel: number | null = null;
 
   /** Frame one pair: its shared solid (or its point) and the two parts. */
   frameInterference(k: number) {
     const it = this.interference[k];
     if (!it) return;
-    if (!this.interferenceOn || this.look !== 'inspect') this.setInterference(true);
+    this.interferenceOn = true;
+    this.pairSel = k;
     this.root.updateMatrixWorld(true);
     const box = new THREE.Box3();
     const o = this.ifGroup.children.find((c) => c.userData.interference === k);
@@ -588,7 +653,7 @@ export class Workbench {
       const furl = joinUrl(base, f.mesh!);
       const flazy = this.lazyHidden.has(asm);
       const geo = flazy ? new THREE.BufferGeometry() : await geometry(furl);
-      const mat = fastMat.clone();
+      const mat = withRim(fastMat.clone());
       const obj = new THREE.Mesh(geo, mat);
       obj.name = f.id;
       obj.userData.fastenerId = f.id;
@@ -651,7 +716,7 @@ export class Workbench {
   }
 
   private material(f: Finish = MATERIAL.printed) {
-    return new THREE.MeshStandardMaterial({ ...f, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    return withRim(new THREE.MeshStandardMaterial({ ...f, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   }
 
   private lazyHidden = new Set<MAssembly>();
@@ -918,6 +983,8 @@ export class Workbench {
 
   private applyScope(sc: Scope | null, frame: boolean) {
     this.scope = sc;
+    this.stopDemo();
+    this.buildPlan();
     this.focus = sc?.owner ?? this.top;
     this.hover = null;
     this.isolated = null;
@@ -989,6 +1056,7 @@ export class Workbench {
   // ------------------------------------------------------------------ pose
 
   setJoint(node: AsmNode, joint: string, value: number) {
+    if (this.demo) this.stopDemo();
     const j = node.asm.joints.find((x) => x.id === joint);
     if (!j) return;
     node.pose[joint] = Math.min(j.limits.max + 40, Math.max(j.limits.min - 40, value));
@@ -998,6 +1066,8 @@ export class Workbench {
 
   home() {
     this.sweep = null;
+    this.demo = null;
+    this.labels(null);
     this.forEachNode((n) => (n.pose = {}));
     this.contact = null;
     this.pose();
@@ -1026,9 +1096,10 @@ export class Workbench {
       po.mesh.scale.set(1, s, 1);
       po.sBase = po.base.clone();
       po.sBase.y = st.anchor[1] + (po.base.y - st.anchor[1]) * s;
-      po.mesh.position.copy(po.sBase).addScaledVector(new THREE.Vector3(...(po.part.explode ?? [0, 0, 0])), (po.part.explode_mm ?? 0) * this.explode);
+      po.mesh.position.copy(po.sBase).add(this.offsetOf(po, this.explode));
     }
     this.root.updateMatrixWorld(true);
+    this.updateMarkers();
     this.markShadow();
   }
 
@@ -1126,8 +1197,147 @@ export class Workbench {
     if (c && node) {
       node.pose = { ...(c.pose ?? {}) };
       this.pose();
-      if (this.look === 'exterior') this.look = 'inspect'; // a check is about the inside
     }
+    this.refresh();
+    this.emit();
+  }
+
+  // ------------------------------------------------------------------ how it works
+
+  /** A motion system running its joints through their range, one after another, on a loop. */
+  private demo: { id: string; t0: number; segs: { node: AsmNode; joint: string; from: number; dur: number; min: number; max: number }[]; total: number } | null = null;
+
+  get demoing() {
+    return this.demo?.id ?? null;
+  }
+
+  /** "How it works": focus the system and loop its joints slowly (up, down, home; then the next),
+   *  keeping the explode. Any joint move, Home or a new focus stops it. */
+  startDemo(id: string) {
+    if (this.scope?.kind !== 'system' || this.scope.id !== id) {
+      const sc = this.systemScope(id);
+      if (!sc) return;
+      this.setScope(sc);
+    }
+    const sc = this.scope!;
+    let t = 0;
+    const segs = sc.joints.map(({ node, joint: j }) => {
+      const span = j.limits.max - j.limits.min;
+      const dur = 2.4 + Math.min(3.6, span / (j.unit === 'mm' ? 25 : 30)); // slow enough to follow the gears
+      const seg = { node, joint: j.id, from: t, dur, min: j.limits.min, max: j.limits.max };
+      t += dur + 0.6;
+      return seg;
+    });
+    if (!segs.length) return;
+    this.sweep = null;
+    this.forEachNode((n) => { for (const s2 of segs) if (s2.node === n) n.pose[s2.joint] = 0; });
+    this.demo = { id, t0: performance.now(), segs, total: t };
+    this.emit();
+  }
+
+  stopDemo() {
+    if (!this.demo) return;
+    this.demo = null;
+    this.labels(null);
+    this.emit();
+  }
+
+  private stepDemo(now: number) {
+    const d = this.demo!;
+    const t = ((now - d.t0) / 1000) % d.total;
+    for (const sg of d.segs) {
+      const u = (t - sg.from) / sg.dur;
+      let v = 0;
+      if (u > 0 && u < 1) {
+        // 0 -> max -> min -> 0, eased
+        const w = u * 4;
+        const e = (x: number) => (1 - Math.cos(Math.PI * Math.min(1, Math.max(0, x)))) / 2;
+        v = w < 1 ? sg.max * e(w) : w < 3 ? sg.max + (sg.min - sg.max) * e((w - 1) / 2) : sg.min * (1 - e(w - 3));
+      }
+      sg.node.pose[sg.joint] = v;
+    }
+    this.pose();
+    this.labels(this.demoLabels());
+  }
+
+  /** A few terse labels on the parts that make the motion: the servos, gears and what they mesh with,
+   *  the wheels, a bearing (at most six). */
+  private demoLabels(): { id: string; text: string }[] {
+    const sc = this.scope;
+    if (!sc) return [];
+    const out: { id: string; text: string }[] = [];
+    const add = (id: string | undefined, text: string) => {
+      if (!id || out.length >= 6 || out.some((x) => x.id === id || x.text === text) || !this.parts.get(id)?.mesh.visible) return;
+      out.push({ id, text });
+    };
+    for (const { node, joint } of sc.joints) {
+      const word = jointLabel(joint.name).toLowerCase().split(/\s+/).filter((w) => !['head', 'arm', 'ring'].includes(w)).pop() ?? 'drive';
+      add(joint.drive?.servos?.[0], `${word} servo`);
+      this.forEachNode((n) => {
+        for (const g of n.asm.gears ?? []) {
+          if (g.joint !== joint.id || (g.joint_assembly ?? n.asm.id) !== node.asm.id) continue;
+          add(g.parts[0], g.kind === 'direct' ? 'coupler' : 'pinion');
+          if (g.mesh_with) add(g.mesh_with, g.kind === 'rack_pinion' ? 'rack' : g.kind === 'internal' ? 'sector' : 'gear');
+        }
+      });
+    }
+    const wheel = [...sc.parts].find((id) => /v-wheel/i.test(this.parts.get(id)?.part.name ?? ''));
+    add(wheel, 'V-wheels');
+    const brg = [...sc.parts].find((id) => this.parts.get(id)?.part.class === 'bearing' && !/wheel/i.test(this.parts.get(id)!.part.name));
+    add(brg, 'bearing');
+    return out;
+  }
+
+  /** The label layer over the viewport (null: none). */
+  private labelEl: HTMLDivElement | null = null;
+  private labels(list: { id: string; text: string }[] | null) {
+    if (!list?.length) {
+      this.labelEl?.replaceChildren();
+      return;
+    }
+    if (!this.labelEl) {
+      this.labelEl = document.createElement('div');
+      this.labelEl.className = 'bb-labels';
+      this.labelEl.setAttribute('aria-hidden', 'true');
+      document.body.append(this.labelEl);
+    }
+    const r = this.host.renderer.domElement.getBoundingClientRect();
+    const cam = this.host.camera;
+    const html: string[] = [];
+    for (const { id, text } of list) {
+      const po = this.parts.get(id)!;
+      const g = po.mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const p = g.boundingBox!.getCenter(new THREE.Vector3()).applyMatrix4(po.mesh.matrixWorld).project(cam);
+      if (p.z > 1) continue;
+      html.push(`<span style="left:${(r.left + ((p.x + 1) / 2) * r.width).toFixed(0)}px;top:${(r.top + ((1 - p.y) / 2) * r.height).toFixed(0)}px">${text}</span>`);
+    }
+    this.labelEl.innerHTML = html.join('');
+  }
+
+  /** Joints outside the focus that are off rest and move it (a turned ring under the hero arm): the
+   *  focus looks wrong until they are home. */
+  upstream(): { node: AsmNode; joint: MJoint; value: number }[] {
+    const sc = this.scope;
+    if (!sc || !this.top) return [];
+    const mine = new Set(sc.joints.map((x) => x.joint));
+    const out: { node: AsmNode; joint: MJoint; value: number }[] = [];
+    this.forEachNode((n) => {
+      if (!this.nodeShown(n)) return;
+      for (const j of n.asm.joints) {
+        const v = n.pose[j.id] ?? 0;
+        if (mine.has(j) || Math.abs(v) < 0.05) continue;
+        const moved = movedBy(n, j.id, (x) => this.nodeShown(x), this.top);
+        if ([...sc.parts].some((id) => moved.has(id))) out.push({ node: n, joint: j, value: v });
+      }
+    });
+    return out;
+  }
+
+  /** One joint back to rest. */
+  rest(node: AsmNode, joint: string) {
+    node.pose[joint] = 0;
+    this.pose();
     this.refresh();
     this.emit();
   }
@@ -1156,6 +1366,11 @@ export class Workbench {
     if (!this.active) return;
     this.holdInspection();
     let moving = false;
+    if (this.demo) {
+      this.stepDemo(now);
+      for (const f of this.listeners) f();
+      moving = true;
+    }
     if (this.sweep) {
       const s = this.sweep;
       const t = (now - s.t0) / 1000;
@@ -1226,15 +1441,14 @@ export class Workbench {
     const scope = this.scope?.parts ?? null;
     // a library design stands alone; a system or assembly keeps the droid around it (or not)
     const ghosts = !!scope && this.context === 'ghost' && this.scope?.kind !== 'library';
-    const intf = look === 'inspect' && this.interferenceOn && !cur && !this.check;
-    const ifHot = new Set<string>();
-    const ifKnown = new Set<string>();
-    const pairOn = (it: InterferencePair) => this.pairInScope(it);
-    if (intf) for (const it of this.interference) if (pairOn(it)) for (const id of [it.a, it.b]) (it.explained ? ifKnown : ifHot).add(this.pid(id));
-    this.ifGroup.visible = intf;
-    for (const o of this.ifGroup.children) o.visible = pairOn(this.interference[o.userData.interference as number]);
+    // overlay marks (rims): the selected pair's two parts while Checks shows it
+    const pairParts = new Set<string>();
+    const sel = this.pairSel !== null && this.interferenceOn ? this.interference[this.pairSel] : null;
+    if (sel) for (const id of [sel.a, sel.b]) pairParts.add(this.pid(id));
     const hover = this.hover;
 
+    // 1. The look: one finish and opacity per part from the look, the focus and the mode (steps)
+    //    alone. 2. Overlays: a rim on top (withRim), never a change of colour, opacity or side.
     for (const [id, po] of this.parts) {
       const p = po.part;
       const shell = p.class === 'shell';
@@ -1243,75 +1457,51 @@ export class Workbench {
       // a part our build replaces (the kit's hero elbow under Anderson's arm) is out of the build; a library
       // design (the kit as published) still shows it
       if (p.replaced_by && !(inScope && this.scope?.kind === 'library')) visible = false;
-      // the look: Exterior is the shells, Mechanism what is inside them, Inspect both (shells ghosted)
+      // Exterior: what is seen from outside, painted. Mechanism: what is inside (a focus keeps its own
+      // shells as a ghost). X-ray: the mechanism under ghosted shells.
       const outside = exposed(p);
       if (look === 'exterior' && !outside) visible = false;
-      if (look === 'mechanism' && shell && !scope) visible = false; // in a scope its own shells stay, ghosted
+      if (look === 'mechanism' && shell && !scope) visible = false;
       if (!inScope && !ghosts) visible = false;
       const f = first.get(id);
       if (cur && f !== undefined && f > this.step && !ctx.has(id)) visible = false;
       po.holder.visible = visible;
       po.mesh.visible = visible;
       const m = po.mat;
+      // ghosts are one neutral grey, whatever the part's paint (no pink X-ray, no purple cups)
       let finish: Finish;
       let opacity = 1;
       if (!inScope) {
-        finish = MATERIAL.neutral;
+        finish = GHOST_FINISH;
         opacity = shell ? GHOST.shell : GHOST.mech;
-      } else if (look === 'exterior' && outside && !shell) {
+      } else if (look === 'exterior') {
         finish = exteriorFinish(p); // its paint; bare metal its material; a missing paint, MISSING_FINISH
       } else if (shell) {
-        finish = exteriorFinish(p);
-        if (look === 'inspect') opacity = GHOST.inspectShell;
-        if (look === 'mechanism') opacity = GHOST.shell;
+        finish = GHOST_FINISH;
+        opacity = look === 'inspect' ? GHOST.inspectShell : GHOST.shell;
       } else {
-        finish = look === 'inspect' ? MATERIAL.neutral : mechanismFinish(p);
+        finish = mechanismFinish(p);
       }
-      if (!inScope) m.color.setHex(GHOST.color);
-      else m.color.setHex(finish.color);
-      m.metalness = inScope ? finish.metalness : 0;
-      m.roughness = inScope ? finish.roughness : 1;
+      if (cur && !inStep.has(id) && !ctx.has(id)) opacity = Math.min(opacity, 0.16); // Steps: the rest recedes
+      m.color.setHex(finish.color);
+      m.metalness = finish.metalness;
+      m.roughness = finish.roughness;
       m.emissive.setHex(0x000000);
-      m.emissiveIntensity = 0.55;
-      if (cur && !inStep.has(id) && !ctx.has(id)) opacity = Math.min(opacity, 0.16);
-      if (this.check && checkParts.size && !checkParts.has(id)) opacity = Math.min(opacity, 0.16);
-      if (cur && inStep.has(id)) m.emissive.setHex(HIGHLIGHT.step);
-      if (this.check && checkParts.has(id)) {
-        m.emissive.setHex(this.check.status === 'fail' ? HIGHLIGHT.fail : this.check.status === 'warn' ? HIGHLIGHT.warn : HIGHLIGHT.step);
-        opacity = 1;
-      }
-      if (intf && (ifHot.has(id) || ifKnown.has(id))) {
-        // the pair's parts: a tinted ghost, so the shared solid inside them shows
-        m.color.setHex(MATERIAL.neutral.color);
-        m.emissive.setHex(ifHot.has(id) ? HIGHLIGHT.fail : HIGHLIGHT.warn);
-        m.emissiveIntensity = 0.22;
-        opacity = 0.32;
-      }
-      if (contact.has(id)) {
-        m.emissive.setHex(this.contact?.status === 'fail' ? HIGHLIGHT.fail : HIGHLIGHT.warn);
-        opacity = Math.max(opacity, 0.5);
-      }
-      // the joint under the pointer: what it moves in the accent, its drive fainter
-      if (hover && visible) {
-        if (hover.moved.has(id)) {
-          m.emissive.setHex(HIGHLIGHT.selected);
-          m.emissiveIntensity = 0.42;
-          opacity = Math.max(opacity, shell ? 0.35 : 1);
-        } else if (hover.drive.has(id)) {
-          m.emissive.setHex(HIGHLIGHT.selected);
-          m.emissiveIntensity = 0.18;
-        }
-      }
-      if (this.selected === id) {
-        m.emissive.setHex(HIGHLIGHT.selected);
-        m.emissiveIntensity = 0.55;
-        opacity = Math.max(opacity, 0.85);
-      }
       setLook(m, opacity, clip);
       po.mesh.renderOrder = opacity < 1 ? 2 : 0;
       po.mesh.castShadow = visible && opacity >= 0.99;
       const edges = po.mesh.getObjectByName('edges');
       if (edges) edges.visible = opacity >= 0.99;
+      // overlays, strongest first; a ghost (the look made it faint) is not lit up
+      let mark: [number, number] | null = null;
+      if (this.selected === id) mark = [HIGHLIGHT.selected, 0.9];
+      else if (this.check && checkParts.has(id)) mark = [this.check.status === 'fail' ? HIGHLIGHT.fail : this.check.status === 'warn' ? HIGHLIGHT.warn : HIGHLIGHT.step, 0.8];
+      else if (contact.has(id)) mark = [this.contact?.status === 'fail' ? HIGHLIGHT.fail : HIGHLIGHT.warn, 0.8];
+      else if (pairParts.has(id)) mark = [sel!.explained ? HIGHLIGHT.warn : HIGHLIGHT.fail, 0.7];
+      else if (cur && inStep.has(id)) mark = [HIGHLIGHT.step, 0.7];
+      else if (hover?.moved.has(id)) mark = [HIGHLIGHT.selected, 0.5];
+      else if (hover?.drive.has(id)) mark = [HIGHLIGHT.selected, 0.25];
+      rim(m, mark?.[0] ?? 0, mark && opacity >= 0.3 ? mark[1] : 0);
     }
     for (const em of [this.edgeMat, this.shellEdgeMat]) {
       if ((clip?.length ?? 0) !== (em.clippingPlanes?.length ?? 0)) em.needsUpdate = true;
@@ -1325,38 +1515,155 @@ export class Workbench {
       if (cur && stepIds.indexOf(fo.f.step) > this.step) visible = false;
       if (this.isolated && !fo.f.joins.some((p) => this.isolated!.has(p))) visible = false;
       fo.obj.visible = visible;
-      fo.mat.color.setHex(look === 'inspect' ? MATERIAL.neutral.color : MATERIAL.fastener.color);
-      fo.mat.emissive.setHex(cur && fastIn.has(id) ? HIGHLIGHT.step : this.selected === id ? HIGHLIGHT.selected : 0);
-      fo.mat.emissiveIntensity = 0.7;
+      fo.mat.color.setHex(MATERIAL.fastener.color);
+      fo.mat.emissive.setHex(0);
       setLook(fo.mat, cur && !fastIn.has(id) ? 0.25 : 1, clip);
+      rim(fo.mat, this.selected === id ? HIGHLIGHT.selected : HIGHLIGHT.step, this.selected === id ? 0.9 : cur && fastIn.has(id) ? 0.7 : 0);
       fo.obj.castShadow = visible;
     }
+    this.updateMarkers();
     this.applyOffsets(this.anim ? 1 - Math.min(1, (performance.now() - this.anim.from) / this.anim.dur) : 0);
   }
 
-  /** Explode offsets, plus the insertion animation of the current step (`insert` 1 -> 0). */
+  // ------------------------------------------------------------------ explode
+
+  /** A focus's explode (hierarchical): part id -> offset at full explode, mm in the droid's frame. */
+  private plan: Map<string, THREE.Vector3> | null = null;
+
+  /**
+   * The explode of what is in focus, as it is assembled: links that move (a joint's child) pull out of
+   * the link they ride - a slide sideways out of its rails (perpendicular to the slide), a coaxial turn
+   * along its axis, anything else away from its parent - carrying everything downstream with them;
+   * then each link's parts spread from that link's centre along their own direction (the plates of a
+   * box to their faces, wheels to their corners). The fixed frame the focus hangs from stays. Parts
+   * of the focus that live elsewhere (a ring's servo on the column) back away from the focus's centre.
+   * Without a focus, each part's manifest `explode` (a direction and a distance) applies.
+   */
+  private buildPlan() {
+    this.plan = null;
+    const sc = this.scope;
+    if (!sc || !this.top) return;
+    const centre = (po: PartObj) => {
+      const g = po.mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const c = g.boundingBox!.isEmpty() ? new THREE.Vector3() : g.boundingBox!.getCenter(new THREE.Vector3());
+      return c.add(po.sBase ?? po.base).applyMatrix4(this.restLink.get(po.part.id) ?? new THREE.Matrix4());
+    };
+    const mine = [...sc.parts].map((id) => this.parts.get(id)).filter((po): po is PartObj => !!po && !this.variantHidden.has(po.node));
+    if (!mine.length) return;
+    const all = new THREE.Box3();
+    const cen = new Map<PartObj, THREE.Vector3>();
+    for (const po of mine) {
+      const c = centre(po);
+      cen.set(po, c);
+      all.expandByPoint(c);
+    }
+    const scopeC = all.getCenter(new THREE.Vector3());
+    const plan = new Map<string, THREE.Vector3>();
+    const nodes = new Set(sc.joints.map((x) => x.node));
+    if (!nodes.size) for (const po of mine) nodes.add(po.node);
+    const half = (pts: THREE.Vector3[], c: THREE.Vector3, d: THREE.Vector3) => pts.reduce((m, p) => Math.max(m, Math.abs(p.clone().sub(c).dot(d))), 0);
+    for (const n of nodes) {
+      const byLink = new Map<string, PartObj[]>();
+      for (const po of mine) if (po.node === n) (byLink.get(po.part.link) ?? byLink.set(po.part.link, []).get(po.part.link)!).push(po);
+      const centroid = (ps: PartObj[]) => ps.reduce((v, po) => v.add(cen.get(po)!), new THREE.Vector3()).divideScalar(Math.max(1, ps.length));
+      const linkOff = new Map<string, THREE.Vector3>();
+      const offOf = (link: string): THREE.Vector3 => {
+        const have = linkOff.get(link);
+        if (have) return have;
+        const j = n.asm.joints.find((x) => x.child_link === link);
+        const kids = byLink.get(link) ?? [];
+        if (!j || !kids.length) {
+          const z = j ? offOf(j.parent_link).clone() : new THREE.Vector3();
+          linkOff.set(link, z);
+          return z;
+        }
+        const parent = byLink.get(j.parent_link) ?? [];
+        const pc = parent.length ? centroid(parent) : scopeC;
+        const lc = centroid(kids);
+        const axis = new THREE.Vector3(...j.axis).normalize().transformDirection(this.restLink.get(kids[0].part.id) ?? new THREE.Matrix4());
+        const v = lc.clone().sub(pc);
+        let dir: THREE.Vector3;
+        if (j.type === 'prismatic') {
+          // out of its rails: across the slide, toward the open side (else the front)
+          dir = v.clone().addScaledVector(axis, -v.dot(axis));
+          if (dir.length() < 8) dir.set(0, 0, 1).addScaledVector(axis, -axis.z);
+        } else {
+          const radial = v.clone().addScaledVector(axis, -v.dot(axis));
+          dir = radial.length() < 10 ? axis.clone().multiplyScalar(v.dot(axis) < 0 ? -1 : 1) : v.clone();
+        }
+        dir.normalize();
+        const kidPts = kids.map((po) => cen.get(po)!);
+        const parPts = parent.map((po) => cen.get(po)!);
+        const dist = Math.min(140, half(parPts, pc, dir) * 0.6 + half(kidPts, lc, dir) + 30);
+        const off = offOf(j.parent_link).clone().addScaledVector(dir, dist);
+        linkOff.set(link, off);
+        return off;
+      };
+      for (const [link, ps] of byLink) {
+        const moving = n.asm.joints.some((x) => x.child_link === link);
+        const lc = centroid(ps);
+        for (const po of ps) {
+          const off = offOf(link).clone();
+          if (moving && ps.length > 1) {
+            const v = cen.get(po)!.clone().sub(lc);
+            const d = v.length();
+            if (d > 2) off.addScaledVector(v.normalize(), Math.min(60, 0.7 * d + 12));
+          }
+          plan.set(po.part.id, off);
+        }
+      }
+    }
+    // the focus's parts that live in other assemblies (a drive servo on the column) back away from it
+    for (const po of mine) {
+      if (plan.has(po.part.id)) continue;
+      const v = cen.get(po)!.clone().sub(scopeC);
+      const d = v.length();
+      plan.set(po.part.id, d > 2 ? v.normalize().multiplyScalar(Math.min(60, 0.4 * d + 20)) : new THREE.Vector3());
+    }
+    // in each part's link frame (mesh.position's), once
+    for (const [id, o] of plan) {
+      const rest = this.restLink.get(id);
+      if (rest) o.applyMatrix3(new THREE.Matrix3().setFromMatrix4(rest).invert());
+    }
+    this.plan = plan;
+  }
+
+  /** A part's explode offset at `k`, in its link's frame. */
+  private offsetOf(po: PartObj, k: number): THREE.Vector3 {
+    if (!(k > 0)) return new THREE.Vector3();
+    if (this.plan) {
+      const o = this.plan.get(po.part.id);
+      return o ? o.clone().multiplyScalar(k) : new THREE.Vector3();
+    }
+    return new THREE.Vector3(...(po.part.explode ?? [0, 0, 0])).multiplyScalar((po.part.explode_mm ?? 0) * k);
+  }
+
+  /** Explode offsets, plus the insertion animation of the current step (`insert` 1 -> 0). Fasteners ride
+   *  the part they hold and back out along their own axis, out of their holes. */
   private applyOffsets(insert: number) {
     const cur = this.step >= 0 ? this.steps[this.step] : null;
     const inStep = new Set(cur?.parts ?? []);
     const fastIn = new Set(cur?.fasteners ?? []);
-    const tmp = new THREE.Vector3();
     for (const po of this.parts.values()) {
-      const p = po.part;
-      const dir = tmp.set(...(p.explode ?? [0, 0, 0]));
-      const k = this.explode + (inStep.has(p.id) ? insert * 1.2 : 0);
-      po.mesh.position.copy(po.sBase ?? po.base).addScaledVector(dir, (p.explode_mm ?? 0) * k);
+      const step = inStep.has(po.part.id) ? new THREE.Vector3(...(po.part.explode ?? [0, 0, 0])).multiplyScalar((po.part.explode_mm ?? 0) * insert * 1.2) : null;
+      po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
+      if (step) po.mesh.position.add(step);
     }
+    const scope = this.scope?.parts;
     for (const fo of this.fast.values()) {
       const owner = this.parts.get(fo.f.joins[0]);
-      const back = 18 * this.explode + (fastIn.has(fo.f.id) ? insert * 30 : 0);
+      const mine = !scope || fo.f.joins.some((p) => scope.has(p));
+      const back = (mine ? 22 * this.explode : 0) + (fastIn.has(fo.f.id) ? insert * 30 : 0);
       const m = fo.base.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -back));
-      if (owner) {
-        const d = new THREE.Vector3(...(owner.part.explode ?? [0, 0, 0])).multiplyScalar((owner.part.explode_mm ?? 0) * this.explode);
+      if (owner && mine) {
+        const d = this.offsetOf(owner, this.explode);
         m.premultiply(new THREE.Matrix4().makeTranslation(d.x, d.y, d.z));
       }
       fo.obj.matrix.copy(m);
     }
     this.root.updateMatrixWorld(true);
+    this.updateMarkers();
     this.markShadow();
     this.host.interact();
   }
@@ -1515,6 +1822,37 @@ function saneNormals(geo: THREE.BufferGeometry) {
     const l = Math.hypot(x, y, z);
     if (!Number.isFinite(l) || l < 1e-6) n.setXYZ(i, 0, 1, 0);
   }
+}
+
+/**
+ * The overlay channel of a part's material: a light emissive rim (stronger at grazing angles, a
+ * faint lift face-on) in one colour, set by `rim()`. It is how a hovered joint's moving parts, the
+ * selection, a step's or a check's parts are marked - over the look, never instead of it: the
+ * colour, opacity and side stay the look's. One shader program for every part (the cache key).
+ */
+function withRim(m: THREE.MeshStandardMaterial) {
+  const u = { value: new THREE.Vector4(0, 0, 0, 0) };
+  m.userData.rim = u;
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uRim = u;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec4 uRim;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (uRim.a > 0.0) {
+          float rimF = 1.0 - clamp(abs(dot(normalize(normal), normalize(vViewPosition))), 0.0, 1.0);
+          totalEmissiveRadiance += uRim.rgb * uRim.a * (0.04 + 0.96 * pow(rimF, 3.0));
+        }`);
+  };
+  m.customProgramCacheKey = () => 'r3x-rim';
+  return m;
+}
+
+/** Mark a part (colour, strength 0..1) or clear the mark (strength 0). */
+function rim(m: THREE.MeshStandardMaterial, color: number, strength: number) {
+  const u = (m.userData.rim as { value: THREE.Vector4 } | undefined)?.value;
+  if (!u) return;
+  const c = new THREE.Color(color);
+  u.set(c.r, c.g, c.b, strength);
 }
 
 /** Opacity and clipping; recompiles the material only when its program would change. */

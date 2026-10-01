@@ -22,7 +22,7 @@ const OUR_BUILD = 'r3x_droid';
 const LOOKS: Look[] = ['exterior', 'mechanism', 'inspect'];
 const unit = (j: MJoint) => (j.unit === 'mm' ? ' mm' : '°');
 
-interface Stored { explode?: number; look?: Look; context?: 'ghost' | 'hide'; fasteners?: boolean }
+interface Stored { explode?: number; look?: Look; context?: 'ghost' | 'hide'; fasteners?: boolean; closed?: string[]; folded?: string[] }
 
 /** A system's motion in a few words: its joints ("tilt · roll"), or one joint's range. */
 function systemMotion(s: MotionSystem): string {
@@ -110,11 +110,11 @@ export function injectBuildDom() {
     <p id="bp-status" class="bh-status" role="status" hidden></p>
     <input id="bv-search" type="search" placeholder="Find a part, joint or assembly&hellip;" aria-label="Find in the build" autocomplete="off" spellcheck="false">
     <div id="bv-build-pane" role="tabpanel" aria-labelledby="bv-tab-build">
-      <h3 class="bv-h" id="bv-systems-h">Systems</h3>
-      <ul id="bv-systems" class="bv-list" aria-labelledby="bv-systems-h"></ul>
-      <h3 class="bv-h" id="bv-tree-h">Assemblies</h3>
-      <ul id="bv-tree" class="bv-list bv-tree" aria-labelledby="bv-tree-h"></ul>
-      <details id="bv-parts-d" class="bv-parts"><summary>Parts <small id="bv-parts-n"></small></summary>
+      <details id="bv-systems-h" class="bv-sec" data-sec="systems" open><summary>Systems</summary>
+        <ul id="bv-systems" class="bv-list" aria-label="Motion systems"></ul></details>
+      <details id="bv-tree-h" class="bv-sec" data-sec="tree" open><summary>Assemblies</summary>
+        <ul id="bv-tree" class="bv-list bv-tree" aria-label="Assemblies"></ul></details>
+      <details id="bv-parts-d" class="bv-parts bv-sec" data-sec="parts"><summary>Parts <small id="bv-parts-n"></small></summary>
         <div class="bp-filters" id="bp-filters" role="group" aria-label="Show parts"></div>
         <div class="bp-legend">${(['parametric', 'vendor', 'mesh'] as Src[]).map((k) => `<span title="${esc(SRC_TITLE[k])}">${srcDot(k)}${SRC_LABEL[k]}</span>`).join('')}
           <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button></div>
@@ -170,8 +170,7 @@ export function injectBuildDom() {
     <div class="tab-body" data-body="checks" role="tabpanel" hidden>
       <p id="bp-check-sum" class="bp-sum"></p>
       <div id="bv-inspect" hidden>
-        <h3 class="bv-h">Overlaps at rest <small id="bv-intf-n"></small>
-          <button id="bv-intf" class="link" aria-pressed="false" title="Draw the overlaps in the view (X-ray look): red unexplained, yellow explained">Show in view</button></h3>
+        <h3 class="bv-h">Overlaps at rest <small id="bv-intf-n"></small></h3>
         <ul id="bv-intf-list" class="intf"></ul>
       </div>
       <div id="bp-torque" hidden><h3 class="bv-h">Servo torque</h3><ul id="bp-torque-list" class="intf"></ul></div>
@@ -262,7 +261,47 @@ export function mountBuildPanel(wb: Workbench) {
     save(st);
   };
   $('bv-frame').onclick = () => wb.frame(false, true);
-  $('bv-intf').onclick = () => wb.setInterference(!(wb.interferenceOn && wb.look === 'inspect'));
+  // Navigator sections and tree nodes fold, and stay folded (per browser).
+  const closed = new Set(st.closed ?? []);
+  const folded = new Set(st.folded ?? []);
+  document.querySelectorAll<HTMLDetailsElement>('#sc-build details.bv-sec').forEach((d) => {
+    if (closed.has(d.dataset.sec!)) d.open = false;
+    d.addEventListener('toggle', () => {
+      if (d.open) closed.delete(d.dataset.sec!);
+      else closed.add(d.dataset.sec!);
+      st.closed = [...closed];
+      save(st);
+    });
+  });
+  $('bv-tree').addEventListener('click', (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>('[data-fold]');
+    if (!t) return;
+    e.stopPropagation();
+    const k = t.dataset.fold!;
+    if (folded.has(k)) folded.delete(k);
+    else folded.add(k);
+    st.folded = [...folded];
+    save(st);
+    $('bv-tree').dataset.sig = '';
+    render();
+  });
+  // How it works: a system's joints loop through their range
+  $('bv-systems').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-demo]');
+    if (!b) return;
+    e.stopPropagation();
+    if (wb.demoing === b.dataset.demo) wb.stopDemo();
+    else wb.startDemo(b.dataset.demo!);
+  });
+  // Joints off rest outside the focus: one click back
+  $('bb-crumbs').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-rest]');
+    if (!b) return;
+    e.stopPropagation();
+    const [key, joint] = b.dataset.rest!.split('|');
+    const n = wb.nodeByKey(key);
+    if (n) wb.rest(n, joint);
+  });
   $<HTMLInputElement>('bv-search').oninput = (e) => {
     query = (e.target as HTMLInputElement).value.trim().toLowerCase();
     render();
@@ -279,6 +318,11 @@ export function mountBuildPanel(wb: Workbench) {
     if (d.sys) {
       const on = wb.scope?.kind === 'system' && wb.scope.id === d.sys;
       wb.setScope(on ? null : wb.systemScope(d.sys));
+      // the focus's row stays in view; the long lists below fold away
+      if (!on) {
+        ($('bv-parts-d') as HTMLDetailsElement).open = false;
+        $('bv-systems').querySelector(`[data-sys="${CSS.escape(d.sys)}"]`)?.scrollIntoView({ block: 'nearest' });
+      }
     } else if (d.node) {
       const n = wb.nodeByKey(d.node);
       const on = wb.scope?.kind === 'assembly' && wb.scope.id === d.node;
@@ -496,6 +540,7 @@ export function mountBuildPanel(wb: Workbench) {
     if (tab === 'steps' && wb.step < 0 && wb.focus?.asm.steps?.length) wb.setStep(0);
     if (tab !== 'steps' && wb.step >= 0) wb.setStep(-1);
     if (tab !== 'checks' && wb.check) wb.showCheck(null);
+    wb.setMarkers(tab === 'checks'); // the overlap markers are the Checks tab's, not a look's
   }
 
   wb.onChange(() => render());
@@ -504,6 +549,8 @@ export function mountBuildPanel(wb: Workbench) {
   function render() {
     renderView();
     if (!wb.active) return;
+    // overlap markers follow the Checks tab (also when Build reopens on it)
+    wb.setMarkers(document.querySelector('[data-tab="checks"]')?.getAttribute('aria-selected') === 'true');
     renderNav();
     renderHead();
     renderParts();
@@ -525,21 +572,26 @@ export function mountBuildPanel(wb: Workbench) {
     press('bv-section', wb.section.on);
     press('bv-flip', wb.section.flip);
     press('bv-fasteners', wb.fasteners);
-    press('bv-intf', wb.interferenceOn);
     // the pairs in focus (a scope: those touching it); `k` stays the pair's index in the suite's list
     const pairs = wb.interference.map((p, k) => ({ ...p, k })).filter((p) => wb.pairInScope(p));
     const open = pairs.filter((p) => !p.explained).length;
     // Overlaps live in Checks (with the rest of the suite's results), whatever the look.
     $('bv-inspect').hidden = !wb.interference.length;
     $('bv-intf-n').textContent = open ? `${open} to fix` : '';
-    $('bv-intf').textContent = wb.interferenceOn && wb.look === 'inspect' ? 'Hide in view' : 'Show in view';
     const list = $('bv-intf-list');
-    const sig = pairs.map((p) => `${p.a}|${p.b}|${p.depth_mm}`).join() || 'none';
+    // the picked pair (its marker is in the view): what it is, and whether the pose still allows it
+    const sigSel = wb.pairSel !== null ? `#${wb.pairSel}:${wb.pairState(wb.pairSel)}` : '';
+    const sig = (pairs.map((p) => `${p.a}|${p.b}|${p.depth_mm}`).join() || 'none') + sigSel;
     if (list.dataset.sig !== sig) {
       list.dataset.sig = sig;
       const short = (id: string) => shortName(wb.partInfo(id.includes('/') && !wb.partInfo(id) ? id.slice(id.indexOf('/') + 1) : id)?.part.name ?? id);
-      const row = (p: (typeof pairs)[number]) => `<li class="${p.explained ? 'known' : 'hot'}"><button data-k="${p.k}" title="${esc(`${p.a} x ${p.b}: ${p.depth_mm} mm deep${p.volume_mm3 != null ? `, ${p.volume_mm3} mm³ shared` : ''}${p.explained ? ' (explained)' : ''}. Click to frame it`)}">
-        <span>${esc(short(p.a))} × ${esc(short(p.b))}</span><span class="d">${num(p.depth_mm, 1)} mm</span></button></li>`;
+      const row = (p: (typeof pairs)[number]) => {
+        const on = wb.pairSel === p.k;
+        const apart = on && wb.pairState(p.k) === 'apart';
+        return `<li class="${p.explained ? 'known' : 'hot'}${on ? ' on' : ''}"><button data-k="${p.k}" aria-pressed="${on}" title="${esc(`${p.a} x ${p.b}: ${p.depth_mm} mm deep${p.volume_mm3 != null ? `, ${p.volume_mm3} mm³ shared` : ''}${p.explained ? ' (explained)' : ''}. Click to show it`)}">
+        <span>${esc(short(p.a))} × ${esc(short(p.b))}</span><span class="d">${num(p.depth_mm, 1)} mm</span></button>
+        ${on ? `<p class="intf-sel">${esc(short(p.a))} and ${esc(short(p.b))} share ${num(p.depth_mm, 1)} mm${p.volume_mm3 != null ? ` (${num(p.volume_mm3, 0)} mm³)` : ''}${p.explained ? ', explained' : ''}.${apart ? ` <span class="dim">Checked at the rest pose.</span> <button class="link" data-bp="home">Go to rest pose</button>` : ''}</p>` : ''}</li>`;
+      };
       const known = pairs.filter((p) => p.explained);
       list.innerHTML = (pairs.filter((p) => !p.explained).map(row).join('')
         + (known.length ? `<li class="known-group"><details class="bp-disc"><summary>${known.length} explained</summary><ul class="intf">${known.map(row).join('')}</ul></details></li>` : ''))
@@ -563,7 +615,9 @@ export function mountBuildPanel(wb: Workbench) {
     // breadcrumb: Our build > Neck, or Library > Head gimbal
     const here = sc?.label ?? (openAsm !== OUR_BUILD ? index.find((x) => x.id === openAsm)?.name ?? openAsm : '');
     const root = lib ? `<button data-crumb="library" title="Back to the build (Esc)">Library</button>` : `<button data-crumb="build" ${sc ? 'title="The whole build (Esc)"' : 'aria-current="page" disabled'}>Our build</button>`;
-    $('bb-crumbs').innerHTML = here ? `${root}<span aria-hidden="true">›</span><b aria-current="page">${esc(here)}</b>` : '';
+    // what upstream is off rest and moves the focus (a turned ring under the arm): shown, one click home
+    const up = wb.upstream().map(({ node, joint, value }) => `<button class="bb-chip" data-rest="${esc(node.key)}|${esc(joint.id)}" title="Off rest: it moves ${esc(sc?.label ?? '')}. Click to put it back to 0">${esc(jointLabel(joint.name))} ${signed(value)}${unit(joint)} <span aria-hidden="true">⟲</span></button>`).join('');
+    $('bb-crumbs').innerHTML = here ? `${root}<span aria-hidden="true">›</span><b aria-current="page">${esc(here)}</b>${up}` : '';
     $('bb-crumbs').hidden = !here; // at the top there is nowhere to step out to
 
     if (!wb.top) return;
@@ -571,14 +625,16 @@ export function mountBuildPanel(wb: Workbench) {
     // systems, with their joints as one short line
     const hit = (...names: string[]) => !query || names.some((n) => n.toLowerCase().includes(query));
     const systems = wb.systems().filter((x) => hit(x.name, ...x.joints.map((j) => jointLabel(j.joint.name))));
-    const sysSig = systems.map((x) => x.id + x.joints.map((j) => j.joint.id).join()).join('|') + (sc?.kind === 'system' ? sc.id : '') + '?' + query;
+    const sysSig = systems.map((x) => x.id + x.joints.map((j) => j.joint.id).join()).join('|') + (sc?.kind === 'system' ? sc.id : '') + '?' + query + '>' + (wb.demoing ?? '');
     const sysEl = $('bv-systems');
     if (sysEl.dataset.sig !== sysSig) {
       sysEl.dataset.sig = sysSig;
       sysEl.innerHTML = systems.map((x) => {
         const on = sc?.kind === 'system' && sc.id === x.id;
         const tip = x.joints.map((j) => `${jointLabel(j.joint.name)}: ${num(j.joint.limits.min)}…${signed(j.joint.limits.max)} ${unit(j.joint).trim()}`).join('\n');
-        return `<li><button data-sys="${esc(x.id)}" aria-pressed="${on}" title="${esc(tip)}"><span>${esc(x.name)}</span><small>${esc(systemMotion(x))}</small></button></li>`;
+        const play = wb.demoing === x.id;
+        return `<li class="sys${on ? ' on' : ''}"><button data-sys="${esc(x.id)}" aria-pressed="${on}" title="${esc(tip)}"><span>${esc(x.name)}</span><small>${esc(systemMotion(x))}</small></button>
+          <button class="ic demo" data-demo="${esc(x.id)}" aria-pressed="${play}" aria-label="${play ? 'Stop' : 'How it works'}: ${esc(x.name)}" title="${play ? 'Stop' : 'How it works: loop its joints, slowly'}">${play ? STOP : PLAY}</button></li>`;
       }).join('') || (query ? '' : '<li class="empty">No moving joints.</li>');
     }
     // A search shows only the groups it found something in.
@@ -598,8 +654,11 @@ export function mountBuildPanel(wb: Workbench) {
         if (!shown(c)) continue;
         const on = sc?.kind === 'assembly' && sc.id === c.key;
         const count = subtreeCount(c);
-        if (hit(c.asm.name, assemblyLabel(c.asm.name))) rows.push(`<li style="--d:${depth}"><button data-node="${esc(c.key)}" aria-pressed="${on}" title="${esc(c.asm.name)}"><span>${esc(assemblyLabel(c.asm.name))}</span><small>${count}</small></button></li>`);
-        walk(c, depth + 1);
+        const kids = c.children.some(shown) || variantOptions(c.asm).length > 0;
+        const fold = !query && folded.has(c.key);
+        const caret = kids ? `<button class="fold" data-fold="${esc(c.key)}" aria-expanded="${!fold}" aria-label="${fold ? 'Expand' : 'Collapse'} ${esc(assemblyLabel(c.asm.name))}">${fold ? '▸' : '▾'}</button>` : '<span class="fold"></span>';
+        if (hit(c.asm.name, assemblyLabel(c.asm.name))) rows.push(`<li class="node" style="--d:${depth}">${caret}<button data-node="${esc(c.key)}" aria-pressed="${on}" title="${esc(c.asm.name)}"><span>${esc(assemblyLabel(c.asm.name))}</span><small>${count}</small></button></li>`);
+        if (!fold) walk(c, depth + 1);
       }
     };
     walk(wb.top, 0);
@@ -1047,6 +1106,8 @@ export function checkVerdict(r: {
 const EYE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
 const STATUS_GLYPH: Record<string, string> = { fail: '✕', warn: '!', explained: 'i', pass: '✓' };
 const SOLO = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>';
+const PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z"/></svg>';
+const STOP = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/></svg>';
 const SWEEP = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 11a5.5 5.5 0 0 1 10 0"/><path d="m13 11-.3-2.6M13 11l-2.4-.9"/></svg>';
 
 /**
