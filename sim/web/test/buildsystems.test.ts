@@ -5,7 +5,8 @@ import {
 import type { MAssembly, MJoint, MPart } from '../src/workbench/manifest';
 import * as THREE from 'three';
 import { gearMatrix } from '../src/workbench/kinematics';
-import { gearParts } from '../src/workbench/systems';
+import { gearParts, libraryFrom } from '../src/workbench/systems';
+import { driveFor, groundFor } from '../src/workbench/manifest';
 
 const part = (id: string, link: string, extra: Partial<MPart> = {}): MPart =>
   ({ id, name: id, class: 'mech', link, transform: { t: [0, 0, 0] }, mesh: '', bbox: [[0, 0, 0], [1, 1, 1]], ...extra });
@@ -127,8 +128,29 @@ describe('build library and looks', () => {
     expect(mechanismFinish(part('p', 'x', { material: 'PETG', printed: true }))).toBe(MATERIAL.printed);
     expect(exteriorFinish(part('ls_m_full', 'x', { class: 'shell' }), 'lower_ring').color).toBe(0xc55a1e); // paint_orange
     expect(exteriorFinish(part('head_top', 'x', { class: 'shell' }), 'hunter_head').color).toBe(0x3c3f44); // charcoal
-    expect(exposed(part('h_v_1', 'x'))).toBe(true); // the kit visor, modelled as mechanism
-    expect(exposed(part('neck_tube', 'x', { name: 'Neck tube 26 mm' }))).toBe(true);
-    expect(exposed(part('coupler', 'x'))).toBe(false);
+    // seen from outside: the manifest's flag, else shells only
+    expect(exposed(part('h_v_1', 'x', { exposed: true }))).toBe(true);
+    expect(exposed(part('neck_tube', 'x', { name: 'Neck tube 26 mm' }))).toBe(false);
+    expect(exposed(part('shell', 'x', { class: 'shell' }))).toBe(true);
+    expect(exposed(part('shell', 'x', { class: 'shell', exposed: false }))).toBe(false);
+  });
+
+  it('the library, the ground and the ring drives come from the manifest under the current picks', () => {
+    const root = {
+      id: 'droid', name: 'd', links: [], parts: [], joints: [],
+      designs: [{ id: 'hunter', name: 'Head gimbal', author: 'Hunter Smoke', assemblies: ['hunter_head'], picks: { internals: 'column' }, deep: true }],
+      ground: { y: -56, by_variant: { 'internals:anderson_morton': -81.6 } },
+    } as MAssembly;
+    const [item] = libraryFrom(root);
+    expect(item).toMatchObject({ id: 'hunter', by: 'Hunter Smoke', nodes: ['hunter_head'], deep: true, look: 'mechanism' });
+    expect(groundFor(root, { internals: 'column' })).toBe(-56);
+    expect(groundFor(root, { internals: 'anderson_morton' })).toBe(-81.6);
+    const ring = joint('torso_lower', 'race', 'ring', { drive: { kind: 'gear', servos: ['col_lower_servo'], variants: [
+      { kind: 'gear', servos: ['col_lower_servo'], gears: ['column_internals/g_lower_ring'], variant: { group: 'internals', id: 'column' } },
+      { kind: 'gear', servos: ['lower_servo'], gears: ['r3x_lower_drive/g_lower'], variant: { group: 'internals', id: 'anderson_morton' } },
+    ] } });
+    expect(driveFor(ring, { internals: 'anderson_morton' })?.servos).toEqual(['lower_servo']);
+    expect(driveFor(ring, { internals: 'column' })?.gears).toEqual(['column_internals/g_lower_ring']);
+    expect(driveFor(ring, { internals: 'anderson_morton' })?.variants?.length).toBe(2);
   });
 });

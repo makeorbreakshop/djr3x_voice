@@ -233,3 +233,6 @@ table.bom tr.grp:first-child th { padding-top: 0; }
   /* phones: under the badge, beside the Scene rail, above the R3X sheet */
   .build-bar { top: 46px; left: 66px; right: 8px; justify-content: flex-start; }
 }
+/* Library rows: the design, its author under it (names are long) */
+.bv-list button.lib { flex-direction: column; align-items: stretch; gap: 1px; }
+.bv-list button.lib small { font: 11.5px system-ui, sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -9,7 +9,7 @@
 
 import './build.css';
 import type { AsmNode, Look, Workbench } from './workbench';
-import { assemblyLabel, jointLabel, LIBRARY, libraryAvailable, type MotionSystem } from './systems';
+import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, type MotionSystem } from './systems';
 import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MStep } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -339,7 +339,7 @@ export function mountBuildPanel(wb: Workbench) {
   }
 
   async function openLibrary(id: string) {
-    const item = LIBRARY.find((x) => x.id === id);
+    const item = libraryFrom(wb.manifest?.root).find((x) => x.id === id);
     if (!item) return;
     if (openAsm !== OUR_BUILD) await openManifest(OUR_BUILD);
     const on = wb.scope?.kind === 'library' && wb.scope.id === id;
@@ -592,13 +592,13 @@ export function mountBuildPanel(wb: Workbench) {
       tree.innerHTML = treeSig;
     }
     // library: the designs the droid is assembled from, and standalone manifests
-    const items = LIBRARY.filter((x) => libraryAvailable(x, wb.top!));
+    const items = libraryFrom(wb.manifest?.root).filter((x) => libraryAvailable(x, wb.top!));
     const standalone = index.filter((e) => e.id !== OUR_BUILD && !items.some((x) => x.nodes.includes(e.id)));
     const libSig = items.map((x) => x.id).join() + standalone.map((x) => x.id).join() + (sc?.kind === 'library' ? sc.id : '') + openAsm;
     const libEl = $('bv-library');
     if (libEl.dataset.sig !== libSig) {
       libEl.dataset.sig = libSig;
-      libEl.innerHTML = items.map((x) => `<li><button data-lib="${esc(x.id)}" aria-pressed="${sc?.kind === 'library' && sc.id === x.id}"><span>${esc(x.name)}</span><small>${esc(x.by)}</small></button></li>`).join('')
+      libEl.innerHTML = items.map((x) => `<li><button class="lib" data-lib="${esc(x.id)}" aria-pressed="${sc?.kind === 'library' && sc.id === x.id}" title="${esc(x.source ?? '')}"><span>${esc(x.name)}</span><small>${esc(x.by)}</small></button></li>`).join('')
         + standalone.map((x) => `<li><button data-manifest="${esc(x.id)}" aria-pressed="${openAsm === x.id}"><span>${esc(assemblyLabel(x.name))}</span><small>own build</small></button></li>`).join('');
     }
   }

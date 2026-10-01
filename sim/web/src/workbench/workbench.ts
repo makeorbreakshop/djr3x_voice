@@ -25,7 +25,7 @@ import {
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
 import {
-  meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
+  driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
   type MAssembly, type MCheck, type MFastener, type MGear, type Manifest, type MLinkage, type MPart, type MStep,
 } from './manifest';
 
@@ -386,9 +386,7 @@ export class Workbench {
     // into 0.85-1.0, which is what flattened the light shells. The Inspection rig keeps them
     // under the bloom threshold instead.
     // The head mech's frame sits where the droid's head is (its mount, mm in the body frame).
-    const mt = m.root.mount?.transform?.t ?? [0, 0, 0];
-    this.root.position.set(mt[0] / 1000, mt[1] / 1000, mt[2] / 1000);
-    this.focus = this.top;
+    this.focus = this.top; // (the root's position: applyVariantNodes, from the mount and the ground)
     if (keep) {
       this.forEachNode((n) => {
         const p = keep.poses[n.key];
@@ -727,6 +725,12 @@ export class Workbench {
   private applyVariantNodes() {
     this.variantHidden.clear();
     if (!this.top) return;
+    // drives that depend on a pick (the rings' servos follow `internals`): the picked option's
+    this.forEachNode((n) => n.asm.joints.forEach((j) => { if (j.drive?.variants) j.drive = driveFor(j, this.variants); }));
+    // the floor where the picked internals put it (the model rises so its ground stands on y = 0)
+    const g = groundFor(this.top.asm, this.variants);
+    const mt = this.top.asm.mount?.transform?.t ?? [0, 0, 0];
+    this.root.position.set(mt[0] / 1000, (mt[1] - (g ?? 0)) / 1000, mt[2] / 1000);
     const hidden = hiddenAssemblies(this.top.asm, this.variants);
     this.forEachNode((n) => {
       if (hidden.has(n.asm)) this.variantHidden.add(n);
@@ -853,6 +857,7 @@ export class Workbench {
     this.step = -1;
     this.check = null;
     this.refresh();
+    this.fitShadow(); // a library design may have moved the ground (its picks)
     this.emit();
     if (frame && this.active) this.frame(sc !== null, true);
   }

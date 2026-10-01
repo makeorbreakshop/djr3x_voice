@@ -39,6 +39,8 @@ export interface MPart {
   note?: string;
   cad?: CadStatus;
   catalog?: string;
+  /** Seen from outside the finished droid (default: shells are, nothing else is). */
+  exposed?: boolean;
   /** Scaled along +Y about `anchor` by (rest_mm + joint value) / rest_mm (the neck spring with head_lift). */
   stretch?: { joint: string; axis?: Vec3; anchor: Vec3; rest_mm: number };
 }
@@ -61,6 +63,8 @@ export interface MJoint {
     servo_deg_per_unit?: number;
     /** The gear entries this joint turns, as "<assembly id>/<gear id>". */
     gears?: string[];
+    /** One full drive per variant option when the drive depends on a pick (the rings follow `internals`). */
+    variants?: (Omit<NonNullable<MJoint['drive']>, 'variants'> & { variant: { group: string; id: string } })[];
   };
   zero?: { how?: string; step?: string };
   inferred?: boolean;
@@ -188,6 +192,30 @@ export interface MBoard {
   connectors?: { id: string; kind: string; at?: Vec3; to?: Record<string, string>; note?: string }[];
 }
 
+export interface MDesign {
+  id: string; name: string; author?: string; source?: string;
+  assemblies: string[]; picks?: Record<string, string>;
+  deep?: boolean; only?: PartClass[]; except?: PartClass[]; look?: 'exterior' | 'mechanism' | 'inspect';
+}
+
+/** A joint's drive under the current picks: its `drive.variants` entry for the picked option. */
+export function driveFor(j: MJoint, picks: Record<string, string>): MJoint['drive'] {
+  const vs = j.drive?.variants;
+  const hit = vs?.find((v) => picks[v.variant.group] === v.variant.id);
+  return hit ? { ...hit, variants: vs } : j.drive;
+}
+
+/** The floor height (mm) under the current picks, or null when the manifest has none. */
+export function groundFor(root: MAssembly, picks: Record<string, string>): number | null {
+  const g = root.ground;
+  if (!g) return null;
+  for (const [k, y] of Object.entries(g.by_variant ?? {})) {
+    const [group, id] = k.split(':');
+    if (picks[group] === id) return y;
+  }
+  return g.y;
+}
+
 export interface MChildRef { ref: string; id: string; name?: string; mount?: MAssembly['mount'] }
 
 export interface MAssembly {
@@ -215,6 +243,10 @@ export interface MAssembly {
   variants?: MVariant[];
   electronics?: MBoard[];
   notes?: string[];
+  /** Root only: the published designs the build is assembled from (the Build view's Library). */
+  designs?: MDesign[];
+  /** Root only: the floor (mm, assembly frame), per variant pick where it differs ("group:id"). */
+  ground?: { y: number; by_variant?: Record<string, number>; inferred?: boolean; inferred_note?: string };
   /** Set by the loader: the URL directory every relative path in this node resolves against. */
   base?: string;
 }

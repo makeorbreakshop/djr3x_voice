@@ -195,6 +195,7 @@ export interface LibraryItem {
   name: string;
   /** Who published it. */
   by: string;
+  source?: string;
   /** Variant picks that put it in the model (groups the manifest lacks are ignored). */
   picks: Record<string, string>;
   /** Assembly ids that make it up (the first shown node with each id). */
@@ -206,23 +207,14 @@ export interface LibraryItem {
   look: Look;
 }
 
-/**
- * The published designs this droid is assembled from. Isolated from the droid's own tree, so
- * switching is instant and a design shows exactly as it is placed in our build.
- * (Manifest need, for the mech side: a `designs` list in the manifest would replace this table.)
- */
-export const LIBRARY: LibraryItem[] = [
-  { id: 'kit', name: 'Kit shells', by: 'Kit', picks: { internals: 'anderson_morton', head_mech: 'r3x_anderson', base_side_panels: 'closed' },
-    nodes: ['base', 'base_panels_closed', 'lower_ring', 'middle_ring', 'top_ring', 'head_r3x'], only: ['shell'], look: 'exterior' },
-  { id: 'anderson', name: 'R-3X Animation', by: 'Anderson', picks: { internals: 'anderson_morton', head_mech: 'r3x_anderson' },
-    nodes: ['r3x_neck_drive', 'head_r3x', 'r3x_lower_drive', 'r3x_top_drive', 'r3x_neck_guide_race'], except: ['shell'], look: 'mechanism' },
-  { id: 'hunter', name: 'Head gimbal', by: 'Hunter', picks: { internals: 'column' }, nodes: ['hunter_head'], deep: true, look: 'mechanism' },
-  { id: 'morton', name: 'Lower cage', by: 'Sam Morton', picks: { internals: 'anderson_morton', base_frame: 'morton' }, nodes: ['morton_frame'], look: 'mechanism' },
-  { id: 'randall', name: 'Printed frame', by: 'Riane Randall', picks: { internals: 'anderson_morton', base_frame: 'randall' }, nodes: ['randall_frame'], look: 'mechanism' },
-  { id: 'mouth', name: 'Mic-Mouth-Split', by: 'Trevor Zaharichuk', picks: { internals: 'anderson_morton', head_mech: 'r3x_anderson', mouth: 'mic_mouth_split' },
-    nodes: ['mouth_split'], look: 'mechanism' },
-  { id: 'column', name: 'Central column', by: 'Ours', picks: { internals: 'column' }, nodes: ['column_internals'], look: 'mechanism' },
-];
+/** The published designs the build is assembled from: the root's `designs` (SCHEMA.md). Each
+ *  is isolated from the droid's own tree, so switching is instant and a design shows as placed. */
+export function libraryFrom(root: MAssembly | null | undefined): LibraryItem[] {
+  return (root?.designs ?? []).map((d) => ({
+    id: d.id, name: d.name, by: d.author ?? '', source: d.source, picks: d.picks ?? {}, nodes: d.assemblies ?? [],
+    deep: d.deep, only: d.only, except: d.except, look: d.look ?? 'mechanism',
+  }));
+}
 
 /** Does the tree hold any of the item's assemblies (whatever is picked)? */
 export function libraryAvailable(item: LibraryItem, root: TreeNode): boolean {
@@ -278,15 +270,9 @@ const PAINT_RULES: [RegExp, string][] = [
 /** A kit part (its id is the kit's code: H_V_1, TR_NR_Full...), whatever its class. */
 export const isKitPart = (p: MPart) => PAINT_RULES.some(([re]) => re.test(p.id));
 
-/**
- * Seen from outside even though it is not a shell: kit pieces modelled as mechanism (the visor
- * brow and arms) and the neck tube between the body and the head. A manifest `exposed` flag
- * wins (manifest need: the mech side marking these would retire the name rule).
- */
+/** Seen from outside the droid: the part's `exposed` flag (SCHEMA.md), else shells only. */
 export function exposed(p: MPart): boolean {
-  const flag = (p as MPart & { exposed?: boolean }).exposed;
-  if (flag !== undefined) return flag;
-  return p.class === 'shell' || isKitPart(p) || /\bneck tube\b/i.test(p.name);
+  return p.exposed ?? p.class === 'shell';
 }
 
 /** A shell in the R3X paint. Non-kit shells take the paint of where they sit (a head shell is charcoal). */
