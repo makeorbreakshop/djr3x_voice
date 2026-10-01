@@ -86,6 +86,8 @@ impl CantinaVoice {
             }
             // Same pair MouseInputService emitted: this one flips the eyes to thinking at once.
             VoiceEvent::Released { .. } => self.emit("mouse.recording.stopped", json!({})),
+            // CantinaOS has no listening reactor: the ears stay on the typed bus.
+            VoiceEvent::Listen(_) => {}
             VoiceEvent::ListeningStopped { turn, transcript } => {
                 let has = !transcript.is_empty();
                 self.emit("voice.listening.stopped", json!({"transcript": transcript, "conversation_id": turn, "has_transcript": has}));

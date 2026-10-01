@@ -6,7 +6,7 @@ import type { JsonValue } from "./serde_json/JsonValue";
 /**
  * Direct body control. Goes to the performer.
  */
-export type PerfCommand = { "type": "play", id: string, intensity: number, speed: number, 
+export type PerfCommand = { "type": "intend", id: string, intensity: number, } | { "type": "play", id: string, intensity: number, speed: number, 
 /**
  * Defaults to the item's own layer.
  */

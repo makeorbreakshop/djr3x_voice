@@ -97,6 +97,13 @@ pub enum StopTarget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PerfCommand {
+    /// An intention (`show/intentions.json`: `amused`, `nod`, `drop`...): the performer plays a
+    /// varied pick from its pool. Cooling down is not an error (nothing plays).
+    Intend {
+        id: String,
+        #[serde(default = "one")]
+        intensity: f64,
+    },
     /// Play a clip, cue or sequence by id.
     Play {
         id: String,
@@ -322,6 +329,11 @@ impl Event {
 pub enum ConversationEvent {
     ListeningStarted,
     ListeningStopped { transcript: String },
+    /// While listening: how loud the guest is, 0..1 above the room (25 Hz, local mic analysis).
+    ListenLevel { level: f64 },
+    /// While listening, from the sound of the guest's voice: `onset` (started talking),
+    /// `pause` (paused mid-turn), `rise` (a phrase ended rising: a question).
+    ListenCue { cue: String },
     Transcript { text: String, is_final: bool },
     IntentDetected {
         tool: String,

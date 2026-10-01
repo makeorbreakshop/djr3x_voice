@@ -85,6 +85,7 @@ pub(crate) fn show_files(dir: &Path) -> Vec<(String, String, SystemTime)> {
         }
     };
     push("idle.json".into(), &dir.join("idle.json"));
+    push("intentions.json".into(), &dir.join("intentions.json"));
     for sub in ["clips", "cues", "sequences"] {
         let Ok(rd) = std::fs::read_dir(dir.join(sub)) else { continue };
         for e in rd.flatten() {
@@ -363,6 +364,18 @@ impl Host {
                 ConversationEvent::ListeningStarted => PCmd::ListeningStarted,
                 ConversationEvent::ListeningStopped { transcript } => PCmd::ListeningStopped { heard: !transcript.trim().is_empty() },
                 ConversationEvent::Transcript { is_final: true, .. } => PCmd::Heard,
+                // The ears (local mic analysis): the head bobs with the guest's voice, and the
+                // sound of it fires the listening intentions (show/intentions.json, kind listen).
+                ConversationEvent::ListenLevel { level } => PCmd::ListenLevel { value: *level },
+                ConversationEvent::ListenCue { cue } => {
+                    let id = match cue.as_str() {
+                        "onset" => "listen_perk",
+                        "pause" => "listen_tilt",
+                        "rise" => "listen_curious",
+                        _ => return,
+                    };
+                    PCmd::Intend { id: id.into(), source: PSource::Jev, intensity: 0.8 }
+                }
                 ConversationEvent::ReplyDelta { .. } => PCmd::LlmChunk,
                 ConversationEvent::SpeechStarted => PCmd::SpeechStarted { timings: None, tags: vec![] },
                 ConversationEvent::SpeechEnded => PCmd::SpeechEnded,

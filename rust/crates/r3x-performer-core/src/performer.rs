@@ -140,6 +140,14 @@ pub enum Command {
         #[serde(default)]
         layer: Option<RunLayer>,
     },
+    /// An intention (`show/intentions.json`): a varied pick from its pool, at `intensity`.
+    Intend {
+        id: String,
+        #[serde(default = "default_source")]
+        source: Source,
+        #[serde(default = "yes_f")]
+        intensity: f64,
+    },
     Stop(StopSel),
     Freeze {
         on: bool,
@@ -173,6 +181,11 @@ pub enum Command {
     },
     /// The guest finished a phrase (a final transcript) while R3X listens: nod.
     Heard,
+    /// While listening: how loud the guest is now, 0..1 (the ears, 25 Hz). The head bobs a
+    /// little with their rhythm, as it does with his own speech.
+    ListenLevel {
+        value: f64,
+    },
     LlmChunk,
     /// Speech became audible. `timings[i]` = seconds after start at which character i is
     /// spoken; `tags` = (char offset, show id) to perform on the word.
@@ -408,6 +421,11 @@ pub struct Performer {
     joints: Vec<String>,
     rng: Rng,
     idle_rng: Rng,
+    /// The guest's voice level while listening (`ListenLevel`).
+    listen_level: f64,
+    /// Intention picks: their own stream, so the other layers' draws never shift.
+    intent_rng: Rng,
+    intents: crate::show::intentions::Picker,
     now: f64,
     ticked: bool,
     speaking: bool,
@@ -500,6 +518,9 @@ impl Performer {
             joints: joints.iter().map(|j| j.name.clone()).collect(),
             rng: derive(cfg.seed, 4),
             idle_rng: derive(cfg.seed, 5),
+            listen_level: 0.0,
+            intent_rng: derive(cfg.seed, 7),
+            intents: Default::default(),
             now: 0.0,
             ticked: false,
             speaking: false,
@@ -555,6 +576,9 @@ impl Performer {
             } => {
                 self.perform(&id, source, params, layer);
             }
+            Command::Intend { id, source, intensity } => {
+                self.intend(&id, source, intensity);
+            }
             Command::Stop(sel) => self.stop(&sel),
             Command::Freeze { on } => self.freeze(on),
             Command::Puppet { intent, value } => {
@@ -597,11 +621,14 @@ impl Performer {
                 self.set_activity(Activity::Listening);
             }
             Command::Heard => self.procedural.heard(self.now),
+            Command::ListenLevel { value } => self.listen_level = value.clamp(0.0, 1.0),
             Command::ListeningStopped { heard: true } => {
+                self.listen_level = 0.0;
                 self.host.listening_stopped();
                 self.set_activity(Activity::Thinking);
             }
             Command::ListeningStopped { heard: false } => {
+                self.listen_level = 0.0;
                 self.host.listening_cancelled();
                 self.set_activity(self.resting());
             }
@@ -746,6 +773,12 @@ impl Performer {
                         .to_lowercase(),
                     });
                 }
+            }
+            PerfCommand::Intend { id, intensity } => {
+                if !self.catalog.intentions.contains_key(id) {
+                    return Err(format!("no intention {id:?}"));
+                }
+                self.intend(id, source, *intensity);
             }
             PerfCommand::Stop(t) => self.stop(&match t {
                 StopTarget::Id { id } => StopSel::id(id.clone()),
@@ -900,6 +933,17 @@ impl Performer {
             speaking: self.speaking,
             bpm: (self.music || self.dj).then_some(self.bpm),
         }
+    }
+
+    /// An intention: a varied pick from its pool (only items `source` may play), performed at
+    /// a varied intensity and speed. None when unknown, cooling down or nothing is playable.
+    pub fn intend(&mut self, id: &str, source: Source, intensity: f64) -> Option<String> {
+        let intent = self.catalog.intentions.get(id)?.clone();
+        let cat = self.catalog.clone();
+        let playable = |p: &str| cat.get(p).is_some_and(|it| crate::show::types::tier_allows(it.tier, source));
+        let pick = self.intents.pick(&intent, self.now, intensity, &mut self.intent_rng, playable)?;
+        let params = Params { intensity: Some(pick.intensity), speed: Some(pick.speed) };
+        self.perform(&pick.item, source, params, None)
     }
 
     /// SPEC `show.perform`. Returns the run id, or None when rejected.
@@ -1173,8 +1217,10 @@ impl Performer {
         self.host.face.fw.read_lines();
 
         // ---- body: procedural -> compositor -> actuation
+        // Listening, the guest's voice drives the speech wobble at LISTEN_BOB of his own.
+        let amplitude = if self.procedural.activity == Activity::Listening { LISTEN_BOB * self.listen_level } else { self.amplitude };
         let ctx = PerformContext {
-            amplitude: self.amplitude,
+            amplitude,
             look: self.look,
             bpm: self.bpm,
             energy: self.puppet.energy_gain(),
@@ -1406,3 +1452,11 @@ impl Performer {
 fn yes() -> bool {
     true
 }
+
+/// The head's bob with the guest's voice while listening, as a fraction of his own speech's.
+pub const LISTEN_BOB: f64 = 0.45;
+
+fn yes_f() -> f64 {
+    1.0
+}
+

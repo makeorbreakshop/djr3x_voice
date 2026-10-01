@@ -4,7 +4,7 @@
  * Rust performer's catalogue loads. In dev, editing a show file hot-reloads the page.
  */
 const files = import.meta.glob<string>(
-  ['../../../../show/clips/*.json', '../../../../show/cues/*.json', '../../../../show/sequences/*.json', '../../../../show/idle.json'],
+  ['../../../../show/clips/*.json', '../../../../show/cues/*.json', '../../../../show/sequences/*.json', '../../../../show/idle.json', '../../../../show/intentions.json'],
   { eager: true, query: '?raw', import: 'default' },
 );
 

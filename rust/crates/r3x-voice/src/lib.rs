@@ -16,6 +16,7 @@ pub mod config;
 pub mod deepgram;
 pub mod eleven;
 pub mod fixture;
+pub mod listen;
 #[cfg(feature = "mouse")]
 pub mod mouse;
 pub mod remote;

@@ -1,0 +1,340 @@
+{
+ "$comment": "Intentions: what R3X feels or does, by name. Claude ({mood:}/{gesture:}/{beat:}/{look:}), Jev and the listening reactor fire an intention; the performer plays a varied pick from its pool (not the last two picks), at a varied intensity and speed, after its cooldown (default 1.5 s). Pools take free or cheap clips and cues. Kind listen is backchannel while the guest talks and is never offered to Claude. Mirrors Threepio's intentions (threepio/scripts/voice-cues.ts).",
+ "intentions": [
+  {
+   "id": "amused",
+   "kind": "mood",
+   "description": "finds it funny, a laugh",
+   "pool": [
+    "beat_bop",
+    "visor_flutter",
+    "head_cant"
+   ]
+  },
+  {
+   "id": "hyped",
+   "kind": "mood",
+   "description": "fired up, let's go",
+   "pool": [
+    "excited",
+    "fist_pump",
+    "beat_headbang",
+    "arm_throw"
+   ]
+  },
+  {
+   "id": "curious",
+   "kind": "mood",
+   "description": "intrigued, tell me more",
+   "pool": [
+    "tilt_curious",
+    "head_cant",
+    "lean_in"
+   ]
+  },
+  {
+   "id": "confused",
+   "kind": "mood",
+   "description": "huh? doesn't follow",
+   "pool": [
+    "huh",
+    "head_cant",
+    "shrug"
+   ]
+  },
+  {
+   "id": "impressed",
+   "kind": "mood",
+   "description": "whoa, nice one",
+   "pool": [
+    "visor_flip",
+    "double_take",
+    "lean_in"
+   ]
+  },
+  {
+   "id": "sympathetic",
+   "kind": "mood",
+   "description": "sorry to hear it, feels for them",
+   "pool": [
+    "sad_droop",
+    "droop"
+   ]
+  },
+  {
+   "id": "surprised",
+   "kind": "mood",
+   "description": "startled, didn't see that coming",
+   "pool": [
+    "recoil",
+    "visor_flip",
+    "double_take"
+   ]
+  },
+  {
+   "id": "thinking",
+   "kind": "mood",
+   "description": "pondering, let me see",
+   "pool": [
+    "thinking",
+    "look_up_think"
+   ]
+  },
+  {
+   "id": "smug",
+   "kind": "mood",
+   "description": "pleased with himself, showing off",
+   "pool": [
+    "visor_flip",
+    "power_up"
+   ]
+  },
+  {
+   "id": "annoyed",
+   "kind": "mood",
+   "description": "not having it, unimpressed",
+   "pool": [
+    "head_shake",
+    "no"
+   ]
+  },
+  {
+   "id": "embarrassed",
+   "kind": "mood",
+   "description": "oops, flustered, a glitch of shame",
+   "pool": [
+    "visor_flutter",
+    "glitch_twitch",
+    "glitch_small"
+   ]
+  },
+  {
+   "id": "fond",
+   "kind": "mood",
+   "description": "warm towards the person",
+   "pool": [
+    "nod",
+    "bow"
+   ]
+  },
+  {
+   "id": "nod",
+   "kind": "gesture",
+   "description": "yes, agreed",
+   "pool": [
+    "nod",
+    "double_nod",
+    "yes"
+   ]
+  },
+  {
+   "id": "no",
+   "kind": "gesture",
+   "description": "shakes his head no",
+   "pool": [
+    "head_shake",
+    "no"
+   ]
+  },
+  {
+   "id": "shrug",
+   "kind": "gesture",
+   "description": "who knows",
+   "pool": [
+    "shrug"
+   ]
+  },
+  {
+   "id": "point",
+   "kind": "gesture",
+   "description": "points out at someone or something",
+   "pool": [
+    "point_forward"
+   ]
+  },
+  {
+   "id": "wave",
+   "kind": "gesture",
+   "description": "a wave of the arm",
+   "pool": [
+    "arm_wave"
+   ]
+  },
+  {
+   "id": "hello",
+   "kind": "gesture",
+   "description": "a greeting (once, at the start)",
+   "pool": [
+    "greet",
+    "arm_wave"
+   ]
+  },
+  {
+   "id": "goodbye",
+   "kind": "gesture",
+   "description": "a farewell",
+   "pool": [
+    "arm_wave",
+    "bow"
+   ]
+  },
+  {
+   "id": "lean_in",
+   "kind": "gesture",
+   "description": "leans in to listen or confide",
+   "pool": [
+    "lean_in"
+   ]
+  },
+  {
+   "id": "fist_pump",
+   "kind": "gesture",
+   "description": "pumps his arm, yes!",
+   "pool": [
+    "fist_pump"
+   ]
+  },
+  {
+   "id": "bow",
+   "kind": "gesture",
+   "description": "takes a bow",
+   "pool": [
+    "bow",
+    "applause_thanks"
+   ]
+  },
+  {
+   "id": "build",
+   "kind": "beat",
+   "description": "the energy builds, anticipation",
+   "pool": [
+    "ring_sweep",
+    "lean_in"
+   ]
+  },
+  {
+   "id": "drop",
+   "kind": "beat",
+   "description": "the drop hits",
+   "pool": [
+    "hype_drop",
+    "beat_drop",
+    "arm_throw"
+   ]
+  },
+  {
+   "id": "hype",
+   "kind": "beat",
+   "description": "hype the crowd up",
+   "pool": [
+    "excited",
+    "fist_pump",
+    "beat_headbang"
+   ]
+  },
+  {
+   "id": "wind_down",
+   "kind": "beat",
+   "description": "bringing it down, chill",
+   "pool": [
+    "idle_still",
+    "droop"
+   ]
+  },
+  {
+   "id": "decks",
+   "kind": "look",
+   "description": "glance down at his decks",
+   "pool": [
+    "tinker_decks"
+   ]
+  },
+  {
+   "id": "crowd",
+   "kind": "look",
+   "description": "look out across the crowd",
+   "pool": [
+    "ring_sweep",
+    "look_around"
+   ]
+  },
+  {
+   "id": "around",
+   "kind": "look",
+   "description": "looks around the room",
+   "pool": [
+    "look_around",
+    "glance_left",
+    "glance_right"
+   ]
+  },
+  {
+   "id": "listen_perk",
+   "kind": "listen",
+   "description": "the guest starts talking: he perks up",
+   "pool": [
+    "beat_bop"
+   ],
+   "cooldown_s": 2.5
+  },
+  {
+   "id": "listen_nod",
+   "kind": "listen",
+   "description": "a phrase lands: mm-hm",
+   "pool": [
+    "nod"
+   ],
+   "cooldown_s": 1.5
+  },
+  {
+   "id": "listen_tilt",
+   "kind": "listen",
+   "description": "the guest pauses: go on?",
+   "pool": [
+    "head_cant",
+    "tilt_curious"
+   ],
+   "cooldown_s": 3.0
+  },
+  {
+   "id": "listen_curious",
+   "kind": "listen",
+   "description": "the guest's voice rises: a question",
+   "pool": [
+    "huh",
+    "head_cant"
+   ],
+   "cooldown_s": 3.0
+  },
+  {
+   "id": "listen_amused",
+   "kind": "listen",
+   "description": "something funny while listening",
+   "pool": [
+    "beat_bop",
+    "visor_flutter"
+   ],
+   "cooldown_s": 3.0
+  },
+  {
+   "id": "listen_concern",
+   "kind": "listen",
+   "description": "something sad while listening",
+   "pool": [
+    "sad_droop",
+    "droop"
+   ],
+   "cooldown_s": 5.0
+  },
+  {
+   "id": "listen_wow",
+   "kind": "listen",
+   "description": "something surprising while listening",
+   "pool": [
+    "double_take",
+    "visor_flip"
+   ],
+   "cooldown_s": 4.0
+  }
+ ]
+}

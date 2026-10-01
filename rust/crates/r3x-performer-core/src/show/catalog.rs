@@ -13,6 +13,8 @@ pub struct Catalog {
     /// Validation and naming problems found while building (the linter asserts none).
     pub errors: Vec<String>,
     pub idle: Option<IdlePolicy>,
+    /// `intentions.json`: intention id -> its pool (see `show::intentions`).
+    pub intentions: IndexMap<String, super::intentions::Intention>,
 }
 
 /// Lowercase, alphanumerics only: the fuzzy-match key.
@@ -44,11 +46,42 @@ impl Catalog {
         for (path, text) in files {
             match serde_json::from_str::<Value>(text) {
                 Err(e) => c.errors.push(format!("{path}: {e}")),
+                Ok(_) if path.ends_with("intentions.json") => {
+                    let (m, errs) = super::intentions::parse(text, path);
+                    c.intentions = m;
+                    c.errors.extend(errs);
+                }
                 Ok(v) if path.ends_with("idle.json") => c.set_idle(&v),
                 Ok(v) => c.add(&v, Some(path)),
             }
         }
+        c.check_intentions();
         c
+    }
+
+    /// Every pool entry is a loaded clip or cue of tier free/cheap (intentions fire from Jev
+    /// and Claude). Bad entries are reported and dropped; an intention left empty goes too.
+    fn check_intentions(&mut self) {
+        let mut errs = vec![];
+        for (id, i) in self.intentions.iter_mut() {
+            i.pool.retain(|p| match self.items.get(p) {
+                None => {
+                    errs.push(format!("intentions.json: {id}: unknown item {p}"));
+                    false
+                }
+                Some(it) if it.kind() == super::types::Kind::Sequence => {
+                    errs.push(format!("intentions.json: {id}: {p} is a sequence (pools take clips and cues)"));
+                    false
+                }
+                Some(it) if !matches!(it.tier, super::types::Tier::Free | super::types::Tier::Cheap) => {
+                    errs.push(format!("intentions.json: {id}: {p} is tier {:?} (pools take free or cheap)", it.tier));
+                    false
+                }
+                Some(_) => true,
+            });
+        }
+        self.intentions.retain(|_, i| !i.pool.is_empty());
+        self.errors.extend(errs);
     }
 
     pub fn add(&mut self, x: &Value, file: Option<&str>) {

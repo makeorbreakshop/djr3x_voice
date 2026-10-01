@@ -615,3 +615,51 @@ fn listening_stopped_without_heard_still_parses_as_heard() {
     let c: Command = serde_json::from_str(r#"{"cmd":"listening_stopped"}"#).unwrap();
     assert!(matches!(c, Command::ListeningStopped { heard: true }));
 }
+
+/// Intentions (show/intentions.json): every pool entry is a real, low-tier item, and an
+/// intention plays a varied pick, never the same one twice running, and waits out its cooldown.
+#[test]
+fn intentions_play_a_varied_pick_and_respect_their_cooldown() {
+    let cat = show_catalog();
+    assert!(cat.errors.is_empty(), "{:?}", cat.errors);
+    assert!(cat.intentions.len() >= 30, "{}", cat.intentions.len());
+    let mut p = performer();
+    let mut picks = vec![];
+    let mut t = 0.0;
+    for _ in 0..8 {
+        run(&mut p, t, t + 5.0);
+        t += 5.0;
+        p.command(Command::Intend { id: "nod".into(), source: Source::Claude, intensity: 1.0 });
+        let started = p.take_events().into_iter().find_map(|o| match o {
+            Out::Started { run } => Some(run.id.clone()),
+            _ => None,
+        });
+        picks.push(started.expect("a nod plays"));
+    }
+    assert!(picks.windows(2).all(|w| w[0] != w[1]), "never the same twice running: {picks:?}");
+    p.command(Command::Intend { id: "nod".into(), source: Source::Claude, intensity: 1.0 });
+    assert!(p.take_events().iter().all(|o| !matches!(o, Out::Started { .. })), "cooling down");
+}
+
+/// While listening, the guest's voice level bobs the head a little (the ears, 2026-10-01);
+/// silence leaves it still, and it stops when listening does.
+#[test]
+fn the_guests_voice_bobs_the_head_while_listening() {
+    let range = |p: &mut Performer, from: f64, level: f64| {
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for i in 0..120 {
+            p.command(Command::ListenLevel { value: if i % 6 < 3 { level } else { 0.0 } });
+            let f = p.tick(from + i as f64 / 60.0);
+            let v = f.targets.get("head_tilt").copied().unwrap_or(0.0);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        hi - lo
+    };
+    let mut quiet = performer();
+    quiet.command(Command::ListeningStarted);
+    let mut talking = performer();
+    talking.command(Command::ListeningStarted);
+    let (q, t) = (range(&mut quiet, 0.0, 0.0), range(&mut talking, 0.0, 1.0));
+    assert!(t > q + 0.3, "the guest's voice moves the head: {t:.2} vs {q:.2}");
+}

@@ -297,6 +297,28 @@
       "description": "Direct body control. Goes to the performer.",
       "oneOf": [
         {
+          "description": "An intention (`show/intentions.json`: `amused`, `nod`, `drop`...): the performer plays a\nvaried pick from its pool. Cooling down is not an error (nothing plays).",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "intensity": {
+              "default": 1.0,
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "intend",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Play a clip, cue or sequence by id.",
           "properties": {
             "id": {

@@ -35,6 +35,10 @@ pub fn show_catalog() -> Catalog {
         "show/idle.json".into(),
         std::fs::read_to_string(repo("show/idle.json")).unwrap(),
     ));
+    files.push((
+        "show/intentions.json".into(),
+        std::fs::read_to_string(repo("show/intentions.json")).unwrap(),
+    ));
     Catalog::from_files(files.iter().map(|(p, t)| (p.as_str(), t.as_str())))
 }
 

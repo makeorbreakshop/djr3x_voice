@@ -76,6 +76,23 @@ pub enum VoiceEvent {
     Released { turn: String },
     ListeningStopped { turn: String, transcript: String },
     Speech(SpeechEvent),
+    /// The listening reactor's ears (`listen`): the guest's voice as it arrives.
+    Listen(crate::listen::Cue),
+}
+
+/// The turn's audio, analysed as it goes to STT (local mic or remote client alike).
+struct Ears {
+    cues: Mutex<crate::listen::ListenCues>,
+    events: broadcast::Sender<VoiceEvent>,
+}
+
+impl Ears {
+    fn hear(&self, pcm: &[i16]) {
+        let out = self.cues.lock().map(|mut c| c.push(pcm)).unwrap_or_default();
+        for c in out {
+            let _ = self.events.send(VoiceEvent::Listen(c));
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +130,7 @@ struct Inner {
     /// Remote PCM not yet a whole 20 ms chunk.
     remote_rest: Mutex<Vec<i16>>,
     events: broadcast::Sender<VoiceEvent>,
+    ears: Arc<Ears>,
     /// The last push-to-talk request (owner, when), for [`Voice::click`].
     last_request: Mutex<Option<(String, std::time::Instant)>>,
 }
@@ -149,6 +167,7 @@ impl Voice {
                 turn: tokio::sync::Mutex::new(None),
                 remote_rest: Mutex::default(),
                 events: events.clone(),
+                ears: Arc::new(Ears { cues: Mutex::default(), events: events.clone() }),
                 last_request: Mutex::default(),
             }),
         };
@@ -241,10 +260,13 @@ impl Voice {
         }
         let remote = Arc::new(AtomicBool::new(false));
         inner.remote_rest.lock().unwrap().clear();
+        if let Ok(mut c) = inner.ears.cues.lock() {
+            c.reset();
+        }
         let pump = inner.mic.as_ref().and_then(|m| match m.open() {
             Ok(mic) => {
                 let (stop, stopped) = tokio::sync::oneshot::channel();
-                Some((tokio::spawn(pump(mic, inner.stt.clone(), remote.clone(), inner.opts.remote_grace, stopped)), stop))
+                Some((tokio::spawn(pump(mic, inner.stt.clone(), inner.ears.clone(), remote.clone(), inner.opts.remote_grace, stopped)), stop))
             }
             Err(e) => {
                 tracing::warn!(error = %e, "local mic did not open; waiting for remote audio");
@@ -332,6 +354,7 @@ impl Voice {
         rest.extend_from_slice(pcm);
         let whole = rest.len() / r3x_audio::MIC_CHUNK * r3x_audio::MIC_CHUNK;
         for c in rest.drain(..whole).collect::<Vec<_>>().chunks(r3x_audio::MIC_CHUNK) {
+            self.inner.ears.hear(c);
             self.inner.stt.audio(c.to_vec());
         }
     }
@@ -339,7 +362,7 @@ impl Voice {
 
 /// Forward local mic audio, held back for `grace` in case the turn turns out to be remote.
 /// On `stop`, what is held back and buffered goes out (unless the turn is remote), then it ends.
-async fn pump(mut mic: MicStream, stt: Stt, remote: Arc<AtomicBool>, grace: Duration, mut stop: tokio::sync::oneshot::Receiver<()>) {
+async fn pump(mut mic: MicStream, stt: Stt, ears: Arc<Ears>, remote: Arc<AtomicBool>, grace: Duration, mut stop: tokio::sync::oneshot::Receiver<()>) {
     let until = Instant::now() + grace;
     let mut held: Vec<Vec<i16>> = Vec::new();
     loop {
@@ -357,6 +380,8 @@ async fn pump(mut mic: MicStream, stt: Stt, remote: Arc<AtomicBool>, grace: Dura
             return;
         }
         let Some(chunk) = chunk else { break };
+        // The ears hear it at once (the grace only delays STT, not R3X's reaction).
+        ears.hear(&chunk);
         if Instant::now() < until {
             held.push(chunk);
             continue;
@@ -380,6 +405,8 @@ pub fn spawn_bus_adapter(voice: &Voice, bus: Bus, lifecycle: bool) -> JoinHandle
     let mut rx = voice.subscribe();
     let clock = bus.clock();
     tokio::spawn(async move {
+        // The turn the ears' cues belong to.
+        let mut turn_id: Option<String> = None;
         loop {
             let e = match rx.recv().await {
                 Ok(e) => e,
@@ -412,8 +439,18 @@ pub fn spawn_bus_adapter(voice: &Voice, bus: Bus, lifecycle: bool) -> JoinHandle
                         }),
                     );
                 }
+                VoiceEvent::Listen(c) => {
+                    let e = match c {
+                        crate::listen::Cue::Level(level) => ConversationEvent::ListenLevel { level },
+                        crate::listen::Cue::Onset => ConversationEvent::ListenCue { cue: "onset".into() },
+                        crate::listen::Cue::Pause => ConversationEvent::ListenCue { cue: "pause".into() },
+                        crate::listen::Cue::Rise => ConversationEvent::ListenCue { cue: "rise".into() },
+                    };
+                    bus.publish(Source::System, turn_id.clone(), conv(e));
+                }
                 _ if !lifecycle => {}
                 VoiceEvent::ListeningStarted { turn, .. } => {
+                    turn_id = Some(turn.clone());
                     phase(ConversationPhase::Listening, Some(turn.clone()));
                     bus.publish(Source::System, Some(turn), conv(ConversationEvent::ListeningStarted));
                 }
