@@ -102,7 +102,8 @@ def _stl_case(module, variant):
 @pytest.mark.parametrize("module,variant", STL_CASES)
 def test_stl_part_matches(module, variant):
     """No B-rep for these: held to the STL (its faceting ~0.01 mm): mean deviation <= 0.05 mm, volume
-    within 1 %, bbox within 2 mm (the ring sectors' simplified end blends), holes found on the mesh
+    within 1 %, bbox within 2 mm (a module's STL_MAX_MM, where set, bounds both the worst deviation and
+    the bbox), holes found on the mesh
     matched both ways within 0.2 mm."""
     mod, params, ref_dir, ref = _stl_case(module, variant)
     p = mod.make(params)
@@ -115,6 +116,9 @@ def test_stl_part_matches(module, variant):
     print(module, variant or "default", json.dumps({k: round(v, 4) if isinstance(v, float) else v for k, v in c.items()}),
           f"holes {len(h['matched'])}")
     assert abs(c["volume_ratio"] - 1) <= 0.01 and c["mean_mm"] <= 0.05 and c["bbox_mm"] <= 2.0, c
+    worst = getattr(mod, "STL_MAX_MM", None)          # parts held to a worst-case bound too (the droid's 0.3)
+    if worst is not None:
+        assert c["hausdorff_mm"] <= worst and c["bbox_mm"] <= worst, c
     assert not h["missing_in_ref"] and not h["missing_in_model"], h
 
 
