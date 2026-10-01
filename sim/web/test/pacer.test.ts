@@ -42,4 +42,18 @@ describe('frame pacer', () => {
     const p = new FramePacer({ active: 30, quiet: 15 }, false);
     expect(drawn(p, 0, 1000, () => pose(0))).toBe(60);
   });
+
+  it('settles 150 ms after the last real input; a bare hover keeps the rate but does not unsettle', () => {
+    const p = new FramePacer({ active: 30, quiet: 15 });
+    expect(p.settled(150, 0)).toBe(true);
+    p.interact(1000);
+    expect(p.settled(150, 1100)).toBe(false);
+    expect(p.settled(150, 1150)).toBe(true);
+    p.interact(1200, true); // hover: full rate, still settled
+    expect(p.fps(1300)).toBe(Infinity);
+    expect(p.settled(150, 1300)).toBe(true);
+    const n = p.touches;
+    p.touch(1400);
+    expect(p.touches).toBe(n + 1);
+  });
 });

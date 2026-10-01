@@ -60,13 +60,26 @@ export class FramePacer {
   frames = 0;
   /** Draw every animation frame until then (a profiling run, framediag.ts). */
   private continuousUntil = -Infinity;
+  /** Last real input (a drag, wheel, key, the orbit camera moving; not a bare hover): see `settled`. */
+  private inputAt = -Infinity;
+  /** Bumped by every `touch()`: a change the drawn state cannot show (post.ts's Build refinement). */
+  touches = 0;
 
   constructor(public rates: PaceRates, private readonly enabled = true) {}
 
   /** A user interaction (or anything that should run at full rate for a moment). */
-  interact(now = performance.now()) {
+  interact(now = performance.now(), hover = false) {
     this.interactUntil = now + INTERACT_HOLD_MS;
+    if (!hover) this.inputAt = now;
     this.wakeNow();
+  }
+
+  /**
+   * No real input for `ms` (the pointer only hovering does not count). Build renders cheaper
+   * frames while this is false and one full-quality frame once it turns true (post.ts).
+   */
+  settled(ms: number, now = performance.now()) {
+    return now - this.inputAt >= ms;
   }
 
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +114,7 @@ export class FramePacer {
 
   /** Something drawn changed that the state does not show (a scene or quality switch). */
   touch(now = performance.now()) {
+    this.touches++;
     this.activeUntil = now + ACTIVE_HOLD_MS;
     this.lastDraw = -Infinity;
   }
@@ -166,7 +180,7 @@ export class FramePacer {
 
   /** Wake on input anywhere in the page, and on resize. */
   listen(target: Window = window) {
-    const wake = () => this.interact();
+    const wake = (e: Event) => this.interact(performance.now(), e.type === 'pointermove' && (e as PointerEvent).buttons === 0);
     for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'input', 'resize', 'focus']) {
       target.addEventListener(ev, wake, { passive: true, capture: true });
     }

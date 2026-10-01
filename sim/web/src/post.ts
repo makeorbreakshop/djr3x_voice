@@ -26,6 +26,9 @@ import { FramePacer, type PaceRates } from './pacer';
  * Resolution is dynamic: the canvas renders at up to the quality's cap (not the display's
  * 2x) and steps down when frames run long while someone is interacting, back up when there
  * is headroom. SMAA recovers the edges the lower scale costs, and the saving pays for AO.
+ * Once the interaction ends the cap is back (a lowered scale used to stick until the next
+ * interaction found headroom, so a slow first frame - a model upload - left the view soft).
+ * Build goes further (see SETTLE_MS): a still view is drawn once at the native resolution.
  *
  * Frames are paced (pacer.ts): 60 fps only while someone interacts, the quality's cap while
  * the scene changes, a low floor while nothing does.
@@ -48,6 +51,23 @@ import { FramePacer, type PaceRates } from './pacer';
  */
 
 export type Quality = 'performance' | 'balanced' | 'high';
+
+/**
+ * Build (setClean) renders like a CAD viewer: cheap frames while someone moves the view, one
+ * full-quality frame once they stop, then nothing until something changes.
+ *
+ *   moving     input in the last SETTLE_MS   the dynamic scale (as everywhere)
+ *   changing   settled, the scene moving     the quality's scale cap (a demo, a sweep)
+ *   still      settled, nothing changed      once: native (devicePixelRatio, at most 2x);
+ *                                            then no frame at all (one every REFRESH_MS)
+ *
+ * AO in Build: full resolution, denoised, a radius for millimetre parts, and transparency-aware
+ * so the ghosted shells (which write depth) neither take nor cast it.
+ */
+const SETTLE_MS = 150;
+const REFRESH_MS = 3000;
+const NATIVE_MAX = 2;
+const BUILD_AO = { radius: 0.025, falloff: 0.6, intensity: 0.6 };
 export type ToneMap = 'neutral' | 'agx' | 'aces';
 
 const params = new URLSearchParams(location.search);
@@ -365,6 +385,14 @@ export class PostPipeline {
   private bloomOn = true;
   private aoOn = true;
   private readonly bloomCap: { value: number };
+  /** AO strength as the Rendering panel set it (Build draws a fraction of it). */
+  private aoIntensity = 4;
+  /** Build: AO settings to restore on leaving, and the still-frame bookkeeping. */
+  private aoSaved: { halfRes: boolean; radius: number; falloff: number } | null = null;
+  private drawnSig = NaN;
+  private stillAt = -Infinity;
+  /** Build frames not drawn because nothing changed (measurement). */
+  skipped = 0;
   /** Environment multiplier over whatever the set chose (the booth's desk drives it per cue). */
   envScale = 1;
   /** Frame diagnostics (framediag.ts), while its overlay is open. */
@@ -403,7 +431,7 @@ export class PostPipeline {
     // Sized for a ~1 m droid: seams, rings and the gaps between parts, not whole-body dimming.
     c.aoRadius = 0.12;
     c.distanceFalloff = 1.0;
-    c.intensity = 4;
+    c.intensity = this.aoIntensity;
     c.color = new THREE.Color(0, 0, 0);
     this.ao.setQualityMode(QUALITY[this.quality].ao ?? 'Medium');
     // The LED glow sprites are additive and depth-less: skip N8AO's transparency pre-pass
@@ -507,7 +535,8 @@ export class PostPipeline {
 
   /** AO on/off (within what the quality allows) and its strength. */
   setAO(on: boolean, intensity: number) {
-    this.ao.configuration.intensity = intensity;
+    this.aoIntensity = intensity;
+    this.ao.configuration.intensity = intensity * (this.aoSaved ? BUILD_AO.intensity : 1);
     if (on !== this.aoOn) {
       this.aoOn = on;
       this.build();
@@ -517,20 +546,41 @@ export class PostPipeline {
 
   private filmSaved: { grain: number; vignette: number; aberration: number } | null = null;
 
-  /** Inspection (Build): no bloom, grain or lens fringing, a light vignette; off restores the film. */
+  /**
+   * Inspection (Build): no bloom, grain, lens fringing or vignette, inspection AO, and the
+   * still-frame refinement (SETTLE_MS); off restores all of it.
+   */
   setClean(on: boolean) {
     const u = this.film.uniforms;
+    const c = this.ao.configuration;
     const was = !!this.filmSaved;
     if (on && !this.filmSaved) {
       this.filmSaved = { grain: u.uGrain.value, vignette: u.uVignette.value, aberration: u.uAberration.value };
       u.uGrain.value = 0;
       u.uAberration.value = 0;
-      u.uVignette.value = 0.12;
+      u.uVignette.value = 0;
+      // Half-res AO, upsampled and blurred over a 12 px radius, smeared dark blotches over the
+      // small parts, and the ghosts (which write depth) took the AO of the solids behind them.
+      this.aoSaved = { halfRes: c.halfRes, radius: c.aoRadius, falloff: c.distanceFalloff };
+      c.halfRes = false;
+      c.aoRadius = BUILD_AO.radius;
+      c.distanceFalloff = BUILD_AO.falloff;
+      c.transparencyAware = true;
+      c.intensity = this.aoIntensity * BUILD_AO.intensity;
+      this.drawnSig = NaN;
     } else if (!on && this.filmSaved) {
       u.uGrain.value = this.filmSaved.grain;
       u.uVignette.value = this.filmSaved.vignette;
       u.uAberration.value = this.filmSaved.aberration;
       this.filmSaved = null;
+      if (this.aoSaved) {
+        c.halfRes = this.aoSaved.halfRes;
+        c.aoRadius = this.aoSaved.radius;
+        c.distanceFalloff = this.aoSaved.falloff;
+        c.transparencyAware = false;
+        c.intensity = this.aoIntensity;
+        this.aoSaved = null;
+      }
     }
     if (was !== !!this.filmSaved) this.build(); // the bloom pass in or out
     this.pacer.touch();
@@ -577,7 +627,7 @@ export class PostPipeline {
     if (this.dyn) {
       const dpr = window.devicePixelRatio || 1;
       this.dyn.max = Math.min(dpr, preset.scale);
-      if (this.dyn.scale !== this.dyn.max) this.applyScale(this.dyn.max);
+      this.dyn.scale = this.dyn.max; // render() applies it
     }
     // Bloom's targets follow the preset's fraction.
     const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -592,7 +642,7 @@ export class PostPipeline {
   }
 
   private applyScale(s: number) {
-    if (this.dyn) this.dyn.scale = s;
+    if (s === this.renderer.getPixelRatio()) return;
     this.renderer.setPixelRatio(s);
     this.composer.setPixelRatio(s);
     this.syncResolution();
@@ -604,15 +654,78 @@ export class PostPipeline {
     this.showScale();
   }
 
+  /**
+   * A number that changes when anything drawn does: the camera, the buffer, levels touched
+   * through the pacer, and every visible mesh's placement, geometry and material (Build's
+   * explode, joints, LOD swaps, ghost fades). Matrices as the last render left them; call
+   * scene.updateMatrixWorld() first to see pending moves.
+   */
+  private signature(): number {
+    let h = this.pacer.touches * 7.31 + this.envScale * 3.7
+      + this.renderer.toneMappingExposure * 5.3 + this.scene.environmentIntensity * 2.9;
+    const buf = this.renderer.getSize(new THREE.Vector2());
+    h += buf.x * 0.013 + buf.y * 0.017;
+    const add = (e: ArrayLike<number>, k: number) => {
+      for (let i = 0; i < e.length; i++) h += e[i] * (k + i * 0.618);
+    };
+    add(this.camera.matrixWorld.elements, 1.1);
+    add(this.camera.projectionMatrix.elements, 2.3);
+    let n = 0;
+    const visit = (o: THREE.Object3D) => {
+      if (!o.visible) return;
+      const m = o as THREE.Mesh;
+      if (m.isMesh || (o as THREE.Line).isLine) {
+        n++;
+        const e = o.matrixWorld.elements;
+        h += (e[12] * 1.3 + e[13] * 1.7 + e[14] * 2.1 + e[0] + e[1] * 0.7 + e[5] * 0.3 + e[9] * 1.9) * (1 + (n % 97) * 0.01);
+        h += m.geometry ? m.geometry.id * 1e-3 : 0;
+        const mat = m.material as THREE.Material & { color?: THREE.Color };
+        if (mat && !Array.isArray(mat)) {
+          h += mat.opacity * 0.37 + mat.version * 0.11 + (mat.color ? mat.color.r + mat.color.g * 0.5 + mat.color.b * 0.25 : 0);
+        }
+      }
+      for (const ch of o.children) visit(ch);
+    };
+    visit(this.scene);
+    return h + n;
+  }
+
+  /**
+   * Build's frame kind (see SETTLE_MS), or null for the usual frame. 'skip' = the last frame
+   * drawn is still what the scene looks like.
+   */
+  private buildFrame(now: number): 'moving' | 'changing' | 'still' | 'skip' | null {
+    if (!this.filmSaved || !this.dyn) return null;
+    if (!this.pacer.settled(SETTLE_MS, now)) return 'moving';
+    this.scene.updateMatrixWorld();
+    this.camera.updateMatrixWorld();
+    const sig = this.signature();
+    if (sig !== this.drawnSig) return this.drawnSig !== this.drawnSig || this.stillAt < 0 ? 'still' : 'changing';
+    if (this.stillAt < 0 || now - this.stillAt >= REFRESH_MS) return 'still';
+    return 'skip';
+  }
+
   render() {
     const now = performance.now();
+    const interacting = this.pacer.fps(now) === Infinity;
     // Resolution adapts only while frames are meant to come at 60 fps (someone interacting);
     // a paced 30 or 15 fps interval is not a slow frame.
-    if (this.dyn && this.lastFrame >= 0 && this.pacer.fps(now) === Infinity) {
-      const s = this.dyn.sample(now - this.lastFrame);
-      if (s !== null) this.applyScale(s);
+    if (this.dyn && this.lastFrame >= 0 && interacting) this.dyn.sample(now - this.lastFrame);
+    this.lastFrame = interacting ? now : -1;
+    const kind = this.buildFrame(now);
+    if (kind === 'skip') {
+      this.skipped++;
+      return;
     }
-    this.lastFrame = this.pacer.fps(now) === Infinity ? now : -1;
+    if (this.dyn) {
+      const dpr = window.devicePixelRatio || 1;
+      // the lowered scale is for the interaction; once it ends, the cap (Build: native when still)
+      const s = kind === 'still' ? Math.min(dpr, NATIVE_MAX)
+        : kind === 'changing' ? this.dyn.max
+        : kind === 'moving' || interacting ? this.dyn.scale : this.dyn.max;
+      this.applyScale(s);
+    }
+    this.stillAt = kind === 'still' ? now : kind ? -Infinity : this.stillAt;
     this.film.uniforms.uTime.value = STILL ? 0 : now / 1000;
     this.probe?.frameStart();
     // a clean inspection image (Build) keeps the room environment near its own level: the Flat
@@ -626,6 +739,7 @@ export class PostPipeline {
       this.composer.render();
       this.scene.environmentIntensity = e;
     }
+    if (kind) this.drawnSig = this.signature();
     this.probe?.frameEnd();
   }
 }
