@@ -1,12 +1,9 @@
 /* Scene -> Lighting / Rendering (rendersettings.ts) and the frame diagnostics (framediag.ts).
-   Same vocabulary as the Scene panel: 11px uppercase h2, muted labels, mono values. */
+   Same vocabulary as the Scene panel: sentence-case h2, muted labels, mono values. */
 
 .rs-section details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; }
 .rs-section details > summary::-webkit-details-marker { display: none; }
 .rs-section details > summary h2 { margin: 0; }
-.rs-section > details > summary::after { content: ""; margin-left: auto; width: 6px; height: 6px;
-  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); }
-.rs-section > details[open] > summary::after { transform: rotate(45deg); }
 .rs-section details > summary:hover h2 { color: var(--text); }
 .rs-section details > summary:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; border-radius: 4px; }
 .rs-body { padding-top: 8px; }
@@ -27,19 +24,15 @@
 .rs-check:has(input:disabled) { opacity: .45; cursor: default; }
 .rs-toggles { display: flex; gap: 18px; min-height: 26px; align-items: center; }
 
-.rs-seg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin: 0 0 6px; }
+.rs-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 0 0 6px; }
 .rs-seg button { min-width: 0; padding: 5px 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rs-custom { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; font-size: 12px; color: var(--warn); }
 .rs-custom[hidden] { display: none; }
 .rs-custom button { flex: 0 0 auto; margin-left: auto; padding: 2px 10px; font-size: 12px; }
 
-.rs-h { margin: 12px 0 2px; }
+.rs-h { margin: 12px 0 2px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .rs-disc { margin: 4px 0 2px; }
-.rs-disc > summary { list-style: none; cursor: pointer; color: var(--muted); font-size: 12px; width: max-content; }
-.rs-disc > summary::-webkit-details-marker { display: none; }
-.rs-disc > summary::before { content: "\25B8"; display: inline-block; width: 12px; }
-.rs-disc[open] > summary::before { content: "\25BE"; }
-.rs-disc > summary:hover { color: var(--text); }
+
 
 /* Frame diagnostics: compact, top-right of the viewport (left of the R3X panel). Numbers only;
    every explanation is a tooltip. */

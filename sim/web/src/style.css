@@ -28,13 +28,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 h1 { font-size: 16px; margin: 0; letter-spacing: .04em; }
 h1 span { color: var(--accent); font-weight: 500; }
-h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
-  margin: 0 0 8px; font-weight: 600; }
-h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: .7; margin-left: 4px; }
+/* One section heading: sentence case, muted, no tracking (headings never shout). */
+h2 { font-size: 12px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+h2 small { font-weight: 400; opacity: .7; margin-left: 4px; }
 section { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
 
 .status { display: flex; gap: 6px; }
-.pill { font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 4px 7px; border-radius: 99px;
+.pill { font: 600 11px/1 system-ui, sans-serif; padding: 4px 8px; border-radius: 99px;
   border: 1px solid var(--line); color: var(--muted); }
 .pill.live.on { color: #57d38c; border-color: #1f5a3a; }
 .pill[hidden] { display: none; }
@@ -57,11 +57,11 @@ button:hover { border-color: #444a58; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #140a02; font-weight: 600; }
 button.on { border-color: var(--accent); color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
-input[type=text], input:not([type]) { flex: 1; background: #0f1117; color: var(--text); border: 1px solid var(--line);
-  border-radius: 7px; padding: 7px 9px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 0; }
+input[type=text], input[type=search], input:not([type]) { flex: 1; background: #0f1117; color: var(--text); border: 1px solid var(--line);
+  border-radius: 7px; padding: 7px 9px; font: 12.5px system-ui, sans-serif; min-width: 0; }
 label.inline { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); }
 label.inline input[type=range] { flex: 1; }
-output { font: 12px ui-monospace, Menlo, monospace; min-width: 2.5em; text-align: right; }
+output { font: 12px ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; min-width: 2.5em; text-align: right; }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 .warn { color: var(--warn); font-size: 12px; margin: 6px 0 0; }
 
@@ -80,7 +80,7 @@ output { font: 12px ui-monospace, Menlo, monospace; min-width: 2.5em; text-align
 }
 
 select, textarea { width: 100%; background: #0f1117; color: var(--text); border: 1px solid var(--line);
-  border-radius: 7px; padding: 7px 9px; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 6px; }
+  border-radius: 7px; padding: 7px 9px; font: 12.5px system-ui, sans-serif; margin-bottom: 6px; }
 textarea { resize: vertical; }
 table.servos { width: 100%; border-collapse: collapse; font: 11px/1.5 ui-monospace, Menlo, monospace; }
 table.servos th { text-align: left; color: #5b6170; font-weight: 500; border-bottom: 1px solid var(--line); }
@@ -94,7 +94,7 @@ table.servos td.bad { color: #ff6b6b; }
 
 /* ------------------------------------------------------------------ show system */
 .show-now { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0 0 8px; padding: 8px;
-  background: #07080b; border: 1px solid var(--line); border-radius: 8px; font: 11px/1.5 ui-monospace, Menlo, monospace; }
+  background: #07080b; border: 1px solid var(--line); border-radius: 8px; font: 12px/1.5 system-ui, sans-serif; }
 .show-now span { color: #5b6170; }
 .show-now b { font-weight: 500; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .show-now b.on { color: var(--accent); }
@@ -107,7 +107,7 @@ table.servos td.bad { color: #ff6b6b; }
 .show-list li button { padding: 2px 0; font-size: 11px; line-height: 1.2; }
 .show-list li .nm { font: 11px ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .show-list li .nm small { color: #5b6170; font-family: system-ui, sans-serif; margin-left: 4px; }
-.show-list li i { font: normal 9px ui-monospace, Menlo, monospace; padding: 1px 5px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.show-list li i { font: normal 10px system-ui, sans-serif; padding: 1px 5px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
 .show-list li i.cheap { color: var(--accent-2); border-color: #23405e; }
 .show-list li i.show { color: var(--accent); border-color: #5a3418; }
 .show-list li.running .nm { color: var(--accent); }
@@ -164,8 +164,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: #0
 
 .state-badge { position: fixed; top: 16px; left: calc(var(--scene-space, 12px) + 4px); padding: 5px 10px 5px 24px; border-radius: 99px;
   border: 1px solid var(--line); background: rgba(10,11,15,.72); color: var(--muted);
-  font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase;
-  pointer-events: none; }
+  font: 600 12px/1.2 system-ui, sans-serif; pointer-events: none; }
 .state-badge::before { content: ""; position: absolute; left: 10px; top: 50%; width: 8px; height: 8px; margin-top: -4px;
   border-radius: 50%; background: #3a3f4c; }
 .state-badge[data-state="idle"]::before { background: var(--accent); }
@@ -191,7 +190,7 @@ button.link:hover { color: var(--text); }
 .turn .you.pending { color: var(--muted); font-style: italic; }
 .turn .rex { background: rgba(232,118,42,.08); border: 1px solid rgba(232,118,42,.18); }
 .turn .rex::before { content: "R3X  "; color: var(--accent); font-size: 10px; letter-spacing: .08em; }
-.turn .meta { color: #5b6170; font: 10px/1.6 ui-monospace, Menlo, monospace; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.turn .meta { color: #5b6170; font: 10.5px/1.6 system-ui, sans-serif; font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .act { color: var(--accent-2); border: 1px solid #23405e; border-radius: 99px; padding: 0 6px; }
 
 /* control tab */
@@ -206,7 +205,6 @@ button.link:hover { color: var(--text); }
 .library .track { width: 100%; text-align: left; background: none; border: 0; border-radius: 5px; padding: 4px 7px;
   overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .library .track:hover { background: #1d2029; }
-h2 .pill { text-transform: uppercase; }
 h2 .pill.on { color: #57d38c; border-color: #1f5a3a; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip { flex: 0 0 auto; padding: 4px 9px; border-radius: 99px; font-size: 12px; }
@@ -219,7 +217,7 @@ h2 .pill.on { color: #57d38c; border-color: #1f5a3a; }
 .cli-out li.err { color: #ff8a8a; }
 .services { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 12px; }
 .services li { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 0; break-inside: avoid; }
-.services li small { margin-left: auto; color: #5b6170; font: 10px ui-monospace, Menlo, monospace; }
+.services li small { margin-left: auto; color: #5b6170; font-size: 11px; }
 
 /* logs */
 .log-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
@@ -327,14 +325,14 @@ button[aria-pressed="true"], .seg button[aria-pressed="true"] { border-color: va
 label.field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 label.field select { margin: 0; }
 .kv { display: flex; align-items: baseline; gap: 8px; margin: 4px 0; color: var(--muted); font-size: 12px; }
-.kv output, .kv b { margin-left: auto; color: var(--text); font: 500 12px ui-monospace, Menlo, monospace; }
+.kv output, .kv b { margin-left: auto; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .kv[hidden] { display: none; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Viewport overlays: the state chip, frame stats, captions (Scene -> Overlays). */
 .frame-stats { position: fixed; top: 46px; left: calc(var(--scene-space, 12px) + 4px); padding: 3px 8px; border-radius: 6px;
   background: rgba(10,11,15,.72); border: 1px solid var(--line); color: var(--muted); pointer-events: none;
-  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .frame-stats[hidden] { display: none; }
 body.no-captions #caption { display: none; }
 .state-badge[data-state="bench"]::before { background: var(--warn); }
@@ -347,7 +345,6 @@ body:not(.live) [data-live] { display: none !important; }
 /* Behaviour */
 details.override { margin-top: 4px; }
 details.override > summary, details.debug > summary, #show-system summary { cursor: pointer; color: var(--muted); font-size: 12px; }
-details.override > summary { display: inline-block; font-size: 11px; }
 details.override[open] > summary { margin-bottom: 6px; }
 
 /* Shows */
@@ -362,24 +359,24 @@ details.override[open] > summary { margin-bottom: 6px; }
 #home-state.on { color: #57d38c; }
 .out-group + .out-group { margin-top: 10px; }
 .og-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; font-size: 12px; }
-.og-head small { color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
+.og-head small { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .og-head button.link { margin-left: auto; font-size: 11px; }
 button.link:disabled { opacity: .4; }
 .table-wrap { overflow-x: auto; }
-.joints-table { width: 100%; border-collapse: collapse; font: 11px/1.5 ui-monospace, Menlo, monospace; table-layout: fixed; }
+.joints-table { width: 100%; border-collapse: collapse; font: 12px/1.5 system-ui, sans-serif; table-layout: fixed; }
 .joints-table thead th { text-align: left; color: #5b6170; font-weight: 500; padding: 0 4px 2px; }
-.joints-table th:first-child { width: 92px; }
-.joints-table th.num, .joints-table td.num { text-align: right; width: 58px; }
-.joints-table th:last-child { width: 50px; }
+.joints-table th:first-child { width: 128px; }
+.joints-table th.num, .joints-table td.num { text-align: right; width: 58px; font: 11px/1.5 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.joints-table th:last-child { width: 30px; }
 .joints-table td, .joints-table tbody th { padding: 1px 4px; border-bottom: 1px solid var(--line); font-weight: 400; text-align: left;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.joints-table tr.grp th { padding-top: 8px; color: var(--muted); font: 600 10px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .08em; }
+.joints-table tr.grp th { padding-top: 10px; color: var(--muted); font: 600 11.5px system-ui, sans-serif; }
 .joints-table td.num { color: var(--text); }
 .joints-table td.home { color: var(--muted); }
 .joints-table tr.off td.num:not(.home) { color: #ffc94d; }
 .joints-table tr[data-joint]:hover > * { background: rgba(92,240,255,.07); }
 .joints-table td.jog input { width: 100%; margin: 0; }
-.joints-table button { width: 100%; padding: 0 4px; font-size: 10px; }
+.joints-table button { width: 100%; padding: 0 4px; font-size: 12px; line-height: 18px; }
 
 /* System: logs in the panel read in two lines (time, level, source; then the message). */
 section.logs .log { height: min(46vh, 420px); flex: none; }
@@ -457,15 +454,170 @@ details.debug small { opacity: .7; }
 /* Electronics tab (electronics.ts) */
 .elec-pick { display: flex; align-items: center; gap: 8px; }
 .elec-pick select { flex: 1; min-width: 0; }
-table.elec { width: 100%; border-collapse: collapse; font: 11px/1.45 ui-monospace, Menlo, monospace; }
+table.elec { width: 100%; border-collapse: collapse; font: 12px/1.45 system-ui, sans-serif; }
 table.elec th { text-align: left; color: #5b6170; font-weight: 500; border-bottom: 1px solid var(--line); padding-right: 6px; }
 table.elec td { color: var(--muted); padding: 2px 6px 2px 0; vertical-align: top; }
-table.elec td.num { text-align: right; white-space: nowrap; }
+table.elec td.num { text-align: right; white-space: nowrap; font: 11px ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
 table.elec a, .elec-list a { color: var(--accent); }
 .elec-list { margin: 4px 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
-.support { font: 500 10px ui-monospace, Menlo, monospace; padding: 0 5px; border-radius: 3px; border: 1px solid currentColor; }
+.support { font: 500 10.5px system-ui, sans-serif; padding: 0 5px; border-radius: 3px; border: 1px solid currentColor; }
 .support.driven { color: #3ddc84; }
 .support.partial { color: #f5b642; }
 .support.listed { color: #8a90a0; }
 abbr.inferred { color: var(--warn); font-size: 10px; text-decoration: underline dotted; cursor: help; }
 #electronics-slot h3 { font-size: 12px; margin: 14px 0 4px; }
+
+/* ================================================================== panel grammar (2026-10 redesign)
+   One of each: section heading (h2, above), disclosure (chevron summary), boolean (a switch),
+   choice (a segmented group, selected = filled), primary action (orange fill, one per surface).
+   Mono only for numbers and code. */
+[hidden] { display: none !important; }
+#panel { z-index: 6; } /* above the viewport's joint labels, like the Scene panel */
+input[type=range] { accent-color: var(--accent); }
+kbd { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
+/* Disclosure: a chevron that turns; the same everywhere. */
+details > summary { list-style: none; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 7px; width: max-content; max-width: 100%; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: ""; flex: none; width: 5px; height: 5px; margin: 0 1px 0 2px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform .12s; }
+details[open] > summary::before { transform: rotate(45deg); }
+details > summary:hover { color: var(--text); }
+details > summary small { font-weight: 400; opacity: .75; }
+details > summary h2 { margin: 0; }
+details > summary:hover h2 { color: var(--text); }
+details[open] > summary { margin-bottom: 8px; }
+@media (prefers-reduced-motion: reduce) { details > summary::before { transition: none; } }
+
+/* Boolean: a switch. A standalone toggle button is a row (label left, switch right); a checkbox
+   is the switch itself. */
+input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: 28px; height: 16px; margin: 0; border-radius: 99px;
+  cursor: pointer; background: #2a2e38 radial-gradient(circle 5.5px at 8px 50%, #8a909c 96%, transparent 100%); transition: background .12s; }
+input[type=checkbox]:checked { background: rgba(232,118,42,.38) radial-gradient(circle 5.5px at 20px 50%, var(--accent) 96%, transparent 100%); }
+input[type=checkbox]:disabled { opacity: .45; cursor: default; }
+input[type=checkbox]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+label.check { display: flex; align-items: center; justify-content: space-between; flex-direction: row-reverse; gap: 10px;
+  margin: 2px 0; padding: 4px 0; color: var(--text); font-size: 12.5px; cursor: pointer; }
+label.check small { color: var(--muted); }
+button.toggle:not(.rail button) { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+  background: none; border: 0; border-radius: 6px; padding: 5px 0; color: var(--text); text-align: left; font-size: 12.5px; }
+button.toggle:not(.rail button)::after { content: ""; flex: none; width: 28px; height: 16px; border-radius: 99px;
+  background: #2a2e38 radial-gradient(circle 5.5px at 8px 50%, #8a909c 96%, transparent 100%); transition: background .12s; }
+button.toggle:not(.rail button)[aria-pressed="true"] { color: var(--text); border: 0; }
+button.toggle:not(.rail button)[aria-pressed="true"]::after { background: rgba(232,118,42,.38) radial-gradient(circle 5.5px at 20px 50%, var(--accent) 96%, transparent 100%); }
+button.toggle:not(.rail button):hover { color: var(--text); }
+button.toggle:not(.rail button):disabled { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { input[type=checkbox], button.toggle::after { transition: none; } }
+
+/* Choice: a segmented group; the picked one is filled (orange is for the primary action). */
+.seg, .vb-seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: #0f1117; margin: 0 0 6px; }
+.seg button, .vb-seg button { flex: 1 1 0; min-width: 0; background: none; border: 1px solid transparent; border-radius: 6px; padding: 5px 6px;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.seg button:hover, .vb-seg button:hover { color: var(--text); border-color: transparent; }
+.seg button.on, .seg button[aria-pressed="true"], .seg button[aria-checked="true"], .seg button[aria-selected="true"],
+.vb-seg button[aria-pressed="true"], .vb-seg button[aria-checked="true"] { background: #2a2f3b; border-color: #3f4554; color: var(--text); }
+.stage-modes { margin: 0 0 8px; }
+.stage-modes button { padding: 6px 4px; font-weight: 600; }
+.chip.on, .chip[aria-pressed="true"] { background: #2a2f3b; border-color: #3f4554; color: var(--text); }
+/* Outputs are on/off states, many at once: on reads as lit (a tinted accent chip), not as "selected". */
+#drive-outputs .chip[aria-pressed="true"] { background: rgba(232,118,42,.12); border-color: var(--accent); color: var(--text); }
+
+/* Header: the connection pill (Live / Demo), Diagnostics, collapse. */
+#panel header .status { margin-left: auto; margin-right: 6px; }
+#panel header .icon { position: relative; }
+#panel header .icon + .icon { margin-left: 4px; }
+#diag-open .count { position: absolute; top: -5px; right: -5px; margin: 0; }
+#diag-open[aria-pressed="true"] { border-color: #3f4554; background: #2a2f3b; color: var(--text); }
+body.r3x-collapsed #diag-open { display: none; }
+
+/* Tabs: More holds the mode's occasional tabs (Build: Steps, Electronics). */
+.tabs { position: relative; }
+.tabs button.in-more { display: none; }
+.tabs .tab-more { flex: 0 0 auto; margin-left: auto; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  color: var(--muted); padding: 8px 10px; font-weight: 600; }
+.tabs .tab-more::after { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 0 3px 7px; border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.tabs .tab-more[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .tab-more:hover { color: var(--text); }
+.more-menu { position: absolute; right: 14px; z-index: 8; margin-top: 2px; min-width: 150px; display: grid; gap: 2px; padding: 4px;
+  background: #171a22; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+.more-menu button { text-align: left; background: none; border: 0; padding: 6px 10px; }
+.more-menu button:hover, .more-menu button:focus-visible { background: #232733; }
+.more-menu button[aria-current="true"] { color: var(--accent); }
+
+/* Diagnostics: takes the panel (wider, for the logs) until Done. */
+body.diag-open #panel { width: min(620px, calc(100vw - 340px)); }
+body.diag-open #panel .tabs, body.diag-open #more-menu { display: none; }
+.diag-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.diag-head h2 { margin: 0; font-size: 14px; color: var(--text); }
+.diag-head .link { font-size: 12.5px; color: var(--accent); margin: 0; }
+.diag-body > section.first { border-top: 0; margin-top: 4px; padding-top: 0; }
+#diag-profile .rig-choice { display: flex; align-items: center; gap: 10px; }
+#diag-profile .rig-label { color: var(--muted); font-size: 12.5px; }
+#diag-profile .seg { flex: 1; margin: 0; }
+section.logs .log { height: min(42vh, 380px); }
+section.logs .log:empty { height: 64px; }
+
+/* The viewport bar: camera presets and the look (every mode); Build adds its breadcrumb. */
+.view-bar { position: fixed; top: 12px; left: calc(var(--scene-space, 12px) + 12px); right: calc(var(--panel-space, 404px) + 12px);
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 10px; pointer-events: none; z-index: 5; }
+.view-bar > * { pointer-events: auto; }
+.vb-seg { margin: 0; background: rgba(14,16,21,.82); backdrop-filter: blur(6px); }
+.vb-seg button { flex: 0 0 auto; padding: 4px 11px; font-size: 12.5px; }
+.vb-seg .vb-icon { padding: 4px 7px; display: grid; place-items: center; }
+.vb-seg .vb-icon svg { width: 14px; height: 14px; }
+body[data-mode="build"] .vb-cams { display: none; }
+.vb-note { flex-basis: 100%; text-align: center; margin: 0; font-size: 11.5px; color: var(--muted); }
+.vb-note.err { color: var(--warn); }
+.vb-note > * { pointer-events: auto; }
+
+/* The state chip says only a live conversation phase now; it sits under the bar. */
+.state-badge { top: 56px; }
+.frame-stats { top: 56px; }
+
+/* Scene panel: View (settings) outside Build, Build (the navigator) in it. */
+#scene-panel h1 span { color: inherit; font-weight: inherit; }
+#scene-panel h1 .h-build { display: none; }
+body[data-mode="build"] #scene-panel h1 .h-view { display: none; }
+body[data-mode="build"] #scene-panel h1 .h-build { display: inline; }
+body:not(.pad-open) #sc-pad, body:not(.pad-open) #scene-body > section#sc-pad { display: none; }
+#sc-pad h2 { display: flex; align-items: center; }
+#sc-pad h2 .link { margin-left: auto; }
+#scene-body > section:not([hidden]):first-of-type, #scene-body > section.first { border-top: 0; margin-top: 0; padding-top: 4px; }
+#sc-perf .rs-body > .field { margin-bottom: 4px; }
+#sc-perf .rs-group { margin-top: 10px; }
+
+/* Perform */
+.sh-find { margin: 8px 0 0; }
+.sh-find input { margin: 0; }
+.sh-find button { flex: 0 0 auto; }
+details.opts { margin-top: 10px; }
+#show-system > details:not(.opts) { margin-top: 6px; }
+#show-now { margin-top: 2px; }
+
+/* Rig */
+.home-one { line-height: 1; }
+section.cal > details > summary { margin-bottom: 0; }
+section.cal > details[open] > summary { margin-bottom: 8px; }
+
+/* Electronics: the reference tables open in a sheet over the viewport. */
+dialog.sheet { width: min(980px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 0; color: var(--text);
+  background: #12141b; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+dialog.sheet::backdrop { background: rgba(4,5,8,.55); }
+.sheet-body { padding: 16px 20px 22px; overflow: auto; max-height: calc(100vh - 66px); }
+.sheet-body header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.sheet-body header h2 { margin: 0; font-size: 15px; color: var(--text); display: flex; gap: 10px; align-items: center; }
+.sheet-desc { color: var(--muted); font-size: 12.5px; max-width: 72ch; margin: 0 0 6px; }
+.sheet-body h3 { font-size: 12.5px; margin: 16px 0 6px; color: var(--text); }
+.sheet-body table.elec td, .sheet-body table.elec th { padding: 3px 12px 3px 0; }
+#electronics-slot .elec-pick { margin-bottom: 8px; }
+#electronics-slot .elec-pick label { color: var(--muted); font-size: 12.5px; }
+#electronics-slot .elec-pick select { margin: 0; }
+
+/* Phones: the R3X panel is the bottom sheet, full width and above the viewport labels. */
+@media (max-width: 720px) {
+  #panel { width: auto; z-index: 7; }
+  body.diag-open #panel { width: auto; }
+  .view-bar { top: 8px; }
+}

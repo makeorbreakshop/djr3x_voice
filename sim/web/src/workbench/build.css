@@ -2,18 +2,28 @@
 
 body:not([data-mode="build"]) [data-build] { display: none !important; }
 /* In Build the droid is not drawn: his camera presets, overlays and controller stand aside. */
-body[data-mode="build"] :is(#sc-view, #sc-overlays, #sc-pad, #caption, #centre-labels, #frame-stats.hide-in-build),
-body[data-mode="build"] #scene-panel .rail :is([data-scene-open="sc-view"], [data-scene-open="sc-overlays"], [data-scene-open="sc-pad"]) { display: none !important; }
+body[data-mode="build"] :is(#sc-overlays, #sc-pad, #caption, #centre-labels, #frame-stats.hide-in-build),
+body[data-mode="build"] #scene-panel .rail :is([data-scene-open="sc-overlays"], [data-scene-open="sc-pad"]) { display: none !important; }
 /* Build lights itself (workbench.ts INSPECTION): the set's work light does not apply */
 body[data-mode="build"] #scene-work { display: none !important; }
 body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
 .state-badge[data-state="build"]::before { background: #57d38c; }
 
-#sc-build .kv { margin: 12px 0 4px; }
 #sc-build select { width: auto; flex: 1; margin: 0; padding: 5px 6px; }
 #sc-build .row button.icon { width: 32px; height: auto; }
-#sc-build .bv-src { margin-bottom: 2px; }
-#sc-build .bv-src button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+.bv-head { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.bv-head .seg { flex: 1; margin: 0; }
+.bv-head button.icon { width: 30px; height: 30px; }
+#bv-search { width: 100%; margin: 0 0 4px; }
+.bv-h { display: flex; align-items: baseline; gap: 6px; margin: 14px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.bv-h small { font-weight: 400; opacity: .8; }
+.bv-h .link { margin-left: auto; }
+details.bv-parts { margin-top: 12px; }
+details.bv-parts > summary { font-size: 12px; }
+#sc-build > .seg { margin-bottom: 4px; }
+#sc-build > label.inline { margin: 6px 0; }
+#sc-build > .row { margin-top: 6px; }
+#bv-frame { flex: 0 0 auto; }
 #sc-build [role="tabpanel"][hidden], #bv-inspect[hidden] { display: none; }
 
 /* Systems, assemblies, library: one row each, the name and a short fact */
@@ -23,21 +33,18 @@ body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top:
   border-color: transparent; padding: 5px 8px; font-size: 12.5px; }
 .bv-list button:hover { background: #1a1d25; border-color: transparent; }
 .bv-list button span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.bv-list button small { flex: 0 0 auto; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.bv-list button[aria-pressed="true"] { background: rgba(232,118,42,.12); border-color: transparent; color: var(--accent); }
+.bv-list button small { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.bv-list button[aria-pressed="true"] { background: rgba(232,118,42,.12); border-color: transparent; color: var(--text); box-shadow: none; }
 .bv-list button[aria-pressed="true"] small { color: inherit; opacity: .8; }
 .bv-list .empty { padding: 4px 8px; }
 .bv-tree li.var { padding-top: 2px; padding-bottom: 2px; }
-.bv-tree .bp-var { grid-template-columns: 74px minmax(0, 1fr); padding-left: 8px; }
+.bv-tree .bp-var { grid-template-columns: minmax(0, 1fr); gap: 2px; padding-left: 8px; } /* label over a full-width picker: no clipped option */
 .bv-tree .bp-var select { padding: 3px 6px; font-size: 12px; }
 #sc-build .bv-section { margin-top: 10px; }
 #sc-build .bv-section[open] > summary { margin-bottom: 6px; }
 #sc-build #bv-inspect { margin-top: 10px; }
 
-/* The viewport bar: breadcrumb (Esc steps out) and the look, centred over the model */
-.build-bar { position: fixed; top: 12px; left: calc(var(--scene-space, 12px) + 150px); right: calc(var(--panel-space, 404px) + 12px);
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 12px; pointer-events: none; z-index: 5; }
-.build-bar > * { pointer-events: auto; }
+/* The viewport bar (index.html, style.css): Build's breadcrumb (Esc steps out) beside the look */
 .bb-crumbs { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 8px; background: rgba(14,16,21,.82);
   border: 1px solid var(--line); font-size: 12.5px; backdrop-filter: blur(6px); }
 .bb-crumbs button { flex: 0 0 auto; background: none; border-color: transparent; padding: 3px 8px; color: var(--muted); }
@@ -46,34 +53,22 @@ body[data-mode="build"] #scene-body > section.first:not(#sc-build) { border-top:
 .bb-crumbs span { color: #5b6170; }
 .bb-crumbs[hidden] { display: none; }
 .bb-crumbs b { font-weight: 600; padding: 3px 8px 3px 2px; }
-.bb-looks { display: flex; gap: 0; margin: 0; padding: 3px; border-radius: 8px; background: rgba(14,16,21,.82);
-  border: 1px solid var(--line); backdrop-filter: blur(6px); }
-.bb-looks button { flex: 0 0 auto; background: none; border-color: transparent; padding: 4px 12px; font-size: 12.5px; color: var(--muted); }
-.bb-looks button:hover { color: var(--text); border-color: transparent; }
-.bb-looks button[aria-checked="true"] { background: #262a35; color: var(--text); border-color: #3a404d; }
 
-/* head: assembly picker (+ rebuild), sub-assembly picker, status only when there is one */
-.build-head { padding: 10px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
-.bh-row { display: flex; gap: 6px; }
-.bh-row select { flex: 1; min-width: 0; margin: 0; }
-.bh-row button.icon { width: 32px; height: 32px; }
-.bh-title { flex: 1 1 0; min-width: 0; overflow: hidden; margin: 0; color: var(--text); display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+/* Inspect: the focus's name, then the selected part, then its joints */
+.bh-title { min-width: 0; overflow: hidden; margin: 0 0 8px; color: var(--text); display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
 .bh-title .bh-name { flex: 0 0 auto; white-space: nowrap; }
 .bh-title small { flex: 0 1 auto; color: var(--muted); font-size: 12px; font-weight: 400; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bh-title button.ic { margin-left: -2px; }
-.bp-load { margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-.bp-load > summary { cursor: pointer; color: var(--muted); font-size: 12px; width: max-content; }
-.bp-load > summary:hover { color: var(--text); }
+.bp-load { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .joint.fixed { opacity: .55; }
-.build-head > select { margin: 0; }
-.bh-status { margin: 0; font-size: 12px; color: var(--muted); }
+.bh-status { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
 .bh-status.err { color: #ff8a8a; }
-.bh-status[hidden], .build-head > select[hidden] { display: none; }
+.bp-sum { margin: 0 0 8px; font-size: 12.5px; color: var(--text); }
 
 /* shared */
-.ptag { font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-2); white-space: nowrap; }
+.ptag { font: 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: #6b7280; white-space: nowrap; }
 .ptag.none { color: #5b6170; }
-sup.inf { color: var(--warn); font: 600 10px ui-monospace, Menlo, monospace; margin-left: 2px; cursor: help; }
+sup.inf { color: var(--warn); font: 600 10.5px system-ui, sans-serif; margin-left: 2px; cursor: help; }
 .bad { color: #ff8a8a; }
 .meh { color: var(--warn); }
 .mono { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -104,7 +99,7 @@ i.src.placeholder { background: none; border: 1.5px dashed #ff8a8a; border-radiu
 .bp-parts-body[hidden] { display: none; }
 .bp-filters { display: flex; flex-wrap: wrap; gap: 4px; }
 .bp-filters .chip { flex: 0 0 auto; padding: 2px 8px; border-radius: 99px; font-size: 12px; }
-.bp-filters .chip span { color: var(--muted); font: 11px ui-monospace, Menlo, monospace; margin-left: 2px; }
+.bp-filters .chip span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: 2px; }
 .bp-filters .chip[aria-pressed="true"] span { color: inherit; }
 .bp-legend { display: flex; align-items: center; gap: 12px; margin: 8px 0 4px; font-size: 11px; color: var(--muted); }
 .bp-legend span { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
@@ -116,7 +111,7 @@ i.src.placeholder { background: none; border: 1.5px dashed #ff8a8a; border-radiu
 .part-tree .grp-btn span { font-weight: 400; color: var(--muted); }
 .part-tree .grp-btn:hover span, .part-tree .grp-btn[aria-pressed="true"] span { color: var(--accent); }
 .part-tree .grp-btn[aria-pressed="true"] { color: var(--accent); }
-.part-tree .grp-n { font: 11px ui-monospace, Menlo, monospace; color: #5b6170; }
+.part-tree .grp-n { font-size: 11px; font-variant-numeric: tabular-nums; color: #5b6170; }
 .part-tree li.part { display: flex; align-items: center; gap: 7px; padding: 0 0 0 4px; border-radius: 6px; }
 .part-tree li.part:hover { background: #1a1d25; }
 .part-tree li.part.sel { background: rgba(232,118,42,.12); }
@@ -132,8 +127,7 @@ i.src.placeholder { background: none; border: 1.5px dashed #ff8a8a; border-radiu
 .part-tree li.off .acts .ic:first-child { color: var(--warn); }
 @media (hover: none) { .part-tree .acts { opacity: 1; } }
 
-.bp-drawer { position: sticky; bottom: -20px; margin: 10px -14px -20px; padding: 10px 14px 12px; background: #151821;
-  border-top: 1px solid var(--line); box-shadow: 0 -8px 16px rgba(0,0,0,.25); }
+.bp-drawer { margin: 0 0 12px; padding: 10px 12px 12px; background: #151821; border: 1px solid var(--line); border-radius: 8px; }
 .bp-drawer[hidden] { display: none; }
 .dr-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .dr-head b { flex: 1; min-width: 0; font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
@@ -151,7 +145,7 @@ dl.facts a { color: var(--accent-2); margin-right: 10px; }
 .jhead b { font-weight: 600; cursor: help; }
 .jhead output { margin-left: auto; font: 12px ui-monospace, Menlo, monospace; color: var(--text); min-width: 3.4em; text-align: right; }
 .joint input[type=range] { width: 100%; margin: 4px 0 0; }
-.jlive { font: 11px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); margin-top: 2px; }
+.jlive { font-size: 11.5px; line-height: 1.5; font-variant-numeric: tabular-nums; color: var(--muted); margin-top: 2px; }
 .jlive[hidden] { display: none; }
 
 /* Steps */
@@ -175,12 +169,12 @@ ul.notes li::before { content: ""; position: absolute; left: 2px; top: .75em; wi
 .step-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .step-list button { width: 100%; display: flex; gap: 8px; text-align: left; background: none; border-color: transparent; padding: 3px 6px;
   font-size: 12px; white-space: normal; }
-.step-list button span { color: #5b6170; font: 11px ui-monospace, Menlo, monospace; min-width: 1.6em; }
+.step-list button span { color: #5b6170; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 1.6em; }
 .step-list button:hover { background: #1d2029; }
 .step-list button.on { border-color: var(--accent-2); color: var(--text); }
 
 /* Checks: status + one-line title, cause -> fix in two short lines, the rest behind Details */
-.st { font: 600 10px/1 ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .04em; }
+.st { font: 600 11px/1 system-ui, sans-serif; }
 .st.pass { color: #57d38c; }
 .st.warn { color: var(--warn); }
 .st.fail { color: #ff6b6b; }
@@ -199,13 +193,11 @@ ul.notes li::before { content: ""; position: absolute; left: 2px; top: .75em; wi
 .checks .l2 { color: var(--text); }
 .checks .bp-disc { margin: 2px 0 0 28px; }
 .checks li.chk .st { font-size: 12px; text-align: center; text-transform: none; }
-/* Six tabs in Build: tighter so System stays on the row at 1024. */
-body[data-mode="build"] #panel .tabs button { padding-left: 7px; padding-right: 7px; }
+
 .checks .bp-disc li { margin: 2px 0; }
-.tabs button[data-tab="checks"][data-status="fail"]::after,
+/* Checks: a count of what to fix (the badge); something only to watch gets a dot. */
 .tabs button[data-tab="checks"][data-status="warn"]::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
   margin-left: 5px; vertical-align: middle; background: var(--warn); }
-.tabs button[data-tab="checks"][data-status="fail"]::after { background: #ff6b6b; }
 
 /* BOM */
 table.bom { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -215,30 +207,37 @@ table.bom td.num, table.bom th.num { text-align: right; width: 34px; font-family
 table.bom td.exp { white-space: nowrap; }
 table.bom a { color: var(--accent-2); text-decoration: none; }
 table.bom a:hover { text-decoration: underline; }
-table.bom td.exp a { margin-left: 6px; font: 11px ui-monospace, Menlo, monospace; }
+table.bom td.exp a { margin-left: 6px; font-size: 11px; }
 table.bom tr.grp th { text-align: left; padding: 12px 4px 3px; color: var(--text); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
 table.bom .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.25); }
-table.bom td.dim { color: #5b6170; font: 11px ui-monospace, Menlo, monospace; }
+table.bom td.dim { color: #5b6170; font: 11px ui-monospace, Menlo, monospace; } /* a colour hex: code */
 table.bom td.warn { color: #e0a43a; }
-table.bom tr.grp th span { color: #5b6170; font: 400 11px ui-monospace, Menlo, monospace; margin-left: 4px; }
+table.bom tr.grp th span { color: #5b6170; font-weight: 400; font-size: 11px; margin-left: 4px; }
 table.bom tr.grp:first-child th { padding-top: 0; }
 .bp-var { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .bp-var select { margin: 0; padding: 3px 6px; min-width: 0; }
 
-/* Interference overlay list (Scene > Build view > Overlays) */
-#sc-build .intf { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow: auto; }
-#sc-build .intf button { display: flex; width: 100%; justify-content: space-between; gap: 8px; text-align: left;
-  font-size: 12px; padding: 4px 6px; background: none; border: 0; border-left: 3px solid transparent; }
-#sc-build .intf li.hot button { border-left-color: #ff3b30; }
-#sc-build .intf li.known button { border-left-color: #f2c230; opacity: 0.8; }
-#sc-build .intf button span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#sc-build .intf .d { font-variant-numeric: tabular-nums; flex: none; }
-#bv-intf .n { font-variant-numeric: tabular-nums; opacity: 0.8; margin-left: 4px; }
-.bh-row select[hidden] { display: none; }
+/* Checks: overlaps at rest and servo torque, one row each; the status glyph carries the colour */
+.intf { list-style: none; margin: 0 0 6px; padding: 0; }
+.intf button, .intf li.tq { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; width: 100%;
+  text-align: left; font-size: 12px; padding: 4px 6px; background: none; border: 0; border-radius: 6px; }
+.intf button:hover { background: #1a1d25; }
+.intf li.hot button::before { content: "✕"; color: #ff6b6b; font-weight: 600; }
+.intf li.known button::before { content: "i"; color: var(--accent-2); font-weight: 600; text-align: center; }
+.intf li.known button { color: var(--muted); }
+.intf button span:first-child, .intf li.tq span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.intf .d { font: 11px ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; color: var(--muted); }
+.intf li.known-group { padding: 4px 0 0 6px; }
+.intf li.known-group .intf { margin-top: 2px; }
+#bv-inspect, #bp-torque { margin-bottom: 8px; }
+#bv-inspect .bv-h:first-child, .tab-body > .bp-sum + #bv-inspect .bv-h { margin-top: 4px; }
 @media (max-width: 720px) {
-  /* phones: under the badge, beside the Scene rail, above the R3X sheet */
-  .build-bar { top: 46px; left: 66px; right: 8px; justify-content: flex-start; }
+  /* phones: beside the Scene rail, above the R3X sheet */
+  .view-bar { left: 66px; right: 8px; justify-content: flex-start; }
 }
 /* Library rows: the design, its author under it (names are long) */
 .bv-list button.lib { flex-direction: column; align-items: stretch; gap: 1px; }
 .bv-list button.lib small { font: 11.5px system-ui, sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.servo-toggle { display: inline-flex; margin: 0 0 0 8px; }
+.servo-toggle button { flex: 0 0 auto; padding: 2px 10px; font-size: 12px; }

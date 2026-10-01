@@ -72,7 +72,7 @@ const FILTERS: [Filter, string, (p: MPart) => boolean][] = [
   ['printed', 'Printed', (p) => p.printed === true || p.class === 'shell' || p.class === 'mech'],
   ['hardware', 'Hardware', (p) => p.class === 'hardware' || p.class === 'bearing'],
   ['servos', 'Servos', (p) => p.class === 'servo'],
-  ['notreal', 'Not real', (p) => notReal(p.cad)],
+  ['notreal', 'Unmodelled', (p) => notReal(p.cad)],
   ['inferred', 'Inferred', (p) => !!p.inferred],
 ];
 
@@ -80,6 +80,11 @@ const FILTERS: [Filter, string, (p: MPart) => boolean][] = [
  * Build's markup, added to the page's two panels before they are wired (main.ts calls this
  * before mountPanels / ControlPanel so their tab and rail bindings see it). Kept here rather
  * than in index.html so Build stays one module.
+ *
+ * Left (Scene panel, titled Build): the navigator - search, systems, assemblies, parts, and the
+ * view controls that never change the model. Right (R3X panel): the inspector for what is in
+ * focus (Inspect), every check result (Checks, with a count), BOM; Steps and Electronics under
+ * More. The look (Exterior / Mechanism / X-ray) is the viewport bar's (index.html).
  */
 export function injectBuildDom() {
   if (document.getElementById('sc-build')) return;
@@ -88,107 +93,96 @@ export function injectBuildDom() {
     t.innerHTML = s.trim();
     return t.content;
   };
-  // Scene panel: rail icon + the view section, first.
+  // Scene panel: rail icon + the navigator, first.
   const rail = document.querySelector('#scene-panel .rail')!;
-  rail.prepend(html(`<button data-scene-open="sc-build" data-build aria-label="Build view" title="Build view">
+  rail.prepend(html(`<button data-scene-open="sc-build" data-build aria-label="Build navigator" title="Build navigator">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 14 5v6l-6 3.5L2 11V5z"/><path d="M2 5l6 3.5L14 5M8 8.5v6"/></svg></button>`));
   document.getElementById('scene-body')!.prepend(html(`<section id="sc-build" class="first" data-build>
-    <h2>Build</h2>
-    <div class="row seg bv-src" role="tablist" aria-label="Model">
-      <button role="tab" id="bv-tab-build" data-src="build" aria-selected="true" aria-controls="bv-build-pane">Our build</button>
-      <button role="tab" id="bv-tab-lib" data-src="library" aria-selected="false" aria-controls="bv-lib-pane">Library</button>
+    <div class="bv-head">
+      <div class="seg bv-src" role="tablist" aria-label="Model">
+        <button role="tab" id="bv-tab-build" data-src="build" aria-selected="true" aria-controls="bv-build-pane">Our build</button>
+        <button role="tab" id="bv-tab-lib" data-src="library" aria-selected="false" aria-controls="bv-lib-pane">Library</button>
+      </div>
+      <button id="bp-reload" class="icon" aria-label="Reload the built assembly">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5"/></svg></button>
     </div>
+    <select id="bp-assembly" aria-label="Manifest" hidden></select>
+    <p id="bp-status" class="bh-status" role="status" hidden></p>
+    <input id="bv-search" type="search" placeholder="Find a part, joint or assembly&hellip;" aria-label="Find in the build" autocomplete="off" spellcheck="false">
     <div id="bv-build-pane" role="tabpanel" aria-labelledby="bv-tab-build">
-      <div class="kv">Systems</div>
-      <ul id="bv-systems" class="bv-list" aria-label="Motion systems"></ul>
-      <div class="kv">Assemblies</div>
-      <ul id="bv-tree" class="bv-list bv-tree" aria-label="Assemblies"></ul>
+      <h3 class="bv-h" id="bv-systems-h">Systems</h3>
+      <ul id="bv-systems" class="bv-list" aria-labelledby="bv-systems-h"></ul>
+      <h3 class="bv-h" id="bv-tree-h">Assemblies</h3>
+      <ul id="bv-tree" class="bv-list bv-tree" aria-labelledby="bv-tree-h"></ul>
+      <details id="bv-parts-d" class="bv-parts"><summary>Parts <small id="bv-parts-n"></small></summary>
+        <div class="bp-filters" id="bp-filters" role="group" aria-label="Show parts"></div>
+        <div class="bp-legend">${(['parametric', 'vendor', 'mesh'] as Src[]).map((k) => `<span title="${esc(SRC_TITLE[k])}">${srcDot(k)}${SRC_LABEL[k]}</span>`).join('')}
+          <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button></div>
+        <ul id="bp-parts" class="part-tree" aria-label="Parts by link"></ul>
+      </details>
     </div>
     <div id="bv-lib-pane" role="tabpanel" aria-labelledby="bv-tab-lib" hidden>
       <ul id="bv-library" class="bv-list" aria-label="Published designs"></ul>
     </div>
-    <div class="kv">Around the focus</div>
-    <div class="row seg" role="group" aria-label="Around the focus">
+    <h3 class="bv-h">Others</h3>
+    <div class="seg" role="group" aria-label="The rest of the droid">
       <button data-ctx="ghost" aria-pressed="true" title="The rest of the droid as a light ghost">Ghost</button>
       <button data-ctx="hide" aria-pressed="false" title="Only what is in focus">Hide</button>
     </div>
     <label class="inline">Explode <input id="bv-explode" type="range" min="0" max="1" step="0.01" value="0"><output id="bv-explode-out">0%</output></label>
-    <div class="row">
-      <button id="bv-fasteners" aria-pressed="true" title="Screws, inserts, nuts and washers">Fasteners</button>
-      <button id="bv-frame" title="Point the camera at what is in focus (F)">Frame</button>
-    </div>
-    <details class="bp-disc bv-section" id="bv-section-d"><summary>Section</summary>
+    <button id="bv-fasteners" class="toggle" aria-pressed="true" title="Screws, inserts, nuts and washers">Fasteners</button>
+    <details class="bv-section" id="bv-section-d"><summary>Section</summary>
       <div class="row">
-        <button id="bv-section" aria-pressed="false" title="Cut the model with a plane">Cut</button>
+        <button id="bv-section" class="toggle-btn" aria-pressed="false" title="Cut the model with a plane">Cut</button>
         <select id="bv-axis" aria-label="Section axis"><option value="x">X (side)</option><option value="y">Y (level)</option><option value="z">Z (front)</option></select>
         <button id="bv-flip" class="icon" aria-pressed="false" aria-label="Flip the kept side" title="Flip the kept side">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 5h8l-2-2M12 11H4l2 2"/></svg></button>
       </div>
-      <label class="inline">At <input id="bv-cut" type="range" min="0" max="1" step="0.005" value="0.5" disabled></label>
+      <label class="inline">Position <input id="bv-cut" type="range" min="0" max="1" step="0.005" value="0.5" disabled></label>
     </details>
-    <div id="bv-inspect" hidden>
-      <div class="stack">
-        <button id="bv-intf" aria-pressed="true" title="Parts that overlap at rest, as the test suite sees them: red unexplained, yellow explained">Interference <span id="bv-intf-n" class="n"></span></button>
-      </div>
-      <ul id="bv-intf-list" class="intf" hidden></ul>
-    </div>
+    <div class="row"><button id="bv-frame" title="Point the camera at what is in focus (F)">Frame <kbd>F</kbd></button></div>
   </section>`));
-  // The viewport's bar: where you are (Esc steps out) and the look.
-  document.body.append(html(`<div id="build-bar" class="build-bar" data-build>
-    <nav id="bb-crumbs" class="bb-crumbs" aria-label="Build location"></nav>
-    <div class="seg bb-looks" role="radiogroup" aria-label="Look">
-      <button role="radio" data-look="exterior" aria-checked="true" title="The shells in R3X's paint (1)">Exterior</button>
-      <button role="radio" data-look="mechanism" aria-checked="false" title="Shells off, parts in their real materials (2)">Mechanism</button>
-      <button role="radio" data-look="inspect" aria-checked="false" title="Ghosted, with the test suite's overlaps and the checks (3)">Inspect</button>
-    </div>
-  </div>`));
   // Operating-mode switches: Build first.
   for (const sel of ['.stage-modes', '.rail-modes']) {
     const box = document.querySelector(sel)!;
     const rail = sel === '.rail-modes';
     box.prepend(html(`<button role="radio" aria-checked="false" data-stage-mode="build" ${rail ? 'aria-label="Build" ' : ''}title="Build: inspect and assemble the mechanics. Sim only - never drives hardware">${rail ? 'Bu' : 'Build'}</button>`));
   }
-  // Tabs + bodies.
+  // Tabs + bodies: Inspect, Checks, BOM; Steps (and Electronics, index.html) under More.
   const tabs = document.querySelector('#panel .tabs')!;
-  tabs.prepend(html(['parts:Parts', 'joints:Joints', 'steps:Steps', 'checks:Checks', 'bom:BOM']
-    .map((t) => { const [id, label] = t.split(':'); return `<button role="tab" data-tab="${id}" data-modes="build">${label}</button>`; }).join('')));
-  const sys = tabs.querySelector<HTMLElement>('[data-tab="system"]');
-  if (sys) sys.dataset.modes = `${sys.dataset.modes ?? ''} build`.trim();
-  tabs.after(html(`<div id="build-head" class="build-head" data-build>
-    <div class="bh-row"><h3 id="bp-title" class="bh-title"></h3>
-      <select id="bp-assembly" aria-label="Manifest" hidden></select>
-      <button id="bp-reload" class="icon" aria-label="Reload the built assembly">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5"/></svg></button></div>
-    <p id="bp-status" class="bh-status" role="status" hidden></p>
-  </div>`));
+  tabs.prepend(html(`<button role="tab" data-tab="inspect" data-modes="build">Inspect</button>
+    <button role="tab" data-tab="checks" data-modes="build">Checks <span id="bp-check-badge" class="count" hidden></span></button>
+    <button role="tab" data-tab="bom" data-modes="build">BOM</button>
+    <button role="tab" data-tab="steps" data-modes="build" data-more="build">Steps</button>`));
   const bodies = html(`
-    <div class="tab-body bp-parts-body" data-body="parts" role="tabpanel" hidden>
-      <div class="bp-filters" id="bp-filters" role="group" aria-label="Show parts"></div>
-      <div class="bp-legend">${(['parametric', 'vendor', 'mesh'] as Src[]).map((k) => `<span title="${esc(SRC_TITLE[k])}">${srcDot(k)}${SRC_LABEL[k]}</span>`).join('')}
-        <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button></div>
-      <ul id="bp-parts" class="part-tree" aria-label="Parts by link"></ul>
+    <div class="tab-body" data-body="inspect" role="tabpanel" hidden>
+      <h3 id="bp-title" class="bh-title" hidden></h3>
       <div id="bp-detail" class="bp-drawer" role="region" aria-label="Selected part" hidden></div>
-    </div>
-    <div class="tab-body" data-body="joints" role="tabpanel" hidden>
-      <details id="bp-load" class="bp-load" open><summary>Servo load</summary></details>
       <div class="bp-bar"><span id="bp-joint-n" class="bp-count"></span>
         <button class="bp-small" data-bp="home" title="Every joint to 0, the rest pose. Moves the model only, never the robot">Home</button></div>
       <div id="bp-joints"></div>
+      <details id="bp-load" class="bp-load"><summary>Servo load</summary></details>
     </div>
     <div class="tab-body" data-body="steps" role="tabpanel" hidden>
       <div id="bp-step"></div>
       <details class="bp-disc" id="bp-steps-all"><summary>All steps</summary><ol id="bp-steplist" class="step-list"></ol></details>
     </div>
     <div class="tab-body" data-body="checks" role="tabpanel" hidden>
-      <div class="bp-bar"><span id="bp-check-sum" class="bp-count"></span></div>
+      <p id="bp-check-sum" class="bp-sum"></p>
+      <div id="bv-inspect" hidden>
+        <h3 class="bv-h">Overlaps at rest <small id="bv-intf-n"></small>
+          <button id="bv-intf" class="link" aria-pressed="false" title="Draw the overlaps in the view (X-ray look): red unexplained, yellow explained">Show in view</button></h3>
+        <ul id="bv-intf-list" class="intf"></ul>
+      </div>
+      <div id="bp-torque" hidden><h3 class="bv-h">Servo torque</h3><ul id="bp-torque-list" class="intf"></ul></div>
       <ul id="bp-checks" class="checks"></ul>
     </div>
     <div class="tab-body" data-body="bom" role="tabpanel" hidden>
-      <div class="bp-bar"><span id="bp-bom-sum" class="bp-count"></span></div>
+      <p id="bp-bom-sum" class="bp-sum"></p>
       <div class="table-wrap"><table class="bom"><thead><tr><th scope="col" class="num">Qty</th><th scope="col">Item</th><th scope="col"><span class="sr">Files</span></th></tr></thead>
         <tbody id="bp-bom"></tbody></table></div>
     </div>`);
-  document.getElementById('build-head')!.after(bodies);
+  tabs.parentElement!.querySelector('#more-menu')!.after(bodies);
 }
 
 export function mountBuildPanel(wb: Workbench) {
@@ -203,6 +197,10 @@ export function mountBuildPanel(wb: Workbench) {
   /** Scene panel: Our build or Library. */
   let src: 'build' | 'library' = 'build';
   let lastKind: string | null = null;
+  /** The navigator's search: filters systems, assemblies and parts by name. */
+  let query = '';
+  /** The suite's servo torque results (mech/out/checks.json), fetched with the index. */
+  let torque: TorqueRow[] = [];
 
   // ------------------------------------------------------------------ scene panel
   const explode = $<HTMLInputElement>('bv-explode');
@@ -217,14 +215,19 @@ export function mountBuildPanel(wb: Workbench) {
   $('bv-explode-out').textContent = `${Math.round(wb.explode * 100)}%`;
   if (st.look === 'exterior' || st.look === 'mechanism' || st.look === 'inspect') wb.look = st.look;
   if (st.context === 'ghost' || st.context === 'hide') wb.context = st.context;
+  /** The viewport bar's look is shared: Build's look here, the Model elsewhere (mechrig, `r3x:look`). */
   const setLook = (l: Look) => {
+    if (!wb.active) {
+      window.dispatchEvent(new CustomEvent('r3x:look', { detail: l }));
+      return;
+    }
     wb.setLook(l);
     st.look = l;
     save(st);
   };
   document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => (b.onclick = () => setLook(b.dataset.look as Look)));
   // Look: arrow keys move within the radio group
-  $('build-bar').addEventListener('keydown', (e) => {
+  $('view-bar').addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
     if (!t.dataset.look || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
     const i = LOOKS.indexOf(t.dataset.look as Look);
@@ -259,7 +262,11 @@ export function mountBuildPanel(wb: Workbench) {
     save(st);
   };
   $('bv-frame').onclick = () => wb.frame(false, true);
-  $('bv-intf').onclick = () => wb.setInterference(!wb.interferenceOn);
+  $('bv-intf').onclick = () => wb.setInterference(!(wb.interferenceOn && wb.look === 'inspect'));
+  $<HTMLInputElement>('bv-search').oninput = (e) => {
+    query = (e.target as HTMLInputElement).value.trim().toLowerCase();
+    render();
+  };
   $('bv-intf-list').onclick = (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-k]');
     if (b) wb.frameInterference(Number(b.dataset.k));
@@ -350,6 +357,7 @@ export function mountBuildPanel(wb: Workbench) {
 
   async function refreshIndex(reload = false) {
     index = await loadIndex();
+    torque = await loadTorque();
     pick.innerHTML = index.map((e) => `<option value="${esc(e.id)}">${esc(e.name)}</option>`).join('');
     if (!index.some((e) => e.id === openAsm)) openAsm = index.find((e) => e.id === OUR_BUILD)?.id ?? index[0]?.id ?? '';
     pick.value = openAsm;
@@ -377,7 +385,7 @@ export function mountBuildPanel(wb: Workbench) {
   });
 
   // ------------------------------------------------------------------ delegated clicks
-  document.getElementById('panel')!.addEventListener('click', (e) => {
+  const onBp = (e: Event) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-bp]');
     if (!el) return;
     const d = el.dataset;
@@ -415,7 +423,10 @@ export function mountBuildPanel(wb: Workbench) {
       }
       case 'variant': wb.setVariant(d.group!, d.id!); break;
     }
-  });
+  };
+  // Inspect, Checks, BOM in the R3X panel; the parts list in the navigator.
+  document.getElementById('panel')!.addEventListener('click', onBp);
+  document.getElementById('sc-build')!.addEventListener('click', onBp);
   document.getElementById('panel')!.addEventListener('change', (e) => {
     const el = e.target as HTMLSelectElement;
     if (el.dataset.bp !== 'variant-sel') return;
@@ -459,7 +470,7 @@ export function mountBuildPanel(wb: Workbench) {
     rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
     e.preventDefault();
   });
-  document.querySelector('[data-body="parts"]')!.addEventListener('keydown', (e) => {
+  $('sc-build').addEventListener('keydown', (e) => {
     if ((e as KeyboardEvent).key === 'Escape' && wb.selected) {
       e.stopPropagation(); // only the drawer closes, the scope stays
       const id = wb.selected;
@@ -504,7 +515,8 @@ export function mountBuildPanel(wb: Workbench) {
 
   function renderView() {
     const press = (id: string, on: boolean) => $(id).setAttribute('aria-pressed', String(on));
-    document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => {
+    // The viewport bar's look is Build's only while Build is open (mechrig's Model otherwise).
+    if (wb.active) document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => {
       const on = b.dataset.look === wb.look;
       b.setAttribute('aria-checked', String(on));
       b.tabIndex = on ? 0 : -1;
@@ -517,17 +529,20 @@ export function mountBuildPanel(wb: Workbench) {
     // the pairs in focus (a scope: those touching it); `k` stays the pair's index in the suite's list
     const pairs = wb.interference.map((p, k) => ({ ...p, k })).filter((p) => wb.pairInScope(p));
     const open = pairs.filter((p) => !p.explained).length;
-    $('bv-inspect').hidden = wb.look !== 'inspect' || !wb.interference.length;
-    $('bv-intf-n').textContent = pairs.length ? `${open}${pairs.length > open ? ` + ${pairs.length - open}` : ''}` : '';
-    $('bv-intf').title = `${open} unexplained (red) and ${pairs.length - open} explained (yellow) overlaps at rest, from the suite's no-overlap test`;
+    // Overlaps live in Checks (with the rest of the suite's results), whatever the look.
+    $('bv-inspect').hidden = !wb.interference.length;
+    $('bv-intf-n').textContent = open ? `${open} to fix` : '';
+    $('bv-intf').textContent = wb.interferenceOn && wb.look === 'inspect' ? 'Hide in view' : 'Show in view';
     const list = $('bv-intf-list');
-    list.hidden = !wb.interferenceOn;
     const sig = pairs.map((p) => `${p.a}|${p.b}|${p.depth_mm}`).join() || 'none';
     if (list.dataset.sig !== sig) {
       list.dataset.sig = sig;
       const short = (id: string) => shortName(wb.partInfo(id.includes('/') && !wb.partInfo(id) ? id.slice(id.indexOf('/') + 1) : id)?.part.name ?? id);
-      list.innerHTML = pairs.map((p) => `<li class="${p.explained ? 'known' : 'hot'}"><button data-k="${p.k}" title="${esc(`${p.a} x ${p.b}: ${p.depth_mm} mm deep${p.volume_mm3 != null ? `, ${p.volume_mm3} mm³ shared` : ''}${p.explained ? ' (explained)' : ''}. Click to frame it`)}">
-        <span>${esc(short(p.a))} × ${esc(short(p.b))}</span><span class="d">${num(p.depth_mm, 1)} mm</span></button></li>`).join('')
+      const row = (p: (typeof pairs)[number]) => `<li class="${p.explained ? 'known' : 'hot'}"><button data-k="${p.k}" title="${esc(`${p.a} x ${p.b}: ${p.depth_mm} mm deep${p.volume_mm3 != null ? `, ${p.volume_mm3} mm³ shared` : ''}${p.explained ? ' (explained)' : ''}. Click to frame it`)}">
+        <span>${esc(short(p.a))} × ${esc(short(p.b))}</span><span class="d">${num(p.depth_mm, 1)} mm</span></button></li>`;
+      const known = pairs.filter((p) => p.explained);
+      list.innerHTML = (pairs.filter((p) => !p.explained).map(row).join('')
+        + (known.length ? `<li class="known-group"><details class="bp-disc"><summary>${known.length} explained</summary><ul class="intf">${known.map(row).join('')}</ul></details></li>` : ''))
         || '<li class="empty">No overlaps here.</li>';
     }
     $<HTMLSelectElement>('bv-axis').value = wb.section.axis;
@@ -554,8 +569,9 @@ export function mountBuildPanel(wb: Workbench) {
     if (!wb.top) return;
     const shown = (n: AsmNode) => wb.nodeShown(n);
     // systems, with their joints as one short line
-    const systems = wb.systems();
-    const sysSig = systems.map((x) => x.id + x.joints.map((j) => j.joint.id).join()).join('|') + (sc?.kind === 'system' ? sc.id : '');
+    const hit = (...names: string[]) => !query || names.some((n) => n.toLowerCase().includes(query));
+    const systems = wb.systems().filter((x) => hit(x.name, ...x.joints.map((j) => jointLabel(j.joint.name))));
+    const sysSig = systems.map((x) => x.id + x.joints.map((j) => j.joint.id).join()).join('|') + (sc?.kind === 'system' ? sc.id : '') + '?' + query;
     const sysEl = $('bv-systems');
     if (sysEl.dataset.sig !== sysSig) {
       sysEl.dataset.sig = sysSig;
@@ -563,13 +579,15 @@ export function mountBuildPanel(wb: Workbench) {
         const on = sc?.kind === 'system' && sc.id === x.id;
         const tip = x.joints.map((j) => `${jointLabel(j.joint.name)}: ${num(j.joint.limits.min)}…${signed(j.joint.limits.max)} ${unit(j.joint).trim()}`).join('\n');
         return `<li><button data-sys="${esc(x.id)}" aria-pressed="${on}" title="${esc(tip)}"><span>${esc(x.name)}</span><small>${esc(systemMotion(x))}</small></button></li>`;
-      }).join('') || '<li class="empty">No moving joints.</li>';
+      }).join('') || (query ? '' : '<li class="empty">No moving joints.</li>');
     }
+    // A search shows only the groups it found something in.
+    $('bv-systems-h').hidden = !!query && !systems.length;
     // assemblies: the fitted tree, each variant group as a picker where its options hang
     const rows: string[] = [];
     const seenGroups = new Set<string>();
     const walk = (n: AsmNode, depth: number) => {
-      for (const v of variantOptions(n.asm)) {
+      for (const v of query ? [] : variantOptions(n.asm)) {
         if (seenGroups.has(v.group)) continue;
         seenGroups.add(v.group);
         const opts: { id: string; name: string }[] = [];
@@ -580,11 +598,12 @@ export function mountBuildPanel(wb: Workbench) {
         if (!shown(c)) continue;
         const on = sc?.kind === 'assembly' && sc.id === c.key;
         const count = subtreeCount(c);
-        rows.push(`<li style="--d:${depth}"><button data-node="${esc(c.key)}" aria-pressed="${on}" title="${esc(c.asm.name)}"><span>${esc(assemblyLabel(c.asm.name))}</span><small>${count}</small></button></li>`);
+        if (hit(c.asm.name, assemblyLabel(c.asm.name))) rows.push(`<li style="--d:${depth}"><button data-node="${esc(c.key)}" aria-pressed="${on}" title="${esc(c.asm.name)}"><span>${esc(assemblyLabel(c.asm.name))}</span><small>${count}</small></button></li>`);
         walk(c, depth + 1);
       }
     };
     walk(wb.top, 0);
+    $('bv-tree-h').hidden = !!query && !rows.length;
     const treeSig = rows.join('');
     const tree = $('bv-tree');
     if (tree.dataset.sig !== treeSig && !tree.contains(document.activeElement as Node | null) || tree.dataset.sig === undefined) {
@@ -620,10 +639,12 @@ export function mountBuildPanel(wb: Workbench) {
     status.hidden = !msg;
     status.classList.toggle('err', !!wb.error);
     $('bp-reload').title = m ? `Reload · built ${new Date(m.generated_at).toLocaleString()}` : 'Reload';
+    // The inspector's title: what is in focus (nothing at the top of our build: the navigator says it).
     const sc = wb.scope;
-    const title = sc ? sc.label : openAsm === OUR_BUILD ? 'Our build' : assemblyLabel(m?.root.name ?? openAsm);
+    const title = sc ? sc.label : openAsm === OUR_BUILD ? '' : assemblyLabel(m?.root.name ?? openAsm);
     const sub = sc?.kind === 'library' ? sc.item?.by ?? '' : '';
-    $('bp-title').innerHTML = `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
+    $('bp-title').hidden = !title;
+    $('bp-title').innerHTML = !title ? '' : `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
   }
 
   /** Parts of the focus: the scope's, else everything fitted under the focused node. */
@@ -676,7 +697,12 @@ export function mountBuildPanel(wb: Workbench) {
       return `<button class="chip" data-bp="filter" data-f="${f}" aria-pressed="${filter === f}">${label} <span>${n}</span></button>`;
     }).join('');
     const test0 = FILTERS.find(([f]) => f === filter)![2];
-    const test = (p: MPart) => inScope(p) && test0(p);
+    const named = (p: MPart) => !query || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
+    const test = (p: MPart) => inScope(p) && test0(p) && named(p);
+    const shownN = allParts.filter((p) => test0(p) && named(p)).length;
+    $('bv-parts-n').textContent = String(shownN);
+    // A search opens the list on what it found; clearing it leaves the list as the operator had it.
+    if (query && shownN) $<HTMLDetailsElement>('bv-parts-d').open = true;
 
     const byLink = subs.flatMap((sa) => sa.links.map((l) => ({ sa, l, parts: sa.parts.filter((p) => p.link === l.id && test(p)) })))
       .filter((g) => g.parts.length);
@@ -699,7 +725,7 @@ export function mountBuildPanel(wb: Workbench) {
               <button class="ic solo" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${solo}" aria-label="${solo ? 'Show everything' : `Show only ${esc(p.name)}`}" title="${solo ? 'Show everything' : 'Solo'}">${SOLO}</button>
             </span></li>`;
         }).join('');
-    }).join('') || `<li class="empty">${filter === 'all' ? 'No parts here.' : 'No parts match.'}</li>`;
+    }).join('') || `<li class="empty">${filter === 'all' && !query ? 'No parts here.' : 'No parts match.'}</li>`;
     $('bp-show-all').hidden = !wb.isolated && !wb.hidden.size;
     renderDetail();
   }
@@ -738,7 +764,7 @@ export function mountBuildPanel(wb: Workbench) {
     const reg = src.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
     const file = (src.file as string | undefined) ?? (src.reference as string | undefined) ?? (src.model as string | undefined) ?? '';
     el.innerHTML = head(shortName(p.name), srcDot(p.cad)) + `<dl class="facts">
-      ${row('Source', `${SRC_LABEL[srcOf(p.cad)]}${file ? ` · <span class="mono">${esc(file)}</span>` : ''}`, SRC_TITLE[srcOf(p.cad)] + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
+      ${row('Source', SRC_LABEL[srcOf(p.cad)], SRC_TITLE[srcOf(p.cad)] + (file ? `\n${file}` : '') + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
       ${row('Material', esc(p.material ?? ''))}
       ${row('Joint', j ? `${esc(bare(j.name))}${j.profile_joint ? ` <span class="mono dim">${esc(j.profile_joint)}</span>` : ''}` : 'fixed', j?.name)}
       ${row('Mates', mates ? String(mates) : '')}
@@ -821,6 +847,9 @@ export function mountBuildPanel(wb: Workbench) {
     const body = $('bp-step');
     const list = $('bp-steplist');
     $('bp-steps-all').hidden = !steps.length;
+    // No steps: the tab stands aside (More lists only what has something in it).
+    const stepsTab = document.querySelector<HTMLElement>('[data-tab="steps"]');
+    if (stepsTab) stepsTab.toggleAttribute('data-empty', !steps.length);
     if (!steps.length) {
       body.innerHTML = '<p class="empty">No steps here.</p>';
       list.innerHTML = '';
@@ -867,8 +896,18 @@ export function mountBuildPanel(wb: Workbench) {
     const checks = (a?.checks ?? []).filter((c) => !sc || sc.kind === 'assembly' || (c.parts ?? []).some((p) => sc.parts.has(p)) || (!!c.joint && scJoints.has(c.joint)));
     const counts = { pass: 0, warn: 0, fail: 0, explained: 0 };
     checks.forEach((c) => counts[c.status]++);
-    $('bp-check-sum').innerHTML = checks.length
-      ? (['fail', 'explained', 'warn', 'pass'] as const).filter((k) => counts[k]).map((k) => `<span class="st ${k}">${counts[k]} ${k}</span>`).join('') : '';
+    // Every result the suite has for this focus: the checks, the overlaps at rest, servo torque.
+    const pairs = wb.interference.filter((p) => wb.pairInScope(p));
+    const overlapsOpen = pairs.filter((p) => !p.explained).length;
+    const tq = torqueInScope();
+    const tqFail = tq.filter((t) => t.status === 'fail').length;
+    const tqWarn = tq.filter((t) => t.status !== 'fail' && (t.status === 'warn' || t.speed_ok === false)).length;
+    const v = checkVerdict({ checks: counts, overlapsOpen, overlapsExplained: pairs.length - overlapsOpen, torqueFail: tqFail, torqueWarn: tqWarn, torquePass: tq.length - tqFail - tqWarn });
+    $('bp-check-sum').textContent = v.summary;
+    const badge = $('bp-check-badge');
+    badge.textContent = v.toFix ? String(v.toFix) : '';
+    badge.hidden = !v.toFix;
+    renderTorque(tq);
     const row = (c: MCheck) => {
       const b = brief(c);
       const on = wb.check?.id === c.id;
@@ -888,7 +927,31 @@ export function mountBuildPanel(wb: Workbench) {
       + (eng.length ? `<li class="grp">Engineering checks</li>${eng.map(row).join('')}` : '')
       || `<li class="empty">${a?.checks?.length ? 'No checks here.' : 'No checks in this build. Build without <code>--no-checks</code>.'}</li>`;
     const tab = document.querySelector<HTMLElement>('[data-tab="checks"]');
-    if (tab) tab.dataset.status = counts.fail ? 'fail' : counts.warn ? 'warn' : 'pass';
+    if (tab) tab.dataset.status = v.toFix ? 'fail' : v.warn ? 'warn' : 'pass';
+  }
+
+  /** The suite's torque rows for the joints in focus (every row at the top). */
+  function torqueInScope(): TorqueRow[] {
+    const sc = wb.scope;
+    if (!sc) return torque;
+    const mine = new Set(sc.joints.map((x) => x.joint.profile_joint ?? x.joint.id));
+    return torque.filter((t) => mine.has(t.joint));
+  }
+
+  function renderTorque(rows: TorqueRow[]) {
+    $('bp-torque').hidden = !rows.length;
+    const glyph = (t: TorqueRow) => (t.status === 'fail' ? 'fail' : t.status === 'warn' || t.speed_ok === false ? 'warn' : 'pass');
+    // The profile joint as the build names it ("head_pan" -> "Head pan" from the manifest).
+    const names = new Map<string, string>();
+    wb.forEachNode((n) => n.asm.joints.forEach((j) => { if (j.profile_joint && !names.has(j.profile_joint)) names.set(j.profile_joint, jointLabel(j.name)); }));
+    const label = (id: string) => names.get(id) ?? (id.charAt(0).toUpperCase() + id.slice(1).replace(/_/g, ' '));
+    $('bp-torque-list').innerHTML = rows.map((t) => {
+      const g = glyph(t);
+      const tip = `${t.servo}: ${num(t.servo_torque_kgcm ?? 0, 2)} of ${num(t.stall_kgcm ?? 0, 1)} kg·cm at the worst pose`
+        + (t.speed_ok === false ? `; too slow - needs ${num(t.servo_speed_needed_dps ?? 0, 0)}°/s, gets ${num(t.loaded_speed_dps ?? 0, 0)}°/s loaded` : '');
+      return `<li class="tq tq-${g}" title="${esc(tip)}"><span class="st ${g}" role="img" aria-label="${g}">${STATUS_GLYPH[g]}</span><span>${esc(label(t.joint))}</span>
+        <span class="d">${Math.round((t.fraction_of_stall ?? 0) * 100)}% of stall${t.speed_ok === false ? ' · slow' : ''}</span></li>`;
+    }).join('');
   }
 
   // ---------------------------------------------------------------- BOM
@@ -910,7 +973,6 @@ export function mountBuildPanel(wb: Workbench) {
       <td class="num">${num(b.qty, 0)}</td>
       <td>${b.source ? `<a href="${esc(b.source)}" target="_blank" rel="noopener">${esc(b.item)}</a>` : esc(b.item)}${b.inferred ? `<sup class="inf" title="Inferred: ${esc(b.inferred_note ?? '')}">?</sup>` : ''}</td>
       <td class="exp">${cat === 'printed' ? exportsFor(b.parts) : ''}</td></tr>`).join('')).join('');
-    const printed = lines.filter((b) => b.category === 'printed').length;
     // the print list: this view's printed parts (current picks, replaced ones out) by filament and colour
     const ids = sc ? sc.parts : a && wb.focus ? subtreeParts(wb.focus, (n) => wb.nodeShown(n)) : new Set<string>();
     const pl = printList([...ids].map((id) => wb.partInfo(id)?.part).filter((p): p is MPart => !!p));
@@ -925,13 +987,62 @@ export function mountBuildPanel(wb: Workbench) {
       <td class="warn">No filament or colour in the manifest</td><td></td></tr>` : '')
       : '';
     $('bp-bom').innerHTML += printRows;
-    $('bp-bom-sum').textContent = lines.length || nPrint ? `${lines.length} lines · ${printed} printed · ${nPrint} to print` : '';
+    $('bp-bom-sum').textContent = lines.length || nPrint ? `${lines.length} items · ${nPrint} parts to print` : '';
   }
 
   return { refreshIndex };
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** One row of the suite's servo torque check (mech/out/checks.json `torque`). */
+export interface TorqueRow {
+  joint: string;
+  servo: string;
+  status: string;
+  fraction_of_stall?: number;
+  servo_torque_kgcm?: number;
+  stall_kgcm?: number;
+  speed_ok?: boolean;
+  servo_speed_needed_dps?: number;
+  loaded_speed_dps?: number;
+}
+
+async function loadTorque(): Promise<TorqueRow[]> {
+  try {
+    const r = await fetch(`${MECH_BASE}checks.json`, { cache: 'no-store' });
+    if (!r.ok) return [];
+    const d = (await r.json()) as { torque?: TorqueRow[] };
+    return Array.isArray(d.torque) ? d.torque : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The Checks tab's one verdict across every result the suite has: the manifest's checks, the
+ * overlaps at rest (unexplained = to fix) and servo torque. `toFix` is the tab's count; the
+ * summary is the line at the top of the tab ("10 to fix · 27 explained · 1 passing").
+ */
+export function checkVerdict(r: {
+  checks: { pass: number; warn: number; fail: number; explained: number };
+  overlapsOpen: number;
+  overlapsExplained: number;
+  torqueFail: number;
+  torqueWarn: number;
+  torquePass?: number;
+}): { toFix: number; warn: number; summary: string } {
+  const toFix = r.checks.fail + r.overlapsOpen + r.torqueFail;
+  const warn = r.checks.warn + r.torqueWarn;
+  const explained = r.checks.explained + r.overlapsExplained;
+  const bits = [
+    toFix ? `${toFix} to fix` : '',
+    warn ? `${warn} to watch` : '',
+    explained ? `${explained} explained` : '',
+    r.checks.pass + (r.torquePass ?? 0) ? `${r.checks.pass + (r.torquePass ?? 0)} passing` : '',
+  ].filter(Boolean);
+  return { toFix, warn, summary: bits.join(' · ') };
+}
 
 const EYE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
 const STATUS_GLYPH: Record<string, string> = { fail: '✕', warn: '!', explained: 'i', pass: '✓' };

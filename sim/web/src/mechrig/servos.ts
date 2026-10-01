@@ -167,12 +167,12 @@ export class ServoView {
 
   private mount(): boolean {
     if (this.body?.isConnected) return true;
-    const tab = document.querySelector<HTMLElement>('.tab-body[data-body="joints"]');
+    const tab = document.querySelector<HTMLElement>('.tab-body[data-body="inspect"]');
     const bar = tab?.querySelector('.bp-bar');
     const joints = document.getElementById('bp-joints');
     if (!tab || !bar || !joints) return false;
     const seg = document.createElement('span');
-    seg.className = 'bp-seg servo-toggle';
+    seg.className = 'seg bp-seg servo-toggle';
     seg.setAttribute('role', 'group');
     seg.setAttribute('aria-label', 'Pose by');
     seg.innerHTML = `<button class="bp-small" data-pose-by="joints" aria-pressed="true" title="Pose joints directly">Joints</button><button class="bp-small" data-pose-by="servos" aria-pressed="false" title="Drive each real actuator; the mechanism decides the joints">Servos</button>`;

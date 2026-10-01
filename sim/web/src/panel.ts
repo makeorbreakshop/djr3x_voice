@@ -1,11 +1,13 @@
 /**
  * The R3X panel (right): what he does. The Build / Show / Bench / Studio switch picks the tabs -
- * Build (sim only, src/workbench/): Parts, Joints, Steps, Checks, BOM - the mechanics, never the robot;
- * Show: Talk (push-to-talk, typed turns, the conversation), Perform (emotes and shows, placed
- * by main.ts; DJ; music), Behaviour (brain, autonomy, alive layers, gaze, engagement);
- * Bench: Rig (Home, outputs by body region, joints, calibrate), Test (the same emotes and
- * shows); every mode: System (services, logs + events, debug views). The Scene panel (left,
- * scenepanel.ts) is how the viewer sees him and never changes his state.
+ * Build (sim only, src/workbench/): Inspect, Checks, BOM, and Steps / Electronics under More -
+ * the mechanics, never the robot; Show: Talk (push-to-talk, typed turns, the conversation),
+ * Perform (emotes and shows, placed by main.ts; DJ; music), Behaviour (brain, autonomy, alive
+ * layers, gaze, engagement); Bench: Rig (Home, outputs by body region, joints, calibrate), Test
+ * (the same emotes and shows), Electronics; Studio: Outputs (the Rig tab's, moved). Every mode:
+ * the header's Diagnostics button (services, logs + events, console, debug views, the rig
+ * profile) takes the panel over until Done. The Scene panel (left, scenepanel.ts) is how the
+ * viewer sees him and never changes his state.
  *
  * Every action is a typed command to the r3x gateway and waits for its ack; state comes from
  * the gateway's retained state, and the runtime's log lines come from the gateway too. The
@@ -42,7 +44,7 @@ const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(
 /** The runtime's operating modes plus Build, which is this page's own (sim only, no runtime). */
 export type PageMode = OperatingMode | 'build';
 /** The first tab of each mode, until the operator picks another. */
-const DEFAULT_TAB: Record<PageMode, string> = { build: 'parts', show: 'talk', bench: 'rig', studio: 'system' };
+const DEFAULT_TAB: Record<PageMode, string> = { build: 'inspect', show: 'talk', bench: 'rig', studio: 'outputs' };
 const TABS_KEY = 'r3x.tabs';
 
 interface Turn {
@@ -83,6 +85,8 @@ export class ControlPanel {
   private logKinds = new Set(['log', 'event']);
   private errCount = 0;
   private activeTab = '';
+  /** Diagnostics (the old System tab) has the panel: the tabs stand aside until Done. */
+  private diagOpen = false;
   private cliHistory: string[] = [];
   private cliIndex = -1;
 
@@ -104,6 +108,7 @@ export class ControlPanel {
       onLog: (r) => this.addLog(r),
     });
     this.bindTabs();
+    this.bindDiag();
     this.bindTalk();
     this.bindControls();
     this.bindDrive();
@@ -128,14 +133,15 @@ export class ControlPanel {
   private onStatus(on: boolean) {
     this.connected = on;
     document.body.classList.toggle('live', on);
-    $('offline-note').hidden = on;
     for (const id of ['ptt', 'rail-ptt', 'say-in', 'say-send']) ($(id) as HTMLButtonElement).disabled = !on;
     const pill = $('st-gw');
-    pill.textContent = on ? 'Connected' : 'Offline';
+    // Offline the page is not dead: it runs its own demo (the embedded performer).
+    pill.textContent = on ? 'Live' : 'Demo';
+    pill.title = on ? 'Connected to the r3x runtime' : 'Not connected: this page runs its own demo. Start the runtime with ./r3x';
     pill.classList.toggle('on', on);
     const dot = $('rail-gw');
     dot.classList.toggle('on', on);
-    dot.title = on ? 'Connected' : 'Offline';
+    dot.title = on ? 'Live' : 'Demo (not connected)';
     dot.setAttribute('aria-label', dot.title);
     this.pttInput({ kind: 'link', connected: on });
     if (!on) {
@@ -221,6 +227,9 @@ export class ControlPanel {
     };
     const badge = $('state-badge');
     const mode = title(this.stageMode);
+    // Only a live conversation phase earns the viewport: connection lives in the header pill,
+    // the mode in the switch.
+    badge.hidden = this.stageMode === 'build' || !this.connected || !['engaging', 'listening', 'thinking', 'speaking'].includes(p);
     if (this.stageMode === 'build') {
       badge.dataset.state = 'build';
       badge.textContent = 'Build · sim only';
@@ -258,6 +267,15 @@ export class ControlPanel {
     const slot = $(mode === 'bench' ? 'test-slot' : 'perform-slot');
     const shared = $('shared-perf');
     if (shared.parentElement !== slot) slot.appendChild(shared);
+    // Outputs: Bench's Rig tab, or Studio's own tab (what the timeline sends to the robot).
+    const out = $('out-sec');
+    if (mode === 'studio') {
+      if (out.parentElement !== $('outputs-slot')) $('outputs-slot').appendChild(out);
+    } else if (out.parentElement !== $('drive')) $('drive').querySelector('.home-row')!.after(out);
+    // Tabs this mode keeps under More (Build: Steps, Electronics).
+    document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
+      b.classList.toggle('in-more', (b.dataset.more ?? '').split(' ').includes(mode)));
+    $('more-menu').hidden = true;
     if (boot) {
       try {
         Object.assign(this.tabFor, JSON.parse(localStorage.getItem(TABS_KEY) ?? '{}'));
@@ -266,8 +284,10 @@ export class ControlPanel {
       }
     }
     const want = this.tabFor[mode];
-    const ok = (t: string) => !!document.querySelector<HTMLButtonElement>(`[data-tab="${t}"]:not([hidden])`);
-    this.showTab(ok(want) ? want : DEFAULT_TAB[mode]);
+    const ok = (t: string) => !!document.querySelector<HTMLButtonElement>(`[data-tab="${t}"]:not([hidden]):not([data-empty])`);
+    if (this.diagOpen) this.activeTab = '';
+    if (!this.diagOpen) this.showTab(ok(want) ? want : DEFAULT_TAB[mode]);
+    this.renderMore();
     this.renderChip();
     window.dispatchEvent(new CustomEvent('r3x:mode', { detail: mode }));
   }
@@ -342,7 +362,7 @@ export class ControlPanel {
   // ------------------------------------------------------------------ tabs
 
   private bindTabs() {
-    const tabs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tab]:not([hidden])'));
+    const tabs = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tab]:not([hidden]):not(.in-more)'));
     document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => {
       const body = document.querySelector<HTMLElement>(`[data-body="${b.dataset.tab}"]`)!;
       body.id ||= `body-${b.dataset.tab}`;
@@ -359,6 +379,87 @@ export class ControlPanel {
         this.pickTab(next.dataset.tab!);
       };
     });
+  }
+
+  /** More: the mode's tabs that sit in a menu (Build: Steps, Electronics); empty ones stand aside. */
+  private bindMore() {
+    const more = $<HTMLButtonElement>('tab-more');
+    const menu = $('more-menu');
+    const close = () => {
+      menu.hidden = true;
+      more.setAttribute('aria-expanded', 'false');
+    };
+    more.onclick = (e) => {
+      e.stopPropagation();
+      if (!menu.hidden) return close();
+      const items = this.moreTabs();
+      menu.innerHTML = items.map((b) => `<button role="menuitem" data-pick="${b.dataset.tab}" aria-current="${b.dataset.tab === this.activeTab}">${esc(b.textContent!.trim())}</button>`).join('');
+      menu.hidden = false;
+      more.setAttribute('aria-expanded', 'true');
+      menu.querySelector<HTMLButtonElement>('button')?.focus();
+    };
+    menu.onclick = (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-pick]');
+      if (!b) return;
+      close();
+      this.pickTab(b.dataset.pick!);
+      // The panel's other listeners (Build's Steps / Checks) hear a tab pick as its button's click.
+      document.querySelector<HTMLButtonElement>(`[data-tab="${b.dataset.pick}"]`)?.dispatchEvent(new Event('click', { bubbles: true }));
+    };
+    menu.onkeydown = (e) => {
+      if (e.key === 'Escape') {
+        close();
+        more.focus();
+      }
+    };
+    addEventListener('click', (e) => {
+      if (!menu.hidden && !menu.contains(e.target as Node)) close();
+    });
+  }
+
+  private moreTabs() {
+    return Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tab].in-more:not([hidden]):not([data-empty])'));
+  }
+
+  /** More's label says which of its tabs is open ("Steps"), else "More". */
+  private renderMore() {
+    const more = $('tab-more');
+    const items = this.moreTabs();
+    more.hidden = !items.length;
+    const cur = items.find((b) => b.dataset.tab === this.activeTab);
+    more.textContent = cur ? cur.textContent!.trim() : 'More';
+    more.setAttribute('aria-selected', String(!!cur));
+  }
+
+  // ------------------------------------------------------------------ diagnostics
+
+  private bindDiag() {
+    $('diag-open').onclick = () => this.setDiag(!this.diagOpen);
+    $('diag-close').onclick = () => this.setDiag(false);
+    addEventListener('keydown', (e) => {
+      if (e.key !== '`' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || this.typing(e)) return;
+      e.preventDefault();
+      this.setDiag(!this.diagOpen);
+    });
+    this.bindMore();
+  }
+
+  /** Diagnostics takes the panel (wider, for the logs); Done hands it back to the mode's tab. */
+  setDiag(on: boolean) {
+    if (on === this.diagOpen) return;
+    this.diagOpen = on;
+    document.body.classList.toggle('diag-open', on);
+    $('diag-open').setAttribute('aria-pressed', String(on));
+    this.activeTab = '';
+    if (on) {
+      this.showTab('system');
+      $('diag-close').focus();
+    } else {
+      const want = this.tabFor[this.stageMode];
+      const ok = (t: string) => !!document.querySelector<HTMLButtonElement>(`[data-tab="${t}"]:not([hidden]):not([data-empty])`);
+      this.showTab(ok(want) ? want : DEFAULT_TAB[this.stageMode]);
+      $('diag-open').focus();
+    }
   }
 
   /** The operator picked a tab: remembered for the current mode. */
@@ -381,6 +482,7 @@ export class ControlPanel {
       b.tabIndex = on ? 0 : -1;
     });
     document.querySelectorAll<HTMLElement>('[data-body]').forEach((el) => (el.hidden = el.dataset.body !== name));
+    this.renderMore();
     if (name === 'system') {
       this.errCount = 0;
       this.renderErrCount();
@@ -665,12 +767,15 @@ export class ControlPanel {
     const st = s.stage;
     const chip = (attr: string, value: string, label: string, on: boolean, title = '') =>
       `<button class="chip${on ? ' on' : ''}" data-${attr}="${esc(value)}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+    // On/off settings are switches (one boolean grammar); outputs stay chips (many, grouped).
+    const sw = (attr: string, value: string, label: string, on: boolean, title = '') =>
+      `<button class="toggle" data-${attr}="${esc(value)}" aria-pressed="${on}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
     $('drive-toggles').innerHTML = [
-      chip('toggle', 'brain', 'Brain', st.brain, 'Voice + LLM: accept spoken and typed turns'),
-      chip('toggle', 'autonomy', 'Autonomy', st.autonomy, 'Idle policy and DJ autonomy'),
+      sw('toggle', 'brain', 'Brain', st.brain, 'Voice + LLM: accept spoken and typed turns'),
+      sw('toggle', 'autonomy', 'Autonomy', st.autonomy, 'Idle policy and DJ autonomy'),
     ].join('');
-    $('drive-layers').innerHTML = Object.keys(st.layers).map((l) => chip('layer', l, l.replace(/_/g, ' '), st.layers[l], 'Procedural motion')).join('')
-      || '<span class="hint">No alive layers in the profile.</span>';
+    $('drive-layers').innerHTML = Object.keys(st.layers).map((l) => sw('layer', l, l.charAt(0).toUpperCase() + l.slice(1).replace(/_/g, ' '), st.layers[l], 'Procedural motion')).join('')
+      || '<span class="hint">None in the profile.</span>';
     const outs = Object.keys(st.outputs);
     $('drive-outputs').innerHTML = this.outputGroups(st).map(([region, names]) => {
       const n = names.filter((o) => st.outputs[o]).length;
@@ -722,11 +827,14 @@ export class ControlPanel {
     const off = h?.status === 'stopped';
     b.disabled = !on && !off;
     b.setAttribute('aria-pressed', String(on));
-    b.textContent = on ? 'Camera on' : off ? 'Camera off' : 'Camera unavailable';
-    $('vision-note').textContent = on
+    b.textContent = on || off ? 'Camera' : 'Camera unavailable'; // a switch: its knob says on or off
+    b.title = on
       ? 'Face tracking runs locally (free); a photo goes to Claude only when someone arrives or he is asked to look.'
+      : off ? 'Camera closed: no tracking, no photos, no cost.' : 'Camera, face recognition and scene photos';
+    $('vision-note').textContent = on
+      ? ''
       : off
-        ? 'Camera closed: no tracking, no photos, no cost.'
+        ? ''
         : h
           ? `Vision is ${h.status}${h.detail ? `: ${h.detail}` : ''}`
           : 'Vision was not started (run the runtime with vision on).';
@@ -789,7 +897,7 @@ export class ControlPanel {
     li.innerHTML = `<time>${clockTime(r.t)}</time><b>${esc(r.level.slice(0, 4))}</b><i>${esc(short)}</i><span>${esc(r.msg)}</span>`;
     li.dataset.text = `${r.level} ${r.name} ${r.msg}`.toLowerCase();
     this.appendLogRow(li, replay);
-    if (!replay && (r.level === 'ERROR' || r.level === 'CRITICAL') && this.activeTab !== 'system') {
+    if (!replay && (r.level === 'ERROR' || r.level === 'CRITICAL') && !this.diagOpen) {
       this.errCount++;
       this.renderErrCount();
     }

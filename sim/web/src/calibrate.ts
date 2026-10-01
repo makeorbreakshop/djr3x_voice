@@ -63,23 +63,28 @@ const STEPS = [-50, -10, -1, 1, 10, 50];
 
 /** The wizard as a section of the Drive tab. */
 export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (msg: string) => void) {
+  // A disclosure, live only (the runtime owns the servos): one servo at a time, in Bench.
   const el = document.createElement('section');
-  el.innerHTML = `
-    <h2>Calibrate <small>Bench, one servo at a time</small></h2>
-    <p class="hint" data-cal="note">Needs a runtime with a profile.</p>
-    <div class="row"><select data-cal="pick"></select><button data-cal="enable">Enable output</button></div>
+  el.className = 'cal';
+  el.dataset.live = '';
+  el.innerHTML = `<details>
+    <summary title="Bench only, one servo at a time: jog until the joint sits at its centre pose">Calibrate a servo</summary>
+    <p class="hint" data-cal="note" hidden></p>
+    <div data-cal="ctl">
+    <div class="row"><select data-cal="pick" aria-label="Servo"></select><button data-cal="enable">Enable output</button></div>
     <p class="now"><span data-cal="pulse">-</span> <small data-cal="tele"></small></p>
     <div class="row wrap" data-cal="steps">${STEPS.map((s) => `<button data-step="${s}">${s > 0 ? '+' : ''}${s}</button>`).join('')}</div>
     <div class="row wrap">
       <button data-cal="centre">Centre here</button>
-      <label><input type="checkbox" data-cal="invert" /> inverted (+us moves the joint negative)</label>
+      <label class="check" title="+us moves the joint negative"><input type="checkbox" data-cal="invert" /> Inverted</label>
     </div>
     <div class="row wrap">
       <button data-cal="lim0">Limit end A here</button><button data-cal="lim1">Limit end B here</button>
       <button data-cal="clear">Clear limits</button>
     </div>
     <p class="hint" data-cal="marks"></p>
-    <div class="row"><button class="primary" data-cal="save">Save to profile</button></div>`;
+    <div class="row"><button class="primary" data-cal="save">Save to profile</button></div>
+    </div></details>`;
   parent.appendChild(el);
   const q = <T extends HTMLElement>(k: string) => el.querySelector(`[data-cal="${k}"]`) as T;
   const pick = q<HTMLSelectElement>('pick');
@@ -95,7 +100,11 @@ export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (m
   const render = () => {
     el.querySelectorAll('button, input, select').forEach((b) => ((b as HTMLInputElement).disabled = !bench || !s));
     pick.disabled = !servos.length;
-    q('note').textContent = !servos.length ? 'No r3x_servo actuators in the profile.' : bench ? 'Jog until the joint sits at its centre pose.' : 'Switch to Bench to calibrate.';
+    // Nothing to calibrate (or not Bench): one line, no dead controls.
+    const note = !servos.length ? 'No servos to calibrate.' : bench ? '' : 'Switch to Bench to calibrate.';
+    q('note').textContent = note;
+    q('note').hidden = !note;
+    q('ctl').hidden = !servos.length || !bench;
     if (!s) return;
     q('pulse').textContent = `${s.us} us`;
     q<HTMLInputElement>('invert').checked = s.invert;

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "profile": "brandon-ai-defaults-v1",
+  "waivers": [
+    {
+      "rule_id": "TASTE-012",
+      "path": "sim/web/src/style.css",
+      "match": ".ptt[data-state=\"starting\"] .ptt-dot",
+      "reason": "The talk button's dot pulses only while the mic is starting or a turn is being sent: real, current system work. Reduced motion stops it (style.css, prefers-reduced-motion)."
+    }
+  ]
+}

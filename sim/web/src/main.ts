@@ -225,15 +225,40 @@ const PANEL_ID = (() => {
   return fresh;
 })();
 const SLOTS = PROFILE.emotes;
-/** The Scene panel's Controller section (G): what the pad is doing and what that does to R3X. */
-const padSection = () => !document.body.classList.contains('scene-collapsed');
+/**
+ * The Scene panel's Controller section (G): what the pad is doing and what that does to R3X.
+ * Disclosed, not standing: shown on G, its rail button, Puppeteer's "Controller view", or when a
+ * pad connects; Hide (or G) puts it away. The choice is this viewer's (localStorage).
+ */
+let padOpen = (() => {
+  try {
+    return localStorage.getItem('r3x.pad-open') === '1';
+  } catch {
+    return false;
+  }
+})();
+const padSection = () => padOpen && !document.body.classList.contains('scene-collapsed');
 const padOverlay = new PadOverlay($('pad-dock'), padSection);
-/** Open the Scene panel at the Controller section (its rail button), or close the panel. */
+function setPadOpen(on: boolean) {
+  padOpen = on;
+  document.body.classList.toggle('pad-open', on);
+  try {
+    localStorage.setItem('r3x.pad-open', on ? '1' : '0');
+  } catch {
+    /* storage blocked: this page load */
+  }
+}
+setPadOpen(padOpen);
+/** Show the Controller section (opening the Scene panel there), or put it away. */
 function toggleController(open = !padSection()) {
-  if (open) $<HTMLButtonElement>('scene-panel').querySelector<HTMLButtonElement>('[data-scene-open="sc-pad"]')!.click();
-  else if (padSection()) $('scene-collapse').click();
+  setPadOpen(open);
+  if (!open) return;
+  panels.set('scene', false);
+  $('sc-pad').scrollIntoView({ block: 'nearest' });
 }
 $('pp-overlay').onclick = () => toggleController(true);
+$('pad-close').onclick = () => toggleController(false);
+$('scene-panel').querySelector<HTMLButtonElement>('[data-scene-open="sc-pad"]')!.onclick = () => toggleController(true);
 addEventListener('keydown', (e) => {
   const t = e.target as HTMLElement | null;
   if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -250,7 +275,11 @@ let padSeen = (() => {
     return true;
   }
 })();
+let padThere = false;
 function onPadFrame(p: PadFrame | null | undefined) {
+  // A pad arriving discloses its section (where the Scene panel is open).
+  if (p && !padThere && !padOpen) setPadOpen(true);
+  padThere = !!p;
   if (p && !padSeen) {
     padSeen = true;
     try {
@@ -484,7 +513,7 @@ function onPerfOut(o: PerfOut) {
       break;
     case 'freeze':
       frozen = o.on;
-      $('sh-freeze').classList.toggle('on', o.on);
+      pressFreeze(o.on);
       break;
   }
 }
@@ -607,7 +636,7 @@ function onGatewayState(s: RetainedState) {
   followRemote(s.stage.rig); // the runtime's rig: a different one reloads this page onto it
   syncPadClaim();
   frozen = s.stage.frozen;
-  $('sh-freeze').classList.toggle('on', frozen);
+  pressFreeze(frozen);
   $('btn-dj').classList.toggle('on', s.dj.active);
   studio.setActive(s.stage.mode === 'studio' && !workbench.active);
   centresFollowMode(s.stage.mode);
@@ -636,7 +665,7 @@ function setConnected(on: boolean) {
     $<HTMLInputElement>('sh-idle').checked = autonomy;
     $('btn-dj').classList.toggle('on', djOn);
     frozen = false;
-    $('sh-freeze').classList.remove('on');
+    pressFreeze(false);
     $('eng-now').textContent = titleCase(mode);
   }
   showUiDirty = true;
@@ -1058,7 +1087,8 @@ function updateJointReadout() {
 // ------------------------------------------------------------------ servo readout
 const servoCells = new Map<number, HTMLElement>();
 {
-  $('servo-summary').textContent = `${PROFILE.actuators.length} actuators; pulses from the performer's controller frame (standalone).`;
+  $('servo-summary').textContent = String(PROFILE.actuators.length);
+  $('servo-summary').parentElement!.title = "Pulses from the performer's controller frame (standalone)";
   for (const a of PROFILE.actuators) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${a.channel}</td><td>${a.name}</td><td>${a.servo}</td><td class="us">-</td>`;
@@ -1226,6 +1256,15 @@ function stopShows() {
   if (connected) void send({ class: 'perf', type: 'stop', target: 'all' });
   else perf({ cmd: 'stop', all: true });
 }
+/** Freeze motion is a switch (Perform > Options). */
+function pressFreeze(on: boolean) {
+  $('sh-freeze').classList.toggle('on', on);
+  $('sh-freeze').setAttribute('aria-pressed', String(on));
+}
+/** A Rig joints-table row's name: the region heading already says head / torso. */
+function jointRowLabel(n: string) {
+  return n.replace(/^(head|torso)_/, '').replace(/_/g, ' ');
+}
 function setFreeze(on: boolean) {
   if (connected) {
     void send({ class: 'stage', type: 'freeze', on });
@@ -1233,7 +1272,7 @@ function setFreeze(on: boolean) {
   }
   frozen = on;
   perf({ cmd: 'freeze', on });
-  $('sh-freeze').classList.toggle('on', on);
+  pressFreeze(on);
   showUiDirty = true;
 }
 function emote(slot: number) {
@@ -1272,7 +1311,7 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
       ul.appendChild(li);
     }
   }
-  $('sh-idle-label').textContent = `Idle policy (after ${idleAfter ?? '-'} s quiet)`;
+  $('sh-idle-label').textContent = `Idle after ${idleAfter ?? '-'} s`;
   const loops = items.filter((q) => q.kind === 'sequence' && q.loop);
   for (const [sel, activity] of [['sh-bg-idle', 'idle'], ['sh-bg-dj', 'dj']] as const) {
     const el = $<HTMLSelectElement>(sel);
@@ -1398,6 +1437,8 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
       el.textContent = r ? `${r.id} (${r.source})` : '-';
       el.classList.toggle('on', !!r);
     }
+    // What is playing, only while something is.
+    $('show-now').hidden = !running.length;
     document.querySelectorAll<HTMLLIElement>('.show-list li').forEach((li) => li.classList.toggle('running', ids.has(li.dataset.id!)));
     // Frozen motion refuses every play: say so instead of offering buttons that bounce.
     document.querySelectorAll<HTMLButtonElement>('.show-list button, #emotes button').forEach((b) => (b.disabled = frozen));
@@ -1427,14 +1468,14 @@ function renderHome() {
 
 function renderHomeState() {
   const el = $('home-state');
-  let text = '-';
+  let text = '';
   let on = false;
   if (connected && !studioLocal && gwState?.perf.at_home !== undefined) {
     on = gwState.perf.at_home;
-    text = on ? 'at home' : gwState.perf.homing ? 'homing…' : 'off home';
+    text = on ? 'At home' : gwState.perf.homing ? 'Homing…' : 'Off home';
   } else if (view) {
     on = atHome(view.joints, HOME, JOINTS, 1); // simulated servo output, not the follower
-    text = on ? 'at home' : 'off home';
+    text = on ? 'At home' : 'Off home';
   }
   el.textContent = text;
   el.classList.toggle('on', on);
@@ -1450,13 +1491,14 @@ function buildJointTable(r: Rig) {
   const body = $('joint-rows');
   const names = FULL_PROFILE.joints.map((j) => j.name).filter((n) => r.joints.has(n));
   body.innerHTML = REGIONS.group(names, (n) => REGIONS.ofDrivenJoint(n)).map(([region, list]) =>
-    `<tr class="grp"><th colspan="5" scope="colgroup">${region}</th></tr>` + list.map((n) => {
+    `<tr class="grp"><th colspan="4" scope="colgroup">${region}</th></tr>` + list.map((n) => {
       const j = FULL_PROFILE.joints.find((x) => x.name === n)!;
+      // The home value is the same for nearly every joint (0): the button's tooltip says it.
       return `<tr data-joint="${n}" title="${n}${r.joints.get(n)!.spec.note ? ` - ${r.joints.get(n)!.spec.note}` : ''}">
-        <th scope="row">${n.replace(/^(head|torso)_/, '').replace(/_/g, ' ')}</th>
+        <th scope="row">${jointRowLabel(n)}</th>
         <td class="jog"><input type="range" min="${r.joints.get(n)!.spec.min}" max="${r.joints.get(n)!.spec.max}" step="0.5" value="${HOME[n]}" aria-label="Jog ${n}" /></td>
-        <td class="num">-</td><td class="num home">${formatValue(HOME[n], j.unit)}</td>
-        <td><button data-home-joint="${n}" aria-label="Home ${n}" title="Ease ${n} to its home value (held until released)">home</button></td></tr>`;
+        <td class="num">-</td>
+        <td><button data-home-joint="${n}" class="home-one" aria-label="Home ${n}" title="Ease ${n} to its home (${formatValue(HOME[n], j.unit)}), held until released">⌂</button></td></tr>`;
     }).join('')).join('');
   for (const tr of Array.from(body.querySelectorAll<HTMLElement>('tr[data-joint]'))) {
     const name = tr.dataset.joint!;

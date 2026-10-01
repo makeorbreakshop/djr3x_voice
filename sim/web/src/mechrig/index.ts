@@ -1,9 +1,10 @@
 /**
  * One rig, from the mechanical model: wires mechrig/ into the page.
  *
- * - Scene panel "Model" (Visual / Mechanical / X-ray), remembered per page mode, Visual by
- *   default: Mechanical draws the built droid assembly (mechview.ts) in place of the visual
- *   model, driven by the same performer frames; X-ray ghosts its shells.
+ * - The viewport bar's look (Exterior / Mechanism / X-ray; index.html), remembered per page
+ *   mode, Exterior by default: Mechanism draws the built droid assembly (mechview.ts) in place
+ *   of the visual model, driven by the same performer frames; X-ray ghosts its shells. In Build
+ *   the same three buttons are the workbench's look (buildpanel.ts).
  * - Servo load (torque.ts): a meter in Bench and Build, an overlay in Studio.
  * - Build, three layers: the pad is the same puppet as everywhere (intent); the performer's
  *   rig layer turns it into joints (gaze, expressive roll); while the pad is in use the
@@ -23,6 +24,9 @@ import { fittedNodes, ServoView } from './servos';
 import { ServoFollower, TorqueModel } from './torque';
 
 const KEY = 'r3x.model';
+/** The viewport bar's look buttons (shared with Build) <-> this rig's model view. */
+const LOOK_OF: Record<ModelView, string> = { visual: 'exterior', mechanical: 'mechanism', xray: 'inspect' };
+const MODEL_OF: Record<string, ModelView> = { exterior: 'visual', mechanism: 'mechanical', inspect: 'xray' };
 type PageMode = 'show' | 'bench' | 'studio' | 'build';
 
 export interface MechRigHost {
@@ -55,7 +59,11 @@ export class MechRig {
     } catch {
       /* storage blocked: Visual everywhere */
     }
-    this.mountSection();
+    // Outside Build the bar's look buttons pick the model (buildpanel.ts forwards them as `r3x:look`).
+    addEventListener('r3x:look', (e) => {
+      const m = MODEL_OF[String((e as CustomEvent).detail)];
+      if (m && this.mode !== 'build') this.setModel(m);
+    });
     addEventListener('r3x:mode', (e) => this.setMode(String((e as CustomEvent).detail) as PageMode));
     this.view.onChange(() => {
       this.sync();
@@ -104,25 +112,25 @@ export class MechRig {
     this.view.root.visible = mech;
     const d = this.host.droid();
     if (d && !build) d.visible = !mech;
-    const sec = document.getElementById('sc-model');
-    if (sec) {
-      sec.hidden = build; // Build draws its own assembly
-      sec.querySelectorAll<HTMLButtonElement>('[data-model]').forEach((b) => {
-        b.setAttribute('aria-pressed', String(b.dataset.model === this.model));
-        b.disabled = this.mode === 'build';
+    if (!build) {
+      document.querySelectorAll<HTMLButtonElement>('#view-bar [data-look]').forEach((b) => {
+        const on = b.dataset.look === LOOK_OF[this.model];
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
       });
-      const note = sec.querySelector<HTMLElement>('.model-note')!;
+    }
+    const note = document.getElementById('model-note');
+    if (note) {
       const v = this.view;
       note.classList.toggle('err', v.status === 'error');
-      // Only what needs attention is shown (loading, an error, a rod out of reach); the model's
-      // size is a tooltip (draw calls and triangles live in Frame stats).
+      // Only what needs attention (loading, an error, a rod out of reach), and never in Build.
       const mechOn = v.status === 'ready' && this.model !== 'visual';
-      note.textContent = v.status === 'loading' ? 'Loading mech/out/r3x_droid…'
-        : v.status === 'error' ? `Mechanical model unavailable: ${v.error}. Build mech/out/r3x_droid and use the dev server.`
-          : mechOn && v.unreachable.length ? `Out of reach: ${v.unreachable.join(', ')}` : '';
+      note.textContent = build || this.model === 'visual' ? ''
+        : v.status === 'loading' ? 'Loading the mechanism…'
+          : v.status === 'error' ? `Mechanism unavailable: ${v.error}`
+            : mechOn && v.unreachable.length ? `Out of reach: ${v.unreachable.join(', ')}` : '';
+      note.title = v.status === 'error' ? 'Build mech/out/r3x_droid and use the dev server' : mechOn ? `${v.stats.parts} parts, ${v.stats.fasteners} fasteners; rods solved per frame` : '';
       note.hidden = !note.textContent;
-      sec.title = mechOn ? `${v.stats.parts} parts, ${v.stats.fasteners} fasteners; rods solved per frame`
-        : 'The performer drives either model. Mechanical is the CAD assembly from mech/out.';
     }
     this.meter.visible = this.mode === 'bench' || this.mode === 'studio' || this.mode === 'build';
     this.meter.el.classList.toggle('overlay', this.mode === 'studio');
@@ -179,40 +187,5 @@ export class MechRig {
       }
     }
     if (first) wb.setJoint(first.n, first.id, first.n.pose[first.id]);
-  }
-
-  private mountSection() {
-    const body = document.getElementById('scene-body');
-    const after = document.getElementById('sc-view');
-    if (!body || document.getElementById('sc-model')) return;
-    const sec = document.createElement('section');
-    sec.id = 'sc-model';
-    sec.innerHTML = `<h2>Model</h2>
-      <div class="row seg" role="group" aria-label="Model">
-        <button data-model="visual" aria-pressed="true" title="The painted kit model (rig.json)">Visual</button>
-        <button data-model="mechanical" aria-pressed="false" title="The CAD assembly: every part, joint and linkage from the mech model">Mechanical</button>
-        <button data-model="xray" aria-pressed="false" title="The mechanical assembly with its shells ghosted">X-ray</button>
-      </div>
-      <p class="model-note"></p>`;
-    body.insertBefore(sec, after?.nextSibling ?? null);
-    sec.querySelectorAll<HTMLButtonElement>('[data-model]').forEach((b) => {
-      b.onclick = () => {
-        this.setModel(b.dataset.model as ModelView);
-        b.blur();
-      };
-    });
-    const railAfter = document.querySelector('[data-scene-open="sc-view"]');
-    if (railAfter) {
-      const r = document.createElement('button');
-      r.dataset.sceneOpen = 'sc-model';
-      r.setAttribute('aria-label', 'Model');
-      r.title = 'Model: Visual / Mechanical / X-ray';
-      r.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v2.1M8 12.1v2.1M1.8 8h2.1M12.1 8h2.1M3.6 3.6l1.5 1.5M10.9 10.9l1.5 1.5M3.6 12.4l1.5-1.5M10.9 5.1l1.5-1.5" /></svg>';
-      r.onclick = () => {
-        (railAfter as HTMLButtonElement).click(); // opens the panel (scenepanel.ts wires the rail at mount)
-        sec.scrollIntoView({ block: 'nearest' });
-      };
-      railAfter.after(r);
-    }
   }
 }

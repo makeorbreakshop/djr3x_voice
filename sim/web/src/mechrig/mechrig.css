@@ -1,13 +1,13 @@
 /* Mech rig overlays: servo load meter (Bench, Studio overlay, Build jog) and the pad-jog HUD. */
-.load-meter { position: fixed; top: 46px; right: calc(var(--panel-space, 404px) + 8px); width: 236px; padding: 7px 9px 6px;
+.load-meter { position: fixed; top: 56px; right: calc(var(--panel-space, 404px) + 8px); width: 236px; padding: 7px 9px 6px;
   border-radius: 8px; background: rgba(10, 11, 15, .78); border: 1px solid var(--line); color: var(--text);
   font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; z-index: 5; }
 .load-meter[hidden] { display: none; }
-.load-meter h3 { margin: 0 0 5px; font: 600 10px system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+.load-meter h3 { margin: 0 0 5px; font: 600 11px system-ui, sans-serif; color: var(--muted);
   display: flex; justify-content: space-between; }
-.load-meter h3 b { color: var(--text); font-weight: 600; }
+.load-meter h3 b { display: none; } /* the mode: the switch already says it */
 .load-meter .row { display: grid; grid-template-columns: 88px 1fr 34px; gap: 6px; align-items: center; height: 15px; }
-.load-meter .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.load-meter .name { font-family: system-ui, sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .load-meter .bar { position: relative; height: 7px; border-radius: 2px; background: #1b1e26; overflow: hidden; }
 .load-meter .bar i { position: absolute; inset: 0 auto 0 0; background: #5fb87a; border-radius: 2px; }
 .load-meter .bar s { position: absolute; top: 0; bottom: 0; width: 2px; background: #6b3a3a; } /* static (hold) part */

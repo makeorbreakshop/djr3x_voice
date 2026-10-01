@@ -411,13 +411,26 @@ export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, has
   slider({ k: 'rim', label: 'Rim', min: 0, max: 3, step: 0.05, title: 'Edge light from behind (booth head rims or work light rim)' }, light.inner);
   const deskRow = slider({ k: 'desk', label: 'Stage desk', min: 0, max: 3, step: 0.05, title: 'The booth fixtures the light desk drives (washes, uplight, ceiling spot)' }, light.inner);
 
-  // ---- Rendering
-  const render = section('sc-render', 'render', 'Rendering', 'How this browser draws R3X; not sent to the robot. Layers over Quality.');
+  // ---- Rendering: a group inside the Scene panel's Advanced disclosure (index.html), under Quality.
+  const advBody = document.getElementById('sc-adv-body');
+  const render = advBody
+    ? (() => {
+      const sec = el('div', 'rs-group');
+      sec.id = 'sc-render';
+      sec.title = 'How this browser draws R3X; not sent to the robot. Layers over Quality.';
+      sec.append(el('h3', 'rs-h', 'Rendering'));
+      const inner = el('div', 'rs-body');
+      sec.append(inner);
+      return { sec, inner };
+    })()
+    : section('sc-render', 'render', 'Rendering', 'How this browser draws R3X; not sent to the robot. Layers over Quality.');
   const seg = el('div', 'row seg rs-seg');
   seg.setAttribute('role', 'group');
   seg.setAttribute('aria-label', 'Look preset');
   const presetBtns = new Map<PresetName, HTMLButtonElement>();
+  // Performance is the Quality select's job (no AO, lowest rates): no second button for it here.
   for (const [name, p] of Object.entries(PRESETS) as [PresetName, (typeof PRESETS)[PresetName]][]) {
+    if (name === 'performance') continue;
     const b = el('button', '', PRESET_SHORT[name]);
     b.title = p.label;
     b.onclick = () => {
@@ -466,7 +479,8 @@ export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, has
   render.inner.append(halo.det);
 
   document.getElementById('sc-env')?.after(light.sec);
-  document.getElementById('sc-perf')?.after(render.sec);
+  if (advBody) advBody.append(render.sec);
+  else document.getElementById('sc-perf')?.after(render.sec);
 
   // Rail icons, in section order.
   const rail = document.querySelector('#scene-panel .rail');
@@ -478,7 +492,7 @@ export function mountRenderPanel(rs: RenderSettings, isBooth: () => boolean, has
     rail?.querySelector(`[data-scene-open="${after}"]`)?.after(b);
   };
   railBtn('sc-light', 'Lighting', ICON_LIGHT, 'sc-env');
-  railBtn('sc-render', 'Rendering', ICON_RENDER, 'sc-perf');
+  if (!advBody) railBtn('sc-render', 'Rendering', ICON_RENDER, 'sc-perf');
 
   const sync = () => {
     const v = rs.values;

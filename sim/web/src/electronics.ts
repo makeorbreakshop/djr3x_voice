@@ -371,7 +371,7 @@ export function packageHtml(pkg: ElectronicsPackage): string {
   const table = (head: string[], body: string) =>
     body ? `<div class="table-wrap"><table class="elec"><thead><tr>${head.map((h) => `<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>` : '<p class="hint">None.</p>';
   return `
-    <p class="hint">${esc(pkg.description)} ${pkg.url ? link('Product page', pkg.url) : ''}</p>
+    ${pkg.url ? `<p>${link('Product page', pkg.url)}</p>` : ''}
     <h3>Boards <small>${pkg.boards.length}</small></h3>
     ${table(['board', 'role', 'mm', 'mount', 'power', 'support'], boards)}
     <h3>Lights <small>${pkg.lights.reduce((n, g) => n + g.pixels, 0)} px</small></h3>
@@ -404,16 +404,32 @@ export function mountElectronics(
   const options = Object.values(PACKAGES)
     .map((p) => `<option value="${esc(p.id)}"${p.id === active.id ? ' selected' : ''}>${esc(p.label)}</option>`)
     .join('');
+  // The tab keeps the choice and two switches; the reference tables (boards, lights, power,
+  // wiring, BOM) open in a sheet over the viewport, wide enough to read them.
   el.innerHTML = `
     <div class="row elec-pick">
       <label for="elec-select">Package</label>
-      <select id="elec-select">${options}</select>
-      <span class="support ${active.support}">${active.support}</span>
+      <select id="elec-select" title="${esc(active.description)}${opts.connected ? '\n\nConnected: the runtime\'s profile decides (R3X_ELECTRONICS); a choice here applies to the offline demo.' : ''}">${options}</select>
     </div>
-    ${opts.connected ? '<p class="hint">Connected: the runtime\'s profile decides (<code>R3X_ELECTRONICS</code>); a choice here applies to the offline demo.</p>' : ''}
-    <label class="check"><input type="checkbox" id="elec-boards"> Show boards in the model</label>
-    ${opts.diffusers?.count ? `<label class="check"><input type="checkbox" id="elec-diffusers"${opts.diffusers.on ? ' checked' : ''}> Diffusers on <small>(${opts.diffusers.count} windows; off shows the raw pixels)</small></label>` : ''}
-    <div id="elec-detail">${packageHtml(active)}</div>`;
+    <label class="check"><input type="checkbox" id="elec-boards"> Show boards</label>
+    ${opts.diffusers?.count ? `<label class="check" title="${opts.diffusers.count} windows; off shows the raw pixels"><input type="checkbox" id="elec-diffusers"${opts.diffusers.on ? ' checked' : ''}> Diffusers</label>` : ''}
+    <div class="row"><button id="elec-sheet-open" aria-haspopup="dialog">Boards, wiring and power</button></div>`;
+  let sheet = document.getElementById('elec-sheet') as HTMLDialogElement | null;
+  if (!sheet) {
+    sheet = document.createElement('dialog');
+    sheet.id = 'elec-sheet';
+    sheet.className = 'sheet';
+    document.body.append(sheet);
+    sheet.addEventListener('click', (e) => {
+      if (e.target === sheet || (e.target as HTMLElement).closest('[data-sheet-close]')) sheet!.close();
+    });
+  }
+  sheet.setAttribute('aria-label', `${active.label}: boards, wiring and power`);
+  sheet.innerHTML = `<div class="sheet-body"><header><h2>${esc(active.label)} <span class="support ${active.support}">${active.support}</span></h2>
+    <button class="icon" data-sheet-close aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button></header>
+    <p class="sheet-desc">${esc(active.description)}</p>
+    <div id="elec-detail">${packageHtml(active)}</div></div>`;
+  el.querySelector<HTMLButtonElement>('#elec-sheet-open')!.onclick = () => sheet!.showModal();
   el.querySelector<HTMLSelectElement>('#elec-select')!.onchange = (e) => selectPackage((e.target as HTMLSelectElement).value);
   el.querySelector<HTMLInputElement>('#elec-boards')!.onchange = (e) => opts.boards?.()?.setVisible((e.target as HTMLInputElement).checked);
   const diff = el.querySelector<HTMLInputElement>('#elec-diffusers');

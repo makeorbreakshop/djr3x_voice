@@ -69,27 +69,27 @@ export function followRemote(rig: Rig | undefined) {
   location.reload();
 }
 
-/** The Original | Physical row under the operating modes in the R3X panel. */
+/**
+ * The Original | Physical row, in Diagnostics > Profile (rarely changed, and a switch reloads the
+ * page: the first click asks, a second within 5 s switches).
+ */
 export function mountRigSelector(host: RigHost) {
-  const modes = document.querySelector('#r3x-body .stage-modes');
+  const modes = document.getElementById('diag-profile') ?? document.querySelector('#r3x-body .stage-modes');
   if (!modes || document.getElementById('rig-choice')) return;
   let mode = 'show';
   addEventListener('r3x:mode', (e) => (mode = String((e as CustomEvent).detail)));
   const row = document.createElement('div');
   row.id = 'rig-choice';
-  row.className = 'row seg rig-choice';
+  row.className = 'rig-choice';
   row.setAttribute('role', 'radiogroup');
   row.setAttribute('aria-label', 'Rig');
   row.innerHTML = `<span class="rig-label" title="The robot profile animation runs on: limits, speeds and joint tree">Rig</span>
+    <span class="seg">
     <button role="radio" data-rig="original" title="robot.json: the limits and kinematics the show was authored on">Original</button>
-    <button role="radio" data-rig="physical" title="robot.generated.json: generated from the mech model (mech/rigsync); head on the base's neck column">Physical</button>`;
-  modes.after(row);
-  const style = document.createElement('style');
-  style.textContent = `.rig-choice { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    .rig-choice .rig-label { font-size: 11px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
-    .rig-choice button { flex: 1; }
-    .rig-choice button[aria-checked="true"] { border-color: var(--accent); color: var(--accent); }`;
-  document.head.appendChild(style);
+    <button role="radio" data-rig="physical" title="robot.generated.json: generated from the mech model (mech/rigsync); head on the base's neck column">Physical</button></span>`;
+  if (modes.id === 'diag-profile') modes.append(row);
+  else modes.after(row);
+  let armed: { rig: Rig; at: number } | null = null;
   row.querySelectorAll<HTMLButtonElement>('[data-rig]').forEach((b) => {
     b.setAttribute('aria-checked', String(b.dataset.rig === ACTIVE_RIG));
     b.disabled = RIG_PINNED;
@@ -98,6 +98,12 @@ export function mountRigSelector(host: RigHost) {
       const rig = b.dataset.rig as Rig;
       b.blur();
       if (rig === ACTIVE_RIG) return;
+      // A switch reloads the page: ask once, switch on the second click.
+      if (!armed || armed.rig !== rig || performance.now() - armed.at > 5000) {
+        armed = { rig, at: performance.now() };
+        return host.say(`Switching to ${RIG_LABEL[rig]} reloads the page: click ${RIG_LABEL[rig]} again to switch`);
+      }
+      armed = null;
       if (host.connected()) {
         const a = await host.setRemote(rig);
         if (a.status === 'rejected') host.say(`Rig: ${a.reason ?? 'refused'}`);
