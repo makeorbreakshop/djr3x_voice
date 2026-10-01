@@ -81,6 +81,7 @@ class Part:
     stretch: Optional[dict] = None  # {"joint", "axis", "anchor", "rest_mm"}: scaled by a prismatic joint (SCHEMA.md)
     exposed: Optional[bool] = None  # seen from outside the droid (a shell is by default; SCHEMA.md "Part")
     replaced_by: Optional[str] = None  # "<assembly id>/<part id>" that supersedes it: not drawn, not in the suite
+    finish: Optional[dict] = None  # {"paint", "print": {filament, color, color_name}, "color", "kit"} (workbench/finish.py)
 
     def __post_init__(self):
         assert self.cls in CLASSES, self.cls

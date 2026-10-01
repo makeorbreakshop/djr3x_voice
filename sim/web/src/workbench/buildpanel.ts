@@ -9,7 +9,7 @@
 
 import './build.css';
 import type { AsmNode, Look, Workbench } from './workbench';
-import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, type MotionSystem } from './systems';
+import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, printList, subtreeParts, type MotionSystem } from './systems';
 import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart, type MStep } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -911,7 +911,21 @@ export function mountBuildPanel(wb: Workbench) {
       <td>${b.source ? `<a href="${esc(b.source)}" target="_blank" rel="noopener">${esc(b.item)}</a>` : esc(b.item)}${b.inferred ? `<sup class="inf" title="Inferred: ${esc(b.inferred_note ?? '')}">?</sup>` : ''}</td>
       <td class="exp">${cat === 'printed' ? exportsFor(b.parts) : ''}</td></tr>`).join('')).join('');
     const printed = lines.filter((b) => b.category === 'printed').length;
-    $('bp-bom-sum').textContent = lines.length ? `${lines.length} lines · ${printed} printed` : '';
+    // the print list: this view's printed parts (current picks, replaced ones out) by filament and colour
+    const ids = sc ? sc.parts : a && wb.focus ? subtreeParts(wb.focus, (n) => wb.nodeShown(n)) : new Set<string>();
+    const pl = printList([...ids].map((id) => wb.partInfo(id)?.part).filter((p): p is MPart => !!p));
+    const nPrint = pl.groups.reduce((k, g) => k + g.count, 0);
+    const printRows = pl.groups.length || pl.unknown.length
+      ? `<tr class="grp"><th colspan="3" scope="rowgroup">Print list <span>${nPrint} parts · ${pl.groups.length} filaments</span></th></tr>`
+        + pl.groups.map((g) => `<tr title="${esc(g.parts.join(', '))}">
+      <td class="num">${g.count}</td>
+      <td><span class="swatch" style="background:${esc(g.color)}" aria-hidden="true"></span>${esc(g.filament)} · ${esc(g.colorName)}</td>
+      <td class="exp dim">${esc(g.color)}</td></tr>`).join('')
+        + (pl.unknown.length ? `<tr title="${esc(pl.unknown.join(', '))}"><td class="num">${pl.unknown.length}</td>
+      <td class="warn">No filament or colour in the manifest</td><td></td></tr>` : '')
+      : '';
+    $('bp-bom').innerHTML += printRows;
+    $('bp-bom-sum').textContent = lines.length || nPrint ? `${lines.length} lines · ${printed} printed · ${nPrint} to print` : '';
   }
 
   return { refreshIndex };

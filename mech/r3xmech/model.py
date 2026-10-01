@@ -46,6 +46,7 @@ class Part:
     features: dict = field(default_factory=dict)  # mate features (workbench/mates.py), in the file frame
     explode: tuple = (0, 1, 0)
     exposed: bool | None = None   # seen from outside the droid (manifest `exposed`)
+    finish: dict | None = None    # paint / print filament / purchased colour (manifest `finish`, workbench/finish.py)
 
 
 @dataclass

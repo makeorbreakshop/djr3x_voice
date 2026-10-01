@@ -73,7 +73,8 @@ LINK_SUBTREE_YAW = {  # which rest yaw applies to a link's kit geometry
     "head": "head", "visor": "head",
 }
 
-MATERIAL_RULES = [(r"_DNP$|\(DNP\)|^TR_RR_Full$", "rubber")]
+# Paint and print per kit part: finish.json (shared with sim/model/build_r3x.py, the Original rig's paint).
+FINISH = Path(__file__).resolve().parent / "finish.json"
 
 # Kit shells that sit inside the droid, behind the logic panels: the light diffusers (MS_DB, MS_DB_M, MS_L),
 # the LED board (LED_B) and its mounts (MS_LPI). The kit exports one of each of the repeated ones (x4..x9 in
@@ -87,11 +88,34 @@ def pid(stem: str, k: int | None = None) -> str:
     return s if k is None else f"{s}_{k}"
 
 
-def _first(rules, name):
-    for tag, pat in rules:
-        if re.search(pat, name):
-            return tag
-    return None
+_FINISH: dict | None = None
+
+
+def _finish_doc() -> dict:
+    global _FINISH
+    if _FINISH is None:
+        d = json.loads(FINISH.read_text())
+        norm = lambda m: {pid(k): v for k, v in m.items()}  # noqa: E731
+        _FINISH = {"print": d["print"], "print_overrides": norm(d.get("print_overrides", {})),
+                   "not_printed": norm(d.get("not_printed", {})), "paint": norm(d["paint"]),
+                   "codes": {pid(k): k for k in d["paint"]}}
+    return _FINISH
+
+
+def kit_finish(code: str) -> tuple[dict | None, bool]:
+    """(manifest `finish`, printed) for a kit part code ("H_LEye_4", "TR-MR_SC_Full_Fixed", "rx_24"):
+    finish.json's paint and print. (None, True) when the code is not in the table (the finish check fails)."""
+    from workbench.finish import finish
+
+    d = _finish_doc()
+    k = pid(code)
+    if k not in d["paint"]:
+        return None, True
+    printed = k not in d["not_printed"]
+    pr = d["print_overrides"].get(k, d["print"]) if printed else None
+    pr = {a: b for a, b in pr.items() if not a.startswith("_")} if pr else None
+    return finish(paint=d["paint"][k], print=pr, kit=d["codes"][k],
+                  note=d["not_printed"].get(k, "")), printed
 
 
 def _deepest(rules, name):
@@ -124,7 +148,7 @@ def kit_parts() -> list[Part]:
         link = _deepest(LINK_RULES, clean)
         if link is None:
             raise ValueError(f"kit part {stem} matches no link rule")
-        mat = "rubber" if _first(MATERIAL_RULES, stem) else "PLA"
+        fin, printed = kit_finish(clean)
         copies = 4 if any(stem.startswith(r) for r in REPLICATE_X4) else 1
         m = re.search(r"x(\d+)$", stem.replace(" ", ""))
         for k in range(copies):
@@ -132,7 +156,7 @@ def kit_parts() -> list[Part]:
             parts.append(Part(
                 id=pid(clean, k + 1 if copies > 1 else None), name=stem + (f" #{k + 1}" if copies > 1 else ""),
                 cls="shell", link=link, T=T, file=f, origin="kit", placement="kit",
-                material=mat, printed=(mat == "PLA"),
+                material="PLA" if printed else "rubber (floor mat)", printed=printed, finish=fin,
                 note=("print qty in the file name: " + m.group(0)) if (m and copies == 1) else "",
                 exposed=False if re.search(INTERIOR, clean) else None,
             ))

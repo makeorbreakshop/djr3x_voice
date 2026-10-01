@@ -79,6 +79,8 @@ RIG_MEASURE_BUDGET = 600000
 MOUTH_DIR = Path(os.path.expanduser(_arg(
     "--mouth",
     "~/Library/CloudStorage/GoogleDrive-brandon@makeorbreakshop.com/My Drive/MOB/Projects/DJ-R3X/Mic-Mouth-Split")))
+# Their paint is mech/assemblies/community/assembly.py MOUTH_FINISH's (mech/workbench/tests/test_finish.py
+# checks the two agree).
 MOUTH_PARTS = {"Grill": ("H_MOUTH_GRILL", "metal_dark"), "LightPipe": ("H_MOUTH_PIPE", "light_pipe"),
                "BackMount": ("H_MOUTH_MOUNT", "metal_dark")}
 # Mic-Mouth-Split files are stored upside down and back to front relative to the kit head
@@ -175,37 +177,20 @@ SKIP = [
 # Exported once by the kit, printed four times, spaced 90 deg about the vertical axis.
 REPLICATE_X4 = ["B_M_D - x4", "B_SM - x4", "B_S_C - x4", "B_S_O - x4", "B_S_PO - x4", "LS_V_1 - x4"]
 
-# Material classes, first match wins. Colours per class: sim/web/src/palette.json.
-MATERIAL_RULES = [
-    # Paint as on the Oga's Cantina animatronic, taken from neutral-light references (the
-    # Hasbro Black Series figure, painted to match) - park photos are too tinted by the
-    # booth's amber stage lights to judge colour. Sources: ~/Desktop/DJ-R3X/Reference Photos.
-    # Weathered orange top/bottom rings and base; charcoal middle ring, top cap, pedestal
-    # and head shell; orange visor with cream chevrons; blue headphone cups; blue RX-24
-    # letters on a dark plate; light-grey arms with orange wrist cuffs.
-    (r"^H_[LR]Eye_4$", "eye_lens"),
-    (r"^H_[LR]Eye_", "metal_dark"),
-    (r"^H_[LR]E_1$", "accent_blue"),          # headphone cups
-    (r"^H_[LR]E_2$", "metal_dark"),
-    (r"^H_HP_", "metal_dark"),                # headband
-    (r"^H_M_1$", "metal_dark"),               # mouthpiece grille
-    (r"^H_V_1$", "visor_stripes"),            # the brow / visor
-    (r"^H_", "paint_charcoal"),               # head shell
-    (r"^RX-24$", "metal_dark"),               # plate; its raised letters -> accent_blue (split_raised_letters)
-    (r"_DNP$", "rubber"),                     # ribbed gasket rings (floor-mat material)
-    (r"^TR_RR_Full$", "rubber"),
-    (r"^(MS_P_[12]_Full)$", "metal_dark"),    # logic panels
-    (r"^(LS_M_Full|TR_NR_Full)", "paint_orange"),
-    (r"^(MS_Main_Full|TR_N_[123])", "paint_charcoal"),
-    (r"^(B_B_|B_S_[12]$|B_T_|B_M_D)", "paint_orange"),
-    (r"^(B_MT_|B_SM|B_S_[COP])", "metal_dark"),
-    (r"^P_", "metal_dark"),
-    (r"^(TR[-_]|LS_|MS_)", "metal_grey"),
-    # Arms: light grey paint, orange cuff at each wrist, bare metal on rods and pistons.
-    (r"^(HA_W_[12]|TA_W_[12]|PA_W_[12])$", "paint_orange"),
-    (r"^(HA_PS_|HA_P_1$|TA_B_|PA_W_3$)", "metal_grey"),
-    (r"^(HA_|TA_|PA_)", "paint_lightgrey"),
-]
+# Material (paint) classes per kit part: mech/assemblies/kit/finish.json, the table the mech workbench
+# also paints Build's Exterior from, so the Original rig and Build always agree. Colours per class:
+# sim/web/src/palette.json. Keys are kit codes, matched case- and punctuation-insensitively (as the
+# workbench's part ids are). Unpainted parts (null: inside the droid) and codes missing from the table
+# fall back to metal_grey with a warning.
+KIT_FINISH = Path(_arg("--finish", str(Path(__file__).resolve().parents[2] / "mech/assemblies/kit/finish.json")))
+
+
+def _code(name):
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+KIT_PAINT = {_code(k): v for k, v in json.loads(KIT_FINISH.read_text())["paint"].items()}
+
 
 # Parts whose decimated geometry rig.json is measured on (see RIG_MEASURE_BUDGET).
 MEASURED_PARTS = ["HA_W_1", "HA_LF_2", "HA_RF_2", "HA_TF_2", "TA_W_1", "TA_W_F1", "TA_W_F2",
@@ -216,10 +201,11 @@ KEEP_SEPARATE = {"H_LEye_4", "H_REye_4", "H_M_1", "H_MOUTH_GRILL", "H_MOUTH_PIPE
 
 
 def material_class(name):
-    for pat, cls in MATERIAL_RULES:
-        if re.search(pat, name):
-            return cls
-    return "metal_grey"
+    cls = KIT_PAINT.get(_code(name))
+    if cls is None:
+        print(f"[r3x] {name}: no paint in {KIT_FINISH.name}; metal_grey")
+        return "metal_grey"
+    return cls
 
 
 # --------------------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  exposed, exteriorFinish, jointLabel, libraryParts, mechanismFinish, MATERIAL, motionSystems, movedBy, type LibraryItem, type TreeNode,
+  exposed, exteriorFinish, isKitPart, jointLabel, libraryParts, mechanismFinish, MATERIAL, MISSING_FINISH, motionSystems, movedBy, printList,
+  type LibraryItem, type TreeNode,
 } from '../src/workbench/systems';
 import type { MAssembly, MJoint, MPart } from '../src/workbench/manifest';
 import * as THREE from 'three';
@@ -121,18 +122,46 @@ describe('build library and looks', () => {
     expect([...shells].sort()).toEqual(['ls_m_full', 'pa_w_1']);
   });
 
-  it('material-true mechanism colours, kit paint outside, and what shows from outside', () => {
+  it('material-true mechanism colours, the manifest paint outside, and what shows from outside', () => {
     expect(mechanismFinish(part('a', 'x', { material: 'aluminium (6061-T6)', class: 'hardware' }))).toBe(MATERIAL.aluminium);
     expect(mechanismFinish(part('b', 'x', { material: 'brass', class: 'hardware' }))).toBe(MATERIAL.brass);
     expect(mechanismFinish(part('s', 'x', { class: 'servo' }))).toBe(MATERIAL.servo);
     expect(mechanismFinish(part('p', 'x', { material: 'PETG', printed: true }))).toBe(MATERIAL.printed);
-    expect(exteriorFinish(part('ls_m_full', 'x', { class: 'shell' }), 'lower_ring').color).toBe(0xc55a1e); // paint_orange
-    expect(exteriorFinish(part('head_top', 'x', { class: 'shell' }), 'hunter_head').color).toBe(0x3c3f44); // charcoal
+    // printed: the filament's colour; purchased: its own colour on its material's surface
+    const petg = { print: { filament: 'PETG', color: '#1d1e21', color_name: 'Black' } };
+    expect(mechanismFinish(part('p', 'x', { material: 'PETG', printed: true, finish: petg })).color).toBe(0x1d1e21);
+    const hub = mechanismFinish(part('h', 'x', { material: 'aluminium', class: 'hardware', finish: { color: '#24262a' } }));
+    expect(hub).toEqual({ ...MATERIAL.aluminium, color: 0x24262a });
+    // the Exterior: the manifest's paint through palette.json, whatever the part's id or where it sits
+    expect(exteriorFinish(part('ls_m_full', 'x', { class: 'shell', finish: { paint: 'paint_orange', kit: 'LS_M_Full' } })).color).toBe(0xc55a1e);
+    expect(exteriorFinish(part('rx_24', 'x', { class: 'shell', finish: { paint: 'metal_dark' } })).color).toBe(0x2e3034);
+    // seen and printed with no paint (or a paint the palette lacks): the loud missing colour, never a guess
+    expect(exteriorFinish(part('head_top', 'x', { class: 'shell', printed: true }))).toBe(MISSING_FINISH);
+    expect(exteriorFinish(part('x', 'x', { exposed: true, printed: true, finish: { paint: 'paint_pink' } }))).toBe(MISSING_FINISH);
+    // seen but purchased metal, or deliberately bare: its real colour
+    expect(exteriorFinish(part('tube', 'x', { exposed: true, class: 'hardware', material: 'aluminium' }))).toBe(MATERIAL.aluminium);
+    expect(exteriorFinish(part('b', 'x', { exposed: true, printed: true, finish: { paint: 'none', ...petg } })).color).toBe(0x1d1e21);
+    // inside the droid and unpainted: fine (its filament)
+    expect(exteriorFinish(part('diffuser', 'x', { class: 'shell', exposed: false, printed: true, finish: petg })).color).toBe(0x1d1e21);
+    expect(isKitPart(part('h_v_1', 'x', { finish: { paint: 'visor_stripes', kit: 'H_V_1' } }))).toBe(true);
+    expect(isKitPart(part('rx_24', 'x'))).toBe(false);
     // seen from outside: the manifest's flag, else shells only
     expect(exposed(part('h_v_1', 'x', { exposed: true }))).toBe(true);
     expect(exposed(part('neck_tube', 'x', { name: 'Neck tube 26 mm' }))).toBe(false);
     expect(exposed(part('shell', 'x', { class: 'shell' }))).toBe(true);
     expect(exposed(part('shell', 'x', { class: 'shell', exposed: false }))).toBe(false);
+  });
+
+  it('the print list groups printed parts by filament and colour', () => {
+    const pla = { filament: 'PLA', color: '#8e9195', color_name: 'Grey' };
+    const petg = { filament: 'PETG', color: '#6b6f75', color_name: 'Grey' };
+    const { groups, unknown } = printList([
+      part('a', 'x', { printed: true, finish: { print: pla } }), part('b', 'x', { printed: true, finish: { print: { ...pla, color: '#8E9195' } } }),
+      part('c', 'x', { printed: true, finish: { print: petg } }), part('d', 'x', { printed: true }),
+      part('e', 'x', { printed: true, replaced_by: 'top/f', finish: { print: pla } }), part('s', 'x', { class: 'servo' }),
+    ]);
+    expect(groups.map((g) => [g.filament, g.colorName, g.count])).toEqual([['PETG', 'Grey', 1], ['PLA', 'Grey', 2]]);
+    expect(unknown).toEqual(['d']);
   });
 
   it('the library, the ground and the ring drives come from the manifest under the current picks', () => {

@@ -92,7 +92,16 @@ def morton_frame() -> Asm:
                 "Morton readme: standoffs from aluminium tube raise the big head-turn gear (the pan sector) to "
                 "height; a nut under the lazy susan leaves a wire chase; the rail extrusion is cut short for "
                 "clearance (millimetres otherwise); Henley B_M_3 replaces the pedestal top."]
+    _finishes(a.parts)
     return a
+
+
+def _finishes(parts, table=None):
+    """Morton's and Randall's printed frames: PETG (their readmes) in a neutral black; no paint (inside the
+    pedestal). The 2020 extrusions show their aluminium."""
+    from workbench.finish import PETG_BLACK, apply
+
+    apply(parts, table or {}, printed_default=PETG_BLACK)
 
 
 def randall_frame() -> Asm:
@@ -109,6 +118,7 @@ def randall_frame() -> Asm:
         a.parts.append(_p(f"randall_bracket_{k + 1}", "Randall bracket", "mech", T @ frames.rot((0, 0, 1), 90 * k),
                           rf / "bracket_x4.stl", link="frame_randall", placement="inferred", inferred=True,
                           inferred_note="x4 copies at 90 deg"))
+    _finishes(a.parts)
     return a
 
 
@@ -121,4 +131,18 @@ def mouth_split_parts(link="head"):
         out.append(_p(id_, f"Mic-Mouth-Split {n} (replaces H_M_1)", "mech", HEAD @ flip, TREVOR / f"{n}.stl",
                       link=link, material="PLA", placement="fitted", replaces=["h_m_1"],
                       evidence="sim/model/build_r3x.py MOUTH_FLIP_Y fit", exposed=n != "BackMount"))
+    _finishes(out, MOUTH_FINISH)
     return out
+
+
+def _mouth_finish():
+    from workbench.finish import PLA_BLACK, PLA_NATURAL, finish
+
+    # the grille as the kit's H_M_1 it replaces (dark metal); the light pipe a translucent print the mouth
+    # LEDs shine through (palette light_pipe). sim/model/build_r3x.py MOUTH_PARTS must agree (test_finish.py).
+    return {"mouth_grill": finish(paint="metal_dark", print=PLA_BLACK),
+            "mouth_light_pipe": finish(paint="light_pipe", print=PLA_NATURAL),
+            "mouth_back_mount": finish(paint="metal_dark", print=PLA_BLACK)}
+
+
+MOUTH_FINISH = _mouth_finish()

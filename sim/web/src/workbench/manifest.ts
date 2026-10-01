@@ -48,6 +48,21 @@ export interface MPart {
   /** "<assembly id>/<part id>" that supersedes this part in our build: not drawn (only a library design,
    * the published kit as it ships, still shows it). */
   replaced_by?: string;
+  /** How it looks on the droid and what it is printed in (SCHEMA.md "Finish"). */
+  finish?: MFinish;
+}
+
+export interface MFinish {
+  /** palette.json class it is painted in; "none" = seen but bare; absent = not painted. */
+  paint?: string;
+  /** Printed parts: what it is printed in. */
+  print?: { filament: string; color: string; color_name?: string };
+  /** Purchased parts: their own colour (else the material shows). */
+  color?: string;
+  color_name?: string;
+  /** The kit part code whose paint this is. */
+  kit?: string;
+  note?: string;
 }
 
 export interface MJoint {

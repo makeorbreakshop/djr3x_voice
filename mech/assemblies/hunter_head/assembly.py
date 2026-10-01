@@ -618,7 +618,35 @@ def build() -> Assembly:
     for p in asm.parts:
         if p.id in EXPOSED:
             p.exposed = True
+    finishes(asm.parts)
     return asm
+
+
+def finishes(parts):
+    """Paint and print (manifest `finish`, workbench/finish.py). Hunter's photos show his head mech printed
+    in black (PLA and PETG, as his files' materials say); his head shells wear the kit head's charcoal, the
+    kit's ears, eyes, face and visor their kit paint (assemblies/kit/finish.json), printed as he prints
+    (black). The coupler, seen between the neck and the head, takes the neck's dark paint. goBILDA servos
+    and hubs in their own colours; Anderson's visor servo black."""
+    from assemblies.kit.assembly import kit_finish
+    from workbench.finish import (BLACK_ANODISED, GOBILDA_SERVO, PETG_BLACK, PLA_BLACK, SERVO_BLACK, apply,
+                                  finish)
+
+    table = {"neck_coupler": finish(paint="metal_dark", print=PLA_BLACK)}
+    for pid in ("head_bottom", "side_left", "side_right", "head_top"):
+        table[pid] = finish(paint="paint_charcoal", print=PLA_BLACK)
+    for p in parts:
+        kf, _ = kit_finish(p.id) if p.source.get("file", "").startswith("vendor/kit/") else (None, True)
+        if kf:  # the kit's paint; printed black, except the eyes' translucent diffusion bulbs
+            translucent = kf["print"]["color_name"].startswith("Natural")
+            table[p.id] = dict(kf, print=dict(kf["print"] if translucent else PLA_BLACK))
+        elif p.cls == "servo":
+            table[p.id] = finish(color=GOBILDA_SERVO if "goBILDA" in p.name else SERVO_BLACK)
+        elif p.id in ("hub_bottom", "hub_top") or p.id.startswith("horn_hub_"):
+            table[p.id] = finish(color=BLACK_ANODISED)
+        elif p.printed and p.id not in table:
+            table[p.id] = finish(print=PETG_BLACK if "PETG" in p.material else PLA_BLACK)
+    apply(parts, table)
 
 
 EXPOSED = {"neck_coupler", "hub_bottom", "hex_shaft", "ujoint", "h_v_1", "h_v_2", "h_v_3", "h_v_4", "h_v_5"}

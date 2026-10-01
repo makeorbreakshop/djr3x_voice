@@ -10,8 +10,9 @@
  *   (the head rides the column's pan hub), so hovering a joint shows what is connected.
  * - The library: each community design as published, isolated out of the droid's tree with
  *   the variant picks that make it present.
- * - Looks: material-true colours for the mechanism, the kit paint for the shells (palette.json,
- *   the same rules the visual model is baked with: sim/model/build_r3x.py MATERIAL_RULES).
+ * - Looks: each part's manifest `finish` (SCHEMA.md "Finish"), assigned where the part is declared: the
+ *   Exterior its paint through palette.json (the kit's from mech/assemblies/kit/finish.json, the table
+ *   the Original is baked from), the Mechanism its filament or purchased colour, else its material.
  */
 
 import palette from '../palette.json';
@@ -251,37 +252,52 @@ export function libraryParts<N extends TreeNode>(item: LibraryItem, root: N, sho
 export interface Finish { color: number; metalness: number; roughness: number }
 
 const hex = (s: string) => parseInt(s.replace('#', ''), 16);
-const paint = (name: string): Finish => {
-  const c = (palette.classes as Record<string, { color: string; roughness: number; metalness: number }>)[name];
-  return { color: hex(c.color), roughness: c.roughness, metalness: c.metalness };
-};
+type PaletteClass = { color: string; roughness: number; metalness: number };
+const CLASSES = palette.classes as Record<string, PaletteClass>;
 
-/** Kit part code -> paint class (sim/model/build_r3x.py MATERIAL_RULES, matched on the id). */
-const PAINT_RULES: [RegExp, string][] = [
-  [/^H_[LR]EYE_4$/i, 'eye_lens'], [/^H_[LR]EYE_/i, 'metal_dark'], [/^H_[LR]E_1$/i, 'accent_blue'], [/^H_[LR]E_2$/i, 'metal_dark'],
-  [/^H_HP_/i, 'metal_dark'], [/^H_M_1$/i, 'metal_dark'], [/^H_V_1$/i, 'visor_stripes'], [/^H_/i, 'paint_charcoal'],
-  [/^RX-?24$/i, 'metal_dark'], [/_DNP$/i, 'rubber'], [/^TR_RR_FULL$/i, 'rubber'], [/^MS_P_[12]_FULL$/i, 'metal_dark'],
-  [/^(LS_M_FULL|TR_NR_FULL)/i, 'paint_orange'], [/^(MS_MAIN_FULL|TR_N_[123])/i, 'paint_charcoal'],
-  [/^(B_B_|B_S_[12]$|B_T_|B_M_D)/i, 'paint_orange'], [/^(B_MT_|B_SM|B_S_[COP])/i, 'metal_dark'], [/^P_/i, 'metal_dark'],
-  [/^(TR[-_]|LS_|MS_)/i, 'metal_grey'], [/^(HA_W_[12]|TA_W_[12]|PA_W_[12])$/i, 'paint_orange'],
-  [/^(HA_PS_|HA_P_1$|TA_B_|PA_W_3$)/i, 'metal_grey'], [/^(HA_|TA_|PA_)/i, 'paint_lightgrey'],
-];
+/** A palette.json paint class as a flat finish (the weathering is the Original's, baked). */
+export function paintFinish(name: string): Finish | null {
+  const c = CLASSES[name];
+  return c ? { color: hex(c.color), roughness: c.roughness, metalness: c.metalness } : null;
+}
 
-/** A kit part (its id is the kit's code: H_V_1, TR_NR_Full...), whatever its class. */
-export const isKitPart = (p: MPart) => PAINT_RULES.some(([re]) => re.test(p.id));
+/** Shown where a part seen from outside has no paint (or a paint the palette lacks): loud on purpose,
+ *  so a missing finish is fixed where the part is declared (SCHEMA.md "Finish") instead of guessed. */
+export const MISSING_FINISH: Finish = { color: 0xff00d4, metalness: 0, roughness: 0.5 };
+
+/** A kit part (or one standing in for a kit part): its finish carries the kit code (assemblies/kit/finish.json). */
+export const isKitPart = (p: MPart) => !!p.finish?.kit;
 
 /** Seen from outside the droid: the part's `exposed` flag (SCHEMA.md), else shells only. */
 export function exposed(p: MPart): boolean {
   return p.exposed ?? p.class === 'shell';
 }
 
-/** A shell in the R3X paint. Non-kit shells take the paint of where they sit (a head shell is charcoal). */
-export function exteriorFinish(p: MPart, nodeId: string): Finish {
-  for (const [re, cls] of PAINT_RULES) if (re.test(p.id)) return paint(cls);
-  return paint(/head/.test(nodeId) ? 'paint_charcoal' : 'paint_lightgrey');
+/** Seen on the finished droid and printed (or a shell): it must say how it is painted (SCHEMA.md "Finish").
+ *  Purchased metal seen from outside may stay bare (it shows its material). */
+export function needsPaint(p: MPart): boolean {
+  return !p.replaced_by && exposed(p) && (!!p.printed || p.class === 'shell');
 }
 
-/** Material-true: aluminium, steel, brass, one dark neutral for printed parts, servos near black. */
+/** What is wrong with a part's paint, or null. */
+export function finishProblem(p: MPart): string | null {
+  const paint = p.finish?.paint;
+  if (paint && paint !== 'none' && !CLASSES[paint]) return `paint "${paint}" is not in palette.json`;
+  if (!paint && needsPaint(p)) return 'seen from outside but has no paint';
+  return null;
+}
+
+/** Exterior: the part's paint (palette.json); a bare or unpainted part its real colour (mechanismFinish);
+ *  a part that should be painted but is not, MISSING_FINISH - never a guess. */
+export function exteriorFinish(p: MPart): Finish {
+  const paint = p.finish?.paint;
+  if (paint && paint !== 'none') return paintFinish(paint) ?? MISSING_FINISH;
+  if (!paint && needsPaint(p)) return MISSING_FINISH;
+  return mechanismFinish(p);
+}
+
+/** Material-true: aluminium, steel, brass; printed parts in their filament colour (`finish.print`), else
+ *  one dark neutral; servos near black. */
 export const MATERIAL = {
   // brushed / clear-anodised 6061: a mid silver, rough enough that the room never mirrors in it
   aluminium: { color: 0xa9afb7, metalness: 0.55, roughness: 0.55 },
@@ -290,18 +306,53 @@ export const MATERIAL = {
   printed: { color: 0x4d5057, metalness: 0.0, roughness: 0.62 },
   servo: { color: 0x26282c, metalness: 0.2, roughness: 0.45 },
   black: { color: 0x1e1f22, metalness: 0.0, roughness: 0.7 },
+  /** A moulded or clear plastic part (polycarbonate wheels). */
+  plastic: { color: 0xb9c2c6, metalness: 0.0, roughness: 0.35 },
   fastener: { color: 0x3c3f45, metalness: 0.8, roughness: 0.38 },
   /** Inspect: one light neutral so the check colours own the view. */
   neutral: { color: 0xa9aeb5, metalness: 0.0, roughness: 0.55 },
 } satisfies Record<string, Finish>;
 
-export function mechanismFinish(p: MPart): Finish {
+/** The material's surface (metalness, roughness, a default colour). */
+function materialFinish(p: MPart): Finish {
   const m = (p.material ?? '').toLowerCase();
   if (p.class === 'servo' || m.startsWith('servo')) return MATERIAL.servo;
   if (p.class === 'fastener') return MATERIAL.fastener;
+  if (p.printed) return MATERIAL.printed;
   if (m.includes('brass')) return MATERIAL.brass;
   if (m.includes('alumin')) return MATERIAL.aluminium;
+  if (m.includes('polycarbonate')) return MATERIAL.plastic;
   if (m.includes('nylon') || m.includes('rubber')) return MATERIAL.black;
-  if (m.includes('steel') || p.class === 'bearing' || (p.class === 'hardware' && !p.printed)) return MATERIAL.steel;
+  if (m.includes('steel') || p.class === 'bearing' || p.class === 'hardware') return MATERIAL.steel;
   return MATERIAL.printed;
+}
+
+/** Mechanism: a printed part in its filament colour, a purchased one in its own colour (`finish.color`:
+ *  goBILDA grey, black anodising) on its material's surface, else the material. */
+export function mechanismFinish(p: MPart): Finish {
+  const base = materialFinish(p);
+  const c = p.printed ? p.finish?.print?.color : p.finish?.color;
+  return c ? { ...base, color: hex(c) } : base;
+}
+
+/** The print list: printed parts grouped by filament and colour (the build's parts, replaced ones left out). */
+export interface PrintGroup { filament: string; color: string; colorName: string; count: number; parts: string[] }
+export function printList(parts: Iterable<MPart>): { groups: PrintGroup[]; unknown: string[] } {
+  const by = new Map<string, PrintGroup>();
+  const unknown: string[] = [];
+  for (const p of parts) {
+    if (!p.printed || p.replaced_by) continue;
+    const pr = p.finish?.print;
+    if (!pr?.filament || !pr.color) {
+      unknown.push(p.id);
+      continue;
+    }
+    const key = `${pr.filament}|${pr.color.toLowerCase()}`;
+    let g = by.get(key);
+    if (!g) by.set(key, (g = { filament: pr.filament, color: pr.color, colorName: pr.color_name ?? pr.color, count: 0, parts: [] }));
+    g.count++;
+    g.parts.push(p.id);
+  }
+  const groups = [...by.values()].sort((a, b) => a.filament.localeCompare(b.filament) || b.count - a.count);
+  return { groups, unknown };
 }

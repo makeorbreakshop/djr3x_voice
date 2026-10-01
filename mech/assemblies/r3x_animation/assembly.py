@@ -687,9 +687,11 @@ def hero_arm(top: Asm):
           A("mainarm"), f("hero", "mainarm"), placement="fitted", replaces=["ha_sb_1", "ha_sp_1", "ha_sp_2"],
           evidence=ev + "; the hinge 38.5 mm below the foot"),
         P("hero_elbow_cover_l", "elbow cover (Anderson's copy of the kit disc HA_LE_1)", "shell", "hero_arm",
-          A("elbow_cover_a"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_le_1"]),
+          A("elbow_cover_a"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_le_1"],
+          material="PLA", printed=True),
         P("hero_elbow_cover_r", "elbow cover (Anderson's copy of the kit disc HA_RE_1)", "shell", "hero_arm",
-          A("elbow_cover_b"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_re_1"]),
+          A("elbow_cover_b"), f("hero", "elbow-covers-dnp"), placement="fitted", evidence=ev, replaces=["ha_re_1"],
+          material="PLA", printed=True),
         P("hero_wrist_body", "wrist", "mech", "hero_arm", A("wrist"), f("wrist", "wrist"), placement="fitted",
           replaces=["ha_w_2"], evidence=ev),
         # his STL names are swapped: the STLs' "Part 1 (1)" is the cap, "Part 1" the wrist servo
@@ -840,6 +842,34 @@ def attach(root: Asm, base: Asm, lower: Asm, middle: Asm, top: Asm, head: Asm, d
         for p in mine:
             p.link = f"{cid}_mount"
     anderson_gears(nd, lower, middle, top, head)
+    apply_finishes([p for a in (base, lower) for p in a.all_parts() if p.origin != "kit"])
+
+
+def apply_finishes(parts):
+    """Paint and print for Anderson's parts (manifest `finish`, workbench/finish.py). His parts list
+    gives PETG for the printed mechanism; no colour is stated, so a neutral grey. What is seen from
+    outside wears the kit paint of what it stands in for."""
+    from workbench.finish import PETG_GREY, PLA_GREY, SERVO_BLACK, apply, finish
+
+    kit_arm = finish(paint="paint_lightgrey", print=PETG_GREY)
+    cuff = finish(paint="paint_orange", print=PETG_GREY,
+                  note="the wrist that replaces the kit's orange cuff HA_W_2 / hand HA_W_1 (palette: orange wrist cuffs)")
+    table = {
+        # the droid's dark neck rod (sim/model/build_r3x.py NECK) and the sim's painted coil spring
+        "neck_tube": finish(paint="metal_dark"),
+        "neck_spring": finish(paint="metal_dark", color={"color": "#2c2f33", "color_name": "Painted steel"}),
+        # the hero arm we build: his elbow, upright and wrist in the kit's arm paint
+        "hero_servomount": kit_arm, "hero_elbow_tube": kit_arm, "hero_forearm": kit_arm,
+        "hero_elbow_cover_l": finish(paint="paint_lightgrey", print=PLA_GREY, kit="HA_LE_1",
+                                     note="the kit's elbow disc HA_LE_1 (his file is a DNP copy of it)"),
+        "hero_elbow_cover_r": finish(paint="paint_lightgrey", print=PLA_GREY, kit="HA_RE_1",
+                                     note="the kit's elbow disc HA_RE_1 (his file is a DNP copy of it)"),
+        "hero_wrist_body": cuff, "hero_wrist_cap": cuff, "hero_hand_arm_side": cuff, "hero_hand_finger_side": cuff,
+    }
+    for p in parts:
+        if p.cls == "servo":  # ZOSKAY, DS5160, DS3218, INJORA: black cases
+            table.setdefault(p.id, finish(color=SERVO_BLACK))
+    apply(parts, table, printed_default=PETG_GREY)
 
 
 # Each pinion's turn about its own axle per unit of its joint, relative to the link it rides (SCHEMA.md

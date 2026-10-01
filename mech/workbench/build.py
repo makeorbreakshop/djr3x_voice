@@ -247,7 +247,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "triangles": _clean({"display": n_disp, "full": full[1] if full else None, "source": int(len(m.faces))}),
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
             "cad": p.cad, "catalog": p.catalog, "features": p.features, "stretch": p.stretch, "exposed": p.exposed,
-            "replaced_by": p.replaced_by,
+            "replaced_by": p.replaced_by, "finish": p.finish,
         }))
     fast = []
     written = set()
@@ -354,6 +354,12 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
         for c in asm.checks:
             log(f"  [{c.status:4}] {c.title}: {c.summary}")
         log(f"checks {time.time() - t1:.1f} s")
+    # finishes (paint, print colour) on every inline part: cheap, so on every build, --sketch included
+    from .finish import check as finish_check
+
+    fc = finish_check(list(_all_parts(asm)))
+    asm.checks = [c for c in asm.checks if c.id != "finish"] + [fc]
+    log(f"  [{fc.status:4}] {fc.title}: {fc.summary}")
     if run_checks:
         t2 = time.time()
         asm.tests = suite_for(mod, asm, out=out_root / asm.id)
@@ -384,6 +390,13 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     _atomic_json(index, index_path)
     log(f"wrote {out / 'manifest.json'} ({time.time() - t0:.1f} s)")
     return out / "manifest.json"
+
+
+def _all_parts(asm: Assembly):
+    yield from asm.parts
+    for c in asm.children:
+        if isinstance(c, Assembly):
+            yield from _all_parts(c)
 
 
 def prune(out: Path, node: dict, export: bool, sigs: "_Sigs") -> int:

@@ -21,7 +21,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  assemblyLabel, exposed, exteriorFinish, isKitPart, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
+  assemblyLabel, exposed, exteriorFinish, finishProblem, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
 import {
@@ -383,6 +383,7 @@ export class Workbench {
     this.allParts = parts;
     this.allFast = fast;
     this.top = top;
+    this.reportFinishes(m.root, parts);
     this.root.add(this.top.group);
     this.top.group.add(this.ifGroup);
     // No highlight knee here (look.ts tameHighlights): it squeezes every lit value above 0.7
@@ -631,6 +632,22 @@ export class Workbench {
       (node.links.get(c.mount?.parent_link ?? '') ?? group).add(child.group);
     }
     return node;
+  }
+
+  /** Parts that should be painted but are not (SCHEMA.md "Finish"): drawn in MISSING_FINISH, listed in the
+   * console and, when the manifest's own `finish` check does not already fail on them, in Checks. */
+  private reportFinishes(root: MAssembly, parts: PartObj[]) {
+    const bad = parts.map((po) => ({ p: po.part, why: finishProblem(po.part) })).filter((x) => x.why);
+    if (!bad.length) return;
+    console.warn(`[build] ${bad.length} parts without a finish (shown magenta):`, bad.map((x) => `${x.p.id}: ${x.why}`));
+    const known = new Set(root.checks?.filter((c) => c.kind === 'finish' && c.status === 'fail').flatMap((c) => c.parts ?? []));
+    const fresh = bad.filter((x) => !known.has(x.p.id));
+    if (!fresh.length) return;
+    (root.checks ??= []).push({
+      id: 'finish_viewer', kind: 'finish', status: 'fail', title: 'Finishes: missing paint',
+      summary: `${fresh.length} parts seen from outside have no usable paint; ${fresh.map((x) => `${x.p.id}: ${x.why}`).join('; ')}`,
+      parts: fresh.map((x) => x.p.id),
+    });
   }
 
   private material(f: Finish = MATERIAL.printed) {
@@ -1242,9 +1259,9 @@ export class Workbench {
         finish = MATERIAL.neutral;
         opacity = shell ? GHOST.shell : GHOST.mech;
       } else if (look === 'exterior' && outside && !shell) {
-        finish = isKitPart(p) ? exteriorFinish(p, po.node.asm.id) : mechanismFinish(p);
+        finish = exteriorFinish(p); // its paint; bare metal its material; a missing paint, MISSING_FINISH
       } else if (shell) {
-        finish = exteriorFinish(p, po.node.asm.id);
+        finish = exteriorFinish(p);
         if (look === 'inspect') opacity = GHOST.inspectShell;
         if (look === 'mechanism') opacity = GHOST.shell;
       } else {

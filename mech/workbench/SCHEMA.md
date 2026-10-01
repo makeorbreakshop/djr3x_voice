@@ -159,9 +159,35 @@ A rigid body. Every part rides on exactly one link.
   // library design, still shows it) but is not part of our build: readers do not draw it in the build's
   // model, and the whole-droid suite and BOM leave it out. The replacing part may list what it replaces
   // in `replaces: ["ha_eb_1", ...]` (informational).
-  "replaced_by": "top_ring/hero_servomount"
+  "replaced_by": "top_ring/hero_servomount",
+  // optional: how the part looks on the finished droid and what it is printed in (see "Finish")
+  "finish": {"paint": "paint_charcoal", "print": {"filament": "PLA", "color": "#1f2023", "color_name": "Black"}}
 }
 ```
+
+### Finish
+
+Assigned where the part is declared (the assembly module or mech/parts), never in a reader:
+`workbench/finish.py` has the helpers and filament presets, `assemblies/kit/finish.json` the kit's
+table (which `sim/model/build_r3x.py` also bakes the Original rig from). `material` stays on the part.
+
+```jsonc
+"finish": {
+  "paint": "paint_orange",   // sim/web/src/palette.json class it is painted in (Build's Exterior look);
+                             // "none" = seen but deliberately bare; omitted = not painted (inside the droid)
+  "print": {"filament": "PETG", "color": "#6b6f75", "color_name": "Grey"},  // printed parts: what it is printed
+                             // in (Mechanism look, the print list); filament PLA | PETG | PA-CF | ...
+  "color": "#3d4045", "color_name": "goBILDA servo grey",  // optional, purchased parts: their real colour
+                             // (else a reader shows the material: aluminium, steel, brass)
+  "kit": "H_LE_1",           // optional: the kit part code whose paint this is (a kit part, or what stands in for one)
+  "note": ""
+}
+```
+
+A part seen from outside (`exposed`, else a shell) that is printed or a shell must have `paint`; one
+that is printed must have `print` with all three fields. The builder adds a `finish` check (kind
+`finish`) to the root: `fail` lists the parts that break this. Readers show a missing paint in a
+loud colour, never a guessed one.
 
 ## Joint
 
@@ -388,3 +414,5 @@ The assembly carries its connections (workbench/mates.py):
   drives connected the way push rods are (a joint turns its pinions; a servo maps to its joint). Same
   day: part `exposed`, joint `drive.variants`, root `designs` and `ground` (all optional). Same day: part
   `replaced_by` (optional; a reader that does not know it draws a replaced part, as before).
+- v1 (2026-10-01): part `finish` (optional: paint, print filament and colour, purchased colour) and the
+  root's `finish` check. Readers that do not know it colour by `material`, as before.

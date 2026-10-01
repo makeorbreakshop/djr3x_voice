@@ -506,6 +506,7 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
         note="On the top cap round the neck, up to the head's shell; stretches with head_lift.")
 
     P["col_neck_tube"].exposed = True   # seen between the top cap and the head (through the spring)
+    _finishes(P.values())
     asm.parts = list(P.values())
     hw = Hw(P)
     _hardware(hw, P, posts, lift_servo, pan_servo, pan_hub, ring)
@@ -520,6 +521,24 @@ def build_column(mount_link: str = "base", variant: dict | None = None, in_droid
     asm.notes = _notes()
     asm.children.append(_head_ref())
     return asm
+
+
+def _finishes(parts):
+    """Paint and colour (manifest `finish`, workbench/finish.py): our printed parts in PETG (the layout's
+    material) in a neutral grey, none seen from outside; the neck in the droid's dark neck paint; the
+    goBILDA servos and hubs in their own colours, the V-wheels clear. Metal shows its material."""
+    from workbench.finish import BLACK_ANODISED, CLEAR_PC, GOBILDA_SERVO, PETG_GREY, apply, finish
+
+    table = {"col_neck_tube": finish(paint="metal_dark", note="the droid's dark neck rod (build_r3x.py NECK)"),
+             "neck_spring": finish(paint="metal_dark", color={"color": "#2c2f33", "color_name": "Painted steel"})}
+    for p in parts:
+        if p.cls == "servo":
+            table[p.id] = finish(color=GOBILDA_SERVO)
+        elif p.id.endswith("_hub") and "1906" in p.name:
+            table[p.id] = finish(color=BLACK_ANODISED)
+        elif p.id.startswith("col_wheel_"):
+            table[p.id] = finish(color=CLEAR_PC)
+    apply(parts, table, printed_default=PETG_GREY)
 
 
 def _anderson_sector(key):

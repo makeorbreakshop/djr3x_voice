@@ -4,9 +4,10 @@
  * values - the same frames the visual rig takes - with the closed linkages (head push-rod
  * pair, visor rod) solved per frame by the workbench's own kinematics (workbench/kinematics.ts).
  *
- * Draw cost is kept flat: every static part of a link is merged into one mesh per material
- * class, each linkage's horn and rod parts into one mesh each, and fasteners are instanced per
- * (link, fastener mesh). The full droid is ~60 draw calls whatever its part count.
+ * Draw cost is kept flat: every static part of a link is merged into one mesh per class and finish
+ * (the manifest's `finish`, coloured as Build colours it), each linkage's horn and rod parts into one
+ * mesh each, and fasteners are instanced per (link, fastener mesh). The full droid is ~100 draw calls
+ * whatever its part count.
  *
  * Sim only, like Build: it reads frames, never sends a command. The meshes come from the dev
  * server's /mech/out/ (gitignored third-party geometry), so a static build shows a notice.
@@ -17,18 +18,17 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { tameHighlights } from '../look';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod } from '../workbench/kinematics';
-import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, meshGeometry, MECH_BASE, type MAssembly, type MGear, type MLinkage, type PartClass } from '../workbench/manifest';
+import { hiddenByVariants, defaultVariants, joinUrl, loadManifest, meshGeometry, MECH_BASE, type MAssembly, type MGear, type MLinkage, type MPart, type PartClass } from '../workbench/manifest';
+import { exteriorFinish, MATERIAL, mechanismFinish, type Finish } from '../workbench/systems';
 
 export type ModelView = 'visual' | 'mechanical' | 'xray';
 
-const LOOK: Record<PartClass, { color: number; metalness: number; roughness: number }> = {
-  shell: { color: 0xd8d2c4, metalness: 0.0, roughness: 0.62 },
-  mech: { color: 0xc9773d, metalness: 0.0, roughness: 0.55 },
-  servo: { color: 0x2c3444, metalness: 0.2, roughness: 0.5 },
-  hardware: { color: 0xb8b09a, metalness: 0.75, roughness: 0.35 },
-  bearing: { color: 0x9aa1ab, metalness: 0.85, roughness: 0.3 },
-  fastener: { color: 0x34353a, metalness: 0.7, roughness: 0.4 },
-};
+/** Fasteners: one dark metal. Parts take their manifest finish (SCHEMA.md "Finish", as Build's looks):
+ *  shells their paint, the rest their filament, purchased or material colour. */
+const FASTENER: Finish = MATERIAL.fastener;
+
+const finishOf = (p: MPart): Finish => (p.class === 'shell' ? exteriorFinish(p) : mechanismFinish(p));
+const finishKey = (f: Finish) => `${f.color.toString(16)}:${f.metalness}:${f.roughness}`;
 
 interface Node {
   asm: MAssembly;
@@ -52,8 +52,9 @@ export class MechView {
   /** Linkages out of reach at the last pose (the pose is past what the rods can do). */
   unreachable: string[] = [];
   private nodes: Node[] = [];
-  private shellMat = new THREE.MeshStandardMaterial({ ...LOOK.shell, side: THREE.DoubleSide });
-  private mats = new Map<PartClass, THREE.MeshStandardMaterial>();
+  /** One material per finish (shells apart: X-ray ghosts them). */
+  private mats = new Map<string, THREE.MeshStandardMaterial>();
+  private shellMats = new Set<THREE.MeshStandardMaterial>();
   private lastKey = '';
   private listeners = new Set<() => void>();
 
@@ -62,9 +63,6 @@ export class MechView {
     this.root.scale.setScalar(0.001); // mm -> m
     this.root.visible = false;
     scene.add(this.root);
-    for (const c of Object.keys(LOOK) as PartClass[]) {
-      this.mats.set(c, c === 'shell' ? this.shellMat : new THREE.MeshStandardMaterial({ ...LOOK[c], side: THREE.DoubleSide }));
-    }
   }
 
   onChange(fn: () => void) {
@@ -79,13 +77,32 @@ export class MechView {
   setView(v: ModelView) {
     this.view = v;
     this.root.visible = v !== 'visual' && this.status === 'ready';
-    const x = v === 'xray';
-    this.shellMat.transparent = x;
-    this.shellMat.opacity = x ? 0.12 : 1;
-    this.shellMat.depthWrite = !x;
-    this.shellMat.needsUpdate = true;
+    for (const m of this.shellMats) this.ghost(m);
     if (v !== 'visual' && this.status === 'idle') void this.load();
     this.emit();
+  }
+
+  private ghost(m: THREE.MeshStandardMaterial) {
+    const x = this.view === 'xray';
+    m.transparent = x;
+    m.opacity = x ? 0.12 : 1;
+    m.depthWrite = !x;
+    m.needsUpdate = true;
+  }
+
+  /** The material for a finish (shared by every part that has it). */
+  private mat(f: Finish, shell = false) {
+    const key = `${shell ? 's' : 'm'}:${finishKey(f)}`;
+    let m = this.mats.get(key);
+    if (!m) {
+      m = new THREE.MeshStandardMaterial({ ...f, side: THREE.DoubleSide });
+      this.mats.set(key, m);
+      if (shell) {
+        this.shellMats.add(m);
+        this.ghost(m);
+      }
+    }
+    return m;
   }
 
   /** True while the mech stands in for the droid. */
@@ -155,10 +172,10 @@ export class MechView {
     }
     const hide = hiddenByVariants(asm, defaultVariants(asm));
     const base = asm.base ?? '/';
-    // Static parts: one merged mesh per (link, class). Linkage parts: per (linkage, role). Gear parts: per gear.
+    // Static parts: one merged mesh per (link, class, finish). Linkage parts: per (linkage, role). Gear parts: per gear.
     const gearOf = new Map<string, MGear>();
     for (const g of asm.gears ?? []) for (const id of [...g.parts, ...(g.fasteners ?? [])]) gearOf.set(id, g);
-    const buckets = new Map<string, { geos: THREE.BufferGeometry[]; cls: PartClass; link?: string; lk?: MLinkage; role?: 'horn' | 'rod'; gear?: MGear }>();
+    const buckets = new Map<string, { geos: THREE.BufferGeometry[]; cls: PartClass; finish: Finish; link?: string; lk?: MLinkage; role?: 'horn' | 'rod'; gear?: MGear }>();
     // a part the build replaces (`replaced_by`, SCHEMA.md) is not on the droid
     await Promise.all(asm.parts.filter((p) => !hide.has(p.id) && !p.replaced_by).map(async (p) => {
       const g = (await geo(joinUrl(base, p.mesh))).clone();
@@ -167,8 +184,10 @@ export class MechView {
       const lk = p.linkage ? asm.linkages?.find((x) => x.id === p.linkage) : undefined;
       const role = lk ? (p.role === 'horn' ? 'horn' : 'rod') : undefined;
       const gear = lk ? undefined : gearOf.get(p.id);
-      const key = lk ? `lk:${lk.id}:${role}:${p.class}` : gear ? `g:${gear.id}:${p.class}` : `l:${p.link}:${p.class}`;
-      if (!buckets.has(key)) buckets.set(key, { geos: [], cls: p.class, link: lk ? undefined : gear?.link ?? p.link, lk, role, gear });
+      const finish = finishOf(p);
+      const fk = `${p.class === 'shell' ? 's' : 'm'}:${finishKey(finish)}`;
+      const key = lk ? `lk:${lk.id}:${role}:${fk}` : gear ? `g:${gear.id}:${fk}` : `l:${p.link}:${fk}`;
+      if (!buckets.has(key)) buckets.set(key, { geos: [], cls: p.class, finish, link: lk ? undefined : gear?.link ?? p.link, lk, role, gear });
       buckets.get(key)!.geos.push(g);
       this.stats.parts++;
     }));
@@ -176,7 +195,7 @@ export class MechView {
       const merged = mergeGeometries(b.geos, false);
       b.geos.forEach((g) => g.dispose());
       if (!merged) continue;
-      const mesh = new THREE.Mesh(merged, this.mats.get(b.cls)!);
+      const mesh = new THREE.Mesh(merged, this.mat(b.finish, b.cls === 'shell'));
       mesh.name = b.lk ? `${b.lk.id}:${b.role}` : `${b.link}:${b.cls}`;
       this.stats.drawCalls++;
       this.stats.triangles += (merged.index?.count ?? merged.attributes.position.count) / 3;
@@ -211,7 +230,7 @@ export class MechView {
     }
     await Promise.all([...fb.values()].map(async (b) => {
       const g = await geo(b.url);
-      const im = new THREE.InstancedMesh(g, this.mats.get('fastener')!, b.ms.length);
+      const im = new THREE.InstancedMesh(g, this.mat(FASTENER), b.ms.length);
       b.ms.forEach((m, i) => im.setMatrixAt(i, m));
       im.instanceMatrix.needsUpdate = true;
       im.computeBoundingSphere();
