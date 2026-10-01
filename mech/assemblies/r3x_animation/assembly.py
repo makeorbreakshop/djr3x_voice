@@ -160,7 +160,9 @@ PARAMETRIC = {
     "bodytube": "parts.anderson.bodytube",
     "servomount": "parts.anderson.servomount",
     "wrist": "parts.anderson.wrist",
-    "Part 1": "parts.anderson.wrist_cap",
+    # his STL and STEP names are swapped: the cap is the STLs' "Part 1 (1)" (the STEPs' "Part 1"); the STLs'
+    # "Part 1" is a micro-servo stand-in (23 x 13 x 25.8 body, tabs 29.8 across), not printed
+    "Part 1 (1)": "parts.anderson.wrist_cap",
     "hand-arm-side": "parts.anderson.hand_arm_side",
     "hand-finger-side": "parts.anderson.hand_finger_side",
 }

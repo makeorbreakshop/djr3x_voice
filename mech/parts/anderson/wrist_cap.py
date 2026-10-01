@@ -13,6 +13,7 @@ from __future__ import annotations
 from parts.head._common import Print, finish, hole_features, hole_group_params, plane, resolve_hole_types
 
 REFERENCE = "r3x-internal - Part 1.step"
+STL_REFERENCE = "new wrist - Part 1 (1).stl"     # the same solid, same frame (his STL names are swapped)
 LABEL = "Hero-arm wrist cap (parametric)"
 DESIGNED: dict = {}
 INSERT_CANDIDATES = ()

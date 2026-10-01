@@ -210,3 +210,43 @@ def test_hero_arm_fits():
     for k in range(1, 5):
         assert np.allclose(arm[f"hole_join{k}"]["p"][:2], fingers[f"hole_join{k}"]["p"][:2])
     assert arm["top"]["p"][2] == fingers["bed"]["p"][2]
+
+
+def test_hero_arm_layout_clears():
+    """His hero arm assembled by parts/anderson/hero_arm.py: no two parts overlap (> 1 mm3) with the
+    forearm anywhere from -50 to 110 deg (servo and covers from his STLs, when on this machine)."""
+    import manifold3d as mf
+    import trimesh
+
+    from parts.anderson import hero_arm as H
+    from parts.head._common import mesh
+
+    stl = STL_DIR / "r3x - hero arm mods"
+    meshes = {k: mesh(_mod(f"parts.anderson.{m}").make()) for k, m in (
+        ("servomount", "servomount"), ("bodytube", "bodytube"), ("mainarm", "mainarm"), ("wrist", "wrist"),
+        ("wrist_cap", "wrist_cap"), ("hand_arm_side", "hand_arm_side"), ("hand_finger_side", "hand_finger_side"))}
+    for k, f in (("servo", "hero arm - servo.stl"), ("elbow_cover_a", "hero arm - elbow-covers-dnp.stl"),
+                 ("elbow_cover_b", "hero arm - elbow-covers-dnp.stl"), ("wrist_servo", "hero arm - Part 1.stl")):
+        if (stl / f).exists():
+            meshes[k] = trimesh.load(stl / f)
+
+    def man(m, T):
+        m = m.copy()
+        m.apply_transform(T)
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                   tri_verts=np.asarray(m.faces, np.uint32)))
+
+    static = {k: man(meshes[k], T) for k, T in H.STATIC.items() if k in meshes}
+    for th in (-50, 0, 45, 90, 110):
+        A = H.arm_in_sm(th)
+        arm = {k: man(meshes[k], A @ T) for k, T in H.ARM.items() if k in meshes}
+        pairs = [(a, b) for a in static for b in arm]
+        if th == 0:
+            ks = list(arm)
+            pairs += [(ks[i], ks[j]) for i in range(len(ks)) for j in range(i + 1, len(ks))]
+            ks = list(static)
+            pairs += [(ks[i], ks[j]) for i in range(len(ks)) for j in range(i + 1, len(ks))]
+        both = {**static, **arm}
+        for a, b in pairs:
+            v = (both[a] ^ both[b]).volume()
+            assert v < 3.0, f"theta {th}: {a} x {b} share {v:.1f} mm3"
