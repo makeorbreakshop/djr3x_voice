@@ -393,13 +393,7 @@
             <span>Gesture</span><b id="sh-gesture">-</b>
             <span>Background</span><b id="sh-background">-</b>
           </div>
-          <div class="row sh-find">
-            <input id="sh-search" type="search" placeholder="Find a sequence, cue or clip&hellip;" aria-label="Find a show" autocomplete="off" spellcheck="false" />
-            <button id="sh-stop" title="Everything blends out">Stop</button>
-          </div>
-          <details><summary>Sequences <small id="sh-n-sequence"></small></summary><ul id="sh-list-sequence" class="show-list"></ul></details>
-          <details><summary>Cues <small id="sh-n-cue"></small></summary><ul id="sh-list-cue" class="show-list"></ul></details>
-          <details><summary>Clips <small id="sh-n-clip"></small></summary><ul id="sh-list-clip" class="show-list"></ul></details>
+          <div id="sh-library"></div>
           <details class="opts">
             <summary>Options</summary>
             <label class="inline">Intensity <input id="sh-int" type="range" min="0" max="1.5" step="0.05" value="1" /><output id="sh-int-out">1.00</output></label>

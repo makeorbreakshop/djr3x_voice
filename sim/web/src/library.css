@@ -1,0 +1,50 @@
+/* The animation library (library.ts): a dropdown, compact rows, drill-down. Panel tokens. */
+.lib { display: grid; gap: 6px; }
+/* The panel stretches buttons (flex: 1); the library's keep their own size. */
+.lib button { flex: 0 0 auto; width: auto; min-width: 0; margin: 0; }
+.lib-bar { display: flex; gap: 6px; align-items: center; }
+.lib-group { flex: 1; }
+.lib-btn {
+  width: 24px; height: 22px; padding: 0; display: inline-grid; place-items: center;
+  font: 11px/1 system-ui, sans-serif; border-radius: 5px; border: 1px solid transparent;
+  background: transparent; color: inherit; opacity: 0.55; cursor: pointer;
+}
+.lib-btn:hover { opacity: 1; border-color: var(--line); }
+.lib-btn.on { opacity: 1; color: #111; background: var(--accent); border-color: var(--accent); }
+.lib-body { display: grid; max-height: 55vh; overflow-y: auto; }
+.lib-item { border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.lib-item > summary { list-style: none; cursor: pointer; }
+.lib-item > summary::-webkit-details-marker { display: none; }
+.lib-item > summary { display: flex; align-items: center; width: 100%; box-sizing: border-box; }
+/* Rows without children line up with the panel's summary chevron. */
+div.lib-item > .lib-head { padding-left: 14px; }
+.lib-head { flex: 1; width: 100%; box-sizing: border-box; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; min-height: 28px; padding-right: 2px; }
+.lib-nm { font: 500 12px/1.2 system-ui, sans-serif; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-note { font: 500 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0.5; }
+.lib-ctl { display: inline-flex; gap: 2px; }
+/* Kind by a small mark, not words: intention ◆, moment (cue) ●, motion (clip) ○, routine ◌. */
+.lib-mark { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--accent); box-sizing: border-box; }
+.lib-mark.cue { background: var(--accent); }
+.lib-mark.sequence { border-style: dashed; }
+.lib-mark.intention { border-radius: 1px; transform: rotate(45deg); background: var(--accent); width: 7px; height: 7px; }
+.lib-mark.missing { border-color: var(--line); }
+.lib-head.playing { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 5px; }
+.lib-head.playing .lib-nm { color: var(--accent); }
+.lib-kids { padding: 0 0 4px 16px; }
+.lib-kids.flat { padding-left: 0; }
+.lib-kids .lib-item { border-top: none; }
+.lib-h { margin: 10px 0 2px; font: 600 10px/1 system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.5; }
+.lib-wbar { display: block; height: 3px; margin: -4px 64px 6px 28px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.lib-wbar i { display: block; height: 100%; background: var(--accent); }
+.lib-timeline { position: relative; margin: 2px 4px 8px 28px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+.lib-timeline.loops { border-right: 2px dashed var(--accent); }
+.lib-block {
+  position: absolute; height: 18px; box-sizing: border-box; padding: 0 5px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font: 500 10px/18px system-ui, sans-serif; text-align: left; border-radius: 4px;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 10%, transparent); color: inherit;
+}
+.lib-block.cue { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.lib-block.action { opacity: 0.55; font-style: italic; background: transparent; }
+.lib-block.playing { background: var(--accent); color: #111; }
+button.lib-block { cursor: pointer; }
+.lib-find { width: 100%; box-sizing: border-box; margin-bottom: 4px; }

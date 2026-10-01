@@ -29,6 +29,7 @@ export const PUPPET_MODES: PuppetMode[] = ['idle', 'engaged', 'dj'];
 
 export type PerfCmd =
   | { cmd: 'perform'; id: string; source?: string; params?: { intensity?: number; speed?: number }; layer?: RunLayer }
+  | { cmd: 'intend'; id: string; source?: string; intensity?: number }
   | { cmd: 'stop'; id?: string; layer?: RunLayer; all?: boolean }
   | { cmd: 'freeze'; on: boolean }
   | { cmd: 'puppet'; intent: string; value: number }

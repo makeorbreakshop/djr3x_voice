@@ -51,6 +51,8 @@ import {
   INTENTS, PROFILE_JSON, PUPPET_MODES, Performer,
   type CatalogItem, type PerfCmd, type PerfOut, type RunLayer, type SystemMode,
 } from './performer';
+import { Library } from './library';
+import { SHOW_FILES } from './show/loader';
 
 // ------------------------------------------------------------------ renderer / scene
 // The droid's look (per-class materials, weathering) lives in look.ts; the booth set and
@@ -1286,31 +1288,19 @@ function puppetSet(intent: string, value: number) {
 
 function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
   const params = () => [Number($<HTMLInputElement>('sh-int').value), Number($<HTMLInputElement>('sh-speed').value)] as const;
-  for (const kind of ['sequence', 'cue', 'clip'] as const) {
-    const ul = $('sh-list-' + kind);
-    const list = items.filter((it) => it.kind === kind);
-    $('sh-n-' + kind).textContent = `(${list.length})`;
-    for (const it of list) {
-      const li = document.createElement('li');
-      li.dataset.id = it.id;
-      li.title = `${it.description}${it.requires ? ' [extended build]' : ''}${it.tags?.length ? `\ntags: ${it.tags.join(', ')}` : ''}`;
-      const b = document.createElement('button');
-      b.textContent = '▶';
-      b.setAttribute('aria-label', `Play ${it.id}`);
-      b.onclick = () => playShow(it.id, ...params());
-      const nm = document.createElement('span');
-      nm.className = 'nm';
-      nm.textContent = it.id;
-      const sm = document.createElement('small');
-      sm.textContent = it.kind === 'sequence' ? `${it.clock === 'beat' ? 'beat' : 'time'}${it.loop ? ' loop' : ''}` : it.kind === 'clip' ? `${it.duration}s` : '';
-      nm.appendChild(sm);
-      const tier = document.createElement('i');
-      tier.className = it.tier;
-      tier.textContent = it.tier;
-      li.append(b, nm, tier);
-      ul.appendChild(li);
-    }
-  }
+  // The animation library: every clip, cue, routine and intention, grouped (library.ts).
+  const lib = $('sh-library');
+  new Library(lib, {
+    files: SHOW_FILES,
+    play: (id) => playShow(id, ...params()),
+    intend: (id) => {
+      if (connected) void send({ class: 'perf', type: 'intend', id, intensity: params()[0] });
+      else perf({ cmd: 'intend', id, source: 'ui', intensity: params()[0] });
+    },
+    stop: () => stopShows(),
+    running: () => (connected ? gwState?.perf.runs ?? [] : performer?.running() ?? []),
+    visible: () => lib.offsetParent !== null,
+  });
   $('sh-idle-label').textContent = `Idle after ${idleAfter ?? '-'} s`;
   const loops = items.filter((q) => q.kind === 'sequence' && q.loop);
   for (const [sel, activity] of [['sh-bg-idle', 'idle'], ['sh-bg-dj', 'dj']] as const) {
@@ -1328,26 +1318,12 @@ function buildShowUi(items: CatalogItem[], idleAfter: number | null) {
     b.onclick = () => emote(i);
     $('emotes').appendChild(b);
   });
-  $<HTMLInputElement>('sh-search').oninput = (e) => {
-    const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
-    for (const kind of ['sequence', 'cue', 'clip']) {
-      const ul = $('sh-list-' + kind);
-      let n = 0;
-      for (const li of Array.from(ul.children) as HTMLElement[]) {
-        li.hidden = !!q && !(li.dataset.id ?? '').toLowerCase().includes(q);
-        if (!li.hidden) n++;
-      }
-      $('sh-n-' + kind).textContent = q ? `(${n} of ${ul.children.length})` : `(${ul.children.length})`;
-      (ul.parentElement as HTMLDetailsElement).open = !!q && n > 0;
-    }
-  };
 }
 
 {
   const out = (id: string, v: string) => ($(id).textContent = Number(v).toFixed(2));
   $<HTMLInputElement>('sh-int').oninput = (e) => out('sh-int-out', (e.target as HTMLInputElement).value);
   $<HTMLInputElement>('sh-speed').oninput = (e) => out('sh-speed-out', (e.target as HTMLInputElement).value);
-  $('sh-stop').onclick = () => stopShows();
   $('sh-freeze').onclick = () => setFreeze(!frozen);
   $<HTMLInputElement>('sh-idle').onchange = (e) => {
     const on = (e.target as HTMLInputElement).checked;
