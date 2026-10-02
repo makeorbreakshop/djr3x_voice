@@ -1,5 +1,5 @@
-//! 18 servo outputs at 50 Hz on the Teensy 4.1: FlexPWM A/B/X outputs plus three QuadTimer
-//! channels. One timebase for both: IPG 150 MHz / 64 = 2.34375 MHz, so a 20 ms frame is
+//! 19 servo outputs at 50 Hz on the Teensy 4.1: FlexPWM A/B/X outputs plus three QuadTimer 1
+//! channels and one QuadTimer 3 channel (pin 14, the second visor servo). One timebase for both: IPG 150 MHz / 64 = 2.34375 MHz, so a 20 ms frame is
 //! exactly 46 875 counts and a pulse resolves to 0.43 us (`us * 75 / 32` counts).
 //!
 //! A/B pins are muxed through `imxrt-iomuxc`'s `flexpwm::Pin`, whose associated types carry
@@ -29,8 +29,8 @@ pub const fn counts(us: u16) -> u32 {
 enum Out {
     /// FlexPWM `module` (1..=4) submodule `sm`, output A / B / X.
     Flex { module: u8, sm: u8, ch: Ch },
-    /// QuadTimer 1 channel.
-    Qt1(u8),
+    /// QuadTimer `timer` (1 or 3) channel.
+    Qt(u8, u8),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -125,6 +125,8 @@ pub struct Pins {
     pub p33: teensy4_bsp::pins::t41::P33,
     pub p36: teensy4_bsp::pins::t41::P36,
     pub p37: teensy4_bsp::pins::t41::P37,
+    /// Channel 18: pin 14 (Serial3 TX, unused), QuadTimer 3 channel 2.
+    pub p14: teensy4_bsp::pins::t41::P14,
 }
 
 fn pwm(module: u8) -> &'static ral::pwm::RegisterBlock {
@@ -140,9 +142,14 @@ fn pwm(module: u8) -> &'static ral::pwm::RegisterBlock {
     }
 }
 
-fn tmr1() -> &'static ral::tmr::RegisterBlock {
-    // Safety: QuadTimer 1 is used only here; the BSP does not hand it out.
-    unsafe { &*ral::tmr::TMR1 }
+fn tmr(timer: u8) -> &'static ral::tmr::RegisterBlock {
+    // Safety: QuadTimers 1 and 3 are used only here; the BSP does not hand them out.
+    unsafe {
+        &*match timer {
+            1 => ral::tmr::TMR1,
+            _ => ral::tmr::TMR3,
+        }
+    }
 }
 
 /// One QuadTimer channel's registers (the RAL names them per channel: COMP10, COMP11, ...).
@@ -158,8 +165,8 @@ struct QtRegs<'a> {
     csctrl: &'a ral::RWRegister<u16>,
 }
 
-fn qt(ch: u8) -> QtRegs<'static> {
-    let t = tmr1();
+fn qt(timer: u8, ch: u8) -> QtRegs<'static> {
+    let t = tmr(timer);
     macro_rules! regs {
         ($c1:ident, $c2:ident, $ld:ident, $cn:ident, $ct:ident, $sc:ident, $l1:ident, $l2:ident, $cs:ident) => {
             QtRegs {
@@ -197,7 +204,8 @@ impl Servos {
     /// Mux the pins and start every output low (no pulse). `ccm` turns on QuadTimer 1's
     /// clock gate, which the BSP's clock policy does not cover.
     pub fn new(p: Pins, ccm: &mut ral::ccm::CCM) -> Self {
-        ral::modify_reg!(ral::ccm, ccm, CCGR6, CG13: 0b11);
+        // QuadTimer 1 (CG13) and 3 (CG15) clock gates
+        ral::modify_reg!(ral::ccm, ccm, CCGR6, CG13: 0b11, CG15: 0b11);
         let map = [
             ab(p.p2),                   // 0  PWM4 SM2 A
             ab(p.p3),                   // 1  PWM4 SM2 B
@@ -205,9 +213,9 @@ impl Servos {
             ab(p.p5),                   // 3  PWM2 SM1 A
             ab(p.p6),                   // 4  PWM2 SM2 A
             ab(p.p9),                   // 5  PWM2 SM2 B
-            alt(p.p10, 1, Out::Qt1(0)), // 6  GPIO_B0_00 ALT1 = QTIMER1_TIMER0
-            alt(p.p11, 1, Out::Qt1(2)), // 7  GPIO_B0_02 ALT1 = QTIMER1_TIMER2
-            alt(p.p12, 1, Out::Qt1(1)), // 8  GPIO_B0_01 ALT1 = QTIMER1_TIMER1
+            alt(p.p10, 1, Out::Qt(1, 0)), // 6  GPIO_B0_00 ALT1 = QTIMER1_TIMER0
+            alt(p.p11, 1, Out::Qt(1, 2)), // 7  GPIO_B0_02 ALT1 = QTIMER1_TIMER2
+            alt(p.p12, 1, Out::Qt(1, 1)), // 8  GPIO_B0_01 ALT1 = QTIMER1_TIMER1
             ab(p.p22),                  // 9  PWM4 SM0 A
             ab(p.p23),                  // 10 PWM4 SM1 A
             alt(
@@ -233,6 +241,7 @@ impl Servos {
             ab(p.p33),                  // 15 PWM2 SM0 B
             ab(p.p36),                  // 16 PWM2 SM3 A
             ab(p.p37),                  // 17 PWM2 SM3 B
+            alt(p.p14, 1, Out::Qt(3, 2)), // 18 GPIO_AD_B1_02 ALT1 = QTIMER3_TIMER2 (visor R)
         ];
         let s = Servos { map };
         s.init_flexpwm();
@@ -302,8 +311,8 @@ impl Servos {
 
     fn init_qtimer(&self) {
         for o in &self.map {
-            if let Out::Qt1(ch) = *o {
-                qt_stop(&qt(ch));
+            if let Out::Qt(timer, ch) = *o {
+                qt_stop(&qt(timer, ch));
             }
         }
     }
@@ -345,7 +354,7 @@ impl Servos {
                         ),
                     }
                 }
-                Out::Qt1(ch) => qt_write(&qt(ch), us),
+                Out::Qt(timer, ch) => qt_write(&qt(timer, ch), us),
             }
         }
         for module in 1..=4u8 {

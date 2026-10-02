@@ -7,7 +7,8 @@ use crate::wire::{flag, nak, t, Builder, Deframer, Reader};
 use r3x_motion::calib::pulse_us;
 use r3x_motion::{Calibration, JerkLimitedFollower, MotionLimits};
 
-pub const CHANNELS: usize = 18;
+/// 0..=17 the kit build's channels; 18 the second visor servo (Hunter's head: one each side).
+pub const CHANNELS: usize = 19;
 pub const CONTROL_HZ: u32 = 200;
 pub const DT: f64 = 1.0 / CONTROL_HZ as f64;
 /// Heartbeat silent this long -> ramp to hold (PROTOCOL.md, D6).

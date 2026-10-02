@@ -53,6 +53,56 @@ pub struct RobotProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub package: Option<ElectronicsPackage>,
+    /// The mech model's block (`robot.generated.json`, written by rigsync): only what the
+    /// runtime enforces is read; the rest of it is for people.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mech: Option<MechInfo>,
+}
+
+/// What the runtime reads from a generated profile's `mech` block.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct MechInfo {
+    /// Coupled joint limits (`mech/workbench/SCHEMA.md` root `couplings`): one joint's range as
+    /// a function of another's. The performer's safety layer clamps to them.
+    #[serde(default)]
+    pub couplings: Vec<JointCoupling>,
+}
+
+/// `joint`'s range as a function of `depends_on` (profile joint names): rows `[a, min, max]`
+/// sorted by `a`, linear in between, the ends held past the table; `min`/`max` null where no
+/// value of `joint` clears.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct JointCoupling {
+    pub joint: String,
+    pub depends_on: String,
+    pub table: Vec<(f64, Option<f64>, Option<f64>)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note: Option<String>,
+}
+
+impl JointCoupling {
+    /// `joint`'s allowed range at `depends_on` = `a` (None: nothing clears there).
+    pub fn range_at(&self, a: f64) -> Option<(f64, f64)> {
+        let t = &self.table;
+        if t.is_empty() {
+            return None;
+        }
+        let k = t.partition_point(|r| r.0 < a).clamp(1, t.len().max(2) - 1).min(t.len() - 1);
+        let (r0, r1) = if t.len() == 1 { (&t[0], &t[0]) } else { (&t[k - 1], &t[k]) };
+        let (lo0, hi0, lo1, hi1) = (r0.1?, r0.2?, r1.1?, r1.2?);
+        let w = if r1.0 == r0.0 { 0.0 } else { ((a - r0.0) / (r1.0 - r0.0)).clamp(0.0, 1.0) };
+        Some((lo0 + (lo1 - lo0) * w, hi0 + (hi1 - hi0) * w))
+    }
+
+    /// `b` clamped into the range at `a` (unchanged when the table has no answer there).
+    pub fn clamp(&self, a: f64, b: f64) -> f64 {
+        match self.range_at(a) {
+            Some((lo, hi)) => b.clamp(lo, hi.max(lo)),
+            None => b,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
@@ -400,7 +450,11 @@ impl RobotProfile {
                 if !names.contains(joint.as_str()) {
                     errs.push(format!("actuator {n}: unknown joint {joint}"));
                 }
-                if !driven.insert(joint.as_str()) {
+                // a joint several servos drive at once (Hunter's visor, one each side) is fine when
+                // each of those actuators drives that joint alone
+                let shared_ok = a.joints.len() == 1
+                    && self.actuators.iter().filter(|b| b.joints.contains_key(joint)).all(|b| b.joints.len() == 1);
+                if !driven.insert(joint.as_str()) && !shared_ok {
                     errs.push(format!("actuator {n}: joint {joint} already driven"));
                 }
             }

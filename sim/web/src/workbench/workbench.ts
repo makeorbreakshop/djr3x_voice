@@ -29,7 +29,7 @@ import { poleSafe, ViewCube } from './viewcube';
 import { Navigator } from './navigate';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  assemblyLabel, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
+  assemblyLabel, contextParts, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
 import { setRegions, setWeather, weatherShader, weatherUniforms, type WeatherUniforms } from './weather';
@@ -55,6 +55,9 @@ export interface Scope {
   joints: SysJoint<AsmNode>[];
   /** Actuators and linkage parts of the scope's joints. */
   drive: Set<string>;
+  /** What the scope's parts are mounted to (a system's servo mounts, the plate under them): drawn solid,
+   *  not ghosted, though not part of the focus (systems.ts contextParts). */
+  context?: Set<string>;
   item?: LibraryItem;
 }
 
@@ -1307,7 +1310,7 @@ export class Workbench {
 
   systemScope(id: string): Scope | null {
     const s = this.systems().find((x) => x.id === id);
-    return s ? { kind: 'system', id, label: s.name, parts: s.parts, owner: s.owner, joints: s.joints, drive: s.drive } : null;
+    return s ? { kind: 'system', id, label: s.name, parts: s.parts, owner: s.owner, joints: s.joints, drive: s.drive, context: contextParts(s.joints, s.parts) } : null;
   }
 
   assemblyScope(node: AsmNode): Scope {
@@ -3062,7 +3065,11 @@ export class Workbench {
     const contact = new Set(this.contact?.parts ?? []);
     const clip = this.section.on ? [this.sectionPlane()] : null;
     const look = this.look;
-    const scope = this.scope?.parts ?? null;
+    const scope0 = this.scope?.parts ?? null;
+    // a focus's context (what its parts are mounted to) is drawn as the focus is: solid, in its finish
+    const scopeCtx = this.scope?.context;
+    const scope = scope0 && scopeCtx?.size && !this.guide ? new Set([...scope0, ...scopeCtx]) : scope0;
+    // (outside the focus: ghosted or hidden as the control says, for any focus - lookShows)
     // overlay marks (rims): the selected pair's two parts while Checks shows it
     const pairParts = new Set<string>();
     const sel = this.pairSel !== null && this.interferenceOn ? this.interference[this.pairSel] : null;
@@ -3224,7 +3231,9 @@ export class Workbench {
     const fastIn = new Set(cur?.fasteners ?? []);
     const fastAt = this.assembly().fast;
     for (const [id, fo] of this.fast) {
-      const joinsVisible = fo.f.joins.some((p) => this.parts.get(p)?.mesh.visible && (!scope || scope.has(p)));
+      // a focus's hardware: what joins its own parts, and what bolts its context together
+      const joinsVisible = fo.f.joins.some((p) => this.parts.get(p)?.mesh.visible && (!scope0 || scope0.has(p)))
+        || (!!scopeCtx?.size && !this.guide && fo.f.joins.every((p) => !this.parts.has(p) || scope!.has(p)) && fo.f.joins.some((p) => this.parts.get(p)?.mesh.visible));
       let visible = this.fasteners && look !== 'exterior' && joinsVisible && !this.hidden.has(id);
       // Instructions: the hardware is part of the build in any look (the guide shows every screw)
       if (g) visible = (joinsVisible || !!this.isolated?.has(id)) && !this.hidden.has(id) && (!g.hover || g.hover.has(id))

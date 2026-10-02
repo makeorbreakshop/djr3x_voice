@@ -80,6 +80,8 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
 
     def walk(a: Assembly, M: np.ndarray, parent_link: str, path: str, parent_anchor: str | None = None):
         R = M[:3, :3]
+        # a mechanism's own coupled limits (profile joint names, so they hold in the droid as they are)
+        out.child_couplings = list(getattr(out, "child_couplings", [])) + list(getattr(a, "couplings", None) or [])
         lmap = {}
         for l in a.links:
             if l.joint is None:

@@ -3,7 +3,7 @@
 The Teensy 4.1 build of the r3x_servo controller. Protocol, behaviour and the host side are
 shared with the RP2040 build: [`../README.md`](../README.md). This crate is wiring only:
 `src/main.rs` (RTIC app: USB CDC, INA219, rail enable, LED, the three tasks) and `src/pwm.rs`
-(18 servo outputs).
+(19 servo outputs).
 
 ## Stack
 
@@ -87,12 +87,14 @@ each have their own compare registers).
 | 15 | 33 | GPIO_EMC_07 | FlexPWM2 SM0 B | poker_claw |
 | 16 | 36 | GPIO_B1_02 | FlexPWM2 SM3 A | middle_ring |
 | 17 | 37 | GPIO_B1_03 | FlexPWM2 SM3 B | headroll (Hunter head mech, base build) |
+| 18 | 14 | GPIO_AD_B1_02 | QuadTimer3 ch2 (ALT1) | visor_r (the second visor servo, Hunter's head; `robot.generated.json`) |
 | - | 18 / 19 | GPIO_AD_B1_01 / _00 | LPI2C1 SDA / SCL (Wire), 100 kHz | INA219 @ 0x40 on the servo rail |
 | - | 30 | GPIO_EMC_37 | GPIO3_IO23, active high, low at boot | servo rail enable (MOSFET / relay gate) |
 | - | 13 | GPIO_B0_03 | GPIO2_IO03 | onboard LED: on = following, off = holding |
 
 Kept free: 0/1 (Serial1) and 7/8 (Serial2) for future bus servos (Feetech / Dynamixel);
-14/15 (Serial3, and QuadTimer3 ch2/ch3 PWM if two more channels are ever needed).
+15 (Serial3 RX; QuadTimer3 ch3 PWM if one more channel is ever needed). Pin 14 (Serial3 TX) is channel 18
+since 2026-10-02: Hunter's visor has a servo each side.
 
 How each row is verified:
 

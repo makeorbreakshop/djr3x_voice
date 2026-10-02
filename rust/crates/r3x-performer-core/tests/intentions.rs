@@ -124,6 +124,7 @@ fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
     let ids: BTreeSet<&String> = cat.intentions.values().flat_map(|i| i.pool.iter()).collect();
     let mut played = 0;
     let mut bad = BTreeSet::new();
+    let mut clamped = BTreeSet::new();
     for id in ids {
         for clip in clips_of(&cat, id) {
             for speed in PICK_SPEEDS {
@@ -146,6 +147,16 @@ fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
                         let lim = &limits[j];
                         if *v < lim.lo - 1e-6 || *v > lim.hi + 1e-6 {
                             bad.insert(format!("{id} > {}.{j} leaves {:.1}..{:.1}", clip.id, lim.lo, lim.hi));
+                        } else if *v < lim.warn_lo - 1e-6 || *v > lim.warn_hi + 1e-6 {
+                            // inside the Original rig: the Physical rig's performer clamps it (a warning)
+                            clamped.insert(format!("{id} > {}.{j} past the Physical {:.1}..{:.1}", clip.id, lim.warn_lo, lim.warn_hi));
+                        } else if let Some(c) = &lim.coupling {
+                            let a = p.get(&c.depends_on).copied().unwrap_or(0.0);
+                            if let Some((lo, hi)) = c.range_at(a) {
+                                if *v < lo - 1e-6 || *v > hi + 1e-6 {
+                                    clamped.insert(format!("{id} > {}.{j} past the coupled {lo:.1}..{hi:.1} at {} {a:+.1}", clip.id, c.depends_on));
+                                }
+                            }
                         }
                         if (t == 0.0 || t >= end - 1e-9) && v.abs() >= 1e-3 {
                             bad.insert(format!("{id} > {}.{j} not at rest at t={t:.3}", clip.id));
@@ -156,6 +167,9 @@ fn every_pool_clip_starts_ends_at_rest_and_stays_inside_the_joint_ranges() {
                 played += 1;
             }
         }
+    }
+    if !clamped.is_empty() {
+        eprintln!("the Physical rig clamps (warnings):\n  {}", clamped.iter().cloned().collect::<Vec<_>>().join("\n  "));
     }
     assert!(bad.is_empty(), "at the picker's extremes (intensity {PICK_INTENSITY_MAX}):\n  {}", bad.iter().cloned().collect::<Vec<_>>().join("\n  "));
     assert!(played > 100, "{played}");

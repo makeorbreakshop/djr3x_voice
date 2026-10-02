@@ -411,10 +411,40 @@ def build(name: str, out_root: Path = OUT, run_checks: bool = True, export: bool
     t3 = time.time()
     sigs = _Sigs(out)
     node = assembly_json(asm, out, "", export, sigs=sigs)
-    try:  # coupled joint limits the whole-droid suite derived (python -m workbench test <root>)
-        node["couplings"] = json.loads((out / "couplings.json").read_text())["couplings"]
+    # coupled joint limits: the assembly's own (a mechanism's, e.g. Hunter's tilt by roll) and the ones the
+    # whole-droid suite derived (python -m workbench test <root>)
+    own = [_jsonable(c) for c in (getattr(asm, "couplings", None) or [])]
+    try:
+        derived = json.loads((out / "couplings.json").read_text())["couplings"]
     except Exception:
-        pass
+        derived = []
+    # and the fitted children's own (a ChildRef's manifest: Hunter's head in the droid), so a reader of the root
+    # (Build's drag, rigsync) sees every coupled limit of the tree
+    def child_own(n, base):
+        for c in n.get("children", []):
+            v = (c.get("mount") or {}).get("variant")
+            if v and not v.get("default"):
+                continue
+            if "ref" in c and "parts" not in c:
+                try:
+                    r = json.loads((base / c["ref"]).read_text())["root"]
+                except Exception:
+                    continue
+                yield from r.get("couplings") or []
+                yield from child_own(r, (base / c["ref"]).parent)
+            else:
+                yield from child_own(c, base)
+
+    own = own + list(child_own(node, out))
+    seen, uniq = set(), []
+    for c in own:
+        if (c["joint"], c["depends_on"]) not in seen:
+            seen.add((c["joint"], c["depends_on"]))
+            uniq.append(c)
+    own = uniq
+    keys = {(c["joint"], c["depends_on"]) for c in own}
+    if own or derived:
+        node["couplings"] = own + [c for c in derived if (c["joint"], c["depends_on"]) not in keys]
     removed = prune(out, node, export, sigs)
     sigs.save()
     log(f"files {time.time() - t3:.1f} s: {sigs.written} written, {sigs.skipped} unchanged, {removed} stale removed")
@@ -517,7 +547,9 @@ def suite_for(mod, asm, full: bool = False, whole: bool = False, out: Path | Non
         from .droid import derive_couplings
 
         t1 = time.time()
-        flat.couplings = s.couplings = derive_couplings(s, flat)
+        own = list(getattr(flat, "child_couplings", []))
+        keys = {(c["joint"], c["depends_on"]) for c in own}
+        flat.couplings = s.couplings = own + [c for c in derive_couplings(s, flat) if (c["joint"], c["depends_on"]) not in keys]
         info["couplings_s"] = round(time.time() - t1, 1)
         if out is not None:
             out.mkdir(parents=True, exist_ok=True)

@@ -47,7 +47,8 @@ MA_PL9823 = 60.0  # 8 mm through-hole "NeoPixel" (PL9823 / WS2812D-F8)
 
 
 # firmware/servo/teensy41: channel n -> Teensy 4.1 pin (FlexPWM / QuadTimer at 50 Hz).
-TEENSY_SERVO_PINS = [2, 3, 4, 5, 6, 9, 10, 11, 12, 22, 23, 24, 25, 28, 29, 33, 36, 37]
+# Channel 18 (pin 14, QuadTimer3 ch2): the second visor servo, mirrored (Hunter's head: one each side).
+TEENSY_SERVO_PINS = [2, 3, 4, 5, 6, 9, 10, 11, 12, 22, 23, 24, 25, 28, 29, 33, 36, 37, 14]
 
 def r(v, n=5):
     return [round(x, n) for x in v]
@@ -103,7 +104,7 @@ def native(chest_layout):
         "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an "
                        "8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 "
                        "chest logic-panel pixels (rex_chest_v1); our Teensy 4.1 controller (firmware/servo/teensy41) runs the "
-                       "18 servo channels.",
+                       "19 servo channels.",
         "support": "driven",
         "emulator": "native",
         "boards": [
@@ -166,14 +167,14 @@ def native(chest_layout):
             },
             {
                 "id": "servo_ctl", "model": "Teensy 4.1 + 3 x 74AHCT245 + INA219 + rail MOSFET",
-                "role": "18 servo channels (FlexPWM + QuadTimer, 50 Hz, 0.43 us), goals at event time",
+                "role": "19 servo channels (FlexPWM + QuadTimer, 50 Hz, 0.43 us), goals at event time",
                 "url": "https://www.pjrc.com/store/teensy41.html",
                 "dims_mm": [61.0, 18.0, 4.0],
                 "mount": {"bracket": "base electronics plate", "link": "torso_lower", "t": [0.0, 0.08, 0.0], "q": [0, 0, 0, 1],
                           "inferred": True, "inferred_note": "Mounting in the base is not recorded; placed on the base plate."},
                 "connectors": [
                     {"id": "usb", "kind": "usb_micro_b", "pins": ["VBUS", "D-", "D+", "GND"], "note": "CDC 16c0:0483 'r3x-servo', R3X_SERVO_PORT"},
-                    {"id": "servo", "kind": "servo_3p_2.54 x18", "pins": [f"ch{c} pin{p}" for c, p in enumerate(TEENSY_SERVO_PINS)] + ["6V", "GND"],
+                    {"id": "servo", "kind": "servo_3p_2.54 x19", "pins": [f"ch{c} pin{p}" for c, p in enumerate(TEENSY_SERVO_PINS)] + ["6V", "GND"],
                      "note": "3.3 V pulses through 74AHCT245 buffers to 5 V; channel -> pin per firmware/servo/teensy41/README.md"},
                     {"id": "i2c", "kind": "dupont_4p_2.54", "pins": ["pin18 SDA", "pin19 SCL", "3V3", "GND"], "note": "INA219 @ 0x40"},
                     {"id": "rail_en", "kind": "dupont_1p", "pins": ["pin30"], "note": "servo rail MOSFET gate (active high, 10 k pull-down)"},
@@ -202,7 +203,10 @@ def native(chest_layout):
         ],
         "actuators": [
             {"actuators": ["*"], "board": "servo_ctl", "driver": "r3x_servo", "support": "driven",
-             "note": "Every profile actuator with driver r3x_servo (channel n = TEENSY_SERVO_PINS[n])."},
+             "note": "Every profile actuator with driver r3x_servo (channel n = TEENSY_SERVO_PINS[n]). Hunter's visor "
+                     "(Physical profile) is two: visor_servo_l -> actuator visor_l on channel 3, visor_servo_r -> visor_r "
+                     "on channel 18 (pin 14), inverted (the servos face opposite ways), each with its own trim_us to "
+                     "match the pair; the one visor joint drives both."},
         ],
         "power": [
             {"name": "5V logic + LEDs", "volts": 5.0,

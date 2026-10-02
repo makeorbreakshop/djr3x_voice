@@ -338,37 +338,48 @@ def _link_points():
     return _LINK_PTS[0]
 
 
-def _pose_ok(asm, lks, pose, tree, arm_pts=None, neck_tree=None):
-    """One pose of a candidate linkage: (reachable and every rule holds, worst clearance). Clearance covers
-    the rod and its housings against the head (`tree`, head frame), the housing at the post end against the
-    top hub (`neck_tree`, neck frame; from 6 mm along the rod, past the ball on its spacer), the horn arm as
-    the servo turns it and the ball stud's head, both against the head."""
+def _pose_ok(asm, lks, pose, tree, arm_pts=None, neck_tree=None, clear_min=CLEAR_MIN, explain=False):
+    """One pose of a candidate linkage: (reachable and every rule holds, worst clearance[, why]). Clearance
+    covers the rod and its housings against the head (`tree`, head frame), the housing at the post end against
+    the top hub (`neck_tree`, neck frame; from 6 mm along the rod, past the ball on its spacer), the horn arm
+    as the servo turns it and the ball stud's head, both against the head. `why` names the rule that fails,
+    or for a pass the closest clearance."""
+    def out(ok, clear, why):
+        return (ok, clear, why) if explain else (ok, clear)
+
     sol = solve_linkages(asm, pose)
     if any(s is None for s in sol.values()):
-        return False, None
+        return out(False, None, "a rod cannot reach")
     ms = link_matrices(asm, pose)
     inv = np.linalg.inv(ms["head"])
     ninv = np.linalg.inv(ms["neck"])
-    clear = math.inf
+    clear, who = math.inf, ""
+
+    def note(d, what):
+        nonlocal clear, who
+        if d < clear:
+            clear, who = d, what
+
     for lk in lks:
         ang, a, b = sol[lk.id]
+        s_ = lk.id[-1]
         if abs(ang) > TRAVEL_MAX:
-            return False, None
+            return out(False, None, f"servo_{s_} travel {ang:.0f} deg")
         if tree is not None:
             seg = a + np.linspace(0, 1, 30)[:, None] * (b - a)
             dd, _ = tree.query(seg @ inv[:3, :3].T + inv[:3, 3])
-            clear = min(clear, float(dd.min()) - HOUSING_R)
+            note(float(dd.min()) - HOUSING_R, f"rod_{s_} housing / head")
             n, u, w = horn_basis(lk)
             al = a @ inv[:3, :3].T + inv[:3, 3]
             stud = al[None, :] + np.outer(np.linspace(BALL_HALF, BALL_HALF + 4.0, 4), n)
-            clear = min(clear, float(tree.query(stud)[0].min()) - 3.6)
+            note(float(tree.query(stud)[0].min()) - 3.6, f"stud_a_{s_} / head")
             if arm_pts is not None:
                 th = math.radians(ang)
                 x = math.cos(th) * u + math.sin(th) * w
                 z = np.cross(x, n)
                 c = np.asarray(lk.centre) + n * HUB_H
                 pts = c + np.outer(arm_pts[:, 0], x) + np.outer(arm_pts[:, 1], n) + np.outer(arm_pts[:, 2], z)
-                clear = min(clear, float(tree.query(pts)[0].min()))
+                note(float(tree.query(pts)[0].min()), f"horn_arm_{s_} / head")
         if neck_tree is not None:
             # the post-end ball link (its real housing, posed on the rod as _rod_parts does) and the rod
             # itself (M4: 2 mm) against the top hub, in the neck frame
@@ -378,18 +389,61 @@ def _pose_ok(asm, lks, pose, tree, arm_pts=None, neck_tree=None):
             y = np.cross(z, x)
             lp = _link_points()
             pts = bl + np.outer(lp[:, 0], x) + np.outer(lp[:, 1], y) + np.outer(lp[:, 2], z)
-            clear = min(clear, float(neck_tree.query(pts)[0].min()))
+            note(float(neck_tree.query(pts)[0].min()), f"link_b_{s_} / hub_top")
             L = float(np.linalg.norm(al - bl))
             seg = bl + np.linspace(BALL_THREAD[0] / L, 1 - BALL_THREAD[0] / L, 25)[:, None] * (al - bl)
-            clear = min(clear, float(neck_tree.query(seg)[0].min()) - 2.0)
+            note(float(neck_tree.query(seg)[0].min()) - 2.0, f"rod_{s_} / hub_top")
         n = ms["head"][:3, :3] @ UP
         rr = unit(b - a)
-        if max(math.degrees(math.asin(min(1, abs(rr @ n)))), math.degrees(math.asin(min(1, abs(rr @ UP))))) > SWIVEL_MAX:
-            return False, clear
+        sw = max(math.degrees(math.asin(min(1, abs(rr @ n)))), math.degrees(math.asin(min(1, abs(rr @ UP)))))
+        if sw > SWIVEL_MAX:
+            return out(False, clear, f"rod_{s_} swivel {sw:.1f} deg")
     jac = servo_jacobian(asm, pose, ["head_tilt", "head_roll"])
     if jac is None or float(np.min(np.max(np.abs(jac), axis=0))) < LEVER_MIN:
-        return False, clear
-    return clear >= CLEAR_MIN, clear
+        return out(False, clear, "leverage below 0.25")
+    return out(clear >= clear_min, clear, f"{who} {clear:.2f} mm")
+
+
+COUPLE_CLEAR = 1.5  # mm: the coupled tilt limit keeps this much clearance (the print tolerance + 0.5)
+
+
+def tilt_roll_coupling(asm, lks, head_pts, neck_pts, rolls, tilt_lo, step=0.5, clear=COUPLE_CLEAR, top=40.0):
+    """The tilt range as a function of roll for the chosen linkage (SCHEMA.md root `couplings` form):
+    per roll value, from rest out each way in `step` degrees while every rule holds with `clear` mm to
+    spare. Returns (rows [[roll, tilt_min, tilt_max]], {roll: why the max stops}), cached."""
+    from scipy.spatial import cKDTree
+
+    key = _cache_key("hunter-coupling-v1", [(lk.id, lk.centre, lk.zero_dir, lk.radius, lk.ball_offset, lk.ground_point,
+                                            lk.rod_length) for lk in lks], list(rolls), tilt_lo, step, clear, top,
+                     np.round(head_pts[::97], 2).tobytes(), np.round(neck_pts[::53], 2).tobytes())
+
+    def run():
+        tree, ntree = cKDTree(head_pts), cKDTree(neck_pts)
+        arm_pts = _arm_points(lks[0].radius)
+        saved = asm.linkages
+        asm.linkages = lks
+        rows, why = [], {}
+        try:
+            for r in rolls:
+                def ok(t):
+                    return _pose_ok(asm, lks, {"head_tilt": float(t), "head_roll": float(r)}, tree, arm_pts, ntree,
+                                    clear_min=clear, explain=True)
+                hi = 0.0
+                while hi + step <= top:
+                    res = ok(hi + step)
+                    if not res[0]:
+                        why[float(r)] = f"at {hi + step:+g}: {res[2]}"
+                        break
+                    hi += step
+                lo = 0.0
+                while lo - step >= tilt_lo and ok(lo - step)[0]:
+                    lo -= step
+                rows.append([float(r), float(lo), float(hi)])
+        finally:
+            asm.linkages = saved
+        return rows, why
+
+    return cached(key, run)
 
 
 def fit_limits(asm, servos, rows, hub_face_y, head_pts, want, neck_pts=None, step=(2.5, 2.0),
@@ -623,6 +677,7 @@ def add_hardware(asm, fit, visor):
     head_pts = np.vstack([geom.sample(p.mesh, 2.0, 12000) for p in head_side])
     arm_holes = tuple(getattr(asm, "horn_holes", ARM_HOLES))
     pick, table = design_linkage(asm, servos, [np.asarray(h) for h in hub_holes], hub_face, head_pts, arm_holes)
+    fine = neck_pts = None
     if not any(c["pass"] for c in table) and getattr(asm, "fit_gimbal_limits", False):
         # Hunter's horn (his hole, not ours) cannot reach the design range: the range it does reach
         tj, rj = asm.joint("head_tilt"), asm.joint("head_roll")
@@ -655,6 +710,27 @@ def add_hardware(asm, fit, visor):
         lk.inferred_note = ("Arm hole, hub hole, horn clocking and ball side chosen by design_linkage (every "
                             "real-part combination tested); Hunter's actual choice is not in the sources.")
     asm.linkages = lks
+    gf = getattr(asm, "gimbal_fit", None)
+    if gf is not None:
+        # the tilt the horns reach depends on the roll (the horn arm swings toward the head top on the side the
+        # head rolls to): a coupled limit, tilt max per |roll|, instead of the box's worst corner everywhere
+        rolls = list(np.arange(-gf["limits"][1], gf["limits"][1] + 1e-9, 2.0))
+        rows, why = tilt_roll_coupling(asm, lks, fine, neck_pts, rolls, gf["limits"][0][0])
+        r0 = next(r for r in rows if abs(r[0]) < 1e-9)
+        tj = asm.joint("head_tilt")
+        tj.limits = (gf["limits"][0][0], r0[2])
+        asm.couplings = [{
+            "joint": "head_tilt", "depends_on": "head_roll", "swept": [], "clearance_mm": COUPLE_CLEAR, "step_deg": 0.5,
+            "table": [[r[0], max(r[1], tj.limits[0]), r[2]] for r in rows], "limits": list(tj.limits),
+            "because": sorted({w.split(": ", 1)[1].rsplit(" ", 2)[0] for w in why.values()}),
+            "source": "hunter_head",
+            "note": (f"head_tilt's range as a function of head_roll: Hunter's 32 mm horns swing toward the head top on "
+                     f"the side the head rolls to; every rule (reach, travel, swivel, leverage) with {COUPLE_CLEAR} mm "
+                     "clearance. The joint's own max is the roll-0 value.")}]
+        asm.gimbal_fit.update(coupling=rows, why=why)
+        notes.append("Coupled tilt limit (tilt max by roll, " + f"{COUPLE_CLEAR} mm clearance): "
+                     + ", ".join(f"roll {r[0]:+g}: {r[2]:+g}" for r in rows if r[0] >= 0)
+                     + f"; at roll 0 the tilt stops {why.get(0.0, 'at the search end')}.")
     for lk in lks:
         s = lk.id[-1]
         n, u, w = horn_basis(lk)

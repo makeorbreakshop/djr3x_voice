@@ -135,6 +135,7 @@ mod app {
                 p33: pins.p33,
                 p36: pins.p36,
                 p37: pins.p37,
+                p14: pins.p14,
             },
             &mut ccm,
         );
