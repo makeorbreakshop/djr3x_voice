@@ -648,6 +648,57 @@
       ],
       "type": "object"
     },
+    "JointCoupling": {
+      "description": "`joint`'s range as a function of `depends_on` (profile joint names): rows `[a, min, max]`\nsorted by `a`, linear in between, the ends held past the table; `min`/`max` null where no\nvalue of `joint` clears.",
+      "properties": {
+        "depends_on": {
+          "type": "string"
+        },
+        "joint": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "items": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "joint",
+        "depends_on",
+        "table"
+      ],
+      "type": "object"
+    },
     "JointKind": {
       "enum": [
         "revolute",
@@ -887,6 +938,20 @@
         "size_m",
         "diffuser"
       ],
+      "type": "object"
+    },
+    "MechInfo": {
+      "description": "What the runtime reads from a generated profile's `mech` block.",
+      "properties": {
+        "couplings": {
+          "default": [],
+          "description": "Coupled joint limits (`mech/workbench/SCHEMA.md` root `couplings`): one joint's range as\na function of another's. The performer's safety layer clamps to them.",
+          "items": {
+            "$ref": "#/$defs/JointCoupling"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "PackageLight": {
@@ -1212,6 +1277,17 @@
         "$ref": "#/$defs/LightGroup"
       },
       "type": "array"
+    },
+    "mech": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MechInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The mech model's block (`robot.generated.json`, written by rigsync): only what the\nruntime enforces is read; the rest of it is for people."
     },
     "name": {
       "type": "string"

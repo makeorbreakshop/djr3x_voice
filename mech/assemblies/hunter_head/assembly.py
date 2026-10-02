@@ -133,9 +133,9 @@ EXPLAINED = [
             "visor's, small. M3 inserts (Ruthex 5.7, OD 4.6) would give 1.5 mm if wanted"},
     {"test": "clearance", "parts": ["head_top", "horn_arm_*", "link_a_*", "stud_a_*", "nut_ball_a_*", "wsh_ball_a_*"],
      "cause": "a show clip asks head_tilt +16..+18 (with the visor up), past the range Hunter's cut-down horns reach "
-              "(32 mm hole: tilt -20..+7.5, the joints' limits now): there the horn arm and its ball link swing into the "
-              "head top. The clip, not the head, is out of range",
-     "fix": "regenerate the profile through rigsync (the new tilt limits) and re-clamp the clips; or the 40 mm hole "
+              "(32 mm hole: the coupled limit, tilt max +13 at roll 0 falling to +9 at |roll| 12): there the horn arm and "
+              "its ball link swing into the head top. The clip, not the head, is out of range",
+     "fix": "the performer clamps to the coupled limit on the Physical rig (the clip lint warns); or the 40 mm hole "
             "(the uncut arm) if more nod is wanted than Hunter's head gives"},
     {"test": "mates_hold", "parts": ["h_hp_1", "side_left", "side_right"],
      "cause": "the kit headband (H_HP_1) stands 0.5 mm off Hunter's side piece where it lands (the kit drew it on the "

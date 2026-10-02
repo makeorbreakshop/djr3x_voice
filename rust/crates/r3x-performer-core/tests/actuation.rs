@@ -290,3 +290,30 @@ fn firmware_calibration_matches_the_output_stage() {
         }
     }
 }
+
+/// The Physical rig's coupled limits (`mech.couplings` in `robot.generated.json`) are the safety
+/// layer's: Hunter's head tilts less far the more it rolls (the horn arm meets the head top), so a
+/// tilt command is clamped at the current roll, and a roll that narrows the tilt pulls it back.
+#[test]
+fn coupled_limits_clamp_commands_on_the_physical_rig() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json");
+    let profile = r3x_contracts::RobotProfile::load(path).unwrap();
+    let mut act = Actuation::from_profile(&profile, &BTreeMap::new(), Rng::new(1)).unwrap();
+    let c = act.couplings.iter().find(|c| c.joint == "head_tilt" && c.depends_on == "head_roll").unwrap().clone();
+    let at0 = c.range_at(0.0).unwrap().1;
+    assert!(c.range_at(12.0).unwrap().1 < at0);
+    let soft = act.channel_for("head_tilt").unwrap().follower.soft_max;
+    act.command("head_roll", 12.0);
+    act.command("head_tilt", 20.0);
+    let roll = act.target_of("head_roll").unwrap(); // the roll's own soft limit may stop it short of 12
+    let at_roll = c.range_at(roll).unwrap().1;
+    assert!(at_roll < at0 && (act.target_of("head_tilt").unwrap() - at_roll.min(soft)).abs() < 1e-9);
+    // level again: the tilt may go to its own (soft) limit
+    act.command("head_roll", 0.0);
+    act.command("head_tilt", 20.0);
+    assert!((act.target_of("head_tilt").unwrap() - at0.min(soft)).abs() < 1e-9);
+    // rolling back over narrows the tilt with it
+    act.command("head_roll", -12.0);
+    let lim = c.range_at(act.target_of("head_roll").unwrap()).unwrap().1;
+    assert!(act.target_of("head_tilt").unwrap() <= lim + 1e-9);
+}

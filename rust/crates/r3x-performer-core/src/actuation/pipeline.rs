@@ -14,7 +14,7 @@ use super::servos::{servo, ServoModel};
 use super::trajectory::{JerkLimitedFollower, MotionLimits};
 use crate::rng::Rng;
 use indexmap::IndexMap;
-use r3x_contracts::profile::{CalibrationStatus, JointKind, RobotProfile};
+use r3x_contracts::profile::{CalibrationStatus, JointCoupling, JointKind, RobotProfile};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -601,6 +601,9 @@ pub struct Actuation {
     acc: f64,
     tick: u64,
     rng: Rng,
+    /// Coupled joint limits (a generated profile's `mech.couplings`): the safety layer clamps
+    /// every command to them, and re-clamps a dependent joint when the joint it depends on moves.
+    pub couplings: Vec<JointCoupling>,
 }
 
 impl Actuation {
@@ -610,13 +613,15 @@ impl Actuation {
         dynamics: &BTreeMap<String, JointDynamics>,
         rng: Rng,
     ) -> Result<Actuation, String> {
-        Self::build(
+        let mut a = Self::build(
             &profile_joints(profile),
             dynamics,
             profile_doc(profile)?,
             &profile.name,
             rng,
-        )
+        )?;
+        a.couplings = profile.mech.as_ref().map(|m| m.couplings.clone()).unwrap_or_default();
+        Ok(a)
     }
 
     /// A named profile of the sim's servo map (`r3x_animation`, `extended`, Maestro, PCA9685).
@@ -688,6 +693,7 @@ impl Actuation {
             acc: 0.0,
             tick: 0,
             rng,
+            couplings: Vec::new(),
         })
     }
 
@@ -698,10 +704,42 @@ impl Actuation {
         self.by_number.get(&number).map(|&i| &self.channels[i])
     }
 
-    /// Behaviour/manual input: desired joint value. Coupled joints follow their primary.
+    /// Behaviour/manual input: desired joint value. Coupled joints follow their primary; a joint
+    /// several channels drive at once (a visor with a servo each side) sets every one of them.
+    /// The coupled limits clamp it (the safety layer), and a joint that depends on this one is
+    /// pulled back inside its range if this move narrowed it.
     pub fn command(&mut self, joint: &str, value: f64) {
-        if let Some(&i) = self.by_joint.get(joint) {
-            let ch = &mut self.channels[i];
+        let mut value = value;
+        for c in &self.couplings {
+            if c.joint == joint {
+                if let Some(a) = self.target_of(&c.depends_on) {
+                    value = c.clamp(a, value);
+                }
+            }
+        }
+        self.set_joint_target(joint, value);
+        let deps: Vec<(String, f64)> = self
+            .couplings
+            .iter()
+            .filter(|c| c.depends_on == joint)
+            .filter_map(|c| {
+                let b = self.target_of(&c.joint)?;
+                let v = c.clamp(value, b);
+                (v != b).then(|| (c.joint.clone(), v))
+            })
+            .collect();
+        for (j, v) in deps {
+            self.set_joint_target(&j, v);
+        }
+    }
+
+    /// The commanded value of a joint (its primary channel's follower target).
+    pub fn target_of(&self, joint: &str) -> Option<f64> {
+        self.channels.iter().find(|c| c.primary_joint == joint).map(|c| c.follower.target)
+    }
+
+    fn set_joint_target(&mut self, joint: &str, value: f64) {
+        for ch in self.channels.iter_mut() {
             if ch.primary_joint == joint && ch.direct_us.is_none() {
                 ch.follower.set_target(value);
             }

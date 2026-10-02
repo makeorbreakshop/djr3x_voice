@@ -342,10 +342,23 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
         # coupled joint limits from the whole-droid suite (workbench/droid.py derive_couplings): the
         # dependent joint's [min, max] as a function of the driving one, profile joint names; for the
         # performer's safety layer to enforce
-        "couplings": tree.manifest.get("root", {}).get("couplings", []),
+        "couplings": _couplings(tree),
         "total_kg": _rd(sum(x["kg"] for x in links), 3),
     }
     return {"profile": gen, "changes": changes, "tree": tree}
+
+
+def _couplings(tree) -> list[dict]:
+    """The droid root's couplings (the whole-droid suite's) and every fitted assembly's own (a mechanism's,
+    e.g. Hunter's tilt by roll), once per (joint, depends_on), the assembly's own first."""
+    out, seen = [], set()
+    for node in [a.raw for a in tree.asms if a.raw is not tree.manifest.get("root")] + [tree.manifest.get("root", {})]:
+        for c in node.get("couplings") or []:
+            k = (c["joint"], c["depends_on"])
+            if k not in seen:
+                seen.add(k)
+                out.append(c)
+    return out
 
 
 def _behaviour(field: str, old, new) -> bool:

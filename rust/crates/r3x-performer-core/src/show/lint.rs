@@ -20,6 +20,7 @@ use crate::actuation::pipeline::{
     profile_doc, rig_joints, servo_map, Channel, JointSpec, ServoMap,
 };
 use crate::stagelights::{rig, rigs, LightMode, DEFAULT_RIG};
+use r3x_contracts::profile::JointCoupling;
 use r3x_contracts::RobotProfile;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -79,8 +80,16 @@ pub fn sfx_stems() -> BTreeMap<String, String> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct JointLimit {
+    /// Positions outside `lo..hi` are errors: no rig the library plays on has them.
     pub lo: f64,
     pub hi: f64,
+    /// Positions inside `lo..hi` but outside `warn_lo..warn_hi` are warnings: a rig that is
+    /// narrower here (the Physical build) clamps them at playback. Equal to `lo..hi` for one rig.
+    pub warn_lo: f64,
+    pub warn_hi: f64,
+    /// This joint's range as a function of another's on the narrower rig (its coupled limit):
+    /// exceeding it is a warning, the performer clamps to it.
+    pub coupling: Option<JointCoupling>,
     pub v_max: f64,
     pub a_max: f64,
     pub channel: String,
@@ -111,6 +120,9 @@ pub fn joint_limits_for(
                 JointLimit {
                     lo: ch.follower.soft_min,
                     hi: ch.follower.soft_max,
+                    warn_lo: ch.follower.soft_min,
+                    warn_hi: ch.follower.soft_max,
+                    coupling: None,
                     v_max: cfg.v_max,
                     a_max: cfg.a_max,
                     channel: cfg.name.clone(),
@@ -136,6 +148,12 @@ pub fn joint_limits_from_profile(p: &RobotProfile) -> Result<BTreeMap<String, Jo
                 JointLimit {
                     lo: joint.soft.min,
                     hi: joint.soft.max,
+                    warn_lo: joint.soft.min,
+                    warn_hi: joint.soft.max,
+                    coupling: p
+                        .mech
+                        .as_ref()
+                        .and_then(|m| m.couplings.iter().find(|c| &c.joint == j).cloned()),
                     v_max: cfg.v_max,
                     a_max: cfg.a_max,
                     channel: cfg.name.clone(),
@@ -151,11 +169,11 @@ pub fn joint_limits_from_profile(p: &RobotProfile) -> Result<BTreeMap<String, Jo
 /// The limits the committed animation library (`show/`) is authored and tested against:
 /// the policy since the 2026-10-01 energy pass. Two rigs play the same files, so
 ///
-/// - **positions** are the range BOTH rigs share: the intersection of `original`'s and
-///   `physical`'s animation ranges. A clip must look the same on either; nothing is authored
-///   past the narrower rig (the Physical neck pans +-124 but the Original rig +-66, the
-///   Physical top ring turns +-23.5 but the Original +-27). Scaling motion to the rig's own
-///   range is a later, separate step.
+/// - **positions**: an error past the Original rig's animation range (`lo..hi`), a warning past
+///   the range both rigs share (`warn_lo..warn_hi`) or the Physical build's coupled limits
+///   (Hunter's tilt by roll): the Physical rig's performer clamps those at playback (Brandon,
+///   2026-10-02: clamp on the physical rig rather than edit the clips). Before 2026-10-02 the
+///   shared range was the error bound; Hunter's cut-down horns took the Physical tilt to +13.
 /// - **velocity and acceleration** are `physical`'s: the real build, whose limits rigsync
 ///   derives from the servo specs (`profiles/r3x/robot.generated.json`). The Original
 ///   profile's v_max are hand-set and conservative (the head tilt 100 deg/s vs the
@@ -180,8 +198,11 @@ pub fn library_limits(
             .ok_or_else(|| format!("{j}: not in the physical profile"))?;
         // both joints exist: joint_limits_from_profile resolved them above
         let (o, q) = (&original.joint(j).unwrap().animation, &physical.joint(j).unwrap().animation);
-        lim.lo = o.min.max(q.min);
-        lim.hi = o.max.min(q.max);
+        lim.lo = o.min;
+        lim.hi = o.max;
+        lim.warn_lo = o.min.max(q.min);
+        lim.warn_hi = o.max.min(q.max);
+        lim.coupling = p.coupling.clone();
         lim.v_max = p.v_max;
         lim.a_max = p.a_max;
     }
@@ -199,6 +220,58 @@ pub struct LintResult {
     pub warnings: Vec<String>,
 }
 
+/// A track's value at `t` (keys linear in between, held past the ends; the ease is ignored: the
+/// keys are the extremes a track reaches).
+pub fn track_at(tr: &super::types::Track, t: f64) -> f64 {
+    let k = &tr.keys;
+    match k.iter().position(|x| x[0] >= t) {
+        None => k.last().map_or(0.0, |x| x[1]),
+        Some(0) => k[0][1],
+        Some(i) => {
+            let (a, b) = (k[i - 1], k[i]);
+            if b[0] == a[0] { b[1] } else { a[1] + (b[1] - a[1]) * (t - a[0]) / (b[0] - a[0]) }
+        }
+    }
+}
+
+/// [`lint_clip`] and its warnings: positions a narrower rig clamps (outside `warn_lo..warn_hi`,
+/// or past a coupled limit at the depending joint's value at that key, 0 where the clip has
+/// no track for it).
+pub fn lint_clip_warn(
+    c: &Clip,
+    limits: &BTreeMap<String, JointLimit>,
+    errors: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) {
+    lint_clip(c, limits, errors);
+    for (j, tr) in &c.tracks {
+        let Some(lim) = limits.get(j) else { continue };
+        for [t, v] in &tr.keys {
+            if *v < lim.lo - 1e-9 || *v > lim.hi + 1e-9 {
+                continue; // an error already
+            }
+            if *v < lim.warn_lo - 1e-9 || *v > lim.warn_hi + 1e-9 {
+                warnings.push(format!(
+                    "{}.{j}: {v} at t={t} outside the Physical rig's {:.1}..{:.1} (clamped there)",
+                    c.id, lim.warn_lo, lim.warn_hi
+                ));
+                continue;
+            }
+            if let Some(cp) = &lim.coupling {
+                let a = c.tracks.get(&cp.depends_on).map_or(0.0, |d| track_at(d, *t));
+                if let Some((lo, hi)) = cp.range_at(a) {
+                    if *v < lo - 1e-9 || *v > hi + 1e-9 {
+                        warnings.push(format!(
+                            "{}.{j}: {v} at t={t} past the Physical rig's coupled limit {lo:.1}..{hi:.1} at {} {a:+.1} (clamped there)",
+                            c.id, cp.depends_on
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn lint_catalog(cat: &Catalog, limits: &BTreeMap<String, JointLimit>) -> LintResult {
     let mut errors = cat.errors.clone();
     let mut warnings = Vec::new();
@@ -211,7 +284,7 @@ pub fn lint_catalog(cat: &Catalog, limits: &BTreeMap<String, JointLimit>) -> Lin
             ));
         }
         match &it.body {
-            Body::Clip(c) => lint_clip(c, limits, &mut errors),
+            Body::Clip(c) => lint_clip_warn(c, limits, &mut errors, &mut warnings),
             _ => lint_refs(it, cat, &mut errors, &mut warnings),
         }
     }

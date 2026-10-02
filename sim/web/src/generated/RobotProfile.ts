@@ -4,6 +4,7 @@ import type { AudioConfig } from "./AudioConfig";
 import type { ElectronicsPackage } from "./ElectronicsPackage";
 import type { Joint } from "./Joint";
 import type { LightGroup } from "./LightGroup";
+import type { MechInfo } from "./MechInfo";
 import type { ServoController } from "./ServoController";
 
 export type RobotProfile = { name: string, label: string, servo_controller?: ServoController, joints: Array<Joint>, actuators: Array<Actuator>, lights: Array<LightGroup>, audio: AudioConfig, 
@@ -28,4 +29,9 @@ electronics?: string,
 /**
  * The resolved package (filled by `load`/`from_json`; the gateway's hello carries it).
  */
-package?: ElectronicsPackage, };
+package?: ElectronicsPackage, 
+/**
+ * The mech model's block (`robot.generated.json`, written by rigsync): only what the
+ * runtime enforces is read; the rest of it is for people.
+ */
+mech?: MechInfo, };

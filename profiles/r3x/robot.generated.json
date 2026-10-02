@@ -435,17 +435,17 @@
       "parent": "head_pan",
       "hard": {
         "min": -20.0,
-        "max": 25.0
+        "max": 13.0
       },
       "soft": {
-        "min": -18.2,
-        "max": 23.2
+        "min": -18.5,
+        "max": 11.5
       },
       "animation": {
-        "min": -18.2,
-        "max": 23.2
+        "min": -18.5,
+        "max": 11.5
       },
-      "v_max": 225.1,
+      "v_max": 86.9,
       "a_max": 400,
       "j_max": 3000,
       "extended": false
@@ -467,7 +467,7 @@
         "min": -10.5,
         "max": 10.5
       },
-      "v_max": 136.7,
+      "v_max": 405.9,
       "a_max": 400,
       "j_max": 3000,
       "extended": false
@@ -489,7 +489,7 @@
         "min": -13.2,
         "max": 28.2
       },
-      "v_max": 335.1,
+      "v_max": 301.8,
       "a_max": 900,
       "j_max": 8000,
       "extended": false
@@ -554,7 +554,7 @@
         "center_value": 0,
         "trim_us": 0,
         "invert": false,
-        "gear": 0.9331,
+        "gear": 2.4176,
         "pulse_min_us": 500,
         "pulse_max_us": 2500,
         "range_deg": 270,
@@ -575,7 +575,7 @@
         "center_value": 0,
         "trim_us": 0,
         "invert": false,
-        "gear": 1.5367,
+        "gear": 0.5174,
         "pulse_min_us": 500,
         "pulse_max_us": 2500,
         "range_deg": 300,
@@ -597,7 +597,7 @@
         "center_value": 0,
         "trim_us": 0,
         "invert": true,
-        "gear": 0.9007,
+        "gear": 1.0,
         "pulse_min_us": 500,
         "pulse_max_us": 2500,
         "range_deg": 270,
@@ -944,13 +944,14 @@
   "home": {},
   "mech": {
     "_doc": "Extension block (serde ignores it): the mech model this profile was generated from. Body frame (show/SPEC.md): mm, +Y up, +Z front, +X the droid's left, rest pose. inertia = [Ixx, Iyy, Izz, Ixy, Ixz, Iyz] kg m^2 about the link COM, body axes. servo_deg_per_unit = servo deg per joint deg (the profile's calibration.gear). Links of joint null are ground.",
-    "generated_at": "2026-10-01T11:38:55+00:00",
+    "generated_at": "2026-10-02T19:43:42+00:00",
     "manifest": {
       "path": "out/r3x_droid/manifest.json",
-      "generated_at": "2026-10-01T11:38:29+00:00",
+      "generated_at": "2026-10-02T19:43:42+00:00",
       "assemblies": [
         "r3x_droid",
         "base",
+        "pedestal_cap_column",
         "base_panels_closed",
         "column_internals",
         "hunter_head",
@@ -959,6 +960,7 @@
         "top_ring"
       ],
       "skipped": [
+        "pedestal_cap_kit",
         "base_panels_open",
         "base_panels_port",
         "internals_anderson",
@@ -1006,6 +1008,7 @@
             "col_lower_servo"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part col_lower_servo name",
           "servo_deg_per_unit": 3.8,
           "mm_per_servo_deg": null,
@@ -1045,6 +1048,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "MG996R",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator poker_shoulder",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1080,6 +1084,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "MG90S",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator poker_wrist",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1115,6 +1120,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "SERVO_35KG_270",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator middle_ring",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1150,6 +1156,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "DS3218",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator throttle_shoulder",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1185,6 +1192,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "MG996R",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator throttle_elbow",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1220,6 +1228,7 @@
           "kind": "none",
           "servos": [],
           "servo_model": "MG90S",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "profile actuator throttle_wrist",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": null,
@@ -1257,6 +1266,7 @@
             "col_top_servo"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part col_top_servo name",
           "servo_deg_per_unit": 4.25,
           "mm_per_servo_deg": null,
@@ -1298,6 +1308,7 @@
             "hero_shoulder_servo"
           ],
           "servo_model": "DS3218_DUAL",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part hero_shoulder_servo material",
           "servo_deg_per_unit": 1.0,
           "mm_per_servo_deg": null,
@@ -1339,6 +1350,7 @@
             "hero_wrist_servo"
           ],
           "servo_model": "SERVO_7KG",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part hero_wrist_servo material",
           "servo_deg_per_unit": 1.0,
           "mm_per_servo_deg": null,
@@ -1369,7 +1381,7 @@
           1.0,
           0.0
         ],
-        "child_link": "column_internals/carriage",
+        "child_link": "column_internals/sled",
         "mech_limits": {
           "min": -37.0,
           "max": 45.0
@@ -1380,6 +1392,7 @@
             "col_lift_servo"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part col_lift_servo name",
           "servo_deg_per_unit": null,
           "mm_per_servo_deg": 0.3351,
@@ -1416,17 +1429,18 @@
           "max": 135.0
         },
         "drive": {
-          "kind": "gear",
+          "kind": "direct",
           "servos": [
             "col_pan_servo"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part col_pan_servo name",
           "servo_deg_per_unit": 1.0,
           "mm_per_servo_deg": null,
-          "eta": 0.85,
+          "eta": 1.0,
           "linkages": [],
-          "how": "gear 1:1",
+          "how": "direct",
           "jacobian_at_rest": null
         },
         "first_contact": {
@@ -1454,7 +1468,7 @@
         "child_link": "hunter_head/cross",
         "mech_limits": {
           "min": -20.0,
-          "max": 25.0
+          "max": 13.0
         },
         "drive": {
           "kind": "push_rod_pair",
@@ -1463,25 +1477,22 @@
             "servo_r"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part servo_r name",
-          "servo_deg_per_unit": 0.9331,
+          "servo_deg_per_unit": 2.4176,
           "mm_per_servo_deg": null,
           "eta": 0.9,
           "linkages": [
             "rod_l",
             "rod_r"
           ],
-          "how": "push_rod_pair at rest: servo_l +0.932, servo_r -0.933 servo deg per joint deg",
+          "how": "push_rod_pair at rest: servo_l -2.417, servo_r +2.418 servo deg per joint deg",
           "jacobian_at_rest": [
-            0.9316,
-            -0.9331
+            -2.4173,
+            2.4176
           ]
         },
-        "first_contact": {
-          "min": null,
-          "max": 31.5,
-          "source": "hunter_head check interference_head_tilt: range -20..+25 deg; first contact +31.5 hex_shaft x mount_plate (6.5 past the limit); -33 hex_shaft x mount_plate (13 past the limit)"
-        },
+        "first_contact": null,
         "inferred": false,
         "driven": true
       },
@@ -1511,25 +1522,22 @@
             "servo_r"
           ],
           "servo_model": "GOBILDA_2000_25_2",
+          "servo_deg_per_unit_by_servo": null,
           "servo_model_source": "part servo_r name",
-          "servo_deg_per_unit": 1.5367,
+          "servo_deg_per_unit": 0.5174,
           "mm_per_servo_deg": null,
           "eta": 0.9,
           "linkages": [
             "rod_l",
             "rod_r"
           ],
-          "how": "push_rod_pair at rest: servo_l +1.537, servo_r +1.536 servo deg per joint deg",
+          "how": "push_rod_pair at rest: servo_l -0.517, servo_r -0.517 servo deg per joint deg",
           "jacobian_at_rest": [
-            1.5367,
-            1.5358
+            -0.5174,
+            -0.5169
           ]
         },
-        "first_contact": {
-          "min": null,
-          "max": 21.0,
-          "source": "hunter_head check interference_head_roll: range -12..+12 deg; first contact +21 hex_shaft x mount_plate (9 past the limit); -21.5 neck_coupler x head_bottom (9.5 past the limit); 4 explained near-miss p"
-        },
+        "first_contact": null,
         "inferred": true,
         "driven": true
       },
@@ -1553,28 +1561,25 @@
           "max": 30.0
         },
         "drive": {
-          "kind": "push_rod",
+          "kind": "direct",
           "servos": [
-            "visor_servo"
+            "visor_servo_l",
+            "visor_servo_r"
           ],
           "servo_model": "SERVO_35KG_270",
-          "servo_model_source": "part visor_servo name",
-          "servo_deg_per_unit": 0.9007,
+          "servo_deg_per_unit_by_servo": {
+            "visor_servo_l": 1.0,
+            "visor_servo_r": -1.0
+          },
+          "servo_model_source": "profile actuator visor",
+          "servo_deg_per_unit": 1.0,
           "mm_per_servo_deg": null,
-          "eta": 0.9,
-          "linkages": [
-            "rod_visor"
-          ],
-          "how": "push_rod at rest: visor_servo +0.901 servo deg per joint deg",
-          "jacobian_at_rest": [
-            0.9007
-          ]
+          "eta": 1.0,
+          "linkages": [],
+          "how": "direct, visor_servo_l +1, visor_servo_r -1 servo deg per joint deg",
+          "jacobian_at_rest": null
         },
-        "first_contact": {
-          "min": null,
-          "max": 33.0,
-          "source": "hunter_head check interference_visor: range -15..+30 deg; first contact +33 h_v_1 x h_m_1 (3 past the limit); clear to -40; 23 explained near-miss pairs left out"
-        },
+        "first_contact": null,
         "inferred": true,
         "driven": true
       }
@@ -1653,14 +1658,14 @@
       {
         "servo": "col_pan_servo",
         "model": "GOBILDA_2000_25_2",
-        "kind": "gear",
+        "kind": "direct",
         "joints": [
           "head_pan"
         ],
         "linkage": null,
         "servo_deg_per_unit": 1.0,
         "mm_per_servo_deg": null,
-        "eta": 0.85,
+        "eta": 1.0,
         "stall_nm": 2.4713,
         "no_load_dps": 300.0
       },
@@ -1691,16 +1696,30 @@
         "no_load_dps": 300.0
       },
       {
-        "servo": "visor_servo",
+        "servo": "visor_servo_l",
         "model": "SERVO_35KG_270",
-        "kind": "push_rod",
+        "kind": "direct",
         "joints": [
           "visor"
         ],
-        "linkage": "hunter_head/rod_visor",
-        "servo_deg_per_unit": 0.9007,
+        "linkage": null,
+        "servo_deg_per_unit": 1.0,
         "mm_per_servo_deg": null,
-        "eta": 0.9,
+        "eta": 1.0,
+        "stall_nm": 2.8603,
+        "no_load_dps": 431.1
+      },
+      {
+        "servo": "visor_servo_r",
+        "model": "SERVO_35KG_270",
+        "kind": "direct",
+        "joints": [
+          "visor"
+        ],
+        "linkage": null,
+        "servo_deg_per_unit": -1.0,
+        "mm_per_servo_deg": null,
+        "eta": 1.0,
         "stall_nm": 2.8603,
         "no_load_dps": 431.1
       }
@@ -1720,21 +1739,42 @@
         "id": "base/base",
         "name": "Base skirt, top and pedestal (static)",
         "joint": null,
-        "kg": 3.1868,
+        "kg": 3.1042,
         "com": [
           -0.25,
-          95.77,
-          -0.82
+          89.44,
+          -0.84
         ],
         "inertia": [
-          0.0963,
-          0.1433,
-          0.09576,
-          9.856e-05,
+          0.09111,
+          0.1425,
+          0.09057,
+          0.0001035,
           -0.0003444,
-          0.0003156
+          0.0003321
         ],
-        "parts": 21,
+        "parts": 20,
+        "catalogue_parts": 0
+      },
+      {
+        "id": "pedestal_cap_column/pedestal_cap",
+        "name": "Pedestal cap (static)",
+        "joint": null,
+        "kg": 0.0476,
+        "com": [
+          0.0,
+          329.73,
+          0.0
+        ],
+        "inertia": [
+          0.0002136,
+          0.0004256,
+          0.0002136,
+          6.663e-13,
+          -1.178e-10,
+          -3.041e-13
+        ],
+        "parts": 1,
         "catalogue_parts": 0
       },
       {
@@ -1743,83 +1783,83 @@
         "joint": null,
         "kg": 0.3142,
         "com": [
-          -0.11,
+          0.0,
           124.69,
-          -0.04
+          0.0
         ],
         "inertia": [
-          0.008694,
-          0.017,
-          0.008626,
-          -8.565e-05,
-          -2.56e-06,
-          -2.855e-05
+          0.008673,
+          0.01703,
+          0.008673,
+          -7.486e-22,
+          -6.204e-25,
+          0.0
         ],
         "parts": 4,
         "catalogue_parts": 0
       },
       {
         "id": "column_internals/column",
-        "name": "Column (fixed: posts, plates, ring drives, lift drive)",
+        "name": "Column (fixed: posts, plates, ring drives, the lift's rack)",
         "joint": null,
-        "kg": 3.8894,
+        "kg": 4.4915,
         "com": [
-          -0.42,
-          200.73,
-          -1.01
+          0.52,
+          223.61,
+          -0.86
         ],
         "inertia": [
-          0.1875,
-          0.02381,
-          0.1856,
-          0.0003538,
-          -7.24e-05,
-          0.00165
+          0.2089,
+          0.0293,
+          0.2077,
+          -0.000486,
+          -1.48e-05,
+          0.001985
         ],
-        "parts": 21,
-        "catalogue_parts": 12
+        "parts": 29,
+        "catalogue_parts": 18
       },
       {
-        "id": "column_internals/carriage",
-        "name": "Lift carriage (rides the rails)",
+        "id": "column_internals/sled",
+        "name": "Lift sled (V-wheels on the posts; lift and pan servos, neck bearings)",
         "joint": "head_lift",
-        "kg": 0.4883,
+        "kg": 0.6723,
         "com": [
-          -4.14,
-          443.9,
-          17.59
+          -10.07,
+          419.63,
+          -0.62
         ],
         "inertia": [
-          0.0008031,
-          0.001382,
-          0.001341,
-          -0.0003617,
-          -5.532e-05,
-          -0.0001099
+          0.001857,
+          0.0008674,
+          0.002175,
+          -7.198e-05,
+          -1.716e-05,
+          1.584e-06
         ],
-        "parts": 14,
-        "catalogue_parts": 10
+        "parts": 33,
+        "catalogue_parts": 24
       },
       {
         "id": "column_internals/neck",
-        "name": "Pan hub, neck tube (the head rides it)",
+        "name": "Neck: coupler, bearing hub, tube (the head rides it)",
         "joint": "head_pan",
-        "kg": 0.1654,
+        "kg": 0.2388,
         "com": [
-          -0.01,
-          508.46,
-          -0.03
+          0.0,
+          472.5,
+          -0.1
         ],
         "inertia": [
-          0.001061,
-          3.697e-05,
-          0.001061,
-          -2.057e-08,
-          2.538e-11,
-          -3.929e-07
+          0.001713,
+          5.065e-05,
+          0.001713,
+          -2.04e-13,
+          1.327e-13,
+          -1.342e-06
         ],
-        "parts": 4,
-        "catalogue_parts": 2
+        "parts": 5,
+        "catalogue_parts": 3
       },
       {
         "id": "hunter_head/neck",
@@ -1835,7 +1875,7 @@
           8.699e-05,
           1.125e-05,
           8.948e-05,
-          5.26e-10,
+          5.206e-10,
           1.836e-08,
           -7.129e-08
         ],
@@ -1856,9 +1896,9 @@
           8.756e-07,
           1.035e-06,
           1.956e-07,
-          -1.463e-24,
-          -2.675e-23,
-          1.672e-24
+          0.0,
+          0.0,
+          0.0
         ],
         "parts": 1,
         "catalogue_parts": 1
@@ -1867,85 +1907,85 @@
         "id": "hunter_head/head",
         "name": "Head (mount plate, servos, shell)",
         "joint": "head_roll",
-        "kg": 1.4033,
+        "kg": 1.3897,
         "com": [
-          1.97,
-          782.8,
-          1.47
+          0.3,
+          779.86,
+          0.07
         ],
         "inertia": [
-          0.009505,
-          0.01482,
-          0.01233,
-          -0.0001139,
-          -3.048e-05,
-          0.001074
+          0.009271,
+          0.01493,
+          0.01206,
+          1.468e-05,
+          -1.181e-05,
+          0.001145
         ],
-        "parts": 47,
-        "catalogue_parts": 29
+        "parts": 43,
+        "catalogue_parts": 25
       },
       {
         "id": "hunter_head/visor",
         "name": "Visor arms",
         "joint": "visor",
-        "kg": 0.158,
+        "kg": 0.152,
         "com": [
-          1.12,
-          802.21,
-          22.61
+          0.26,
+          809.23,
+          27.99
         ],
         "inertia": [
-          0.0005786,
-          0.001753,
-          0.001908,
-          3.215e-06,
-          9.379e-06,
-          -0.0002279
+          0.0005612,
+          0.001777,
+          0.001913,
+          -2.114e-06,
+          6.565e-06,
+          -0.0002204
         ],
-        "parts": 10,
-        "catalogue_parts": 5
+        "parts": 7,
+        "catalogue_parts": 4
       },
       {
         "id": "lower_ring/lower_ring_mount",
         "name": "Lower-ring lazy susan (static race)",
         "joint": null,
-        "kg": 0.1473,
+        "kg": 0.6473,
         "com": [
-          0.08,
-          376.85,
-          0.19
+          0.02,
+          378.65,
+          0.04
         ],
         "inertia": [
-          0.0008456,
-          0.001612,
-          0.0008477,
-          -1.704e-08,
-          1.112e-06,
-          -4.039e-08
+          0.004115,
+          0.007114,
+          0.004117,
+          4.209e-09,
+          1.11e-06,
+          1.041e-08
         ],
-        "parts": 1,
-        "catalogue_parts": 0
+        "parts": 3,
+        "catalogue_parts": 2
       },
       {
         "id": "lower_ring/lower_ring",
         "name": "Lower ring",
         "joint": "torso_lower",
-        "kg": 0.8957,
+        "kg": 1.2348,
         "com": [
-          29.24,
-          356.17,
-          -6.36
+          21.0,
+          356.49,
+          -4.61
         ],
         "inertia": [
-          0.007158,
-          0.01685,
-          0.01058,
-          -0.0003645,
-          -0.0002359,
-          6.208e-05
+          0.009824,
+          0.02214,
+          0.01343,
+          -0.0003445,
+          -0.000189,
+          0.0001016
         ],
-        "parts": 13,
-        "catalogue_parts": 0
+        "parts": 14,
+        "catalogue_parts": 1
       },
       {
         "id": "lower_ring/poker_upper",
@@ -1962,8 +2002,8 @@
           0.0001041,
           0.0001412,
           -6.475e-05,
-          -3.75e-08,
-          -3.424e-08
+          -3.751e-08,
+          -3.423e-08
         ],
         "parts": 2,
         "catalogue_parts": 0
@@ -1984,7 +2024,7 @@
           0.0003735,
           -2.081e-06,
           -2.502e-07,
-          -2.162e-09
+          -2.201e-09
         ],
         "parts": 6,
         "catalogue_parts": 0
@@ -2003,22 +2043,22 @@
         "id": "middle_ring/middle_ring",
         "name": "Middle ring (logic panels)",
         "joint": "torso_middle",
-        "kg": 0.5652,
+        "kg": 0.8152,
         "com": [
-          -30.3,
-          444.13,
-          20.02
+          -21.01,
+          434.63,
+          13.88
         ],
         "inertia": [
-          0.005206,
-          0.01052,
-          0.00606,
-          5.874e-05,
-          4.086e-06,
-          -8.308e-05
+          0.007188,
+          0.01423,
+          0.008131,
+          0.0002215,
+          0.0001092,
+          -0.0001906
         ],
-        "parts": 18,
-        "catalogue_parts": 0
+        "parts": 19,
+        "catalogue_parts": 1
       },
       {
         "id": "middle_ring/throttle_upper",
@@ -2087,73 +2127,84 @@
         "id": "top_ring/top_ring_mount",
         "name": "Top-ring lazy susan (lower race)",
         "joint": "torso_middle",
-        "kg": 0.0,
-        "com": null,
-        "inertia": null,
-        "parts": 0,
-        "catalogue_parts": 0
+        "kg": 0.3014,
+        "com": [
+          0.0,
+          483.79,
+          0.0
+        ],
+        "inertia": [
+          0.001748,
+          0.003489,
+          0.001748,
+          1.356e-13,
+          -1.07e-11,
+          -8.816e-14
+        ],
+        "parts": 2,
+        "catalogue_parts": 1
       },
       {
         "id": "top_ring/top_ring",
         "name": "Top ring (RX-24)",
         "joint": "torso_top",
-        "kg": 1.2238,
+        "kg": 1.2255,
         "com": [
-          44.55,
-          531.36,
-          48.98
+          18.96,
+          525.36,
+          21.87
         ],
         "inertia": [
-          0.01354,
-          0.02389,
-          0.01286,
-          0.000434,
-          -0.00558,
-          0.0002587
+          0.01248,
+          0.0214,
+          0.012,
+          4.435e-06,
+          -0.002974,
+          -0.0002095
         ],
-        "parts": 21,
-        "catalogue_parts": 1
+        "parts": 15,
+        "catalogue_parts": 2
       },
       {
         "id": "top_ring/hero_arm",
         "name": "Hero arm",
         "joint": "hero_shoulder",
-        "kg": 0.5054,
+        "kg": 0.3241,
         "com": [
-          217.18,
-          614.27,
-          232.78
+          216.39,
+          614.73,
+          234.04
         ],
         "inertia": [
-          0.002143,
-          0.00172,
-          0.001993,
-          -0.0007971,
-          -0.0007431,
-          -0.0008744
+          0.001521,
+          0.001235,
+          0.001402,
+          -0.0005483,
+          -0.0005365,
+          -0.0006158
         ],
-        "parts": 15,
+        "parts": 11,
         "catalogue_parts": 1
       },
       {
         "id": "top_ring/hero_hand",
         "name": "Hero hand",
         "joint": "hero_wrist",
-        "kg": 0.0836,
+        "kg": 0.0556,
         "com": [
-          300.36,
-          705.97,
-          331.24
+          308.73,
+          711.87,
+          338.1
         ],
         "inertia": [
-          7.388e-05,
-          9.846e-05,
-          6.148e-05,
-          -5.968e-06,
-          -3.071e-05,
-          -6.879e-06
+          5.487e-05,
+          7.521e-05,
+          4.689e-05,
+          -5.647e-06,
+          -2.548e-05,
+          -6.731e-06
         ],
-        "parts": 12,
+        "parts": 11,
         "catalogue_parts": 0
       }
     ],
@@ -2174,23 +2225,23 @@
             1.0,
             0.0
           ],
-          "radius": 40.0,
+          "radius": 32.0,
           "zero_dir": [
-            0.5358,
+            -0.809,
             0.0,
-            0.8443
+            -0.5878
           ],
           "ball_offset": 19.245
         },
         "ground": {
           "link": "hunter_head/neck",
           "point": [
-            8.0702,
+            8.0737,
             810.045,
-            7.9892
+            -8.0179
           ]
         },
-        "rod_length": 74.291,
+        "rod_length": 77.236,
         "servo_range_deg": [
           -135.0,
           135.0
@@ -2226,23 +2277,23 @@
             1.0,
             0.0
           ],
-          "radius": 40.0,
+          "radius": 32.0,
           "zero_dir": [
-            -0.5358,
+            0.809,
             0.0,
-            0.8443
+            -0.5878
           ],
           "ball_offset": 19.245
         },
         "ground": {
           "link": "hunter_head/neck",
           "point": [
-            -8.0702,
+            -8.0737,
             810.045,
-            7.9892
+            -8.0179
           ]
         },
-        "rod_length": 74.335,
+        "rod_length": 77.317,
         "servo_range_deg": [
           -135.0,
           135.0
@@ -2261,58 +2312,93 @@
         ],
         "inferred": true,
         "inferred_note": "Arm hole, hub hole, horn clocking and ball side chosen by design_linkage (every real-part combination tested); Hunter's actual choice is not in the sources."
-      },
-      "hunter_head/rod_visor": {
-        "id": "rod_visor",
-        "kind": "push_rod",
-        "servo": "visor_servo",
-        "horn": {
-          "link": "hunter_head/head",
-          "centre": [
-            52.5,
-            841.09,
-            -1.2697
-          ],
-          "axis": [
-            1.0,
-            0.0,
-            0.0
-          ],
-          "radius": 25.0,
-          "zero_dir": [
-            0.0,
-            -0.5,
-            0.866
-          ],
-          "ball_offset": 0.0
-        },
-        "ground": {
-          "link": "hunter_head/visor",
-          "point": [
-            52.5,
-            770.59,
-            20.3809
-          ]
-        },
-        "rod_length": 58.0,
-        "servo_range_deg": [
-          -135.0,
-          135.0
-        ],
-        "ground_axis": [
-          1.0,
-          0.0,
-          0.0
-        ],
-        "parts": [
-          "visor_horn",
-          "visor_push_rod"
-        ],
-        "inferred": true,
-        "inferred_note": "Anderson's horn/rod/tab; the servo's place on Hunter's head is chosen by design_drive (lever rest 0 deg, horn -30 deg off it, rod 90 deg, servo orientation 1)."
       }
     },
     "couplings": [
+      {
+        "joint": "head_tilt",
+        "depends_on": "head_roll",
+        "swept": [],
+        "clearance_mm": 1.5,
+        "step_deg": 0.5,
+        "table": [
+          [
+            -12.0,
+            -18.5,
+            9.0
+          ],
+          [
+            -10.0,
+            -19.0,
+            9.5
+          ],
+          [
+            -8.0,
+            -19.0,
+            10.0
+          ],
+          [
+            -6.0,
+            -19.0,
+            11.0
+          ],
+          [
+            -4.0,
+            -19.0,
+            11.5
+          ],
+          [
+            -2.0,
+            -19.5,
+            12.0
+          ],
+          [
+            0.0,
+            -19.0,
+            13.0
+          ],
+          [
+            2.0,
+            -19.0,
+            12.5
+          ],
+          [
+            4.0,
+            -19.5,
+            11.5
+          ],
+          [
+            6.0,
+            -19.0,
+            11.0
+          ],
+          [
+            8.0,
+            -18.5,
+            10.0
+          ],
+          [
+            10.0,
+            -18.0,
+            9.5
+          ],
+          [
+            12.0,
+            -18.0,
+            9.0
+          ]
+        ],
+        "limits": [
+          -20.0,
+          13.0
+        ],
+        "because": [
+          "horn_arm_l / head",
+          "horn_arm_r / head"
+        ],
+        "source": "hunter_head",
+        "note": "head_tilt's range as a function of head_roll: Hunter's 32 mm horns swing toward the head top on the side the head rolls to; every rule (reach, travel, swivel, leverage) with 1.5 mm clearance. The joint's own max is the roll-0 value."
+      },
       {
         "joint": "throttle_elbow",
         "depends_on": "throttle_shoulder",
@@ -2563,6 +2649,6 @@
         "note": "head_tilt's range as a function of head_lift (head_roll swept to its ends): outside it the arm comes within 1.0 mm of the body"
       }
     ],
-    "total_kg": 13.734
+    "total_kg": 15.722
   }
 }

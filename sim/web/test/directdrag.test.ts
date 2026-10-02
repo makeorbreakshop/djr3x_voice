@@ -99,7 +99,7 @@ describe('drag projections', () => {
   });
 
   it('coupled limits: the dependent range from the table, and the driver stops where the dependent would collide', () => {
-    const fromDroid = (DROID as { couplings?: Coupling[] } | null)?.couplings?.find((c) => c.joint === 'head_tilt');
+    const fromDroid = (DROID as { couplings?: Coupling[] } | null)?.couplings?.find((c) => c.joint === 'head_tilt' && c.depends_on === 'head_lift');
     const c: Coupling = fromDroid ?? {
       joint: 'head_tilt', depends_on: 'head_lift',
       table: [[-37, -20, 15], [-32, -20, 15], [-27, -20, 20], [-22, -20, 20], [-17, -20, 20], [-12, -20, 25], [0, -20, 25], [45, -20, 25]],
@@ -119,6 +119,20 @@ describe('drag projections', () => {
     expect(couplingRangeA(c, 0, 0, -37, 45)).toEqual([-37, 45]);
     // already outside at the current lift: nothing is trapped
     expect(couplingRangeA(c, 25, -30, -37, 45)).toEqual([-37, 45]);
+  });
+
+  it("Hunter's head: the tilt's coupled limit by roll narrows as the head rolls (the horn arm meets the head top)", () => {
+    const all = [...((DROID as { couplings?: Coupling[] } | null)?.couplings ?? []), ...((HUNTER as { couplings?: Coupling[] } | null)?.couplings ?? [])];
+    const c = all.find((x) => x.joint === 'head_tilt' && x.depends_on === 'head_roll');
+    if (!c) return; // not built with Hunter's cut-down horns
+    const level = couplingAt(c, 0)!;
+    const rolled = couplingAt(c, 12)!;
+    expect(rolled[1]).toBeLessThan(level[1]);
+    expect(couplingAt(c, -12)![1]).toBeLessThan(level[1]);
+    // halfway out, between the two
+    const mid = couplingAt(c, 6)![1];
+    expect(mid).toBeLessThanOrEqual(level[1]);
+    expect(mid).toBeGreaterThanOrEqual(rolled[1]);
   });
 });
 
