@@ -21,7 +21,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  assemblyLabel, exposed, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
+  assemblyLabel, exposed, isKitPart, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
 import { fastenerKind, fastenerPose, fastenerTravel, GUIDE_TIMING, itemU, pathAt, planSequence, timed, type SeqFastener, type SeqItem, type SeqPart, type Timing } from './sequence';
@@ -1544,6 +1544,7 @@ export class Workbench {
     const fade = (m: THREE.MeshStandardMaterial, mesh: THREE.Object3D, a: number) => {
       if (a >= 1) return;
       setLook(m, Math.max(0.001, a), null);
+      m.side = THREE.FrontSide; // (setLook flips the side at 0.3: a jump mid-fade)
       mesh.renderOrder = 2;
       const e = mesh.getObjectByName('edges');
       if (e) e.visible = false;
@@ -1557,21 +1558,29 @@ export class Workbench {
       // (warming over 0.4 s up to its start, so a part already in sight does not flash)
       const it = q?.of.get(id);
       const on = it && q!.force === null ? Math.min(1, Math.max(0, (q!.t - it.start + 0.4) / 0.4)) : 1;
-      if (u > 0) m.color.lerp(warm, Math.min(1, u * 1.6) * 0.85 * on * on * (3 - 2 * on));
+      if (u > 0) m.color.lerp(warm, Math.min(1, u * 1.6) * 0.45 * on * on * (3 - 2 * on));
     };
+    const shellRank = new Map<string, number>();
+    for (const po of this.parts.values()) if (po.part.class === 'shell' || exposed(po.part) || isKitPart(po.part)) shellRank.set(po.part.id, shellRank.size);
     for (const po of this.parts.values()) {
       const v = !!po.mesh.userData.vis && (!inStep.has(po.part.id) || started(po.part.id));
       po.mesh.visible = v;
       po.holder.visible = v;
       if (!v) continue;
       tint(po.mat, po.part.id);
-      if (inStep.has(po.part.id)) fade(po.mat, po.mesh, alphaOf(po.part.id));
-      // the shells see-through (the mechanism working under them), or as they are
-      if (po.part.class === 'shell') {
-        setLook(po.mat, this.videoShellAlpha < 1 ? this.videoShellAlpha : 1, null);
-        po.mesh.renderOrder = this.videoShellAlpha < 1 ? 2 : 0;
+      const a = inStep.has(po.part.id) ? alphaOf(po.part.id) : 1;
+      // the exterior: the shells, and every part seen from outside (the kit's visor, ear cups, face) - ghosted together
+      const outer = po.part.class === 'shell' || exposed(po.part) || isKitPart(po.part);
+      if (!outer) fade(po.mat, po.mesh, a);
+      // the shells see-through (the mechanism working under them), or as they are - and fading in like the rest
+      else {
+        const sa = a * (this.videoShellAlpha < 1 ? this.videoShellAlpha : 1);
+        setLook(po.mat, Math.max(0.001, sa), null);
+        if (sa < 1) po.mat.side = THREE.FrontSide; // one side all the way through a fade (setLook flips it at 0.3)
+        // each ghost its own fixed draw order: sorted by distance they would swap as the head moves (a flicker)
+        po.mesh.renderOrder = sa < 1 ? 3 + (shellRank.get(po.part.id) ?? 0) * 1e-3 : 0;
         const e = po.mesh.getObjectByName('edges');
-        if (e) e.visible = this.videoShellAlpha >= 1;
+        if (e) e.visible = true; // (ghosted, the shell keeps its fine edge lines: a clean outline)
       }
     }
     for (const fo of this.fast.values()) {
@@ -1812,6 +1821,39 @@ export class Workbench {
     return bad;
   }
 
+  /** The video makes room in a step for the camera: items from index i on start `delta` s later. */
+  videoShift(shifts: [number, number][]) {
+    const q = this.seq;
+    if (!q) return;
+    for (const [i, d] of shifts) for (let k = i; k < q.items.length; k++) q.items[k].start += d;
+    q.total = Math.max(...q.items.map((it) => it.start + it.dur));
+  }
+
+  /** Each item of the step playing: when it moves, and the box of where it starts and where it seats (world). */
+  videoItemBoxes(): { start: number; dur: number; c: number[]; s: number[] }[] {
+    const q = this.seq;
+    if (!q) return [];
+    const was = q.force;
+    const boxes = q.items.map(() => new THREE.Box3());
+    for (const f of [1, 0]) {
+      q.force = f;
+      this.applyOffsets(0);
+      this.root.updateMatrixWorld(true);
+      q.items.forEach((it, i) => {
+        for (const id of it.ids) {
+          const obj = this.parts.get(id)?.mesh ?? this.fast.get(id)?.obj;
+          if (!obj) continue;
+          const g = (obj as THREE.Mesh).geometry;
+          if (!g.boundingBox) g.computeBoundingBox();
+          if (!g.boundingBox!.isEmpty()) boxes[i].union(g.boundingBox!.clone().applyMatrix4(obj.matrixWorld));
+        }
+      });
+    }
+    q.force = was;
+    this.applyOffsets(0);
+    return q.items.map((it, i) => ({ start: it.start, dur: it.dur, c: boxes[i].getCenter(new THREE.Vector3()).toArray(), s: boxes[i].getSize(new THREE.Vector3()).toArray() }));
+  }
+
   /** Does anything in the step come in from below (its path starts under its seat)? */
   videoFromBelow(): boolean {
     const q = this.seq;
@@ -1953,7 +1995,41 @@ export class Workbench {
     if (this.videoStay.has(id) && q.force === null && !q.of.get(id)) return 0;
     const it = q.of.get(id);
     if (!it) return 0;
-    return q.force ?? itemU(it, q.t);
+    if (q.force !== null) return q.force;
+    if (this.video && it.kind === 'part') {
+      const x = Math.min(1, Math.max(0, (q.t - it.start) / it.dur));
+      // ease in-out "back": a slight pull back before it goes, a small overshoot into the seat and a settle
+      const c = this.videoHeavy(id) ? 0.9 : 0.45;
+      const c2 = c * 1.525;
+      const e = x < 0.5 ? ((2 * x) ** 2 * ((c2 + 1) * 2 * x - c2)) / 2 : ((2 * x - 2) ** 2 * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2;
+      return 1 - e;
+    }
+    return itemU(it, q.t);
+  }
+  /** A part big enough to carry momentum (a seat-settle reads on it; small parts barely overshoot). */
+  private videoHeavy(id: string) {
+    const b = this.parts.get(id)?.part.bbox;
+    return !!b && Math.hypot(b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2]) > 40;
+  }
+  /** Along a path past its ends (u above 1: further out; below 0: a hair into the seat), and on a slight arc. */
+  private videoPathAt(pts: THREE.Vector3[], u: number, arc: boolean): THREE.Vector3 {
+    const o = pathAt(pts, Math.min(1, Math.max(0, u)));
+    if (!this.video || !pts.length) return o;
+    const L = pts.reduce((l, p, i) => l + p.distanceTo(i + 1 < pts.length ? pts[i + 1] : new THREE.Vector3()), 0);
+    if (u > 1) {
+      const d = pts[0].clone().sub(pts.length > 1 ? pts[1] : new THREE.Vector3()).normalize();
+      o.addScaledVector(d, (u - 1) * L);
+    } else if (u < 0) {
+      o.addScaledVector(pts[pts.length - 1].clone().normalize(), u * L * 0.35);
+    }
+    if (arc && pts.length === 1 && u > 0 && u < 1) {
+      // a slight arc: bowed up (or sideways, for a vertical path)
+      const d = pts[0].clone().normalize();
+      const up = Math.abs(d.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+      const perp = up.sub(d.clone().multiplyScalar(up.dot(d))).normalize();
+      o.addScaledVector(perp, Math.sin(Math.PI * u) * 0.12 * L);
+    }
+    return o;
   }
   /** Linear progress left (1 at its start, 0 seated): a fastener spins at a steady rate, so it reads as screwing. */
   private seqLin(id: string): number {
@@ -2582,7 +2658,8 @@ export class Workbench {
         finish = GHOST_FINISH;
         opacity = look === 'inspect' ? GHOST.inspectShell : GHOST.shell;
       } else {
-        finish = mechanismFinish(p);
+        // (the video: every part as it is finished - shells in their paint, prints in their filament, metals bare)
+        finish = this.video ? exteriorFinish(p) : mechanismFinish(p);
       }
       if (toCome) {
         finish = GHOST_FINISH;
@@ -2590,7 +2667,7 @@ export class Workbench {
       }
       // the guide on a step that works inside the shells (a mechanism under the kit's head): the shells already on
       // fade back, as X-ray would, so what goes in stays in sight
-      if (g && cur && !g.title && shell && !inStep.has(id) && insideShells && !this.isolated) {
+      if (g && cur && !g.title && shell && !inStep.has(id) && insideShells && !this.isolated && !this.video) {
         finish = GHOST_FINISH;
         opacity = Math.min(opacity, GHOST.inspectShell);
       }
@@ -2600,13 +2677,10 @@ export class Workbench {
         opacity = Math.min(opacity, 0.12);
       }
       m.color.setHex(finish.color);
-      // the video: a black print as a dark charcoal that still shows its form (the kit's shells a cooler shade)
+      // the video: a black print lifted just enough to show its form; paint a little glossy, prints matte
       if (this.video) {
         const hsl = m.color.getHSL({ h: 0, s: 0, l: 0 });
-        if (hsl.l < 0.1) {
-          if (shell) m.color.setHSL(0.6, 0.07, 0.11);
-          else m.color.setHSL(hsl.h, Math.min(hsl.s, 0.04), 0.065);
-        }
+        if (hsl.l < 0.05) m.color.setHSL(hsl.h, hsl.s, 0.05);
       }
       m.userData.base = m.color.getHex();
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
@@ -2619,6 +2693,7 @@ export class Workbench {
         m.color.setHSL(acc.h, acc.s * 0.9, Math.min(0.62, Math.max(0.3, own)));
       }
       m.metalness = finish.metalness;
+      if (this.video && finish.metalness < 0.1) finish = { ...finish, roughness: p.finish?.paint && p.finish.paint !== 'none' ? Math.min(finish.roughness, 0.42) : Math.max(finish.roughness, 0.68) };
       m.roughness = finish.roughness;
       m.emissive.setHex(0x000000);
       setLook(m, opacity, clip);
@@ -2660,7 +2735,7 @@ export class Workbench {
       fo.obj.visible = visible;
       fo.obj.userData.vis = visible;
       const addsF = !!g && !g.title && !!cur && fastIn.has(id) && !this.isolated && !this.video;
-      fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : this.video ? 0xb2b8c0 : MATERIAL.fastener.color);
+      fo.mat.color.setHex(addsF ? GUIDE_COLOR.add : this.video ? 0x5c6066 : MATERIAL.fastener.color);
       fo.mat.userData.base = fo.mat.color.getHex();
       fo.mat.emissive.setHex(0);
       setLook(fo.mat, 1, clip);
@@ -2835,8 +2910,8 @@ export class Workbench {
       const u = g && inStep.has(po.part.id) ? this.seqU(po.part.id) : 0;
       const path = g ? this.seqPaths.get(po.part.id) : undefined;
       // a step's new parts come in along their path (the manifest's), else from where the explode would take them
-      const step = inStep.has(po.part.id) && (u > 0 || (!g && insert > 0))
-        ? (g ? (path ? pathAt(path, u).add(this.videoExtra(po.part.id, path)) : (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u))
+      const step = inStep.has(po.part.id) && (u !== 0 || (!g && insert > 0))
+        ? (g ? (path ? this.videoPathAt(path, u, true).add(this.videoExtra(po.part.id, path)) : (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u))
           : this.arrival(po).multiplyScalar(insert)) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);

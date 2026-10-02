@@ -31,12 +31,30 @@ const TITLE = opt('title', "Hunter Smoke's head mech");
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 // pacing (s): parts, screws (a bolt circle's overlap), the hold after a step, the opening, the ending
 // parts one at a time with a short gap, screws in order (a bolt circle overlapping a little); `hold` is the camera's move
-const MOVE_S = 1.0;
-const TIMING = { part: 0.75, fastener: 0.35, overlap: (0.75 + 0.12) / 0.75, fastenerOverlap: 0.6, hold: MOVE_S + 0.1, maxTotal: 1e9, minDur: 0.1 };
-const STEP_HOLD = 0.6;
+const MOVE_S = 0.7;
+// one continuous flow: each next part starts as the one before seats; a step's first part starts as the camera arrives
+const TIMING = { part: 0.56, fastener: 0.24, overlap: 0.76, fastenerOverlap: 0.3, hold: 0.45, maxTotal: 1e9, minDur: 0.1 };
+const STEP_HOLD = 0.15;
 const OPEN_S = 1.0;
-const MOTION_S = 2.8;
+const MOTION_S = 2.0;
 const ORBIT_S = 1.6;
+const DEMO_S = 10.4;
+// the demo: keys [s, value] per joint, eased between (slow in, slow out), and what the band says when
+const DEMO = {
+  head_tilt: [[0, 0], [0.7, 22], [1.0, 22], [1.8, -18], [2.1, -18], [2.6, 0], [7.6, 0], [8.4, -14], [9.6, -14], [10.4, 0]],
+  head_roll: [[2.7, 0], [3.3, 11], [3.6, 11], [4.4, -11], [4.7, -11], [5.2, 0], [7.8, 0], [8.6, 9], [9.6, 9], [10.4, 0]],
+  visor: [[5.3, 0], [6.0, 30], [6.5, 30], [7.3, 0], [7.9, 0], [8.6, 18], [9.6, 18], [10.4, 0]],
+};
+const CALLOUTS = [[0, 2.6, 'Tilt: both servos together'], [2.7, 5.2, 'Roll: servos opposite'], [5.3, 7.3, 'Visor'], [7.5, 10.4, 'All together']];
+const keyed = (keys, t) => {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) {
+    const [t0, v0] = keys[i - 1], [t1, v1] = keys[i];
+    const x = (t - t0) / (t1 - t0);
+    return v0 + (v1 - v0) * x * x * (3 - 2 * x);
+  }
+  return keys[keys.length - 1][1];
+};
 
 fs.mkdirSync(path.join(OUT, 'frames'), { recursive: true });
 for (const f of fs.readdirSync(path.join(OUT, 'frames'))) fs.rmSync(path.join(OUT, 'frames', f));
@@ -105,11 +123,52 @@ const steps = await ev(`(() => {
 })()`);
 const shown = steps.filter((s) => s.parts > 0);
 
-// each step's length
+// each step: its items, split into clusters when it spreads big and small things apart (an establishing beat,
+// then a closer shot per cluster), and room made in its timing for the camera to move between them
+const MOVE_C = 0.5; // a move between a step's clusters
+const SETTLE_C = 0.05; // the hold after a move, before anything moves
+const diag = (b) => Math.hypot(...b.s);
+const union = (a, b) => {
+  const lo = a.c.map((v, k) => Math.min(v - a.s[k] / 2, b.c[k] - b.s[k] / 2));
+  const hi = a.c.map((v, k) => Math.max(v + a.s[k] / 2, b.c[k] + b.s[k] / 2));
+  return { c: lo.map((l, k) => (l + hi[k]) / 2), s: lo.map((l, k) => hi[k] - l) };
+};
 const plan = [];
 for (const s of shown) {
-  const total = await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${s.i}, true); wb.seqSetTime(0); return wb.seqState.total; })()`);
-  plan.push({ ...s, total });
+  const items = await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${s.i}, true); wb.seqSetTime(0); return JSON.stringify(wb.videoItemBoxes()); })()`).then(JSON.parse);
+  let clusters = [];
+  if (items.length >= 3) {
+    const all = items.reduce((b, it) => (b ? union(b, it) : it), null);
+    const D = diag(all);
+    const med = items.map(diag).sort((a, b) => a - b)[Math.floor(items.length / 2)];
+    if (D > 2.2 * med && items.length >= 4) {
+      for (let lim = 0.4; lim < 1; lim += 0.1) {
+        clusters = [];
+        items.forEach((it, i) => {
+          const c = clusters[clusters.length - 1];
+          if (c && diag(union(c.box, it)) <= lim * D) c.box = union(c.box, it), (c.last = i);
+          else clusters.push({ first: i, last: i, box: it });
+        });
+        if (clusters.length <= 3) break;
+      }
+      if (clusters.length < 2) clusters = [];
+    }
+  }
+  // the room: an establishing beat (MOVE_S, a hold), then a move to each cluster before it plays
+  const shifts = [];
+  if (clusters.length) {
+    let shift = 0;
+    let prevEnd = MOVE_S - 0.1;
+    for (const c of clusters) {
+      const want = prevEnd + MOVE_C + SETTLE_C;
+      const d = want - (items[c.first].start + shift);
+      if (d > 0) shifts.push([c.first, d]), (shift += d);
+      c.at = items[c.first].start + shift - MOVE_C - SETTLE_C;
+      prevEnd = Math.max(...items.slice(c.first, c.last + 1).map((it) => it.start + shift + it.dur));
+    }
+  }
+  const total = await ev(`(() => { const wb = __r3x.build; wb.videoShift(${JSON.stringify(shifts)}); return wb.seqState.total; })()`);
+  plan.push({ ...s, total, clusters, shifts });
 }
 // the shells come last: the mechanism moves once without them, then they go on and it moves again
 const SHELLS_FROM = Number(opt('shells-from', 15));
@@ -118,15 +177,17 @@ const shells = plan.filter((p) => p.n >= SHELLS_FROM);
 
 // ------------------------------------------------------------------ the timeline
 // open on the finished head, explode it along the build's own paths (last in, first out), then build it up
-const EXPLODE_S = 2.0;
-const segs = [{ kind: 'open', dur: 3.0 }, { kind: 'explode', dur: EXPLODE_S }, { kind: 'exploded', dur: 0.8 }, { kind: 'disperse', dur: 1.2 }];
+const EXPLODE_S = 1.5;
+const segs = [{ kind: 'open', dur: 2.0 }, { kind: 'explode', dur: EXPLODE_S }, { kind: 'exploded', dur: 0.5 }, { kind: 'disperse', dur: 1.0 }];
 for (const p of mech) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
-segs.push({ kind: 'wide', dur: MOVE_S + 0.2 }, { kind: 'motion', dur: MOTION_S });
+segs.push({ kind: 'wide', dur: 0.9 }, { kind: 'motion', dur: MOTION_S });
 for (const p of shells) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
-segs.push({ kind: 'wide', dur: MOVE_S + 0.2 }, { kind: 'motion', dur: MOTION_S }, { kind: 'orbit', dur: ORBIT_S });
+// assembled: the shells ghost back, the mechanism shows what it does, the shells come back, a last orbit
+segs.push({ kind: 'wide', dur: 0.7 }, { kind: 'ghost', dur: 0.6 }, { kind: 'demo', dur: DEMO_S }, { kind: 'solid', dur: 0.6 }, { kind: 'orbit', dur: 2.6 });
 const total = segs.reduce((t, s) => t + s.dur, 0);
 const nFrames = Math.round(total * FPS);
-console.log(`${shown.length} steps, ${total.toFixed(1)} s, ${nFrames} frames`);
+console.log(`${shown.length} steps, ${total.toFixed(1)} s, ${nFrames} frames; steps ${plan.map((p) => `${p.n}:${p.total.toFixed(1)}${p.clusters.length ? `/${p.clusters.length}` : ''}`).join(' ')}`);
+if (argv.includes('--plan')) process.exit(0);
 
 const node = JSON.stringify(SECTION);
 // the band is always there; its text fades (0.3 s) in and out
@@ -187,9 +248,9 @@ const stepShot = async (az) => {
   // something coming in from below: a low camera looking up at the underside first, and closer
   const below = await ev(`__r3x.build.videoFromBelow()`);
   const els = below ? [-22, EL0, 40] : [EL0, -14, 40];
-  const fills = below ? [0.72, 0.6, 0.45] : [0.6, 0.45];
+  const fills = below ? [0.74, 0.62, 0.5] : [0.68, 0.52];
   for (const fill of fills) for (const el of els) for (const da of [0, 45, -45, 100, -100, 180]) {
-    const sh = boxShot(b, az + da, el, fill, 1.15);
+    const sh = boxShot(b, az + da, el, fill, 1.06);
     await place(sh);
     const bad = await ev(`JSON.stringify(__r3x.build.videoShotCheck(${JSON.stringify(SAFE)}))`).then(JSON.parse);
     if (!best || bad.length < best.bad.length) best = { sh, bad };
@@ -203,6 +264,10 @@ let f = 0;
 let cur = null; // the camera shot: { c, r, az, el }
 let from = null;
 let to = null;
+let beats = [];
+let goalShot = null;
+let camState = null;
+const OMEGA = 7.5; // rad/s: arrives in about 0.6 s, no overshoot
 const report = [];
 for (const sg of segs) {
   const n = Math.round(sg.dur * FPS);
@@ -238,6 +303,7 @@ for (const sg of segs) {
         await ev(`__r3x.build.videoExplodeAt(1, ${smooth((k + 1) / n).toFixed(4)})`); // (the last frame fully gone)
       }
       await place(cur);
+      camState = { x: [...cur.c, Math.log(cur.r), cur.az, cur.el], v: [0, 0, 0, 0, 0, 0] };
     } else if (sg.kind === 'step') {
       const p = sg.p;
       if (k === 0) {
@@ -245,8 +311,12 @@ for (const sg of segs) {
         const got = await stepShot(AZ0 + T * DRIFT);
         report.push({ step: p.n, az: Math.round(got.sh.az), el: got.sh.el, fill: got.sh.r, bad: got.bad });
         if (p !== plan[0]) await ev(`(() => { __r3x.build.videoStay = new Set(); 1 })()`);
-        from = cur;
-        to = got.sh;
+        await ev(`(() => { __r3x.build.videoShift(${JSON.stringify(p.shifts)}); 1 })()`);
+        // the camera's beats: the step's shot (establishing, when it has clusters), then each cluster close
+        beats = [{ at: 0, dur: MOVE_S, shot: got.sh }];
+        for (const c of p.clusters) beats.push({ at: c.at, dur: MOVE_C, shot: boxShot(c.box, got.sh.az, got.sh.el, 0.68, 1.08) });
+        beats[0].from = cur;
+        for (let i = 1; i < beats.length; i++) beats[i].from = beats[i - 1].shot;
       }
       await ev(`__r3x.build.seqSetTime(${t.toFixed(4)})`);
       await label(p.n, p.title, Math.min(smooth(t / 0.3), smooth((sg.dur - t) / 0.3)));
@@ -254,9 +324,19 @@ for (const sg of segs) {
       if (k === 0 && sg.kind === 'wide') {
         await label('', '', 0);
         await ev(`(() => { __r3x.build.videoStay = new Set(); 1 })()`);
-        from = cur;
-        to = await wholeShot(AZ0 + T * DRIFT, EL0, 0.74);
+        beats = [{ at: 0, dur: MOVE_S, from: cur, shot: await wholeShot(AZ0 + T * DRIFT, EL0, 0.76) }];
       }
+      if (sg.kind === 'ghost' || sg.kind === 'solid') {
+        const a = sg.kind === 'ghost' ? 1 - 0.72 * smooth((k + 1) / n) : 0.28 + 0.72 * smooth((k + 1) / n);
+        await ev(`(() => { const wb = __r3x.build; wb.videoShellAlpha = ${a.toFixed(4)}; wb.refresh(); 1 })()`);
+      }
+      if (sg.kind === 'demo') {
+        const v = Object.fromEntries(Object.entries(DEMO).map(([j, keys]) => [j, keyed(keys, t)]));
+        await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); for (const [j, x] of Object.entries(${JSON.stringify(v)})) wb.setJoint(n, j, x); wb.refresh(); 1 })()`);
+        const c = CALLOUTS.find(([a, b]) => t >= a - 0.05 && t <= b + 0.05);
+        await label('', c ? c[2] : '', c ? Math.min(smooth((t - c[0]) / 0.3), smooth((c[1] - t) / 0.3)) : 0);
+      }
+      if (sg.kind === 'solid' && k === 0) await label('', '', 0);
       if (sg.kind === 'motion') {
         const u = t / sg.dur;
         const w = (a, b) => Math.max(0, Math.min(1, (u - a) / (b - a)));
@@ -264,14 +344,26 @@ for (const sg of segs) {
         const tilt = swing(w(0, 0.45), -20, 25), roll = swing(w(0.3, 0.75), -12, 12), visor = swing(w(0.55, 1), -15, 30);
         await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); wb.setJoint(n, 'head_tilt', ${tilt}); wb.setJoint(n, 'head_roll', ${roll}); wb.setJoint(n, 'visor', ${visor}); 1 })()`);
       }
-      if (sg.kind === 'orbit') orbit = 60 * ease(t / sg.dur);
+      if (sg.kind === 'orbit') orbit = 75 * ease(t / sg.dur);
     }
-    if (sg.kind === 'step' || sg.kind === 'wide' || sg.kind === 'motion' || sg.kind === 'orbit') {
-      // one eased move at the start of a step (or of the wide shot), then still
-      if ((sg.kind === 'step' || sg.kind === 'wide') && t < MOVE_S) {
-        const e = ease(t / MOVE_S);
-        cur = { c: from.c.map((v, j) => v + (to.c[j] - v) * e), r: from.r + (to.r - from.r) * e, az: from.az + (to.az - from.az) * e, el: from.el + (to.el - from.el) * e };
-      } else if (sg.kind === 'step' || sg.kind === 'wide') cur = { ...to, az: to.az + (t - MOVE_S) * DRIFT };
+    if (sg.kind !== 'open' && sg.kind !== 'explode' && sg.kind !== 'exploded' && sg.kind !== 'disperse') {
+      // the camera: a critically damped follow of the beat's shot (velocity carried through, never a stop-start),
+      // the framed size in log space; on a hold the shot drifts a little, so it never quite stops
+      if (sg.kind === 'step' || sg.kind === 'wide') {
+        const bi = Math.max(0, beats.findLastIndex((x) => x.at <= t));
+        goalShot = { ...beats[bi].shot, az: beats[bi].shot.az + Math.max(0, t - beats[bi].at) * DRIFT };
+      }
+      if (goalShot) {
+        const dt = 1 / FPS;
+        const keys = [...goalShot.c, Math.log(goalShot.r), goalShot.az, goalShot.el];
+        if (!camState) camState = { x: [...cur.c, Math.log(cur.r), cur.az, cur.el], v: [0, 0, 0, 0, 0, 0] };
+        for (let j = 0; j < 6; j++) {
+          const acc = OMEGA * OMEGA * (keys[j] - camState.x[j]) - 2 * OMEGA * camState.v[j];
+          camState.v[j] += acc * dt;
+          camState.x[j] += camState.v[j] * dt;
+        }
+        cur = { c: camState.x.slice(0, 3), r: Math.exp(camState.x[3]), az: camState.x[4], el: camState.x[5] };
+      }
       await place(cur, orbit);
     }
     await ev(`__r3xStill.hold(2)`);
@@ -288,11 +380,11 @@ kill();
 // ------------------------------------------------------------------ encode
 const mp4 = path.join(OUT, `${SECTION}_assembly.mp4`);
 const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(OUT, 'frames', '%05d.png'),
-  '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '29', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
 if (r.status) process.exit(r.status);
 const small = mp4.replace(/\.mp4$/, '_720.mp4');
 spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(OUT, 'frames', '%05d.png'), '-vf', 'scale=720:-2',
-  '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', small], { stdio: 'inherit' });
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '29', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', small], { stdio: 'inherit' });
 // one-frame glitches: consecutive frames' difference (64x64 grey) spiking above both neighbours
 {
   const raw = spawnSync('ffmpeg', ['-loglevel', 'error', '-i', mp4, '-vf', 'scale=64:64,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 30 }).stdout;
