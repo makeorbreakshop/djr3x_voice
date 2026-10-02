@@ -24,8 +24,9 @@ body[data-viewer] :is(#bp-title, #bp-joint-n, sup.inf) { display: none !importan
 body[data-viewer] details.bv-view { margin-top: 12px; }
 body[data-viewer] details.bv-view > .bv-h { margin-top: 8px; }
 
-/* The header names the open design; DJ R3X is its context */
-body[data-viewer] #panel header h1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* The header names the open design; DJ R3X is its context (collapsed to its rail, style.css hides it) */
+body[data-viewer]:not(.r3x-collapsed) #panel header h1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+body[data-viewer] #panel header h1 .vh-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body[data-viewer] #panel header h1 .vh-ctx { color: var(--muted); font-size: 12px; font-weight: 500; }
 /* Instructions only for designs on the allow-list (page.ts INSTRUCTIONS) */
 body[data-viewer] #bb-guide.vh-off { display: none !important; }
@@ -36,6 +37,12 @@ body[data-viewer] #bb-guide.vh-off { display: none !important; }
 body[data-viewer]:not([data-guide]) .bb-cube { margin-top: 40px; }
 body[data-viewer] #vb-link span:empty { display: none; }
 body[data-viewer] #vb-link { padding: 6px 9px; }
+/* The cube on the viewer's light ground: pale faces and dark lettering (the sim's is dark on the dark studio) */
+body[data-viewer] .bb-cube .f { background: rgba(244, 244, 246, 0.92); border-color: rgba(60, 64, 72, 0.35); }
+body[data-viewer] .bb-cube .z.c { color: #3a3e46; }
+body[data-viewer] .bb-cube .z:hover { background: rgba(232, 118, 42, 0.5); color: #fff; }
+body[data-viewer] :is(.bb-cube-home, .bb-cube-help) { background: rgba(244, 244, 246, 0.92); color: #3a3e46; border: 1px solid rgba(60, 64, 72, 0.25); }
+body[data-viewer] :is(.bb-cube-home, .bb-cube-help):hover { background: #fff; color: #111; }
 
 /* The input and frame diagnostic (diag.ts): `?diag` or the ` key. */
 #viewer-diag { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 40; max-width: min(760px, calc(100vw - 24px));

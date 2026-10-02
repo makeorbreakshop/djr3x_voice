@@ -213,7 +213,10 @@ function renderOpen() {
     const ctx = document.createElement('small');
     ctx.className = 'vh-ctx';
     ctx.textContent = 'DJ R3X';
-    head.append(document.createTextNode(d.name), ctx);
+    const name = document.createElement('span');
+    name.className = 'vh-name';
+    name.textContent = d.name;
+    head.append(name, ctx);
   } else head.textContent = 'DJ R3X';
   document.title = d ? `${d.name} · DJ R3X` : 'DJ R3X';
   $('bb-guide').classList.toggle('vh-off', !(d && INSTRUCTIONS.has(d.id)));

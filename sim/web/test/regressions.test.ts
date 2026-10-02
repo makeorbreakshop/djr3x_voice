@@ -172,6 +172,13 @@ describe('10-12. looks and the focus (refresh)', () => {
     expect(lookShows({ ...part, scope: 'system', context: 'ghost' })).toBe(true);
     expect(lookShows({ ...part, scope: 'system', context: 'hide' })).toBe(false);
   });
+  it("10b. Hide in Mechanism also drops the focus's own ghosted shells (the Hide that 'did not work')", () => {
+    const shell = { ...part, shell: true, inScope: true };
+    expect(lookShows({ ...shell, context: 'ghost' })).toBe(true); // a ghost over the mechanism
+    expect(lookShows({ ...shell, context: 'hide' })).toBe(false);
+    expect(lookShows({ ...shell, look: 'inspect', context: 'hide' })).toBe(true); // X-ray is the ghosted shells
+    expect(lookShows({ ...shell, look: 'exterior', context: 'hide' })).toBe(true);
+  });
   it('11. Exterior draws a library design\'s own parts (Lower cage: inside, not seen from outside)', () => {
     expect(lookShows({ look: 'exterior', outside: false, shell: false, inScope: true, scope: 'library', context: 'hide' })).toBe(true);
     // the rest of the build in Exterior is still only what is seen from outside

@@ -154,7 +154,7 @@ export function bvhFor(g: THREE.BufferGeometry): MeshBVH {
  *   Exterior   what is seen from outside, painted; a library design's own parts are drawn whatever:
  *              it is what was opened (a frame or a column has nothing the finished droid shows, and
  *              Exterior drew it empty)
- *   Mechanism  what is inside (a focus keeps its own shells, as a ghost)
+ *   Mechanism  what is inside (a focus keeps its own shells, as a ghost; with Hide, not even those)
  *   outside the focus  ghosted or hidden, as the control says, for any focus - a system, an assembly or
  *              a library design. (A library design used to stand alone whatever it said, so Ghost did
  *              nothing there while it worked on a system: the "sometimes it ghosts" of the viewer.)
@@ -162,6 +162,9 @@ export function bvhFor(g: THREE.BufferGeometry): MeshBVH {
 export function lookShows(p: { look: Look; outside: boolean; shell: boolean; inScope: boolean; scope: Scope['kind'] | null; context: Context }): boolean {
   if (p.look === 'exterior' && !p.outside && !(p.scope === 'library' && p.inScope)) return false;
   if (p.look === 'mechanism' && p.shell && !p.scope) return false;
+  // Hide, in Mechanism: the focus's own shells go too (they are ghosts; "Hide" read as "the ghosts stay" is
+  // the Hide that does not work)
+  if (p.look === 'mechanism' && p.shell && p.scope && p.context === 'hide') return false;
   if (!p.inScope && !(p.scope && p.context === 'ghost')) return false;
   return true;
 }

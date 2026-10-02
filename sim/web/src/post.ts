@@ -699,7 +699,9 @@ export class PostPipeline {
       m.configuration.gammaCorrection = false;
       m.configuration.depthAwareUpsampling = true;
       m.autoDetectTransparency = false;
-      m.configuration.transparencyAware = false;
+      // transparency-aware like the still pass: the ghosts neither take nor cast AO in either, so the
+      // shading on them does not come and go with the hand (it did: the ghosts shaded only while moving)
+      m.configuration.transparencyAware = true;
       Object.assign(m.configuration, BUILD_MOVE_AO);
       protectEmitters(m);
       this.aoMove = m;
