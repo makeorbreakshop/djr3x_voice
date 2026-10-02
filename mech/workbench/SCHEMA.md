@@ -161,8 +161,9 @@ A rigid body. Every part rides on exactly one link.
                                          // it in for parts in focus or close (geom.display_lods)
                                          // beside each GLB, optionally `<mesh>.uv.bin`: the Original rig's baked
                                          // UVs (float32 u, v per face corner, index order), from
-                                         // `python -m workbench.uvtransfer`; `<asm>/uvtransfer.json` lists which
-                                         // parts wear the Original's textures (the rest keep procedural weathering)
+                                         // `python -m workbench.uvtransfer`; `uvtransfer.json` in the mesh's folder
+                                         // (the one above `parts/`) lists which of its parts wear the Original's
+                                         // textures (the rest keep procedural weathering)
   "mesh_sig": "3f1c0a9e2b7d",           // optional: the mesh's content hash (a reader may cache the GLB on it)
   "export": {"stl": "export/head_mount_plate.stl", "3mf": "export/head_mount_plate.3mf"}, // full detail
   "source": {"file": "RX Head Mech Base Plate V4.stl", "kind": "step | stl | dxf | generated",
