@@ -218,14 +218,15 @@ CLEAR_MIN = 1.0   # rod + housings to every head-side part, across the range (pr
 HOUSING_R = 4.6   # 2913 housing body radius around the rod axis
 
 
-def design_linkage(asm, servos, hub_holes, hub_face_y, head_pts=None):
+def design_linkage(asm, servos, hub_holes, hub_face_y, head_pts=None, arm_holes=ARM_HOLES):
     """Pick the real-part push-rod geometry (see module doc). Returns (chosen, table).
     `head_pts`: surface samples of every head-side part (shell, plate, servos...) that the rods
-    and their housings must clear by CLEAR_MIN through the whole range."""
+    and their housings must clear by CLEAR_MIN through the whole range. `arm_holes`: the arm
+    holes to try (Hunter's build: the 32 mm one only, assembly.PARAMS["horn_hole_mm"])."""
     from scipy.spatial import cKDTree
 
     tree = cKDTree(head_pts) if head_pts is not None and len(head_pts) else None
-    key = _cache_key("hunter-linkage-v4", CLEAR_MIN, HOUSING_R, 0 if head_pts is None else len(head_pts), SPACER_T, BALL_HALF, HUB_H, ARM_T, ARM_HOLES, ROD_L, ENGAGE_MIN,
+    key = _cache_key("hunter-linkage-v4", CLEAR_MIN, HOUSING_R, 0 if head_pts is None else len(head_pts), SPACER_T, BALL_HALF, HUB_H, ARM_T, tuple(arm_holes), ROD_L, ENGAGE_MIN,
                      SWIVEL_MAX, TRAVEL_MAX, LEVER_MIN, {k: np.round(v, 3).tolist() for k, v in servos.items()},
                      np.round(hub_holes, 3).tolist(), round(hub_face_y, 3),
                      [(j.id, j.limits) for j in asm.joints])
@@ -233,7 +234,7 @@ def design_linkage(asm, servos, hub_holes, hub_face_y, head_pts=None):
     def search():
         rows = []
         clocks = [k * 360.0 / TEETH for k in range(TEETH)]
-        for r_arm, (hi, hole), ball_side in itertools.product(ARM_HOLES, enumerate(hub_holes), ("above", "below")):
+        for r_arm, (hi, hole), ball_side in itertools.product(arm_holes, enumerate(hub_holes), ("above", "below")):
             if hole[0] <= 0:  # the left servo takes a hole on its own side; the right mirrors it
                 continue
             for phi in clocks:
@@ -320,6 +321,138 @@ def _candidate(asm, servos, hole, hub_face_y, r_arm, phi, ball_side, tree=None):
         asm.linkages = saved
 
 
+def _arm_points(r_arm):
+    """The cut-down 1916 arm's surface (its own frame: hub axis +Y, arm along +X, face on the hub at 0),
+    2 mm samples, for sweeping it with the servo."""
+    arm = lib_part("gobilda", "1916-0014-0048").mesh.slice_plane([r_arm + 6.0, 0, 0], [-1.0, 0, 0], cap=True)
+    return geom.sample(arm, 0.8, 20000)
+
+
+_LINK_PTS = []
+
+
+def _link_points():
+    """The 2913 ball link's surface (canonical: ball at 0, housing +Z), 1.5 mm samples."""
+    if not _LINK_PTS:
+        _LINK_PTS.append(geom.sample(lib_part("gobilda", "2913-0004-0241").mesh, 0.8, 20000))
+    return _LINK_PTS[0]
+
+
+def _pose_ok(asm, lks, pose, tree, arm_pts=None, neck_tree=None):
+    """One pose of a candidate linkage: (reachable and every rule holds, worst clearance). Clearance covers
+    the rod and its housings against the head (`tree`, head frame), the housing at the post end against the
+    top hub (`neck_tree`, neck frame; from 6 mm along the rod, past the ball on its spacer), the horn arm as
+    the servo turns it and the ball stud's head, both against the head."""
+    sol = solve_linkages(asm, pose)
+    if any(s is None for s in sol.values()):
+        return False, None
+    ms = link_matrices(asm, pose)
+    inv = np.linalg.inv(ms["head"])
+    ninv = np.linalg.inv(ms["neck"])
+    clear = math.inf
+    for lk in lks:
+        ang, a, b = sol[lk.id]
+        if abs(ang) > TRAVEL_MAX:
+            return False, None
+        if tree is not None:
+            seg = a + np.linspace(0, 1, 30)[:, None] * (b - a)
+            dd, _ = tree.query(seg @ inv[:3, :3].T + inv[:3, 3])
+            clear = min(clear, float(dd.min()) - HOUSING_R)
+            n, u, w = horn_basis(lk)
+            al = a @ inv[:3, :3].T + inv[:3, 3]
+            stud = al[None, :] + np.outer(np.linspace(BALL_HALF, BALL_HALF + 4.0, 4), n)
+            clear = min(clear, float(tree.query(stud)[0].min()) - 3.6)
+            if arm_pts is not None:
+                th = math.radians(ang)
+                x = math.cos(th) * u + math.sin(th) * w
+                z = np.cross(x, n)
+                c = np.asarray(lk.centre) + n * HUB_H
+                pts = c + np.outer(arm_pts[:, 0], x) + np.outer(arm_pts[:, 1], n) + np.outer(arm_pts[:, 2], z)
+                clear = min(clear, float(tree.query(pts)[0].min()))
+        if neck_tree is not None:
+            # the post-end ball link (its real housing, posed on the rod as _rod_parts does) and the rod
+            # itself (M4: 2 mm) against the top hub, in the neck frame
+            bl, al = b @ ninv[:3, :3].T + ninv[:3, 3], a @ ninv[:3, :3].T + ninv[:3, 3]
+            z = unit(al - bl)
+            x = unit(np.cross(UP, z))
+            y = np.cross(z, x)
+            lp = _link_points()
+            pts = bl + np.outer(lp[:, 0], x) + np.outer(lp[:, 1], y) + np.outer(lp[:, 2], z)
+            clear = min(clear, float(neck_tree.query(pts)[0].min()))
+            L = float(np.linalg.norm(al - bl))
+            seg = bl + np.linspace(BALL_THREAD[0] / L, 1 - BALL_THREAD[0] / L, 25)[:, None] * (al - bl)
+            clear = min(clear, float(neck_tree.query(seg)[0].min()) - 2.0)
+        n = ms["head"][:3, :3] @ UP
+        rr = unit(b - a)
+        if max(math.degrees(math.asin(min(1, abs(rr @ n)))), math.degrees(math.asin(min(1, abs(rr @ UP))))) > SWIVEL_MAX:
+            return False, clear
+    jac = servo_jacobian(asm, pose, ["head_tilt", "head_roll"])
+    if jac is None or float(np.min(np.max(np.abs(jac), axis=0))) < LEVER_MIN:
+        return False, clear
+    return clear >= CLEAR_MIN, clear
+
+
+def fit_limits(asm, servos, rows, hub_face_y, head_pts, want, neck_pts=None, step=(2.5, 2.0),
+               span=((-30.0, 35.0), (-18.0, 18.0))):
+    """When no candidate reaches the whole design range: for each candidate, the largest tilt x roll box
+    round the rest pose (roll symmetric) where every pose on a `step` grid passes every rule; the pick is
+    the candidate whose box covers most of `want` ((tilt lo, hi), roll half). Returns (row, (t0, t1),
+    roll half) or None."""
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(head_pts) if head_pts is not None and len(head_pts) else None
+    neck_tree = cKDTree(neck_pts) if neck_pts is not None and len(neck_pts) else None
+    T = np.arange(span[0][0], span[0][1] + 1e-9, step[0])
+    R = np.arange(0.0, span[1][1] + 1e-9, step[1])
+    R = np.unique(np.concatenate([-R, R]))
+    key = _cache_key("hunter-limits-v4", CLEAR_MIN, HOUSING_R, len(head_pts) if head_pts is not None else 0,
+                     np.round(neck_pts[::53], 2).tobytes() if neck_pts is not None else b"",
+                     np.round(head_pts[::97], 2).tobytes() if head_pts is not None else b"", T.tolist(), R.tolist(),
+                     [(r["r_arm"], r["hole"], r["phi"], r["ball"]) for r in rows],
+                     {k: np.round(v, 3).tolist() for k, v in servos.items()}, round(hub_face_y, 3))
+
+    def search():
+        out = []
+        saved = asm.linkages
+        try:
+            for r in rows:
+                lks = _linkages(servos, np.asarray(r["hole"]), hub_face_y, r["r_arm"], r["phi"], r["ball"])
+                asm.linkages = lks
+                arm_pts = _arm_points(r["r_arm"])
+                ok = np.zeros((len(T), len(R)), bool)
+                for i, t in enumerate(T):
+                    for k, rr in enumerate(R):
+                        ok[i, k] = _pose_ok(asm, lks, {"head_tilt": float(t), "head_roll": float(rr)}, tree,
+                                            arm_pts, neck_tree)[0]
+                out.append(ok.tolist())
+        finally:
+            asm.linkages = saved
+        return out
+
+    grids = cached(key, search)
+    i0 = int(np.argmin(np.abs(T)))
+    best = None
+    for r, g in zip(rows, grids):
+        ok = np.asarray(g, bool)
+        for h in R[R >= 0]:
+            cols = np.abs(R) <= h + 1e-9
+            rowok = ok[:, cols].all(axis=1)
+            if not rowok[i0]:
+                break
+            lo = i0
+            while lo > 0 and rowok[lo - 1]:
+                lo -= 1
+            hi = i0
+            while hi < len(T) - 1 and rowok[hi + 1]:
+                hi += 1
+            t0, t1 = float(T[lo]), float(T[hi])
+            cover = (min(t1, want[0][1]) - max(t0, want[0][0])) / (want[0][1] - want[0][0]) * min(h, want[1]) / want[1]
+            score = (round(cover, 3), (t1 - t0) * h)
+            if best is None or score > best[0]:
+                best = (score, r, (t0, t1), float(h))
+    return None if best is None else best[1:]
+
+
 # ------------------------------------------------------------------ the whole head's hardware
 
 def add_hardware(asm, fit, visor):
@@ -384,8 +517,9 @@ def add_hardware(asm, fit, visor):
                   key=lambda f: np.linalg.norm(np.asarray(f.features["top"]["p"])[[0, 2]] - c[[0, 2]]))
         clamps = [("mount_plate", f"fl{i + 1}")]
         head = top
-        # a visor bracket's foot on this hole: the same screw clamps it too
-        for bid in ("visor_bracket_l", "visor_bracket_r"):
+        # a visor bracket's (Anderson's drive) or a visor servo mount's (Hunter's) foot on this hole: the same
+        # screw clamps it too
+        for bid in ("visor_bracket_l", "visor_bracket_r", "visor_mount_l", "visor_mount_r"):
             if bid not in P:
                 continue
             for k, f in P[bid].features.items():
@@ -487,7 +621,28 @@ def add_hardware(asm, fit, visor):
     # --- servo horns: 1906 hub on the spline, 1916 arm on the hub --------------------------------
     head_side = [p for p in asm.parts if p.link == "head" and not p.linkage]
     head_pts = np.vstack([geom.sample(p.mesh, 2.0, 12000) for p in head_side])
-    pick, table = design_linkage(asm, servos, [np.asarray(h) for h in hub_holes], hub_face, head_pts)
+    arm_holes = tuple(getattr(asm, "horn_holes", ARM_HOLES))
+    pick, table = design_linkage(asm, servos, [np.asarray(h) for h in hub_holes], hub_face, head_pts, arm_holes)
+    if not any(c["pass"] for c in table) and getattr(asm, "fit_gimbal_limits", False):
+        # Hunter's horn (his hole, not ours) cannot reach the design range: the range it does reach
+        tj, rj = asm.joint("head_tilt"), asm.joint("head_roll")
+        want = ((tj.limits[0], tj.limits[1]), max(abs(rj.limits[0]), abs(rj.limits[1])))
+        # dense samples (0.6 mm) for the fit: point-to-point distances may then read at most ~0.4 mm long
+        fine = np.vstack([geom.sample(p.mesh, 0.6, 400000) for p in head_side])
+        neck_pts = geom.sample(P["hub_top"].mesh, 0.6, 60000)
+        got = fit_limits(asm, servos, table, hub_face, fine, want, neck_pts)
+        if got:
+            row, (t0, t1), rh = got
+            # the design range, cut down only where the horn cannot reach it
+            lim_t, lim_r = (max(t0, want[0][0]), min(t1, want[0][1])), min(rh, want[1])
+            notes.append(f"Gimbal range: with the {row['r_arm']:g} mm arm hole no rod geometry reaches tilt "
+                         f"{want[0][0]:g}..{want[0][1]:g} x roll +/-{want[1]:g}; the reachable box on a 2.5 x 2 deg grid "
+                         f"(every rule: reach, travel, swivel, leverage, clearance) is tilt {t0:g}..{t1:g} x roll "
+                         f"+/-{rh:g}, so the joints' design limits become tilt {lim_t[0]:g}..{lim_t[1]:g} x roll "
+                         f"+/-{lim_r:g} (the design range where the horn reaches it).")
+            asm.gimbal_fit = {"want": want, "tilt": (t0, t1), "roll": rh, "row": row, "limits": (lim_t, lim_r)}
+            tj.limits, rj.limits = lim_t, (-lim_r, lim_r)
+            pick, table = design_linkage(asm, servos, [np.asarray(h) for h in hub_holes], hub_face, head_pts, arm_holes)
     notes.append(f"Push-rod design: {sum(c['pass'] for c in table)} of {len(table)} real-part candidates pass; "
                  f"picked arm hole {pick['r_arm']:g} mm, hub hole {np.round(pick['hole'], 1).tolist()}, horn clocked "
                  f"{pick['phi']:g} deg, ball {pick['ball']} the arm: rod ball centres {pick['L']:g} mm "
@@ -520,7 +675,8 @@ def add_hardware(asm, fit, visor):
                      cad=hub.status, catalog="gobilda:1906-0025-0032",
                      features={"spline": spline(boss, UP, TEETH), "servo_face": plane(boss, -UP),
                                "top": plane(boss + UP * HUB_H, UP), "axis": axis(boss, UP, 3.0)})
-        arm_p = Part(f"horn_arm_{s}", f"Control arm 1916, 48 mm ({s.upper()})", "hardware", "head", arm_m,
+        arm_p = Part(f"horn_arm_{s}", f"Control arm 1916, 48 mm, cut down to the {lk.radius:g} mm hole ({s.upper()})",
+                     "hardware", "head", arm_m,
                      {"kind": "step", "file": "vendor/parts_cad/gobilda/1916-0014-0048.step", "placement": "mates",
                       "cut": f"keep the {lk.radius:g} mm hole" + ("" if lk.radius >= 48 else ", cut beyond it")},
                      "nylon", False, (0, 1, 0), 30, 6.0, "catalogue", linkage=lk.id, role="horn",

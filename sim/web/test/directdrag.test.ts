@@ -101,24 +101,27 @@ describe('IK (damped least squares)', () => {
   const J = [{ ...lim('head_tilt'), weight: 1 }, { ...lim('head_roll'), weight: 1 }];
 
   it("converges on the head's tilt and roll for a reachable point", () => {
-    const q = solveIK(fk, [0, 0], J, fk([12, -6]), { iters: 80 });
-    expect(q[0]).toBeCloseTo(12, 1);
-    expect(q[1]).toBeCloseTo(-6, 1);
-    expect(fk(q).distanceTo(fk([12, -6]))).toBeLessThan(0.05);
+    // well inside the head's limits (Hunter's cut-down horns: tilt to +7.5 only)
+    const goal = [J[0].min * 0.6, J[1].min * 0.5];
+    const q = solveIK(fk, [0, 0], J, fk(goal), { iters: 80 });
+    expect(q[0]).toBeCloseTo(goal[0], 1);
+    expect(q[1]).toBeCloseTo(goal[1], 1);
+    expect(fk(q).distanceTo(fk(goal))).toBeLessThan(0.05);
   });
 
   it('follows the cursor in the screen plane (depth is free) and holds the limits', () => {
     const normal = V(0, 0, -1); // looking along -Z at the head
-    const target = fk([8, 5]).add(V(0, 0, 40)); // the same screen point, nearer the camera
+    const target = fk([Math.min(8, J[0].max * 0.7), 5]).add(V(0, 0, 40)); // the same screen point, nearer the camera
     const q = solveIK(fk, [0, 0], J, target, { iters: 80, normal });
     const e = target.clone().sub(fk(q));
     expect(Math.hypot(e.x, e.y)).toBeLessThan(0.1);
-    const far = solveIK(fk, [0, 0], J, fk([24.9, 11.9]).add(V(0, 0, -200)), { iters: 80 });
-    expect(far[0]).toBeLessThanOrEqual(25);
-    expect(far[1]).toBeLessThanOrEqual(12);
+    // the head's own limits (the built manifest's when there is one: Hunter's cut-down horns narrow them)
+    const far = solveIK(fk, [0, 0], J, fk([J[0].max - 0.1, J[1].max - 0.1]).add(V(0, 0, -200)), { iters: 80 });
+    expect(far[0]).toBeLessThanOrEqual(J[0].max);
+    expect(far[1]).toBeLessThanOrEqual(J[1].max);
     const out = solveIK(fk, [0, 0], J, V(0, -400, 400), { iters: 80 });
-    expect(out[0]).toBeLessThanOrEqual(25 + 1e-9);
-    expect(out[0]).toBeGreaterThanOrEqual(-20 - 1e-9);
+    expect(out[0]).toBeLessThanOrEqual(J[0].max + 1e-9);
+    expect(out[0]).toBeGreaterThanOrEqual(J[0].min - 1e-9);
   });
 
   it('weights favour the nearest joint', () => {
@@ -172,6 +175,31 @@ describe.skipIf(!built)('what a grabbed part moves (built manifests)', () => {
     expect(both).not.toBeNull();
     expect(servoAngle(l, both)).toBeCloseTo(deg, 2);
     expect(Math.hypot(both.head_tilt - pose.head_tilt, both.head_roll - pose.head_roll)).toBeGreaterThan(0.5);
+  });
+
+  it("Hunter's visor: either servo's horn drives the visor 1:1, the two servos turning opposite ways", () => {
+    const vj = HUNTER!.joints.find((j) => j.id === 'visor')!;
+    if (vj.drive?.kind !== 'direct') return; // built with Anderson's linkage (HUNTER_VISOR_DRIVE)
+    expect(vj.drive.servos).toEqual(['visor_servo_l', 'visor_servo_r']);
+    for (const [horn, servo, sign] of [['visor_horn_l', 'visor_servo_l', 1], ['visor_horn_r', 'visor_servo_r', -1]] as const) {
+      const d = partDrive(HUNTER!, horn) as { kind: string; gear: NonNullable<MAssembly['gears']>[number] };
+      expect(d.kind).toBe('gear');
+      expect(d.gear.joint).toBe('visor');
+      expect(d.gear.servo).toBe(servo);
+      expect(d.gear.servo_deg_per_unit).toBe(sign);
+      // the horn grabbed and swept 10 degrees about the visor axis: the visor turns 10
+      expect(rotaryValue(0, 0, 0, 10, d.gear.deg_per_unit)).toBeCloseTo(10, 6);
+    }
+    const node = { asm: HUNTER!, pose: { visor: 12 } } as unknown as AsmNode;
+    const acts = actuators([node]);
+    const l = acts.find((a) => a.servo === 'visor_servo_l')!;
+    const r = acts.find((a) => a.servo === 'visor_servo_r')!;
+    expect(l.kind).toBe('direct');
+    expect(servoAngle(l)).toBeCloseTo(12, 6);
+    expect(servoAngle(r)).toBeCloseTo(-12, 6);
+    // either servo slider moves the one visor joint
+    expect(solveServo(l, 20)).toEqual({ visor: 20 });
+    expect(solveServo(r, 20)).toEqual({ visor: -20 });
   });
 
   it('a pinion turns through its ratio: the lift pinion moves the lift, the gear following the cursor', () => {

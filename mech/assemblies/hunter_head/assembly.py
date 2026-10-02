@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -50,9 +51,16 @@ PROFILE = MECH.parent / "profiles" / "r3x" / "robot.json"
 
 # ------------------------------------------------------------------ parameters
 PARAMS = {
+    # the visor's drive: "hunter_direct" (Hunter's, 2026-10-02: a standard servo on each side on the visor
+    # axis, his Visor Servo Mount and DXF arm, 1:1) or "anderson_linkage" (Anderson's horn, push rod and tab
+    # from one servo in a cradle above the plate, the visor on F6001ZZ bearings). HUNTER_VISOR_DRIVE overrides.
+    "visor_drive": os.environ.get("HUNTER_VISOR_DRIVE", "hunter_direct"),
     "visor_arm_thickness": 3.0,   # mm; the DXF implies a cut plate (inferred: 3 mm aluminium)
-    "horn_radius": 40.0,          # mm, horn centre to ball on the 48 mm arm "cut down" (BOM); the
-                                  # smallest radius (4 mm steps) whose rods reach tilt -20..25 x roll +/-12
+    # the gimbal horns: goBILDA 1916 arms cut down (BOM, "these will need to be cut down"; Hunter 2026-10-02:
+    # "I cut down the stock plastic gobilda servo horns"). His top-down photo puts both ball studs 30.5 / 31.5 mm
+    # from the hub (scaled by the arm's own 8-hole ring, 11.31 mm): the 32 mm hole (inferred from the photo)
+    "horn_hole_mm": 32.0,
+    "fit_gimbal_limits": True,    # when his horn cannot reach tilt/roll below, the joints take the range it does
     "horn_hub_height": 8.0,       # goBILDA 1906 hub
     "horn_arm_thickness": 3.0,
     "ball_above_arm": 3.5,        # ball-link ball centre above the arm face
@@ -117,6 +125,18 @@ EXPLAINED = [
               "servo case is 4.0 mm from each hole centre (the servo's flange hole spacing fixes it)",
      "fix": "none: geometry-limited by the servo flange spacing (2.0 >= the 1.5 mm floor). The 1.30 mm of plastic "
             "over the cable tunnel under the outer bosses is accepted too"},
+    {"test": "inserts", "parts": ["visor_mount_l", "visor_mount_r", "ins_vmount_*"],
+     "cause": "Hunter's Visor Servo Mount holds the servo by its flange: the 48 mm hole pattern on a 40 mm case leaves "
+              "4 mm from each insert's centre to the case end, so the bars carry 0.8 mm of plastic between a 6 mm insert "
+              "and the servo pocket (his own print: 1.2 mm, with the case 0.2 mm into the bar); the rule wants 0.5 x OD",
+     "fix": "none: geometry-limited by the servo's flange spacing, as on the plate's servo bosses; the load is the "
+            "visor's, small. M3 inserts (Ruthex 5.7, OD 4.6) would give 1.5 mm if wanted"},
+    {"test": "clearance", "parts": ["head_top", "horn_arm_*", "link_a_*", "stud_a_*", "nut_ball_a_*", "wsh_ball_a_*"],
+     "cause": "a show clip asks head_tilt +16..+18 (with the visor up), past the range Hunter's cut-down horns reach "
+              "(32 mm hole: tilt -20..+7.5, the joints' limits now): there the horn arm and its ball link swing into the "
+              "head top. The clip, not the head, is out of range",
+     "fix": "regenerate the profile through rigsync (the new tilt limits) and re-clamp the clips; or the 40 mm hole "
+            "(the uncut arm) if more nod is wanted than Hunter's head gives"},
     {"test": "mates_hold", "parts": ["h_hp_1", "side_left", "side_right"],
      "cause": "the kit headband (H_HP_1) stands 0.5 mm off Hunter's side piece where it lands (the kit drew it on the "
               "kit's own head); the glue rule wants <= 0.5",
@@ -470,7 +490,7 @@ def build() -> Assembly:
         m, n = printed_mass(mesh)
         add(Part(pid, name, "shell", "head", mesh, src, "PLA (printed)", True, ex, 150, m, n, **kw))
 
-    # ---------------------------------------------------------- visor: the kit's, Anderson's drive
+    # ---------------------------------------------------------- visor: the kit's, on Hunter's or Anderson's drive
     from assemblies.hunter_head import visor as V_
     from assemblies.kit.assembly import kit_head_parts
     from r3xmech.meshes import load_file
@@ -482,7 +502,18 @@ def build() -> Assembly:
             km.apply_transform(kT)
             kit.append((kid, km, "visor" if kid in V_.KIT_VISOR else "head", Path(kfile).name))
     visor_pivot = V_.pivot_of(next(m for k, m, _, _ in kit if k == "h_v_4"))
-    for p in V_.fixed_parts(kit, visor_pivot):
+    direct = PARAMS["visor_drive"] == "hunter_direct"
+    if PARAMS["visor_drive"] not in ("hunter_direct", "anderson_linkage"):
+        raise ValueError(f"visor_drive {PARAMS['visor_drive']!r}: hunter_direct | anderson_linkage")
+    if direct:
+        vparts, vlay = V_.direct_parts(kit, visor_pivot, next(p for p in parts if p.id == "mount_plate").mesh,
+                                       PARAMS["visor_arm_thickness"])
+        bad = [s for s, L in vlay.items() if not L["ok"]]
+        if bad:
+            raise RuntimeError(f"Hunter's visor mount cannot reach the plate holes on side(s) {bad}: {vlay}")
+    else:
+        vparts = V_.fixed_parts(kit, visor_pivot)
+    for p in vparts:
         add(p)
     tip_head = next(p for p in parts if p.id == "h_v_1").mesh.centroid
     shim = V_.mouth_shim_part({p.id: p for p in parts})
@@ -508,6 +539,19 @@ def build() -> Assembly:
               {"how": "Same as head_tilt: one servo-centring sets both.", "step": "s08"},
               inferred=True, inferred_note="Roll range is not stated by the sources; +/-12 deg (the profile's hard range) "
                                            "sits inside the first contact at +/-17."),
+        Joint("visor", "Visor (the kit's, direct on Hunter's two servos)", "revolute", "head", "visor",
+              tuple(visor_pivot), (1, 0, 0), PARAMS["visor_limits"], "deg", "visor", plims.get("visor"),
+              {"kind": "direct", "servos": ["visor_servo_l", "visor_servo_r"], "linkages": [], "gear_ratio": 1.0,
+               "servo_deg_per_unit": 1.0,
+               "servo_deg_per_unit_by_servo": {"visor_servo_l": 1.0, "visor_servo_r": -1.0},
+               "note": "Hunter: one standard servo on each side on the visor axis, its horn bolted to his arm: 1:1. "
+                       "The two face opposite ways, so for one visor move they turn opposite ways: visor_servo_l +1, "
+                       "visor_servo_r -1 servo deg per visor deg (+ = right-hand about the servo's own output, which "
+                       "points outboard; `gears` carries each). servo_deg_per_unit is the left's."},
+              {"how": "Visor at the bottom of its flap with both servos at their centre pulse.", "step": "s12"},
+              inferred=True, inferred_note="Hunter's servos and mount from his files and reply; the horn and the arm's "
+                                           "thickness are inferred (see the parts).")
+        if direct else
         Joint("visor", "Visor (the kit's, on Anderson's push rod)", "revolute", "head", "visor", tuple(visor_pivot),
               (1, 0, 0), PARAMS["visor_limits"], "deg", "visor", plims.get("visor"),
               {"kind": "push_rod", "servos": ["visor_servo"], "linkages": ["rod_visor"], "gear_ratio": None,
@@ -530,23 +574,27 @@ def build() -> Assembly:
 
     asm.visor_tip = tip_head  # for the torque check's assumed brow load
     asm.clamp_leaves = clamp_leaves()
+    asm.horn_holes = (PARAMS["horn_hole_mm"],)
+    asm.fit_gimbal_limits = PARAMS["fit_gimbal_limits"]
     asm.notes += add_hardware(asm, fit, {"pivot": visor_pivot})
-    # the visor drive: Anderson's parts, placed where every test passes
-    pick, table = V_.design_drive(asm, visor_pivot, PARAMS["visor_limits"])
-    if pick is None:
-        raise RuntimeError("no visor drive placement passes: " + str(table[:5]))
-    vparts, vlk, vgeo = V_.drive_parts(asm, visor_pivot, pick)
-    # the axles and hubs again, the D flat now along the chosen lever
-    redo = {p.id: p for p in V_.axle_and_hub_parts(visor_pivot, vgeo["lev"], kit)}
-    asm.parts = [redo.get(p.id, p) for p in asm.parts]
-    asm.parts += vparts
-    asm.parts.append(V_.cradle_part(asm, vgeo))
+    if not direct:
+        # the visor drive: Anderson's parts, placed where every test passes
+        pick, table = V_.design_drive(asm, visor_pivot, PARAMS["visor_limits"])
+        if pick is None:
+            raise RuntimeError("no visor drive placement passes: " + str(table[:5]))
+        vparts, vlk, vgeo = V_.drive_parts(asm, visor_pivot, pick)
+        # the axles and hubs again, the D flat now along the chosen lever
+        redo = {p.id: p for p in V_.axle_and_hub_parts(visor_pivot, vgeo["lev"], kit)}
+        asm.parts = [redo.get(p.id, p) for p in asm.parts]
+        asm.parts += vparts
+        asm.parts.append(V_.cradle_part(asm, vgeo))
     # the design default: a clearance channel in the shells along the kit visor's sweep (the
     # parametric shells can take the same envelopes as `clearance_cuts`; exported for them)
     if PARAMS["visor_channel_mm"]:
         byid = {p.id: p for p in asm.parts}
         key = _cache_key("visor-channel", PARAMS["visor_channel_mm"], PARAMS["visor_limits"], visor_pivot.round(3).tolist(),
-                         sorted(mesh_hash(byid[k].mesh) for k in V_.KIT_VISOR + V_.CHANNEL_SHELLS if k in byid))
+                         sorted(mesh_hash(byid[k].mesh) for k in V_.KIT_VISOR + V_.CHANNEL_SHELLS + ("visor_arm_l", "visor_arm_r")
+                                if k in byid))
         envs = [trimesh.Trimesh(v, f, process=False) for v, f in cached(key, lambda: [
             (np.asarray(e.vertices), np.asarray(e.faces))
             for e in V_.visor_channel(byid, visor_pivot, PARAMS["visor_limits"], PARAMS["visor_channel_mm"])])]
@@ -592,17 +640,35 @@ def build() -> Assembly:
         asm.notes.append(f"Visor channel ({PARAMS['visor_channel_mm']} mm round the kit visor's sweep, "
                          f"{PARAMS['visor_limits'][0]:g}..{PARAMS['visor_limits'][1]:g} deg): {len(envs)} envelopes; "
                          + (", ".join(cut_note) or "no shell cut"))
-    asm.visor_link = vlk
-    asm.visor_geo = vgeo
-    asm.joints[-1].drive["gear_ratio"] = pick.get("ratio")
-    asm.visor_design = {"pick": pick, "candidates": len(table), "passing": sum(1 for r in table if r.get("ok"))}
     hw = asm._hw
     hw.p.update({p.id: p for p in asm.parts})
-    V_.visor_mates(hw, hw.p, {"geo": vgeo, "V": visor_pivot})
-    asm.fasteners, asm.mates = hw.fast, hw.mates
-    del asm._hw
-    asm.linkages.append(vlk)
-    asm.notes.append(f"Visor: the kit's (H_V_1..5) and ears on Hunter's head, Anderson's drive: "
+    if direct:
+        V_.direct_mates(hw, hw.p, visor_pivot, vlay)
+        asm.fasteners, asm.mates = hw.fast, hw.mates
+        del asm._hw
+        asm.gears = V_.direct_gears(visor_pivot)
+        asm.visor_layout = vlay
+        L = vlay[1]
+        asm.notes.append(
+            "Visor: Hunter's direct drive (his reply, 2026-10-02: \"one standard size servo on either side, basically "
+            "where your bearings are\"), carrying the kit's brow and axle ends on his DXF arms (the kit side arms' "
+            f"outline). Each side, outboard in: axle end at |x| {L['x_ao']:.2f}, arm {L['x_ai']:.2f}..{L['x_ao']:.2f}, "
+            f"horn, spline top {L['tip']:.2f}, servo flange on the mount face at {L['x_face']:.2f}; the mount's feet on "
+            f"the plate flange (y {L['feet_y']:.2f}) and its slots on the plate's M4 holes (x {L['hole_x']:.2f}, z "
+            f"{L['hole_z'][0]:.2f} / {L['hole_z'][1]:.2f}), the hole "
+            + ", ".join(f"{vlay[s]['slot_used']:+.2f} mm ({'L' if s > 0 else 'R'})" for s in (1, -1))
+            + f" from the slot centre (travel +/-{L['slot_travel']:.2f}). 1:1: visor_servo_l +1, visor_servo_r -1 servo "
+              "deg per visor deg.")
+    if not direct:
+        asm.visor_link = vlk
+        asm.visor_geo = vgeo
+        asm.joints[-1].drive["gear_ratio"] = pick.get("ratio")
+        asm.visor_design = {"pick": pick, "candidates": len(table), "passing": sum(1 for r in table if r.get("ok"))}
+        V_.visor_mates(hw, hw.p, {"geo": vgeo, "V": visor_pivot})
+        asm.fasteners, asm.mates = hw.fast, hw.mates
+        del asm._hw
+        asm.linkages.append(vlk)
+        asm.notes.append(f"Visor: the kit's (H_V_1..5) and ears on Hunter's head, Anderson's drive: "
                      + (f"re-checked the {asm.visor_design['candidates']} placements that passed before this geometry "
                         f"change, {asm.visor_design['passing']} still pass (WB_RESEARCH=1 for the full search); "
                         if any(r.get("revalidated") for r in table) else
@@ -627,7 +693,8 @@ def finishes(parts):
     in black (PLA and PETG, as his files' materials say); his head shells wear the kit head's charcoal, the
     kit's ears, eyes, face and visor their kit paint (assemblies/kit/finish.json), printed as he prints
     (black). The coupler, seen between the neck and the head, takes the neck's dark paint. goBILDA servos
-    and hubs in their own colours; Anderson's visor servo black."""
+    and hubs in their own colours; the visor servos black (Hunter's photo; Anderson's too), Hunter's visor arms
+    the kit side arm's paint, their disc horns bare aluminium."""
     from assemblies.kit.assembly import kit_finish
     from workbench.finish import (BLACK_ANODISED, GOBILDA_SERVO, PETG_BLACK, PLA_BLACK, SERVO_BLACK, apply,
                                   finish)
@@ -644,12 +711,19 @@ def finishes(parts):
             table[p.id] = finish(color=GOBILDA_SERVO if "goBILDA" in p.name else SERVO_BLACK)
         elif p.id in ("hub_bottom", "hub_top") or p.id.startswith("horn_hub_"):
             table[p.id] = finish(color=BLACK_ANODISED)
+        elif p.id.startswith("visor_arm_"):  # Hunter's arm in the kit side arm's place: the kit arm's paint
+            kf, _ = kit_finish("h_v_2")
+            table[p.id] = finish(paint=kf["paint"] if kf else "paint_charcoal",
+                                 note="Hunter's cut arm, painted as the kit side arm it stands in for")
+        elif p.id.startswith("visor_horn_"):
+            table[p.id] = finish(color={"color": "#b9bdc3", "color_name": "Bare aluminium"})
         elif p.printed and p.id not in table:
             table[p.id] = finish(print=PETG_BLACK if "PETG" in p.material else PLA_BLACK)
     apply(parts, table)
 
 
-EXPOSED = {"neck_coupler", "hub_bottom", "hex_shaft", "ujoint", "h_v_1", "h_v_2", "h_v_3", "h_v_4", "h_v_5"}
+EXPOSED = {"neck_coupler", "hub_bottom", "hex_shaft", "ujoint", "h_v_1", "h_v_2", "h_v_3", "h_v_4", "h_v_5",
+           "visor_arm_l", "visor_arm_r"}
 
 
 def checks(asm: Assembly):
@@ -870,10 +944,15 @@ def add_steps(asm: Assembly):
     from assemblies.hunter_head import visor as V_
 
     F = lambda prefix: [f.id for f in asm.fasteners if f.id.startswith(prefix)]
+    direct = any(p.id == "visor_mount_l" for p in asm.parts)
+    n_vm = len(F("ins_vmount"))
+    mount_screws = [f.id for f in asm.fasteners
+                    if f.id.startswith("scr_plate_bottom") and any(j.startswith("visor_mount") for j in f.joins)]
     asm.steps = [
         Step("s01", "Heat-set the inserts", [], F("ins_"), context=["head_bottom", "mount_plate"],
              tools=["soldering iron with an M4 insert tip (~220 C for PLA)", "flat plate to seat them level"],
-             notes=["Do all 14 before anything else: 6 in the head bottom's bosses, 8 in the plate's servo bosses.",
+             notes=["Do them all before anything else: 6 in the head bottom's bosses, 8 in the plate's servo bosses"
+                    + (f", {n_vm} in the two visor servo mounts' bosses (4 each)." if n_vm else "."),
                     "Press straight and stop flush; a proud insert tilts the plate or the servo."]),
         Step("s02", "Neck coupler", ["neck_coupler"], F("ins_coupler") + F("nut_coupler"),
              tools=["3 mm hex key"],
@@ -929,13 +1008,26 @@ def add_steps(asm: Assembly):
                     "Record the centre pulse in the robot profile (actuator center_us) as the zero."],
              joint="head_tilt", pose={"head_tilt": 0, "head_roll": 0},
              inferred=True, inferred_note="1500 us is goBILDA's centre; the horn angle comes from the rod geometry."),
-        Step("s09", "Head bottom onto the plate (the visor brackets under the side screws)",
+        *([Step("s09", "Head bottom onto the plate", ["head_bottom"],
+                [f for f in F("scr_plate_bottom") if f not in mount_screws], context=["mount_plate"],
+                tools=["3 mm hex key"],
+                notes=["Feed the servo leads through the neck opening first.",
+                       "The two middle M4 down through the plate's flange into the head bottom's inserts now: the "
+                       "visor servo mounts stand over them next."]),
+           Step("s09b", "Hunter's visor servo mounts on the plate flange", ["visor_mount_l", "visor_mount_r"],
+                mount_screws, context=["mount_plate", "head_bottom"],
+                tools=["3 mm hex key"],
+                notes=["Each mount's slotted feet over the plate's front and back flange holes, flange face "
+                       "outboard: 2 x M4 per side down through the foot and the plate into the head bottom's "
+                       "inserts. Finger-tight: the slots set the mount's place along the axis in s12b."])]
+          if direct else
+          [Step("s09", "Head bottom onto the plate (the visor brackets under the side screws)",
              ["head_bottom", "visor_bracket_l", "visor_bracket_r", "visor_bearing_l", "visor_bearing_r"],
              F("scr_plate_bottom"), context=["mount_plate"],
              tools=["3 mm hex key"],
              notes=["6 x M4 down through the plate's flange into the head bottom's inserts; on each side the three "
                     "screws also clamp a visor bracket's foot (press its F6001ZZ bearing in first).",
-                    "Feed the servo leads through the neck opening first."]),
+                    "Feed the servo leads through the neck opening first."])]),
         Step("s10", "Push rods", ["rod_l", "rod_r", "link_a_l", "link_b_l", "link_a_r", "link_b_r"],
              F("stud_") + F("nut_ball") + F("wsh_ball"), context=["horn_arm_l", "horn_arm_r", "hub_top"],
              tools=["3 mm hex key", "7 mm spanner", "calipers", "Loctite 243"],
@@ -948,6 +1040,34 @@ def add_steps(asm: Assembly):
                     "With the servos still at centre the plate must sit level: adjust a rod half a turn if not."],
              pose={"head_tilt": 0, "head_roll": 0},
              inferred=True, inferred_note="Rod length is computed from the inferred horn radius and hub holes."),
+        *(_direct_visor_steps(asm, F) if direct else _anderson_visor_steps(asm, F)),
+        Step("s13", "Sides and top", ["side_left", "side_right", "head_top"], [],
+             unplaced=[{"key": "pin-align", "spec": {"type": "pin", "note": "alignment pins or filament"},
+                        "count": 0, "note": "alignment holes on the side pieces: pins + CA glue (count on the parts)"}],
+             tools=["CA glue or 2-part epoxy"],
+             notes=["Dry-fit first: sweep the head through tilt and roll by hand and look for rubbing (Checks tab).",
+                    "The top lifts off for service; glue only the sides to the bottom if you glue at all."],
+             inferred=True, inferred_note="The sources give alignment holes but no fastener for the shell."),
+        Step("s13b", "Kit ears", ["h_le_1", "h_le_2", "h_re_1", "h_re_2"], [], context=["side_left", "side_right"],
+             tools=["CA glue"], notes=["The kit's ear cups over the visor axle ends, on Hunter's side pieces."]),
+        Step("s13c", "Kit face: plate, eyes, mouth, headband",
+             [*(["mouth_shim"] if any(p.id == "mouth_shim" for p in asm.parts) else []), *V_.KIT_FACE],
+             [], context=["head_bottom", "side_left", "side_right", "head_top"],
+             tools=["CA glue"],
+             notes=["Glue the eyes and the mic into the face plate as the kit does, then the plate into the head's front.",
+                    "The mouth glues to Hunter's head bottom (our shim goes under it only if the gap is over 0.5 mm).",
+                    "Headband over the top, as the kit's goes on."]),
+    ]
+    for s in asm.steps:
+        s.text = (direct and _STEP_TEXT.get(f"{s.id}_direct")) or _STEP_TEXT.get(s.id, "")
+        if s.id == "s10":
+            s.text = (f"Set both push rods to {asm.linkages[0].rod_length:.1f} mm between ball centres and fit them from "
+                      "each horn to the top hub. The plate must sit level with both servos centred.")
+
+
+def _anderson_visor_steps(asm, F):
+    """Anderson's visor drive (visor_drive = "anderson_linkage")."""
+    return [
         Step("s11", "Visor servo in its cradle, centred, horn on", ["visor_servo_cradle", "visor_servo", "visor_horn"], [],
              unplaced=[{"key": "shcs-M3x8", "spec": SHCS(8, "M3"), "count": 4, "note": "servo flange into the cradle's tap holes"},
                        {"key": "shcs-M4x10", "spec": SHCS(10), "count": 2, "note": "cradle leg into the plate (holes to add to the plate)"}],
@@ -979,25 +1099,47 @@ def add_steps(asm: Assembly):
                     "Pin the 58 mm push rod to the tab and to the horn (3 mm pins).",
                     "Glue the axle ends H_V_4/5 over the arms (over the hub screws' heads)."],
              joint="visor", pose={"visor": 0}),
-        Step("s13", "Sides and top", ["side_left", "side_right", "head_top"], [],
-             unplaced=[{"key": "pin-align", "spec": {"type": "pin", "note": "alignment pins or filament"},
-                        "count": 0, "note": "alignment holes on the side pieces: pins + CA glue (count on the parts)"}],
-             tools=["CA glue or 2-part epoxy"],
-             notes=["Dry-fit first: sweep the head through tilt and roll by hand and look for rubbing (Checks tab).",
-                    "The top lifts off for service; glue only the sides to the bottom if you glue at all."],
-             inferred=True, inferred_note="The sources give alignment holes but no fastener for the shell."),
-        Step("s13b", "Kit ears", ["h_le_1", "h_le_2", "h_re_1", "h_re_2"], [], context=["side_left", "side_right"],
-             tools=["CA glue"], notes=["The kit's ear cups over the visor axle ends, on Hunter's side pieces."]),
-        Step("s13c", "Kit face: plate, eyes, mouth, headband",
-             [*(["mouth_shim"] if any(p.id == "mouth_shim" for p in asm.parts) else []), *V_.KIT_FACE],
-             [], context=["head_bottom", "side_left", "side_right", "head_top"],
-             tools=["CA glue"],
-             notes=["Glue the eyes and the mic into the face plate as the kit does, then the plate into the head's front.",
-                    "The mouth glues to Hunter's head bottom (our shim goes under it only if the gap is over 0.5 mm).",
-                    "Headband over the top, as the kit's goes on."]),
     ]
-    for s in asm.steps:
-        s.text = _STEP_TEXT.get(s.id, "")
+
+
+def _direct_visor_steps(asm, F):
+    """Hunter's visor: the servos into their mounts, centred, horns on, his arms with the kit brow onto the
+    horns, the kit axle ends over the screws."""
+    L = asm.visor_layout[1]
+    return [
+        Step("s11", "Visor servos into Hunter's mounts", ["visor_servo_l", "visor_servo_r"], F("scr_vservo"),
+             context=["visor_mount_l", "visor_mount_r", "mount_plate"],
+             tools=["3 mm hex key (M4 low heads)"],
+             notes=["Each servo goes in from outboard, spline down and pointing out of the head, its flange on the "
+                    "mount's four bosses: 4 x M4 low heads into the mount's inserts.",
+                    "Run both leads down to the plate and out through the neck with the gimbal servos' leads."]),
+        Step("s12", "Centre both visor servos, horns on", ["visor_horn_l", "visor_horn_r"], F("scr_vhorn"),
+             context=["visor_servo_l", "visor_servo_r"],
+             tools=["servo tester or the r3x bench (1500 us)", "2 mm hex key"],
+             notes=["Send both visor servos their centre pulse (1500 us) BEFORE the horns go on: that is visor = 0, "
+                    "the visor at the bottom of its flap, on both sides at once.",
+                    "Disc horn on each spline with one of its tapped holes square to the plate (the arm's four holes "
+                    "line up with it at visor 0), then the servo's own M3 centre screw.",
+                    "The two servos face opposite ways: for one visor move, the left turns + and the right - "
+                    "(each about its own output). Mirror the right channel in the controller."],
+             joint="visor", pose={"visor": 0},
+             inferred=True, inferred_note="The horn is inferred from the arm's hole pattern."),
+        Step("s12b", "Hunter's arms onto the horns, with the kit brow", ["h_v_1", "visor_arm_l", "visor_arm_r"],
+             F("scr_varm"), context=["visor_horn_l", "visor_horn_r", "visor_mount_l", "visor_mount_r"],
+             tools=["2 mm hex key", "CA glue or epoxy (the brow)"],
+             notes=["Glue the kit brow (H_V_1) to both arms where the kit's own side arms (H_V_2/3, not used here) "
+                    "would meet it.",
+                    "Lower the visor over the head, each arm's centre hole over its horn: 4 x M3 flat heads per side "
+                    "through the arm's countersinks into the horn.",
+                    f"Slide each mount along its slots until the arm's outer face is at {L['x_ao']:.1f} mm from the "
+                    "centre plane (the kit axle end's face; both sides equal), then tighten the plate screws.",
+                    "Hunter's arm tip hole (for his own brow) is not used with the kit brow."],
+             joint="visor", pose={"visor": 0}),
+        Step("s12c", "Kit axle ends over the arms", ["h_v_4", "h_v_5"], [],
+             context=["visor_arm_l", "visor_arm_r", "h_v_1"], tools=["CA glue"],
+             notes=["Glue each axle end flat on its arm's outer face, over the screw heads (flush in their "
+                    "countersinks)."]),
+    ]
 
 
 # The Instructions' sentence per step (SCHEMA.md "Step" `text`): imperative, one or two sentences.
@@ -1021,6 +1163,16 @@ _STEP_TEXT = {
     "s10": "Set both push rods to 74.3 mm between ball centres and fit them from each horn to the top hub. The "
            "plate must sit level with both servos centred.",
     "s11": "Centre the visor servo, fit its horn along the lever and mount the servo in its cradle.",
+    "s11_direct": "Fit each visor servo into Hunter's mount from outboard, spline down and out, with four M4 low heads.",
+    "s12_direct": "Centre both visor servos at 1500 µs, then fit a disc horn on each spline with the servo's centre "
+                  "screw. This sets visor zero.",
+    "s12b": "Glue the kit brow to Hunter's two arms, bolt each arm to its horn with four M3 flat heads, then slide the "
+            "mounts along their slots until both arms sit at the axle ends' faces and tighten the plate screws.",
+    "s12c": "Glue the kit's axle ends flat on the arms' outer faces.",
+    "s09_direct": "Feed the servo leads through the neck, then screw the head bottom to the plate with the two middle "
+                  "M4.",
+    "s09b": "Stand Hunter's two visor servo mounts on the plate flange, flange faces outboard, and screw each down "
+            "through its slotted feet with two M4, finger-tight.",
     "s12a": "Glue the visor brow to its side arms, then screw a hub to each arm's inboard face.",
     "s12": "Slide the stub axles through the bearings into the visor hubs and pin the push rod between the tab and "
            "the horn. Glue the axle ends over the arms.",
@@ -1051,8 +1203,11 @@ def add_bom(asm: Assembly):
                 source=GOBILDA + "1516-series-8mm-rex-standoff-m4-x-0-7mm-threads-96mm-length-4-pack/", parts=["hex_shaft"]),
         BomLine("gobilda-1906-hub", "Lightweight servo hub, 25T, 32 mm (1906)", 2, "hardware",
                 source=GOBILDA + "1906-series-lightweight-servo-hub-25-tooth-spline-32mm-diameter/", parts=["horn_l", "horn_r"]),
-        BomLine("gobilda-arm-48", "Plastic hub-mount control arm, 48 mm (cut down)", 2, "hardware",
-                source=GOBILDA + "plastic-hub-mount-control-arm-48mm-length/", parts=["horn_l", "horn_r"]),
+        BomLine("gobilda-arm-48", f"Plastic hub-mount control arm, 48 mm (cut down past the {asm.linkages[0].radius:g} mm "
+                "hole)", 2, "hardware",
+                source=GOBILDA + "plastic-hub-mount-control-arm-48mm-length/", parts=["horn_arm_l", "horn_arm_r"],
+                inferred=True, inferred_note="The hole (and so the cut) from Hunter's top-down photo: both ball studs "
+                                             "30.5-31.5 mm from the hub, scaled by the arm's 11.31 mm hole ring."),
         BomLine("gobilda-2913-ball", "Ball linkage, female M4, 24.1 mm (2913), 2-pack", 2, "hardware",
                 source=GOBILDA + "2913-series-steel-ball-linkage-female-m4-x-0-7mm-24-1mm-length-2-pack/",
                 parts=[f"rod_{s}_end_{e}" for s in "lr" for e in "ab"]),
@@ -1064,14 +1219,29 @@ def add_bom(asm: Assembly):
         BomLine("bearing-6mm", "Flanged bearing, 6 mm bore (in the pillow blocks, 1600-0515-0006)", 2, "bearing",
                 parts=["pillow_bearing_f", "pillow_bearing_b"], inferred=True, inferred_note="Comes with the pillow blocks (STEP)."),
         BomLine("loctite-243", "Loctite (threadlocker, medium)", 1, "hardware"),
-        BomLine("servo-visor", "Visor servo (standard size)", 1, "servo", parts=["visor_servo"], inferred=True,
-                inferred_note="Not in the BOM; the visor needs one."),
     ]
+    if any(p.id == "visor_servo_l" for p in asm.parts):
+        lines += [
+            BomLine("servo-visor", "Visor servo, standard size (one each side)", 2, "servo",
+                    parts=["visor_servo_l", "visor_servo_r"], inferred=True,
+                    inferred_note="Not in Hunter's BOM; his reply (2026-10-02): one standard size servo on either side. "
+                                  "Make not stated (black cases in his photo)."),
+            BomLine("horn-disc-25t", "25T aluminium disc servo horn, 4 x M3 on a 10 mm square", 2, "hardware",
+                    parts=["visor_horn_l", "visor_horn_r"], inferred=True,
+                    inferred_note="Inferred from his visor arm's hole pattern (DXF) and the round horn in his photo."),
+            BomLine("visor-arm-dxf", f"Visor arm, cut from {PARAMS['visor_arm_thickness']:g} mm aluminium (Visor Arm DXF)",
+                    2, "hardware", parts=["visor_arm_l", "visor_arm_r"], spec={"file": "Visor Arm DXF.dxf"},
+                    inferred=True, inferred_note="Material and thickness not in the DXF."),
+        ]
+    else:
+        lines.append(BomLine("servo-visor", "Visor servo (standard size)", 1, "servo", parts=["visor_servo"],
+                             inferred=True, inferred_note="Not in the BOM; the visor needs one."))
     for p in asm.parts:
         if p.printed:
             lines.append(BomLine(f"print-{p.id}", f"Print: {p.name}", 1, "printed", parts=[p.id],
                                  spec={"file": p.source.get("file")}, inferred=p.inferred, inferred_note=p.inferred_note))
     names = {"shcs": "socket head cap screw", "shcs_low": "low-head cap screw (DIN 7984)", "bhcs": "button head screw",
+             "fhcs": "flat head screw (ISO 10642)",
              "insert": "heat-set insert", "lock_nut": "lock nut", "pin": "steel pin", "washer": "washer", "nut": "nut"}
     for key, fl in count.items():
         s = fl[0].spec

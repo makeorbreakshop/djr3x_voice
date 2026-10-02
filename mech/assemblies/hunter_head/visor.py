@@ -94,14 +94,12 @@ def pivot_of(h_v_4: trimesh.Trimesh):
 
 # ------------------------------------------------------------------ fixed parts
 
-def fixed_parts(kit_parts, V):
-    """Kit visor + ears, our brackets and stub axles, the bearings, Anderson's adapters and tab."""
-    from parts.head import visor_bracket, visor_stub_axle
-    from parts.head._common import mesh as b_mesh
-    from parts.library import spec_part
-
+def kit_head_parts(kit_parts, skip=()):
+    """The kit's visor, ears and face parts as Parts (the sim's own placements)."""
     out = []
     for pid, mesh, link, fname in kit_parts:
+        if pid in skip:
+            continue
         name = KIT_NAMES.get(pid) or (f"Kit ear {pid.upper()}" if pid in KIT_EARS else
                                       f"Kit eye {pid.upper()}" if "eye" in pid else f"Kit {pid.upper()}")
         out.append(Part(pid, name, "mech" if pid in KIT_VISOR else "shell", link, mesh,
@@ -109,6 +107,15 @@ def fixed_parts(kit_parts, V):
                         "PLA (printed)", True, (0, 1, 0) if link == "visor" else (1, 0, 0) if pid.startswith("h_le") else
                         (-1, 0, 0) if pid.startswith("h_re") else (0, 0, 1),
                         40, None, "", cad="mesh"))
+    return out
+
+
+def fixed_parts(kit_parts, V):
+    """Kit visor + ears, our brackets and stub axles, the bearings, Anderson's adapters and tab."""
+    from parts.head import visor_bracket
+    from parts.library import spec_part
+
+    out = kit_head_parts(kit_parts)
     for s, tag in ((1, "l"), (-1, "r")):
         br = visor_bracket.make(side=s, axis_y=float(V[1]), axis_z=float(V[2]))
         out.append(Part(f"visor_bracket_{tag}", f"Visor bearing bracket {tag.upper()} (ours)", "mech", "head",
@@ -133,7 +140,8 @@ CHANNEL_SHELLS = ("head_top", "side_left", "side_right")
 
 
 def visor_channel(parts_by_id, V, limits, clear=CHANNEL_MM, step_deg=0.5, cell=0.6):
-    """The clearance channel the shells need along the kit visor's path: the visor parts swept
+    """The clearance channel the shells need along the visor's path: the visor parts (the kit's, and
+    Hunter's arms when his drive is fitted) swept
     about the visor axis over `limits`, grown by `clear`, kept only where a shell comes within
     `clear` + 2 mm of the sweep (so it is the channel, not the whole sweep). Returns a list of
     watertight trimesh envelopes (one per region), in the head frame. Cutting them out of the
@@ -141,7 +149,7 @@ def visor_channel(parts_by_id, V, limits, clear=CHANNEL_MM, step_deg=0.5, cell=0
     import manifold3d as mf
     from scipy.spatial import cKDTree
 
-    visor = [p for p in parts_by_id.values() if p.id in KIT_VISOR]
+    visor = [p for p in parts_by_id.values() if p.id in KIT_VISOR or p.id.startswith("visor_arm_")]
     shells = [parts_by_id[k] for k in CHANNEL_SHELLS if k in parts_by_id]
     near_r = clear + 2.0
     # the sweep, sampled
@@ -636,42 +644,11 @@ def cradle_part(asm, g):
                 inferred_note="new part: where it bolts to the plate needs two holes in the plate (to add)")
 
 
-def visor_mates(hw, P, ctx):
-    """Mates for the visor: bearings in the brackets, stub axles in the bearings, adapters and
-    the tab on the axles, the kit visor on the adapters, the servo in its cradle, the horn on the
-    spline, the rod's pins."""
-    from workbench.geom import fastener_mesh  # noqa: F401
-    from workbench.mates import frame_on_axis
-    from parts.library import spec_part
-
+def kit_face_mates(hw, P):
+    """The kit's ears on Hunter's side pieces and its face parts glued as the kit head goes together
+    (either visor drive)."""
     from assemblies.hunter_head.hardware import contact_mates
 
-    g = dict(ctx["geo"], V=ctx["V"])
-    for s in ("l", "r"):
-        hw.mate("press", (f"visor_bearing_{s}", "outer"), (f"visor_bracket_{s}", "bearing_seat"))
-        hw.mate("concentric", (f"visor_axle_{s}", "axis"), (f"visor_bearing_{s}", "bore"))
-        hw.mate("concentric", (f"visor_hub_{s}", "bore"), (f"visor_axle_{s}", "axis"), note="on the D, set screw on the flat")
-    hw.mate("concentric", ("visor_tab", "socket"), ("visor_axle_l", "axis"),
-            note="straddles the axle's 8 mm section, D flat under the tab's bridge, 3 mm cross pin")
-    contact_mates(hw, P, [("h_v_5", "h_v_2"), ("h_v_4", "h_v_3"), ("h_v_2", "h_v_1"), ("h_v_3", "h_v_1")], "glue",
-                  "the kit visor's printed joints (glued in the kit)")
-    # the hubs onto the kit arms: M3 inserts in the hub, M3 screws from the arm's outboard face
-    for s, sg, arm in (("l", 1, "h_v_2"), ("r", -1, "h_v_3")):
-        hub = P[f"visor_hub_{s}"]
-        hw.mate("seated", (f"visor_hub_{s}", "face_out"), (arm, "arm_in"), note="hub face on the arm's inboard face")
-        lo, hi = P[arm].mesh.bounds
-        out_x = float(hi[0]) if sg > 0 else float(lo[0])
-        P[arm].features["arm_in"] = plane([float(lo[0]) if sg > 0 else float(hi[0]), g["V"][1], g["V"][2]], [-sg, 0, 0])
-        k = 0
-        for name in sorted(n[5:] for n in hub.features if n.startswith("hole_ins")):
-            k += 1
-            h = hub.features[f"hole_{name}"]
-            ins = hw.insert(f"ins_vhub_{s}{k}", f"visor_hub_{s}", name, "s12a",
-                            spec={"type": "insert", "thread": "M3", "length_mm": 5.7, "od_mm": 4.6})
-            hn = hw.hole(arm, f"vhub{k}", [out_x, h["p"][1], h["p"][2]], [-sg, 0, 0], 1.95)[0][5:]
-            hw.screw(f"scr_vhub_{s}{k}", [out_x, h["p"][1], h["p"][2]], [-sg, 0, 0], [(arm, hn)],
-                     (ins.id, "thread", "insert", None), "s12a", "visor", thread="M3",
-                     note="head in the axle end's Ø5.8 pocket (H_V_4/5 glued over it)")
     contact_mates(hw, P, [("h_le_1", "side_left"), ("h_re_1", "side_right"), ("h_le_2", "h_le_1"),
                           ("h_re_2", "h_re_1")], "glue", "the kit's ear cups on Hunter's side pieces")
     # the kit's face parts: each glued to whatever it touches first (the face plate to Hunter's
@@ -709,6 +686,45 @@ def visor_mates(hw, P, ctx):
         contact_mates(hw, P, [(q, h)], "glue", "the kit's face parts, glued as the kit head goes together")
         held.append(q)
         todo.remove(q)
+
+
+def visor_mates(hw, P, ctx):
+    """Mates for the visor: bearings in the brackets, stub axles in the bearings, adapters and
+    the tab on the axles, the kit visor on the adapters, the servo in its cradle, the horn on the
+    spline, the rod's pins."""
+    from workbench.geom import fastener_mesh  # noqa: F401
+    from workbench.mates import frame_on_axis
+    from parts.library import spec_part
+
+    from assemblies.hunter_head.hardware import contact_mates
+
+    g = dict(ctx["geo"], V=ctx["V"])
+    for s in ("l", "r"):
+        hw.mate("press", (f"visor_bearing_{s}", "outer"), (f"visor_bracket_{s}", "bearing_seat"))
+        hw.mate("concentric", (f"visor_axle_{s}", "axis"), (f"visor_bearing_{s}", "bore"))
+        hw.mate("concentric", (f"visor_hub_{s}", "bore"), (f"visor_axle_{s}", "axis"), note="on the D, set screw on the flat")
+    hw.mate("concentric", ("visor_tab", "socket"), ("visor_axle_l", "axis"),
+            note="straddles the axle's 8 mm section, D flat under the tab's bridge, 3 mm cross pin")
+    contact_mates(hw, P, [("h_v_5", "h_v_2"), ("h_v_4", "h_v_3"), ("h_v_2", "h_v_1"), ("h_v_3", "h_v_1")], "glue",
+                  "the kit visor's printed joints (glued in the kit)")
+    # the hubs onto the kit arms: M3 inserts in the hub, M3 screws from the arm's outboard face
+    for s, sg, arm in (("l", 1, "h_v_2"), ("r", -1, "h_v_3")):
+        hub = P[f"visor_hub_{s}"]
+        hw.mate("seated", (f"visor_hub_{s}", "face_out"), (arm, "arm_in"), note="hub face on the arm's inboard face")
+        lo, hi = P[arm].mesh.bounds
+        out_x = float(hi[0]) if sg > 0 else float(lo[0])
+        P[arm].features["arm_in"] = plane([float(lo[0]) if sg > 0 else float(hi[0]), g["V"][1], g["V"][2]], [-sg, 0, 0])
+        k = 0
+        for name in sorted(n[5:] for n in hub.features if n.startswith("hole_ins")):
+            k += 1
+            h = hub.features[f"hole_{name}"]
+            ins = hw.insert(f"ins_vhub_{s}{k}", f"visor_hub_{s}", name, "s12a",
+                            spec={"type": "insert", "thread": "M3", "length_mm": 5.7, "od_mm": 4.6})
+            hn = hw.hole(arm, f"vhub{k}", [out_x, h["p"][1], h["p"][2]], [-sg, 0, 0], 1.95)[0][5:]
+            hw.screw(f"scr_vhub_{s}{k}", [out_x, h["p"][1], h["p"][2]], [-sg, 0, 0], [(arm, hn)],
+                     (ins.id, "thread", "insert", None), "s12a", "visor", thread="M3",
+                     note="head in the axle end's Ø5.8 pocket (H_V_4/5 glued over it)")
+    kit_face_mates(hw, P)
     hw.mate("spline", ("visor_horn", "spline"), ("visor_servo", "spline"), teeth=25)
     hw.mate("seated", ("visor_horn", "servo_face"), ("visor_servo", "boss"))
     if "visor_servo_cradle" in P:
@@ -742,3 +758,379 @@ def visor_mates(hw, P, ctx):
                             features={"shank": axis(at, n, 1.5)}))
     hw.mate("concentric", ("pin_visor_tab_axle", "shank"), ("visor_tab", "cross"))
     hw.mate("concentric", ("pin_visor_tab_axle", "shank"), ("visor_axle_l", "tab_pin"))
+
+
+# ================================================================== Hunter's direct drive (the default)
+#
+# Hunter (2026-10-02): "I use one standard size servo on either side, basically where your bearings are for
+# the visor." His files agree to the tenth: the Visor Servo Mount (printed twice in his 3MF, once with each
+# side piece) stands on the mount plate's flange, its slotted feet on the plate's own M4 flange holes (slot
+# pitch 57.48 = the holes' 57.48), the servo hung spline-down in it with the output on the visor axis (spline
+# 31.8 above the feet = the axis 31.4 above the flange top) pointing outboard; his visor arm (the DXF) bolts
+# to a round horn on that spline (the DXF's 9.5 mm centre hole and 4 x M3 on a 10 mm square). The DXF arm is
+# the kit side arm's outline drawn flat (they overlie in the side view), so here it takes H_V_2/H_V_3's place
+# and carries the kit brow (H_V_1) and axle ends (H_V_4/5). Each servo turns the visor 1:1; they face
+# opposite ways, so for one visor move they turn opposite ways (servo_deg_per_unit +1 left, -1 right).
+
+DIRECT_ARMS = {1: "h_v_2", -1: "h_v_3"}           # the kit side arms Hunter's arms replace
+AXLE_END = {1: "h_v_5", -1: "h_v_4"}              # the kit axle end glued on each arm's outer face
+SERVO_CASE = "standard"                          # parts/models.py CASES: 40 x 20, 54.5 flange
+SPLINE_ABOVE_FLANGE = 16.25                      # standard case: flange underside 16.25 below the spline top
+FLANGE_T = 2.5
+CASE_OFF = 10.0                                  # the spline's offset from the case centre (long side)
+HORN = {"od": 24.0, "above_tip": 1.0, "below_tip": 2.8, "socket_r": 3.1, "screw_r": 1.65, "tap_r": 1.25,
+        "square": 10.0}                          # 25T aluminium disc horn (inferred: the DXF's hole pattern)
+MOUNT_DEF = {"pattern_y0": 41.8, "bridge": (12.5, 22.0, 62.3), "height": 70.3, "depth": 20.0,
+             "slot": (4.5, 14.4, 28.75)}         # parts/hunter.py visor_servo_mount defaults (Hunter's STL)
+CASE_FIT = 0.2                                   # ours: the bars stand 0.2 mm off the case ends
+
+
+def _plate_flange(plate):
+    """The plate flange's top (y) and its six M4 holes [(x, z)], measured on the plate."""
+    hits = [h for h in geom.ray_depth(plate, [60.0, 60.0, 14.5], [0.0, -1.0, 0.0]) if h > 0]
+    top = 60.0 - hits[0]
+    holes = [(float(c[0]), float(c[2])) for c, r in geom.section_holes(plate, 1, top - 1.0, 1.9, 2.6) if abs(c[0]) > 50]
+    return top, holes
+
+
+def direct_layout(kit_parts, V, plate, arm_t):
+    """Each side's stack along the axis, outboard in: the kit axle end's inner face, Hunter's arm (arm_t),
+    the horn, the spline top, the servo flange on the mount's face; and the mount on the plate flange,
+    its feet slots on the plate's holes. Returns {side: dict} with |x| values and the slot travel used."""
+    kit = {pid: m for pid, m, _, _ in kit_parts}
+    feet_y, holes = _plate_flange(plate)
+    out = {}
+    for s in (1, -1):
+        lo, hi = kit[AXLE_END[s]].bounds
+        x_ao = float(lo[0]) if s > 0 else float(-hi[0])
+        x_ai = x_ao - arm_t
+        tip = x_ai - HORN["above_tip"]
+        x_face = tip - SPLINE_ABOVE_FLANGE
+        hs = sorted((h for h in holes if np.sign(h[0]) == s), key=lambda h: h[1])
+        hx = float(np.mean([abs(h[0]) for h in hs]))
+        zc = (hs[0][1] + hs[-1][1]) / 2
+        sw, sl, sx = MOUNT_DEF["slot"]
+        travel = (sl - sw) / 2
+        used = hx - (x_face - MOUNT_DEF["depth"] / 2)  # the plate hole from the slot's centre (+ = outboard)
+        out[s] = dict(x_ao=x_ao, x_ai=x_ai, tip=tip, x_face=x_face, feet_y=feet_y, hole_x=hx, zc=zc,
+                      hole_z=(hs[0][1], hs[-1][1]), slot_used=used, slot_travel=travel,
+                      pitch=hs[-1][1] - hs[0][1], ok=abs(used) <= travel + 1e-6)
+    return out
+
+
+def _mount_params(s, V, lay):
+    """Hunter's mount, the bosses on the visor axis: his pattern height less the 0.36 mm his own plate
+    gives (the axis 31.44 above the flange top), the pattern across moved so the spline sits on the axis
+    on both sides (his two prints are identical, which leaves one side 1.3 mm off: mirror that one)."""
+    from parts.hunter import visor_servo_mount
+
+    d0 = cached(_cache_key("hunter-mount-bosses", code_sig_hunter()),
+                lambda: np.mean([f["p"] for k, f in visor_servo_mount().features.items() if k.startswith("boss")], axis=0))
+    off_x = float(d0[0]) - 0.65  # the bosses' centre across, from the model's pattern_x0 (default 0.65)
+    # squared X -> head -s Z: the spline's z = zc - s * bc_x
+    bc_x = s * (lay["zc"] - float(V[2]))
+    y0 = float(V[1]) - lay["feet_y"] + CASE_OFF
+    b0 = y0 - 20.0 - CASE_FIT                     # the bottom bar's top: under the case's lower end
+    t0 = y0 + 20.0 + CASE_FIT
+    dy = y0 - MOUNT_DEF["pattern_y0"]
+    return dict(pattern_x0=round(bc_x - off_x, 3), pattern_y0=round(y0, 3), pocket=(20.4, 40.6),
+                bridge=(round(b0 - 9.5, 3), round(b0, 3), round(t0, 3)), height=round(MOUNT_DEF["height"] + dy, 3),
+                insert_depth=8.0)  # ours: 6 x 6 insert + 2 mm (the fastening rule; an M4 x 10 reaches 1.5 d)
+
+
+def code_sig_hunter():
+    from workbench.geom import code_sig
+
+    return code_sig("parts.hunter")
+
+
+def _mount_matrix(s, lay):
+    """The mount's squared frame (X across the feet, Y up, Z through the pocket to the flange face)
+    -> head: Z outboard, the face at |x| = x_face, the feet on the flange, centred on the plate holes."""
+    m = _R(np.array([0.0, 0.0, -s]), np.array([0.0, 1.0, 0.0]), np.array([float(s), 0.0, 0.0]))
+    return _T(m, [s * (lay["x_face"] - MOUNT_DEF["depth"]), lay["feet_y"], lay["zc"]])
+
+
+def _servo_matrix(s, V, lay):
+    """parts/models.py servo (spline top at 0 along +Y, case centre at +X 10) -> head: the spline
+    outboard on the axis, the case up (spline toward the feet, as the mount holds it)."""
+    m = _R(np.array([0.0, 1.0, 0.0]), np.array([float(s), 0.0, 0.0]), np.array([0.0, 0.0, -float(s)]))
+    return _T(m, [s * lay["tip"], float(V[1]), float(V[2])])
+
+
+def _servo_mesh():
+    """parts/models.py's standard servo as one solid, with the output's M3 tapped hole (6 mm) the centre
+    screw goes into (spline top at 0 along +Y, case centre at +X 10)."""
+    import manifold3d as mf
+
+    from parts.models import CASES
+
+    c = CASES[SERVO_CASE]
+    top = -c["sh"]
+
+    def box(sx, sy, sz, at):
+        return mf.Manifold.cube((sx, sy, sz), True).translate(at)
+
+    def ycyl(r, h, y0):
+        return mf.Manifold.cylinder(h, r, r, 40).rotate((-90, 0, 0)).translate((0, y0, 0))
+
+    body = box(c["L"], c["H"], c["W"], (c["off"], top - c["H"] / 2, 0))
+    body += box(c["fl"], c["ft"], c["W"], (c["off"], top - c["H"] + c["fh"], 0))
+    body += ycyl(c["sd"] * 1.2, 1.5, top)
+    body += ycyl(c["sd"] / 2, c["sh"] - 1.5 + 0.01, top + 1.5 - 0.01)
+    body -= ycyl(1.25, 6.0, -6.0 + 0.01)
+    fy = top - c["H"] + c["fh"]  # the flange's mid-plane
+    for dx in (-24.0, 24.0):     # its four M4 clearance holes on the 48 x 9.9 pattern Hunter's mount takes
+        for dz in (-4.95, 4.95):
+            body -= mf.Manifold.cylinder(c["ft"] + 2, 2.25, 2.25, 24).rotate((-90, 0, 0)).translate(
+                (c["off"] + dx, fy - c["ft"] / 2 - 1, dz))
+    m = body.to_mesh()
+    return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts), process=True)
+
+
+def _trim_to(mesh, cutter, keep_near):
+    """`mesh` minus `cutter`, keeping the piece nearest `keep_near` (Hunter's arm cut where it enters
+    the kit brow: the rest of it, beyond, was for his own brow)."""
+    import manifold3d as mf
+
+    def M(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                   tri_verts=np.asarray(m.faces, np.uint32)))
+
+    r = (M(mesh) - M(cutter)).to_mesh()
+    t = trimesh.Trimesh(np.asarray(r.vert_properties)[:, :3], np.asarray(r.tri_verts), process=True)
+    pieces = t.split(only_watertight=False)
+    best = min(pieces, key=lambda q: float(np.min(np.linalg.norm(q.vertices - keep_near, axis=1))))
+    return best, float(mesh.volume - best.volume)
+
+
+def _horn_mesh():
+    """25T aluminium disc horn along +Z from 0 (servo side) to its thickness: the spline socket from the
+    servo side, the centre screw's hole, four M3 tapped holes on the 10 mm square."""
+    import manifold3d as mf
+
+    t = HORN["below_tip"] + HORN["above_tip"]
+    body = mf.Manifold.cylinder(t, HORN["od"] / 2, HORN["od"] / 2, 64)
+    body -= mf.Manifold.cylinder(HORN["below_tip"], HORN["socket_r"], HORN["socket_r"], 32).translate((0, 0, -0.01))
+    body -= mf.Manifold.cylinder(t + 1, HORN["screw_r"], HORN["screw_r"], 24).translate((0, 0, -0.5))
+    q = HORN["square"] / 2
+    for x in (-q, q):
+        for y in (-q, q):
+            body -= mf.Manifold.cylinder(t + 1, HORN["tap_r"], HORN["tap_r"], 16).translate((x, y, -0.5))
+    m = body.to_mesh()
+    return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts), process=True)
+
+
+def _horn_matrix(s, V, lay):
+    m = _R(np.array([0.0, 0.0, -float(s)]), np.array([0.0, 1.0, 0.0]), np.array([float(s), 0.0, 0.0]))
+    return _T(m, [s * (lay["tip"] - HORN["below_tip"]), float(V[1]), float(V[2])])
+
+
+def _arm_mesh(arm_t):
+    """Hunter's visor arm: the DXF outline extruded `arm_t` (centred), the four M3 holes countersunk on
+    one face (+Z) for flat heads (ours: the kit axle end glues flat over them)."""
+    import manifold3d as mf
+
+    from assemblies.hunter_head.assembly import vendor
+
+    poly, circles = geom.dxf_profile(vendor("Visor Arm DXF.dxf"))
+    m = geom.extrude(poly, arm_t)
+    piv = min(circles, key=lambda c: abs(c[2] - 4.75))
+    cuts = []
+    for cx, cy, r in circles:
+        if abs(r - 1.7) < 0.1:
+            depth = (3.15 - 1.7) / math.tan(math.radians(41))
+            c = mf.Manifold.cylinder(depth + 0.01, 1.7, 3.15, 32).translate((cx, cy, arm_t / 2 - depth))
+            cuts.append(c)
+    if cuts:
+        a = mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32), tri_verts=np.asarray(m.faces, np.uint32)))
+        for c in cuts:
+            a -= c
+        mm = a.to_mesh()
+        m = trimesh.Trimesh(np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts), process=True)
+    return m, piv, circles
+
+
+def _arm_matrix(s, V, lay, piv, arm_t):
+    """DXF (x, y) -> head: -x forward (+Z), y up, the extrusion outboard (+Z of the arm = s X: its
+    countersunk face outboard); the DXF's 9.5 mm hole on the visor axis."""
+    m = np.eye(4)
+    m[:3, :3] = np.array([[0, 0, s], [0, 1, 0], [-1, 0, 0]], float)
+    m[:3, 3] = [s * (lay["x_ai"] + arm_t / 2), float(V[1]) - piv[1], float(V[2]) + piv[0]]
+    return m
+
+
+def direct_parts(kit_parts, V, plate, arm_t):
+    """The kit visor less its side arms, Hunter's arms, his mounts, the two standard servos, the horns.
+    Returns (parts, layout)."""
+    from assemblies.hunter_head.assembly import remodel
+    from parts.library import spec_part
+
+    lay = direct_layout(kit_parts, V, plate, arm_t)
+    out = kit_head_parts(kit_parts, skip=set(DIRECT_ARMS.values()))
+    arm0, piv, circles = cached(_cache_key("hunter-visor-arm", arm_t, 2),
+                                lambda: (lambda r: ((np.asarray(r[0].vertices), np.asarray(r[0].faces)), r[1], r[2]))(
+                                    _arm_mesh(arm_t)))
+    arm0 = trimesh.Trimesh(*arm0, process=False)
+    horn0 = cached(_cache_key("hunter-visor-horn", sorted(HORN.items()), 1),
+                   lambda: (lambda m: (np.asarray(m.vertices), np.asarray(m.faces)))(_horn_mesh()))
+    horn0 = trimesh.Trimesh(*horn0, process=False)
+    servo0 = cached(_cache_key("hunter-visor-servo", SERVO_CASE, 2),
+                    lambda: (lambda m: (np.asarray(m.vertices), np.asarray(m.faces)))(_servo_mesh()))
+    servo0 = trimesh.Trimesh(*servo0, process=False)
+    brow = next(m for pid, m, _, _ in kit_parts if pid == "h_v_1")
+    q = HORN["square"] / 2
+    for s, tag in ((1, "l"), (-1, "r")):
+        L = lay[s]
+        side = "left" if s > 0 else "right"
+        X_ = np.array([float(s), 0.0, 0.0])
+        tip = np.array([s * L["tip"], float(V[1]), float(V[2])])
+        # the mount (Hunter's Visor Servo Mount, parametric remodel)
+        prm = _mount_params(s, V, L)
+        Mm = _mount_matrix(s, L)
+        mesh, src, feats = remodel("visor_servo_mount", Mm, f"visor_mount_{tag}", **prm)
+        for k, (hz) in enumerate(L["hole_z"]):
+            at = [s * L["hole_x"], L["feet_y"] + 6.0, hz]
+            feats[f"hole_screw{k + 1}"] = axis(at, [0, -1.0, 0], 2.25)
+            feats[f"face_screw{k + 1}"] = plane(at, [0, 1.0, 0])
+        feats["feet"] = plane([s * L["hole_x"], L["feet_y"], L["zc"]], [0, -1.0, 0])
+        src = dict(src, placement="mates", file="Visor Servo Mount.stl",
+                   fit=f"feet on the plate flange (y {L['feet_y']:.2f}), slots on its M4 holes (pitch {L['pitch']:.2f} vs "
+                       f"the slots' {2 * MOUNT_DEF['slot'][2]:.2f}); the plate hole {L['slot_used']:+.2f} mm from the slot "
+                       f"centre (travel +/-{L['slot_travel']:.2f})")
+        from assemblies.hunter_head.assembly import printed_mass
+
+        m_, n_ = printed_mass(mesh)
+        out.append(Part(f"visor_mount_{tag}", f"Visor Servo Mount {tag.upper()} (Hunter's, parametric)", "mech", "head",
+                        mesh, src, "PLA (printed)", True, (s, 0, 0), 40, m_, n_, cad="parametric", features=feats,
+                        inferred=True, inferred_note=(
+                            "Hunter's mount, placed by his own geometry (feet on the plate flange, slots on its holes, the "
+                            "spline on the visor axis). Ours: the bosses 0.36 mm lower and the pattern moved "
+                            f"{prm['pattern_x0'] - 0.65:+.2f} mm across so both splines sit on the axis (his two prints "
+                            "are identical, which leaves one 1.3 mm off), the pocket 0.4 mm roomier.")))
+        # the servo, standard size, hung spline-down, output outboard on the axis
+        Ms = _servo_matrix(s, V, L)
+        sv = servo0.copy()
+        sv.apply_transform(Ms)
+        sfeat = {"spline": spline(tip, X_, 25), "boss": plane(tip - X_ * 2.8, X_),
+                 "out_thr": dict(axis(tip, -X_, 1.5), depth=6.0),
+                 "flange_under": plane(tip - X_ * SPLINE_ABOVE_FLANGE, -X_)}
+        out.append(Part(f"visor_servo_{tag}", f"Visor servo {tag.upper()}, standard size (Hunter's; make not stated)",
+                        "servo", "head", sv, {"kind": "parametric", "model": "parts/models.py:servo",
+                                              "params": {"case": SERVO_CASE}, "placement": "mates"},
+                        "servo", False, (s, 0, 0), 40, 60.0, "estimate", cad="parametric", features=sfeat, inferred=True,
+                        inferred_note=("Hunter: \"one standard size servo on either side, basically where your bearings "
+                                       "are\"; his photo shows black cases (not goBILDA). Make and torque not stated: the "
+                                       "parts library's standard case.")))
+        # the horn on the spline (visor link: the output turns the visor 1:1)
+        Mh = _horn_matrix(s, V, L)
+        hm = horn0.copy()
+        hm.apply_transform(Mh)
+        face_out = tip + X_ * HORN["above_tip"]
+        hfeat = {"spline": spline(tip, X_, 25), "seat": plane(tip - X_ * HORN["below_tip"], -X_),
+                 "face_out": plane(face_out, X_), "axis": axis(face_out, -X_, HORN["screw_r"])}
+        k = 0
+        for zz in (-q, q):
+            for yy in (-q, q):
+                k += 1
+                at = face_out + np.array([0.0, yy, zz])
+                hfeat[f"hole_tap{k}"] = axis(at, -X_, HORN["tap_r"])
+        out.append(Part(f"visor_horn_{tag}", f"Visor servo horn {tag.upper()}: 25T aluminium disc, M3 on a 10 mm square",
+                        "hardware", "visor", hm, {"kind": "parametric", "model": "assemblies/hunter_head/visor.py:_horn_mesh",
+                                                  "placement": "mates"},
+                        "aluminium", False, (s, 0, 0), 25, 4.0, "estimate", cad="parametric", features=hfeat, inferred=True,
+                        inferred_note=("Hunter's arm takes a round horn (photo) with 4 x M3 on a 10 mm square round a "
+                                       "9.5 mm hole (DXF); Ø24 x 3.8 mm is a typical 25T disc horn, not his stated part.")))
+        # Hunter's visor arm (the DXF), on the horn
+        Ma = _arm_matrix(s, V, L, piv, arm_t)
+        am = arm0.copy()
+        am.apply_transform(Ma)
+        ao = np.array([s * L["x_ao"], float(V[1]), float(V[2])])
+        from workbench.collide import mesh_hash
+
+        vf = cached(_cache_key("hunter-arm-trim", mesh_hash(am), mesh_hash(brow), 1),
+                    lambda: (lambda r: (np.asarray(r[0].vertices), np.asarray(r[0].faces), r[1]))(
+                        _trim_to(am, brow, ao)))
+        am, cut_mm3 = trimesh.Trimesh(vf[0], vf[1], process=False), vf[2]
+        afeat = {"face_in": plane(ao - X_ * arm_t, -X_), "face_out": plane(ao, X_), "hub": axis(ao, -X_, 4.75)}
+        k = 0
+        for zz in (-q, q):
+            for yy in (-q, q):
+                k += 1
+                afeat[f"hole_c{k}"] = axis(ao + np.array([0.0, yy, zz]), -X_, 1.7)
+                afeat[f"face_c{k}"] = plane(ao + np.array([0.0, yy, zz]), X_)
+        out.append(Part(f"visor_arm_{tag}", f"Visor arm {tag.upper()} (Hunter's DXF, cut {arm_t:g} mm)", "mech", "visor", am,
+                        {"file": "Visor Arm DXF.dxf", "kind": "dxf", "placement": "mates", "extrude_mm": arm_t,
+                         "mirrored": s < 0, "replaces": DIRECT_ARMS[s],
+                         "trimmed": f"cut where it enters the kit brow ({cut_mm3:.0f} mm3 off, the tip hole with it)"},
+                        f"aluminium {arm_t:g} mm (inferred)", False, (s, 0, 0), 40,
+                        round(float(am.volume) * 2.7 / 1000, 1), "aluminium 2.7 g/cc at the chosen thickness",
+                        cad="parametric", features=afeat, inferred=True,
+                        inferred_note=(f"Thickness {arm_t:g} mm is a parameter (the DXF has none; his photo shows a thin "
+                                       "light plate). The DXF arm is the kit side arm's outline drawn flat, so it takes "
+                                       f"{DIRECT_ARMS[s].upper()}'s place. Ours: cut off where it enters the kit brow (its "
+                                       "140 mm tip hole was for his own, larger brow; the kit brow glues on there as on the "
+                                       "kit's side arm), and the four M3 holes countersunk outboard for flat heads under "
+                                       "the kit axle end.")))
+    return out, lay
+
+
+def direct_gears(V):
+    """The horns as direct gears (SCHEMA.md "Gear"): each turns 1:1 with the visor about the axis; the
+    left servo's output points +X, the right's -X, so the right servo turns -1 deg per visor deg."""
+    from workbench.model import Gear
+
+    out = []
+    for s, tag in ((1, "l"), (-1, "r")):
+        out.append(Gear(f"g_visor_{tag}", "direct", "visor", "head", tuple(float(x) for x in V), (1.0, 0.0, 0.0), 1.0,
+                        parts=[f"visor_horn_{tag}"],
+                        fasteners=[f"scr_vhorn_{tag}"] + [f"scr_varm_{tag}{k}" for k in range(1, 5)],
+                        servo=f"visor_servo_{tag}", servo_deg_per_unit=float(s),
+                        note=(f"the {'left' if s > 0 else 'right'} visor servo's horn, on its spline: 1:1, servo "
+                              f"{'+' if s > 0 else '-'}1 deg per visor deg (+ = right-hand about the servo's own output, "
+                              "which points outboard)")))
+    return out
+
+
+def direct_mates(hw, P, V, lay):
+    """Servos into their mounts (M4 into the mount's inserts), horns on the splines (the servo's centre
+    screw), Hunter's arms on the horns (4 x M3 flat heads), the kit brow and axle ends glued on the arms."""
+    from assemblies.hunter_head.hardware import contact_mates
+
+    for s, tag in ((1, "l"), (-1, "r")):
+        X_ = np.array([float(s), 0.0, 0.0])
+        mid, sid, hid, aid = f"visor_mount_{tag}", f"visor_servo_{tag}", f"visor_horn_{tag}", f"visor_arm_{tag}"
+        hw.mate("seated", (sid, "flange_under"), (mid, "face"), note="the servo's flange on the mount's bosses")
+        sv = P[sid].mesh
+        bosses = sorted(k for k in P[mid].features if k.startswith("boss"))
+        for k, b in enumerate(bosses):
+            f = P[mid].features[b]
+            P[mid].features[f"hole_vm{k + 1}"] = f
+            P[mid].features[f"face_vm{k + 1}"] = plane(f["p"], X_)
+            ins = hw.insert(f"ins_vmount_{tag}{k + 1}", mid, f"vm{k + 1}", "s01")
+            top = np.asarray(f["p"], float) + X_ * FLANGE_T
+            hw.hole(sid, f"vfl{k + 1}", top, -X_, 2.25)
+            hw.screw(f"scr_vservo_{tag}{k + 1}", top, -X_, [(sid, f"vfl{k + 1}")], (ins.id, "thread", "insert", 6.0),
+                     "s11", "head", kind="shcs_low", thread="M4", joins=[sid, mid, ins.id],
+                     note="Through the servo's flange into the mount's heat-set insert (Hunter's 6 mm holes).")
+        hw.mate("spline", (hid, "spline"), (sid, "spline"), teeth=25,
+                note="fitted at the servo's centre pulse with the visor at 0 (step s12)")
+        hw.mate("concentric", (hid, "axis"), (sid, "out_thr"))
+        # the servo's own centre screw through the horn
+        fo = np.asarray(P[hid].features["face_out"]["p"], float)
+        hw.hole(hid, "centre", fo, -X_, HORN["screw_r"])
+        hw.screw(f"scr_vhorn_{tag}", fo, -X_, [(hid, "centre")], (sid, "out_thr", "metal", 6.0), "s12", "visor",
+                 kind="bhcs", thread="M3", joins=[hid, sid],
+                 note="The servo's centre screw; its head sits inside the arm's 9.5 mm hole.")
+        # the arm on the horn: face to face, 4 x M3 flat heads into the horn's tapped holes
+        hw.mate("seated", (aid, "face_in"), (hid, "face_out"))
+        hw.mate("concentric", (aid, "hub"), (hid, "axis"))
+        for k in range(1, 5):
+            f = P[aid].features[f"hole_c{k}"]
+            hw.screw(f"scr_varm_{tag}{k}", f["p"], f["d"], [(aid, f"c{k}")], (hid, f"hole_tap{k}", "metal", 3.8),
+                     "s12b", "visor", kind="fhcs", thread="M3", joins=[aid, hid],
+                     note="Flat head in the arm's countersink (ours), into the disc horn's tapped hole.")
+        contact_mates(hw, P, [(AXLE_END[s], aid)], "glue", "the kit axle end glued flat on Hunter's arm, over the screws")
+        contact_mates(hw, P, [("h_v_1", aid)], "glue",
+                      "the kit brow glued to Hunter's arm where the kit's own side arm met it")
+    kit_face_mates(hw, P)

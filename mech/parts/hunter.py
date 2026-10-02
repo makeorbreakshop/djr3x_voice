@@ -243,7 +243,8 @@ def visor_servo_mount(pattern=(48.0, 9.9), pattern_x0=0.65, pattern_y0=41.8, poc
             k += 1
             feats[f"boss{k}"] = _axis([x, y, depth], [0, 0, -1], insert_d / 2)
     feats["face"] = _plane([pattern_x0, pattern_y0, depth], [0, 0, 1])
-    params = dict(pattern=list(pattern), pocket=list(pocket), depth=depth, wall=wall, height=height,
+    params = dict(pattern=list(pattern), pattern_x0=pattern_x0, pattern_y0=pattern_y0, pocket=list(pocket), depth=depth,
+                  wall=wall, height=height,
                   bridge=list(bridge), insert_d=insert_d, insert_depth=insert_depth, foot=list(foot), slot=list(slot))
     return Remodel("Visor Servo Mount", params, body, feats, "Visor Servo Mount.stl")
 

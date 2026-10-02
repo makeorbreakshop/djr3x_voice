@@ -195,8 +195,11 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
             ratio = j.drive.get("servo_deg_per_joint_deg") or (1.0 / j.drive["gear_ratio"] if j.drive.get("gear_ratio") else None)
             how = f"gear {ratio:.4g}:1"
         elif kind == "direct":
-            ratio = 1.0 / (j.drive.get("gear_ratio") or 1.0)
+            ratio = j.drive.get("servo_deg_per_unit") or 1.0 / (j.drive.get("gear_ratio") or 1.0)
             how = "direct"
+            by = j.drive.get("servo_deg_per_unit_by_servo")
+            if by and len(by) > 1:
+                how = "direct, " + ", ".join(f"{k} {v:+g}" for k, v in by.items()) + " servo deg per joint deg"
         elif kind in ("push_rod", "push_rod_pair") and lks:
             jac = servo_jacobian(tree, lks, [name], {})
             if jac is not None:
@@ -246,6 +249,7 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
             "child_link": j.child_link,
             "mech_limits": {"min": lo, "max": hi},
             "drive": {"kind": kind, "servos": list((j.drive or {}).get("servos") or []), "servo_model": key,
+                      "servo_deg_per_unit_by_servo": (j.drive or {}).get("servo_deg_per_unit_by_servo"),
                       "servo_model_source": key_src, "servo_deg_per_unit": _rd(ratio, 4) if ratio else None,
                       "mm_per_servo_deg": mm_per_deg, "eta": ETA.get(kind, 1.0),
                       "linkages": [lk["id"] for lk in lks], "how": how,
@@ -289,6 +293,12 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
             for s, lk in zip(d["servos"], d["linkages"]):
                 drives.append(dict(servo=s, model=d["servo_model"], kind="push_rod_pair", joints=list(group),
                                    linkage=f"{mj['gid'].split('/')[0]}/{lk}", eta=d["eta"]))
+        elif d.get("servo_deg_per_unit_by_servo") and len(d["servos"]) > 1:
+            # several servos on one joint at once (Hunter's visor: one each side, mirrored): one drive each, signed
+            for sv in d["servos"]:
+                drives.append(dict(servo=sv, model=d["servo_model"], kind=d["kind"], joints=[name], linkage=None,
+                                   servo_deg_per_unit=d["servo_deg_per_unit_by_servo"].get(sv, d["servo_deg_per_unit"]),
+                                   mm_per_servo_deg=d["mm_per_servo_deg"], eta=d["eta"]))
         else:
             drives.append(dict(servo=d["servos"][0], model=d["servo_model"], kind=d["kind"], joints=[name],
                                linkage=(f"{mj['gid'].split('/')[0]}/{d['linkages'][0]}" if d["linkages"] else None),

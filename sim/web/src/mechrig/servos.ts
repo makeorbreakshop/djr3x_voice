@@ -71,6 +71,18 @@ export function actuators(nodes: AsmNode[]): Actuator[] {
         }
         continue;
       }
+      if (d.kind !== 'push_rod' && j.type !== 'prismatic' && d.servos.length > 1) {
+        // a joint driven by several servos at once (Hunter's visor: one each side, mirrored): one actuator per
+        // servo, each with its own signed ratio from its gear (SCHEMA.md "Gear" servo_deg_per_unit)
+        for (const servo of d.servos) {
+          if (seen.has(servo)) continue;
+          seen.add(servo);
+          const g = (node.asm.gears ?? []).find((x) => x.servo === servo && x.joint === j.id && !x.joint_assembly);
+          const ratio = g?.servo_deg_per_unit ?? sdpu ?? drive.servo_deg_per_joint_deg ?? (d.gear_ratio ? 1 / d.gear_ratio : 1);
+          out.push({ servo, node, kind: d.kind === 'direct' ? 'direct' : 'gear', joints: [j], ratio, range: [-half, half] });
+        }
+        continue;
+      }
       const servo = d.servos[0];
       if (seen.has(servo)) continue;
       seen.add(servo);
@@ -146,7 +158,7 @@ export function solveServo(a: Actuator, deg: number, pose = a.node.pose): Record
 }
 
 const LABEL: Record<string, string> = {
-  servo_l: 'gimbal L', servo_r: 'gimbal R', visor_servo: 'visor', pan_servo: 'neck pan', lift_servo: 'head lift',
+  servo_l: 'gimbal L', servo_r: 'gimbal R', visor_servo: 'visor', visor_servo_l: 'visor L', visor_servo_r: 'visor R', pan_servo: 'neck pan', lift_servo: 'head lift',
   lower_servo: 'lower ring', top_servo: 'top ring', hero_shoulder_servo: 'hero shoulder', hero_wrist_servo: 'hero wrist',
   // the central column's (mech/assemblies/column)
   col_pan_servo: 'neck pan', col_lift_servo: 'head lift', col_lower_servo: 'lower ring', col_top_servo: 'top ring',

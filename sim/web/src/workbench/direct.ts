@@ -86,7 +86,8 @@ const SOFT = 3; // deg or mm of give past a limit while dragging
 const sgn = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`;
 const unitOf = (j: MJoint) => (j.unit === 'mm' ? ' mm' : '°');
 const SERVO_NAME: Record<string, string> = {
-  servo_l: 'Gimbal L servo', servo_r: 'Gimbal R servo', visor_servo: 'Visor servo', tilt_servo: 'Tilt servo',
+  servo_l: 'Gimbal L servo', servo_r: 'Gimbal R servo', visor_servo: 'Visor servo',
+  visor_servo_l: 'Visor L servo', visor_servo_r: 'Visor R servo', tilt_servo: 'Tilt servo',
   pan_servo: 'Pan servo', lift_servo: 'Lift servo', lower_servo: 'Lower ring servo', top_servo: 'Top ring servo',
   col_pan_servo: 'Pan servo', col_lift_servo: 'Lift servo', col_lower_servo: 'Lower ring servo', col_top_servo: 'Top ring servo',
 };
