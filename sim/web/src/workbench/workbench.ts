@@ -24,6 +24,7 @@ import {
   assemblyLabel, exposed, isKitPart, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
+import { setWeather, weatherShader, weatherUniforms, type WeatherUniforms } from './weather';
 import { fastenerKind, fastenerPose, fastenerTravel, GUIDE_TIMING, itemU, pathAt, planSequence, timed, type SeqFastener, type SeqItem, type SeqPart, type Timing } from './sequence';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
@@ -2045,7 +2046,7 @@ export class Workbench {
     if (!this.video || !q || q.force !== null || this.videoStay.has(id) || !path.length) return new THREE.Vector3();
     const u = this.seqU(id);
     const k = Math.min(1, Math.max(0, (u - 0.6) / 0.4));
-    return path[0].clone().multiplyScalar(1.5 * k * k * (3 - 2 * k));
+    return path[0].clone().multiplyScalar(0.6 * k * k * (3 - 2 * k)); // (not so far that it enters from the frame's edge)
   }
   /** Items that stay where the explode left them (the first step's): no fade, no extra approach. */
   videoStay = new Set<string>();
@@ -2683,6 +2684,12 @@ export class Workbench {
         if (hsl.l < 0.05) m.color.setHSL(hsl.h, hsl.s, 0.05);
       }
       m.userData.base = m.color.getHex();
+      // weathering (weather.ts): the paint's park wear in Exterior and in the video; a bare print its layer lines
+      {
+        const real = finish !== GHOST_FINISH && (this.video || look === 'exterior');
+        const paint = p.finish?.paint && p.finish.paint !== 'none' ? p.finish.paint : undefined;
+        setWeather(m.userData.weather as WeatherUniforms, paint, real ? 1 : 0, real && !paint && !!p.printed);
+      }
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
       // aluminium a pale one) - never mixed with its paint, which turns the orange shells purple. A part being
       // inspected shows as it is, not as new.
@@ -3134,7 +3141,10 @@ function saneNormals(geo: THREE.BufferGeometry) {
 function withRim(m: THREE.MeshStandardMaterial) {
   const u = { value: new THREE.Vector4(0, 0, 0, 0) };
   m.userData.rim = u;
+  const w = weatherUniforms();
+  m.userData.weather = w;
   m.onBeforeCompile = (sh) => {
+    weatherShader(sh, w); // (weather.ts: off until a look turns it on)
     sh.uniforms.uRim = u;
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nuniform vec4 uRim;')

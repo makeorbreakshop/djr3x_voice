@@ -137,11 +137,11 @@ const plan = [];
 for (const s of shown) {
   const items = await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(${s.i}, true); wb.seqSetTime(0); return JSON.stringify(wb.videoItemBoxes()); })()`).then(JSON.parse);
   let clusters = [];
-  if (items.length >= 3) {
+  if (items.length >= 2) {
     const all = items.reduce((b, it) => (b ? union(b, it) : it), null);
     const D = diag(all);
     const med = items.map(diag).sort((a, b) => a - b)[Math.floor(items.length / 2)];
-    if (D > 2.2 * med && items.length >= 4) {
+    if (D > 2.2 * med) {
       for (let lim = 0.4; lim < 1; lim += 0.1) {
         clusters = [];
         items.forEach((it, i) => {
