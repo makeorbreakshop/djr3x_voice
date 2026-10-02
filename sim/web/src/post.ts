@@ -65,6 +65,8 @@ export type Quality = 'performance' | 'balanced' | 'high';
  * so the ghosted shells (which write depth) neither take nor cast it.
  */
 const SETTLE_MS = 150;
+/** No real input (a hover does not count) this long and the dynamic scale's last drop is forgotten. */
+const FORGET_MS = 4000;
 const REFRESH_MS = 3000;
 const NATIVE_MAX = 2;
 const BUILD_AO = { radius: 0.025, falloff: 0.6, intensity: 0.6 };
@@ -326,6 +328,12 @@ class DynamicResolution {
 
   constructor(public min: number, public max: number, start: number) {
     this.scale = start;
+  }
+
+  /** Back to the cap with a fresh window (a new interaction after a quiet spell). */
+  reset() {
+    this.scale = this.max;
+    this.sum = this.n = this.worst = this.clean = 0;
   }
 
   /** Feed one frame interval; returns the new scale when it should change. */
@@ -711,6 +719,10 @@ export class PostPipeline {
     // Resolution adapts only while frames are meant to come at 60 fps (someone interacting);
     // a paced 30 or 15 fps interval is not a slow frame.
     if (this.dyn && this.lastFrame >= 0 && interacting) this.dyn.sample(now - this.lastFrame);
+    // A scale lowered in one interaction (often by a model upload's slow frames, not by the view) is
+    // forgotten after a few quiet seconds: the next drag or orbit starts sharp and steps down only if its
+    // own frames run long (the 1 s window above), instead of popping to a soft view the moment it starts.
+    if (this.dyn && this.dyn.scale < this.dyn.max && this.pacer.settled(FORGET_MS, now)) this.dyn.reset();
     this.lastFrame = interacting ? now : -1;
     const kind = this.buildFrame(now);
     if (kind === 'skip') {

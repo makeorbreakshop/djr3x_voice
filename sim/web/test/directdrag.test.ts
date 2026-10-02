@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  couplingAt, couplingRangeA, jointChain, partDrive, pickChain, pointAngle, rayAngle, rayLineParam, rotaryValue, softClamp, solveIK,
+  couplingAt, couplingRangeA, jointChain, partDrive, pickChain, pointAngle, rayAngle, rayLineParam, rotaryValue, softLimit, solveIK, springStep, pickByDirection,
   type ChainNode, type Coupling,
 } from '../src/workbench/drag';
 import { gearMatrix, linkMatrices } from '../src/workbench/kinematics';
@@ -50,15 +50,52 @@ describe('drag projections', () => {
     expect(rayLineParam(new THREE.Ray(V(0, 0, 0), V(0, 1, 0)), origin, dir)).toBeNull();
   });
 
-  it('limits: soft while dragging (never more than the give), hard with none', () => {
-    expect(softClamp(10, -20, 25, 3)).toBe(10);
-    expect(softClamp(26, -20, 25, 3)).toBeGreaterThan(25);
-    expect(softClamp(26, -20, 25, 3)).toBeLessThan(26);
-    expect(softClamp(400, -20, 25, 3)).toBeLessThanOrEqual(28);
-    expect(softClamp(400, -20, 25, 3)).toBeGreaterThan(27.9);
-    expect(softClamp(-400, -20, 25, 3)).toBeGreaterThanOrEqual(-23);
-    expect(softClamp(30, -20, 25, 3)).toBeGreaterThan(softClamp(27, -20, 25, 3));
-    expect(softClamp(30, -20, 25, 0)).toBe(25);
+  it('limits: a tanh cushion into each end, never past it, the value as dragged inside', () => {
+    expect(softLimit(0, -20, 7.5, 2.5)).toBe(0);
+    expect(softLimit(4.9, -20, 7.5, 2.5)).toBe(4.9);
+    for (const v of [7.5, 8, 12]) expect(softLimit(v, -20, 7.5, 2.5)).toBeLessThan(7.5);
+    expect(softLimit(400, -20, 7.5, 2.5)).toBeLessThanOrEqual(7.5);
+    expect(softLimit(400, -20, 7.5, 2.5)).toBeGreaterThan(7.499);
+    expect(softLimit(-400, -20, 7.5, 2.5)).toBeGreaterThanOrEqual(-20);
+    expect(softLimit(-21, -20, 7.5, 2.5)).toBeGreaterThan(-20);
+    // monotone and smooth: no step anywhere, slope 1 at the knee
+    let prev = -Infinity, slope = NaN;
+    for (let v = -30; v <= 20; v += 0.05) {
+      const y = softLimit(v, -20, 7.5, 2.5);
+      expect(y).toBeGreaterThanOrEqual(prev);
+      if (prev > -Infinity) {
+        const s = (y - prev) / 0.05;
+        if (!Number.isNaN(slope)) expect(Math.abs(s - slope)).toBeLessThan(0.03);
+        slope = s;
+      }
+      prev = y;
+    }
+    expect(softLimit(30, -20, 25, 0)).toBe(25);
+  });
+
+  it('the shown pose follows the solve through a critically damped spring: quick, no overshoot', () => {
+    let x = 0, v = 0;
+    const seen: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      [x, v] = springStep(x, v, 10, 72, 1 / 60);
+      seen.push(x);
+    }
+    expect(Math.max(...seen)).toBeLessThanOrEqual(10 + 1e-9); // never past the target
+    expect(seen[3]).toBeGreaterThan(8); // 4 frames (~67 ms): most of the way
+    expect(seen.every((y, i) => i === 0 || y >= seen[i - 1])).toBe(true);
+    // stable at a long frame
+    [x, v] = springStep(0, 0, 10, 72, 0.5);
+    expect(x).toBeGreaterThan(9.9);
+    expect(x).toBeLessThanOrEqual(10);
+  });
+
+  it('direction lock: the joint whose motion matches the first pixels (either way), the nearer on a tie', () => {
+    const tilt = { x: 0.2, y: -6 }, roll = { x: 5, y: 0.3 };
+    expect(pickByDirection([roll, tilt], { x: 1, y: 8 })).toBe(1);
+    expect(pickByDirection([roll, tilt], { x: -8, y: 1 })).toBe(0);
+    expect(pickByDirection([roll, tilt], { x: 6, y: -5.5 })).toBe(0); // a near tie: the nearer joint
+    expect(pickByDirection([{ x: 0, y: 0 }, tilt], { x: 3, y: 0 })).toBe(1); // one that does not move on screen never wins
+    expect(pickByDirection([{ x: 0, y: 0 }], { x: 3, y: 0 })).toBe(-1);
   });
 
   it('coupled limits: the dependent range from the table, and the driver stops where the dependent would collide', () => {
@@ -122,6 +159,50 @@ describe('IK (damped least squares)', () => {
     const out = solveIK(fk, [0, 0], J, V(0, -400, 400), { iters: 80 });
     expect(out[0]).toBeLessThanOrEqual(J[0].max + 1e-9);
     expect(out[0]).toBeGreaterThanOrEqual(J[0].min - 1e-9);
+  });
+
+  it('warm-started frame to frame, the solution moves continuously along a smooth cursor path', () => {
+    let q = [0, 0];
+    let worst = 0;
+    const N = 60;
+    for (let i = 1; i <= N; i++) {
+      const t = i / N;
+      const goal = [J[0].min * 0.7 * Math.sin(t * Math.PI), J[1].max * 0.8 * Math.sin(t * 2 * Math.PI)];
+      const next = solveIK(fk, q, J, fk(goal), { iters: 8, maxStep: 4 });
+      worst = Math.max(worst, Math.abs(next[0] - q[0]), Math.abs(next[1] - q[1]));
+      q = next;
+    }
+    // the path's own step is under 1.6 deg a frame: the solve never jumps beyond a small multiple of it
+    expect(worst).toBeLessThan(3);
+    expect(fk(q).distanceTo(fk([J[0].min * 0.7 * Math.sin(Math.PI), 0]))).toBeLessThan(1);
+  });
+
+  it("direction lock on the head: down the screen picks tilt, across picks roll", () => {
+    // seen from the front (+Z toward the camera): screen x = world x, screen y = -world y
+    const scr = (p: THREE.Vector3) => ({ x: p.x, y: -p.y });
+    const at = fk([0, 0]);
+    const motion = [[0.5, 0], [0, 0.5]].map(([dt, dr]) => {
+      const p = fk([dt, dr]);
+      return { x: (scr(p).x - scr(at).x) / 0.5, y: (scr(p).y - scr(at).y) / 0.5 };
+    });
+    expect(pickByDirection(motion, { x: 0.5, y: 8 })).toBe(0); // tilt
+    expect(pickByDirection(motion, { x: 8, y: 0.5 })).toBe(1); // roll
+  });
+
+  it('a handle drags its one joint: the ring on tilt turns tilt alone, by the swept angle', () => {
+    const tilt = gimbal.joints.find((j) => j.id === 'head_tilt')!;
+    const axis = V(...tilt.axis), pivot = V(...tilt.pivot);
+    // the ring's handle point, and the cursor where that point would be 5 degrees on
+    const onRing = V(0, 0, 40);
+    const centre = pivot.clone().addScaledVector(axis, onRing.clone().sub(pivot).dot(axis));
+    const moved = onRing.clone().sub(centre).applyAxisAngle(axis.clone().normalize(), (5 * Math.PI) / 180).add(centre);
+    const ray = new THREE.Ray(moved.clone().addScaledVector(axis, 300), axis.clone().negate());
+    const c = rayAngle(ray, centre, axis, onRing.clone().sub(centre))!;
+    const v = rotaryValue(0, 0, 0, c, 1);
+    expect(v).toBeCloseTo(5, 6);
+    // only tilt: the grabbed point now sits where the cursor is, roll untouched
+    const p = onRing.clone().applyMatrix4(linkMatrices(gimbal.links, gimbal.joints, { head_tilt: v }).get('cross')!);
+    expect(p.distanceTo(moved)).toBeLessThan(1e-6);
   });
 
   it('weights favour the nearest joint', () => {

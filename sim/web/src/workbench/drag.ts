@@ -71,12 +71,49 @@ export function rayLineParam(ray: THREE.Ray, origin: THREE.Vector3, dir: THREE.V
   return (b * ee - c * dd) / den;
 }
 
-/** A limit with give: past an end the value creeps on, asymptotically, at most `soft` beyond it. */
-export function softClamp(v: number, min: number, max: number, soft: number): number {
-  if (soft <= 0) return Math.min(max, Math.max(min, v));
-  if (v > max) return max + soft * (1 - Math.exp(-(v - max) / soft));
-  if (v < min) return min - soft * (1 - Math.exp(-(min - v) / soft));
+/**
+ * A smooth limit: the value as dragged inside the range, easing into each end along a tanh over the last
+ * `soft` units, so a drag runs into a limit like a cushion (no hard stop to stutter on) and never past it.
+ * Slope 1 and continuous everywhere inside [min + soft, max - soft]; at most the limit beyond.
+ */
+export function softLimit(v: number, min: number, max: number, soft: number): number {
+  const s = Math.max(0, Math.min(soft, (max - min) / 2));
+  if (s <= 0) return Math.min(max, Math.max(min, v));
+  if (v > max - s) return max - s + s * Math.tanh((v - (max - s)) / s);
+  if (v < min + s) return min + s - s * Math.tanh((min + s - v) / s);
   return v;
+}
+
+/**
+ * One step of a critically damped spring (closed form, stable at any dt): the shown value `x` (velocity `v`)
+ * toward `target`. `omega` sets the speed: 95 % of a step in about 4.7 / omega seconds.
+ */
+export function springStep(x: number, v: number, target: number, omega: number, dt: number): [number, number] {
+  const d = x - target;
+  const e = Math.exp(-omega * dt);
+  const t = (v + omega * d) * dt;
+  return [target + (d + t) * e, (v - omega * t) * e];
+}
+
+/**
+ * Direction lock: which of several joints a drag means, from the cursor's first few pixels. `motion[i]` is
+ * how the grabbed point moves on screen per unit of joint i (px); the joint whose motion lines up best with
+ * the cursor wins (either sign), the nearer joint (lower index) on a near tie. -1 when none moves on screen.
+ */
+export function pickByDirection(motion: { x: number; y: number }[], cursor: { x: number; y: number }, tie = 0.06): number {
+  const c = Math.hypot(cursor.x, cursor.y);
+  let best = -1;
+  let score = -Infinity;
+  motion.forEach((m, i) => {
+    const l = Math.hypot(m.x, m.y);
+    if (l < 1e-6 || c < 1e-9) return;
+    const cos = Math.abs((m.x * cursor.x + m.y * cursor.y) / (l * c));
+    if (cos > score + tie) {
+      best = i;
+      score = cos;
+    }
+  });
+  return best;
 }
 
 // ------------------------------------------------------------------ coupled limits

@@ -2,29 +2,41 @@
  * Direct manipulation in Build, the way Fusion and Onshape do it: press on a part and drag, and the
  * mechanism moves the way its joints allow (drag.ts has the maths).
  *
- * - A part on a moving link drags its own joint: a revolute one like a door (the swept angle about its axis),
- *   a prismatic one along its axis. More than one joint between the part and its assembly's ground (Hunter's
- *   head: tilt and roll; the neck: pan and lift) and the grabbed point follows the cursor by damped least
- *   squares on those joints. Alt: only the nearest joint. Shift: on through every joint to the ground.
- * - An actuator's output drags its servo: a horn (or its rod or ball stud) turns the servo and the push rods
- *   solve the joints; a pinion, spline or hub turns through its ratio and moves its joint.
- * - Grounded parts do not drag (a lock cursor; a drag on one orbits as on empty space). While exploded,
- *   parts do not drag either: the explode is a view of the parts apart, not a pose.
- * - Limits hold: soft at the ends while dragging (settling on release), and the manifest's coupled limits.
- * - A press without a drag still selects; Ctrl/Cmd+Z puts back the pose before the last drag; the arrow keys
+ * - Handles: a selected (or hovered) part that moves shows a thin ring per revolute joint of its chain and an
+ *   arrow per prismatic one, at the joint, sized to the screen. A handle drags that one joint only.
+ * - A drag on the part itself: one joint in its chain, it turns like a door (the swept angle about its axis) or
+ *   slides along its axis. Several (Hunter's head: tilt and roll; the neck: pan and lift): the first ~8 px
+ *   pick the joint whose motion best matches the cursor, and that joint alone moves (the label names it).
+ *   Shift: the grabbed point follows the cursor on all of them (damped least squares); Ctrl/Cmd+Shift: on
+ *   through every joint to the ground. Alt: the nearest joint only.
+ * - An actuator's output: a pinion, spline or horn of a direct drive turns its joint through its ratio (either
+ *   visor horn turns the visor; the mirrored servos follow). A push-rod horn, its rod or ball stud: "Drive:
+ *   servo" turns that servo and the rods decide the joints (the label shows them); "Drive: joint" (the pill by
+ *   a selected horn, or D) moves the joint that servo mostly drives, and both servos follow.
+ * - Smooth: pointer input is only recorded; the solve runs once per frame (warm-started from the last
+ *   solution) and the model follows it through a critically damped spring (~60 ms), snapping home on release.
+ *   Limits ease in (tanh), the manifest's coupled limits hold, and a push-rod pose the rods cannot reach keeps
+ *   the last good one. While a drag lasts the frame pacer stays at full rate (no still frames mid-drag).
+ * - Grounded parts do not drag (a lock cursor; a drag on one orbits). No drag while exploded or in
+ *   Instructions. A press without a drag selects; Ctrl/Cmd+Z puts back the pose before a drag; the arrow keys
  *   nudge the selected part's joint (Left/Right the nearest, Up/Down the next one up; Shift: x5).
  */
 
 import * as THREE from 'three';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { actuators, servoAngle, solveServo, type Actuator } from '../mechrig/servos';
 import { linkMatrices, type Pose } from './kinematics';
 import {
-  couplingAt, couplingRangeA, jointChain, moves, partDrive, pickChain, planeBasis, rayAngle, rayLineParam,
-  rotaryValue, softClamp, solveIK, type ChainJoint, type ChainMode, type Coupling,
+  couplingAt, couplingRangeA, jointChain, moves, partDrive, pickByDirection, pickChain, planeBasis, rayAngle, rayLineParam,
+  rotaryValue, softLimit, solveIK, springStep, type ChainJoint, type ChainMode, type Coupling,
 } from './drag';
 import type { MGear, MJoint, MLinkage } from './manifest';
 import { jointLabel } from './systems';
 import type { AsmNode, BuildHost, Workbench } from './workbench';
+
+type DriveMode = 'servo' | 'joint';
 
 /** What a press on a part would move. */
 type Target =
@@ -34,7 +46,7 @@ type Target =
 
 interface Rotary {
   kind: 'rotary';
-  /** The frame the axis is stated in (live: it may move as the value does, a horn on the head). */
+  /** The frame the axis is stated in, at the drag's solved pose (it may move with the value: a horn on the head). */
   frame: () => THREE.Matrix4;
   centre: THREE.Vector3;
   axis: THREE.Vector3;
@@ -45,7 +57,6 @@ interface Rotary {
   v0: number;
   raw: number;
   radius: number;
-  /** The grabbed point, frame coordinates, at the start. */
   local: THREE.Vector3;
   soft: boolean;
   get(): number;
@@ -79,10 +90,37 @@ interface IK {
   label(): string;
 }
 
-type Grab = Rotary | Linear | IK;
+/** A free drag on a part of several joints, waiting for the cursor's first pixels to say which. */
+interface Lock {
+  kind: 'lock';
+  chain: ChainJoint<AsmNode>[];
+  node: AsmNode;
+  link: string | null;
+  point: THREE.Vector3;
+  label(): string;
+}
+
+type Grab = Rotary | Linear | IK | Lock;
+
+interface Handle {
+  node: AsmNode;
+  joint: MJoint;
+  /** A dark underlay and the orange line over it (screen-width lines: they read on any paint). */
+  obj: THREE.Group;
+  top: LineSegments2;
+  /** Its outline as segment pairs, unit size in the handle's own frame. */
+  unit: THREE.Vector3[];
+  /** The same in world space (for hit testing), refreshed each frame. */
+  pts: THREE.Vector3[];
+}
 
 const ACCENT = 0xe8762a;
-const SOFT = 3; // deg or mm of give past a limit while dragging
+/** The tanh cushion at each end of a joint's range (deg or mm), at most a tenth of the range. */
+const SOFT = 2.5;
+/** The shown pose follows the solve with this spring: 95 % of a step in ~65 ms. */
+const OMEGA = 72;
+const LOCK_PX = 8;
+const HANDLE_PX = 46;
 const sgn = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}`;
 const unitOf = (j: MJoint) => (j.unit === 'mm' ? ' mm' : '°');
 const SERVO_NAME: Record<string, string> = {
@@ -91,19 +129,39 @@ const SERVO_NAME: Record<string, string> = {
   pan_servo: 'Pan servo', lift_servo: 'Lift servo', lower_servo: 'Lower ring servo', top_servo: 'Top ring servo',
   col_pan_servo: 'Pan servo', col_lift_servo: 'Lift servo', col_lower_servo: 'Lower ring servo', col_top_servo: 'Top ring servo',
 };
+const servoName = (s: string) => SERVO_NAME[s] ?? s;
 const LOCK_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
   "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M2 1v15l4-4 3 6 2-1-3-6h5z' fill='#fff' stroke='#000'/>"
   + "<path d='M15.5 15v-2a2.5 2.5 0 0 1 5 0v2' fill='none' stroke='#2a2c31' stroke-width='1.4'/><rect x='13.5' y='15' width='9' height='7' rx='1.2' fill='#8a8f99' stroke='#2a2c31'/></svg>",
 )}") 2 1, default`;
+const DRIVE_KEY = 'r3x.build.drive';
 
 export class DirectDrag {
   /** A drag is moving the model (the puppet and the camera stand down). */
   dragging = false;
-  private down: { x: number; y: number; pointer: number; touch: boolean; hit: THREE.Intersection; target: Target | null; why: 'grounded' | 'exploded' | null; lastX: number; lastY: number } | null = null;
+  /** Push-rod horns: turn the servo, or move the joint it mostly drives. */
+  driveMode: DriveMode = (() => {
+    try {
+      return localStorage.getItem(DRIVE_KEY) === 'joint' ? 'joint' : 'servo';
+    } catch {
+      return 'servo';
+    }
+  })();
+  private down: {
+    x: number; y: number; pointer: number; touch: boolean; hit: THREE.Intersection | null; target: Target | null;
+    handle: Handle | null; why: 'grounded' | 'exploded' | null; mods: { shift: boolean; ground: boolean };
+  } | null = null;
   private grab: Grab | null = null;
+  /** The latest pointer position, and whether the solve has seen it. */
+  private ptr = { x: 0, y: 0, dirty: false };
+  /** The drag's solved pose (sparse, over the nodes' own) and the shown pose's spring state. */
+  private solved = new Map<AsmNode, Pose>();
+  private springs = new Map<string, { node: AsmNode; id: string; x: number; v: number }>();
+  private lastTick = 0;
   private controlsWere = true;
   private justDragged = false;
   private tag: HTMLDivElement | null = null;
+  private pill: HTMLDivElement | null = null;
   private hintTimer = 0;
   private lastHint = 0;
   private readonly giz = new THREE.Group();
@@ -113,31 +171,39 @@ export class DirectDrag {
   private readonly track: THREE.Line;
   private readonly dot: THREE.Points;
   private readonly lead: THREE.Line;
+  private readonly handleGroup = new THREE.Group();
+  private readonly handleMat: LineMaterial;
+  private readonly handleHot: LineMaterial;
+  private readonly handleUnder: LineMaterial;
+  private handles: Handle[] = [];
+  private handleKey = '';
+  private hotHandle: Handle | null = null;
+  /** The part whose handles show while nothing is selected (the pointer is on it, or on its handles). */
+  private hoverMesh: THREE.Object3D | null = null;
   private hoverAt = 0;
   private hoverTimer = 0;
   private lastNudge = 0;
-  private settle: number | null = null;
 
   constructor(private readonly wb: Workbench, private readonly host: BuildHost) {
     const mat = (opacity: number) => new THREE.LineBasicMaterial({ color: ACCENT, transparent: true, opacity, depthTest: false, depthWrite: false });
-    const circle = new THREE.BufferGeometry().setFromPoints(Array.from({ length: 72 }, (_, i) => new THREE.Vector3(Math.cos((i / 72) * 2 * Math.PI), Math.sin((i / 72) * 2 * Math.PI), 0)));
-    this.ring = new THREE.LineLoop(circle, mat(0.35));
+    this.ring = new THREE.LineLoop(circleGeometry(72), mat(0.3));
     this.arc = new THREE.Line(new THREE.BufferGeometry(), mat(0.95));
-    this.axisLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -0.7), new THREE.Vector3(0, 0, 0.7)]), mat(0.6));
+    this.axisLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, -0.6), new THREE.Vector3(0, 0, 0.6)]), mat(0.5));
     this.track = new THREE.Line(new THREE.BufferGeometry(), mat(0.55));
     this.dot = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]),
       new THREE.PointsMaterial({ color: ACCENT, size: 7, sizeAttenuation: false, depthTest: false, depthWrite: false, transparent: true }));
     this.lead = new THREE.Line(new THREE.BufferGeometry(), mat(0.6));
-    for (const o of [this.ring, this.arc, this.axisLine, this.track, this.dot, this.lead]) {
-      o.renderOrder = 60;
-      o.frustumCulled = false;
-      o.raycast = () => {};
-      this.giz.add(o);
-    }
+    for (const o of [this.ring, this.arc, this.axisLine, this.track, this.dot, this.lead]) this.overlay(o, this.giz);
     this.giz.name = 'build_drag_gizmo';
     this.giz.matrixAutoUpdate = false;
     this.giz.visible = false;
     host.scene.add(this.giz);
+    const fat = (color: number, linewidth: number, opacity: number) => new LineMaterial({ color, linewidth, transparent: true, opacity, depthTest: false, depthWrite: false });
+    this.handleMat = fat(ACCENT, 1.6, 0.9);
+    this.handleHot = fat(ACCENT, 2.6, 1);
+    this.handleUnder = fat(0x101216, 4.5, 0.45);
+    this.handleGroup.name = 'build_joint_handles';
+    host.scene.add(this.handleGroup);
 
     const el = host.renderer.domElement;
     // capture: ahead of OrbitControls' own pointerdown on the canvas, so a press on a part never starts an orbit
@@ -147,6 +213,13 @@ export class DirectDrag {
     el.addEventListener('pointercancel', (e) => this.onUp(e), { capture: true });
     el.addEventListener('pointerleave', () => { if (!this.down) this.cursor(''); });
     addEventListener('keydown', (e) => this.onKey(e));
+  }
+
+  private overlay(o: THREE.Object3D, parent: THREE.Object3D) {
+    o.renderOrder = 60;
+    o.frustumCulled = false;
+    o.raycast = () => {};
+    parent.add(o);
   }
 
   /** Whether the pointer handler of a click should stand down (the press was a drag). */
@@ -159,6 +232,14 @@ export class DirectDrag {
   private usable() {
     const wb = this.wb;
     return wb.active && !!wb.top && !wb.guide && !wb.video;
+  }
+
+  setDriveMode(m: DriveMode) {
+    this.driveMode = m;
+    try {
+      localStorage.setItem(DRIVE_KEY, m);
+    } catch { /* private window */ }
+    this.syncPill();
   }
 
   // ------------------------------------------------------------------ what a part moves
@@ -226,9 +307,31 @@ export class DirectDrag {
     return lo <= hi ? [lo, hi] : [j.limits.min, j.limits.max];
   }
 
-  // ------------------------------------------------------------------ kinematics off the scene graph
+  private soft(lo: number, hi: number) {
+    return Math.min(SOFT, 0.1 * (hi - lo));
+  }
 
-  /** A link's world matrix with some poses overridden (the IK's trial poses), without touching the model. */
+  // ------------------------------------------------------------------ the solved pose
+
+  /** A node's pose as the drag has solved it (the shown pose lags it through the spring). */
+  private poseOf = (n: AsmNode): Pose => {
+    const s = this.solved.get(n);
+    return s ? { ...n.pose, ...s } : n.pose;
+  };
+
+  private val(node: AsmNode, id: string) {
+    return this.solved.get(node)?.[id] ?? node.pose[id] ?? 0;
+  }
+
+  private put(node: AsmNode, id: string, v: number) {
+    let s = this.solved.get(node);
+    if (!s) this.solved.set(node, (s = {}));
+    s[id] = v;
+    const k = `${node.key}:${id}`;
+    if (!this.springs.has(k)) this.springs.set(k, { node, id, x: node.pose[id] ?? 0, v: 0 });
+  }
+
+  /** A link's world matrix with some poses overridden (trial or solved poses), without touching the model. */
   private linkWorld(n: AsmNode, link: string | null, poseOf: (n: AsmNode) => Pose): THREE.Matrix4 {
     const g = this.groupWorld(n, poseOf);
     const m = link ? linkMatrices(n.asm.links, n.asm.joints, poseOf(n)).get(link) : undefined;
@@ -244,32 +347,59 @@ export class DirectDrag {
 
   // ------------------------------------------------------------------ servos
 
-  /** Turn an actuator to `deg` (within its range), stopping short where the linkage or a joint limit says so. */
-  private setServo(a: Actuator, deg: number): void {
+  /** Turn an actuator to `deg` (within its range) in the solved pose, stopping short where the linkage or a
+   *  joint limit says so, and never jumping to the rods' other branch (the last good pose holds). */
+  private setServo(a: Actuator, deg: number, into: (id: string, v: number) => void = (id, v) => this.put(a.node, id, v)): void {
+    const base = this.poseOf(a.node);
+    const cur = servoAngle(a, base) ?? 0;
     const d = Math.min(a.range[1], Math.max(a.range[0], deg));
     const ok = (x: number) => {
-      const sol = solveServo(a, x);
+      const sol = solveServo(a, x, base);
       if (!sol) return null;
       for (const [id, v] of Object.entries(sol)) {
         const j = a.node.asm.joints.find((q) => q.id === id)!;
-        const [lo, hi] = this.limitsOf(a.node, j, (n) => (n === a.node ? { ...n.pose, ...sol } : n.pose));
+        const [lo, hi] = this.limitsOf(a.node, j, (n) => (n === a.node ? { ...base, ...sol } : this.poseOf(n)));
         if (v < lo - 1e-3 || v > hi + 1e-3) return null;
+        // continuity: a few degrees of servo never throws a joint far (a branch flip near the rods' edge)
+        if (Math.abs(v - (base[id] ?? 0)) > 2 + 3 * Math.abs(x - cur)) return null;
       }
       return sol;
     };
     let sol = ok(d);
     if (!sol) {
-      let good = servoAngle(a) ?? 0;
+      let good = cur;
       let bad = d;
-      if (!ok(good)) return;
       for (let i = 0; i < 14; i++) {
         const mid = (good + bad) / 2;
         if (ok(mid)) good = mid;
         else bad = mid;
       }
-      sol = ok(good);
+      sol = Math.abs(good - cur) > 1e-6 ? ok(good) : null;
     }
-    if (sol) Object.assign(a.node.pose, sol);
+    if (sol) for (const [id, v] of Object.entries(sol)) into(id, v);
+  }
+
+  /** The joint a push-rod servo mostly drives here (relative to its range). */
+  private dominantJoint(a: Actuator): MJoint {
+    const base = this.poseOf(a.node);
+    const cur = servoAngle(a, base) ?? 0;
+    const sol = solveServo(a, cur + 2, base) ?? solveServo(a, cur - 2, base);
+    let best = a.joints[0];
+    let score = -1;
+    for (const j of a.joints) {
+      const dv = Math.abs((sol?.[j.id] ?? 0) - (base[j.id] ?? 0)) / Math.max(1e-6, j.limits.max - j.limits.min);
+      if (dv > score) {
+        score = dv;
+        best = j;
+      }
+    }
+    return best;
+  }
+
+  /** "Gimbal L servo +7° · Gimbal R servo −3°": every servo of a push-rod group at the solved pose. */
+  private servoLine(a: Actuator) {
+    const group = actuators([a.node]).filter((x) => x.group?.some((l) => l.id === a.linkage?.id) || x.servo === a.servo);
+    return group.map((x) => `${servoName(x.servo)} ${sgn(servoAngle(x, this.poseOf(a.node)) ?? 0)}°`).join(' · ');
   }
 
   // ------------------------------------------------------------------ a drag
@@ -281,168 +411,229 @@ export class DirectDrag {
     return rc.ray;
   }
 
-  private begin(t: Target, hit: THREE.Intersection): Grab | null {
-    const point = hit.point.clone();
-    const rotary = (o: Omit<Rotary, 'kind' | 'u' | 'raw' | 'radius' | 'local'>): Rotary => {
-      const local = point.clone().applyMatrix4(o.frame().clone().invert());
-      const off = local.clone().sub(o.centre);
-      const n = o.axis.clone().normalize();
-      off.addScaledVector(n, -off.dot(n));
-      const radius = Math.max(off.length(), 4);
-      const u = off.lengthSq() > 1e-9 ? off.normalize() : planeBasis(n).u;
-      // the drag plane square to the axis through the grabbed point (not the pivot, which may sit far along the
-      // axis - a ring's is at the floor): the same turn, and the cursor stays on the part
-      const centre = o.centre.clone().addScaledVector(n, local.clone().sub(o.centre).dot(n));
-      return { kind: 'rotary', ...o, centre, axis: n, u, raw: o.v0, radius, local };
-    };
+  private jointText(node: AsmNode, j: MJoint) {
+    return `${jointLabel(j.name)} ${sgn(this.val(node, j.id))}${unitOf(j)}`;
+  }
+
+  /** One joint, grabbed at a world point: a door for a revolute joint, a slide for a prismatic one. */
+  private single(node: AsmNode, j: MJoint, point: THREE.Vector3, label?: () => string): Grab | null {
+    if (!node.links.get(j.parent_link)) return null;
+    const frame = () => this.linkWorld(node, j.parent_link, this.poseOf);
+    const get = () => this.val(node, j.id);
+    const set = (v: number) => this.put(node, j.id, v);
+    const limits = () => this.limitsOf(node, j, this.poseOf);
+    const lab = label ?? (() => this.jointText(node, j));
+    if (j.type === 'prismatic') {
+      const origin = point.clone().applyMatrix4(frame().invert());
+      return { kind: 'linear', frame, origin, dir: new THREE.Vector3(...j.axis).normalize(), v0: get(), raw: get(), get, set, limits, label: lab };
+    }
+    return this.rotary({ frame, centre: new THREE.Vector3(...j.pivot), axis: new THREE.Vector3(...j.axis), rate: 1, v0: get(), soft: true, get, set, limits, label: lab }, point);
+  }
+
+  private rotary(o: Omit<Rotary, 'kind' | 'u' | 'raw' | 'radius' | 'local'>, point: THREE.Vector3): Rotary {
+    const local = point.clone().applyMatrix4(o.frame().invert());
+    const n = o.axis.clone().normalize();
+    const off = local.clone().sub(o.centre);
+    off.addScaledVector(n, -off.dot(n));
+    const radius = Math.max(off.length(), 1);
+    const u = off.lengthSq() > 1e-9 ? off.normalize() : planeBasis(n).u;
+    // the drag plane square to the axis through the grabbed point (not the pivot, which may sit far along the
+    // axis - a ring's is at the floor): the same turn, and the cursor stays on the part
+    const centre = o.centre.clone().addScaledVector(n, local.clone().sub(o.centre).dot(n));
+    return { kind: 'rotary', ...o, centre, axis: n, u, raw: o.v0, radius, local };
+  }
+
+  private begin(t: Target, point: THREE.Vector3, mods: { shift: boolean; ground: boolean }): Grab | null {
     if (t.kind === 'servo') {
       const { a, lk } = t;
-      const link = a.node.links.get(lk.horn.link);
-      if (!link) return null;
-      const v0 = servoAngle(a) ?? 0;
-      const others = () => a.joints.map((j) => `${jointLabel(j.name)} ${sgn(a.node.pose[j.id] ?? 0)}${unitOf(j)}`).join(' · ');
-      return rotary({
-        frame: () => link.matrixWorld, centre: new THREE.Vector3(...lk.horn.centre), axis: new THREE.Vector3(...lk.horn.axis), rate: 1, v0, soft: false,
-        get: () => servoAngle(a) ?? v0,
+      if (this.driveMode === 'joint') {
+        const j = this.dominantJoint(a);
+        return this.single(a.node, j, point, () => `${this.jointText(a.node, j)} → ${this.servoLine(a)}`);
+      }
+      if (!a.node.links.get(lk.horn.link)) return null;
+      const v0 = servoAngle(a, this.poseOf(a.node)) ?? 0;
+      return this.rotary({
+        frame: () => this.linkWorld(a.node, lk.horn.link, this.poseOf), centre: new THREE.Vector3(...lk.horn.centre),
+        axis: new THREE.Vector3(...lk.horn.axis), rate: 1, v0, soft: false,
+        get: () => servoAngle(a, this.poseOf(a.node)) ?? v0,
         set: (v) => this.setServo(a, v),
         limits: () => a.range,
-        label: () => `${SERVO_NAME[a.servo] ?? a.servo} ${sgn(servoAngle(a) ?? 0)}° → ${others()}`,
-      });
+        label: () => `${servoName(a.servo)} ${sgn(servoAngle(a, this.poseOf(a.node)) ?? 0)}° → ${a.joints.map((j) => this.jointText(a.node, j)).join(' · ')}`,
+      }, point);
     }
     if (t.kind === 'gear') {
       const { gear, gearNode, node, joint } = t;
-      const link = gearNode.links.get(gear.link);
-      if (!link) return null;
-      const servoPer = gear.servo_deg_per_unit ?? joint.drive?.servo_deg_per_unit;
-      return rotary({
-        frame: () => link.matrixWorld, centre: new THREE.Vector3(...gear.pivot), axis: new THREE.Vector3(...gear.axis), rate: gear.deg_per_unit,
-        v0: node.pose[joint.id] ?? 0, soft: true,
-        get: () => node.pose[joint.id] ?? 0,
-        set: (v) => { node.pose[joint.id] = v; },
-        limits: () => this.limitsOf(node, joint),
+      if (!gearNode.links.get(gear.link)) return null;
+      // every servo on this joint (the visor's mirrored pair turns together)
+      const servos = (node.asm.gears ?? []).filter((g) => g.joint === joint.id && g.servo && !g.joint_assembly);
+      const list = servos.length ? servos : gear.servo ? [gear] : [];
+      return this.rotary({
+        frame: () => this.linkWorld(gearNode, gear.link, this.poseOf), centre: new THREE.Vector3(...gear.pivot),
+        axis: new THREE.Vector3(...gear.axis), rate: gear.deg_per_unit, v0: this.val(node, joint.id), soft: true,
+        get: () => this.val(node, joint.id),
+        set: (v) => this.put(node, joint.id, v),
+        limits: () => this.limitsOf(node, joint, this.poseOf),
         label: () => {
-          const v = node.pose[joint.id] ?? 0;
-          const servo = gear.servo && servoPer ? `${SERVO_NAME[gear.servo] ?? gear.servo} ${sgn(v * servoPer)}° → ` : '';
-          return `${servo}${jointLabel(joint.name)} ${sgn(v)}${unitOf(joint)}`;
+          const v = this.val(node, joint.id);
+          const per = (g: MGear) => g.servo_deg_per_unit ?? joint.drive?.servo_deg_per_unit;
+          const sv = list.filter((g) => per(g)).map((g) => `${servoName(g.servo!)} ${sgn(v * per(g)!)}°`).join(' · ');
+          return `${sv ? `${sv} → ` : ''}${this.jointText(node, joint)}`;
         },
-      });
+      }, point);
     }
     const { chain } = t;
-    if (chain.length === 1) {
-      const { node, joint: j } = chain[0];
-      const link = node.links.get(j.parent_link);
-      if (!link) return null;
-      const get = () => node.pose[j.id] ?? 0;
-      const set = (v: number) => { node.pose[j.id] = v; };
-      const limits = () => this.limitsOf(node, j);
-      const label = () => `${jointLabel(j.name)} ${sgn(get())}${unitOf(j)}`;
-      if (j.type === 'prismatic') {
-        const frame = () => link.matrixWorld;
-        const origin = point.clone().applyMatrix4(frame().clone().invert());
-        return { kind: 'linear', frame, origin, dir: new THREE.Vector3(...j.axis).normalize(), v0: get(), raw: get(), get, set, limits, label };
-      }
-      return rotary({ frame: () => link.matrixWorld, centre: new THREE.Vector3(...j.pivot), axis: new THREE.Vector3(...j.axis), rate: 1, v0: get(), soft: true, get, set, limits, label });
+    if (chain.length === 1) return this.single(chain[0].node, chain[0].joint, point);
+    if (mods.shift) {
+      // free: the grabbed point follows the cursor on every joint, in the plane facing the camera
+      const lw = this.linkWorld(t.node, t.link, this.poseOf);
+      const local = point.clone().applyMatrix4(lw.invert());
+      const normal = this.host.camera.getWorldDirection(new THREE.Vector3());
+      const k = mods.ground ? 0.6 : 0.5;
+      return {
+        kind: 'ik', chain, node: t.node, link: t.link, local, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point),
+        weights: chain.map((_, i) => k ** i), target: point.clone(),
+        label: () => `Free · ${chain.map(({ node, joint }) => this.jointText(node, joint)).join(' · ')}`,
+      };
     }
-    // more than one joint: the grabbed point follows the cursor in the plane facing the camera
-    const lw = this.linkWorld(t.node, t.link, (n) => n.pose);
-    const local = point.clone().applyMatrix4(lw.invert());
-    const normal = this.host.camera.getWorldDirection(new THREE.Vector3());
-    const k = t.mode === 'extend' ? 0.6 : 0.35;
-    return {
-      kind: 'ik', chain, node: t.node, link: t.link, local, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point),
-      weights: chain.map((_, i) => k ** i), target: point.clone(),
-      label: () => chain.map(({ node, joint }) => `${jointLabel(joint.name)} ${sgn(node.pose[joint.id] ?? 0)}${unitOf(joint)}`).join(' · '),
-    };
+    return { kind: 'lock', chain, node: t.node, link: t.link, point, label: () => chain.map(({ joint }) => jointLabel(joint.name)).join(' or ') };
   }
 
-  /** Move the grab to the cursor. */
-  private update(g: Grab, x: number, y: number, dx: number, dy: number) {
-    const wb = this.wb;
+  /** Lock a free drag onto the joint its first pixels point along. */
+  private lockOn(g: Lock, dx: number, dy: number): Grab | null {
+    const r = this.host.renderer.domElement.getBoundingClientRect();
+    const cam = this.host.camera;
+    const scr = (p: THREE.Vector3) => {
+      const s = p.clone().project(cam);
+      return new THREE.Vector2(((s.x + 1) / 2) * r.width, ((1 - s.y) / 2) * r.height);
+    };
+    const local = g.point.clone().applyMatrix4(this.linkWorld(g.node, g.link, this.poseOf).invert());
+    const at = scr(g.point);
+    const motion = g.chain.map(({ node, joint }) => {
+      const h = joint.type === 'prismatic' ? 0.5 : 0.5;
+      const p = local.clone().applyMatrix4(this.linkWorld(g.node, g.link, (n) => (n === node ? { ...this.poseOf(n), [joint.id]: this.val(node, joint.id) + h } : this.poseOf(n))));
+      return scr(p).sub(at).divideScalar(h);
+    });
+    const i = pickByDirection(motion, { x: dx, y: dy });
+    const pick = g.chain[Math.max(0, i)];
+    const others = g.chain.length > 1;
+    return this.single(pick.node, pick.joint, g.point, () => `${this.jointText(pick.node, pick.joint)}${others ? '  ·  Shift: free' : ''}`);
+  }
+
+  /** Solve the grab for the cursor (once per frame). */
+  private solve(g: Grab, x: number, y: number) {
     const ray = this.ray(x, y);
+    if (g.kind === 'lock') return;
     if (g.kind === 'ik') {
       const target = ray.intersectPlane(g.plane, new THREE.Vector3());
       if (!target) return;
       g.target.copy(target);
       const ids = g.chain.map(({ node, joint }) => ({ node, id: joint.id }));
-      const poseOf = (q: number[]) => {
+      const trial = (q: number[]) => {
         const over = new Map<AsmNode, Pose>();
-        ids.forEach(({ node, id }, i) => over.set(node, { ...(over.get(node) ?? node.pose), [id]: q[i] }));
-        return (n: AsmNode) => over.get(n) ?? n.pose;
+        ids.forEach(({ node, id }, i) => over.set(node, { ...(over.get(node) ?? this.poseOf(node)), [id]: q[i] }));
+        return (n: AsmNode) => over.get(n) ?? this.poseOf(n);
       };
-      const fk = (q: number[]) => g.local.clone().applyMatrix4(this.linkWorld(g.node, g.link, poseOf(q)));
-      const q0 = ids.map(({ node, id }) => node.pose[id] ?? 0);
+      const fk = (q: number[]) => g.local.clone().applyMatrix4(this.linkWorld(g.node, g.link, trial(q)));
+      // warm start: from the last solution, so it never hops to another one between frames
+      const q0 = ids.map(({ node, id }) => this.val(node, id));
       const q = solveIK(fk, q0, g.chain.map(({ joint }, i) => ({ min: joint.limits.min, max: joint.limits.max, weight: g.weights[i] })), target, {
-        normal: g.plane.normal, iters: 10,
-        limits: (i, qq) => this.limitsOf(g.chain[i].node, g.chain[i].joint, poseOf(qq)),
+        normal: g.plane.normal, iters: 8, maxStep: 4,
+        limits: (i, qq) => this.limitsOf(g.chain[i].node, g.chain[i].joint, trial(qq)),
       });
-      ids.forEach(({ node, id }, i) => (node.pose[id] = q[i]));
-      wb.applyPose(false);
+      ids.forEach(({ node, id }, i) => this.put(node, id, q[i]));
       return;
     }
     if (g.kind === 'linear') {
-      const lr = ray.clone().applyMatrix4(g.frame().clone().invert());
+      const lr = ray.clone().applyMatrix4(g.frame().invert());
       const s = rayLineParam(lr, g.origin, g.dir);
       if (s !== null && Math.abs(lr.direction.dot(g.dir)) < 0.97) g.raw = g.v0 + s;
-      else g.raw += this.screenStep(g.origin.clone().addScaledVector(g.dir, g.get() - g.v0), g.dir, g.frame(), dx, dy);
       const [lo, hi] = g.limits();
-      g.set(softClamp(g.raw, lo, hi, Math.min(SOFT, 0.06 * (hi - lo))));
-      wb.applyPose(false);
+      g.set(softLimit(g.raw, lo, hi, this.soft(lo, hi)));
       return;
     }
-    // rotary: the frame may move with the value (a horn on the head it tilts), so settle in a few passes
+    // rotary: the frame may move with the value (a horn on the head it tilts): a few passes on the solved pose
     for (let pass = 0; pass < 3; pass++) {
-      const F = g.frame().clone();
+      const F = g.frame();
       const lr = ray.clone().applyMatrix4(F.clone().invert());
       // a plane seen nearly edge on turns a few pixels into a large angle: drag along the screen path instead
       const c = rayAngle(lr, g.centre, g.axis, g.u, 0.3);
       const before = g.get();
       if (c === null) {
-        // the plane edge on: the drag along the grabbed point's path on screen
-        const at = g.local.clone().sub(g.centre).applyAxisAngle(g.axis, (g.rate * (before - g.v0) * Math.PI) / 180).add(g.centre);
+        if (pass > 0) break;
+        const ang = (g.rate * (before - g.v0) * Math.PI) / 180;
+        const at = g.local.clone().sub(g.centre).applyAxisAngle(g.axis, ang).add(g.centre);
         const tangent = g.axis.clone().cross(at.clone().sub(g.centre)).multiplyScalar((g.rate * Math.PI) / 180);
-        if (pass === 0) g.raw += this.screenStep(at, tangent, F, dx, dy);
+        const r = this.host.renderer.domElement.getBoundingClientRect();
+        const scr = (v: THREE.Vector3) => {
+          const s = v.clone().applyMatrix4(F).project(this.host.camera);
+          return new THREE.Vector2(r.left + ((s.x + 1) / 2) * r.width, r.top + ((1 - s.y) / 2) * r.height);
+        };
+        const a0 = scr(at);
+        const b = scr(at.clone().addScaledVector(tangent, 0.01)).sub(a0).divideScalar(0.01);
+        // the cursor's offset from where the grabbed point is now, along its path
+        const l2 = b.lengthSq();
+        if (l2 > 1e-6) g.raw += ((x - a0.x) * b.x + (y - a0.y) * b.y) / l2;
       } else {
         g.raw = rotaryValue(g.raw, g.v0, 0, c, g.rate); // the grab sits at angle 0 (u points at it)
       }
       const [lo, hi] = g.limits();
-      g.set(g.soft ? softClamp(g.raw, lo, hi, Math.min(SOFT, 0.06 * (hi - lo))) : g.raw);
-      wb.applyPose(false);
+      g.set(g.soft ? softLimit(g.raw, lo, hi, this.soft(lo, hi)) : g.raw);
       if (c === null || Math.abs(g.get() - before) < 0.02) break;
     }
   }
 
-  /** How far a screen drag (dx, dy px) moves a point at `p` (frame coords) whose motion per unit is `dp`. */
-  private screenStep(p: THREE.Vector3, dp: THREE.Vector3, F: THREE.Matrix4, dx: number, dy: number): number {
-    const r = this.host.renderer.domElement.getBoundingClientRect();
-    const scr = (v: THREE.Vector3) => {
-      const s = v.clone().applyMatrix4(F).project(this.host.camera);
-      return new THREE.Vector2(((s.x + 1) / 2) * r.width, ((1 - s.y) / 2) * r.height);
-    };
-    const a = scr(p);
-    const b = scr(p.clone().addScaledVector(dp, 0.01)).sub(a).divideScalar(0.01);
-    const l2 = b.lengthSq();
-    return l2 < 1e-6 ? 0 : (dx * b.x + dy * b.y) / l2;
+  /** Per drawn frame (Workbench.tick): solve for the latest pointer, spring the shown pose toward it, draw. */
+  tick(now: number) {
+    const dt = Math.min(0.05, Math.max(0, (now - (this.lastTick || now)) / 1000));
+    this.lastTick = now;
+    if (!this.dragging || !this.grab) {
+      this.updateHandles();
+      this.syncPill();
+      return;
+    }
+    const g = this.grab;
+    if (this.ptr.dirty) {
+      this.ptr.dirty = false;
+      this.solve(g, this.ptr.x, this.ptr.y);
+    }
+    this.stepSprings(dt);
+    this.wb.applyPose(true); // the sliders only, while dragging (Workbench.onPose)
+    this.drawGizmo(g);
+    this.say(g.label(), this.ptr.x, this.ptr.y);
+    // keep the pacer at full rate (and its "input" fresh, so no still frame lands mid-drag) while the hand is on it
+    this.host.interact();
   }
 
-  /** Release: a value left past a limit settles back onto it. */
-  private finish(g: Grab) {
-    if (g.kind === 'ik') return;
-    const [lo, hi] = g.limits();
-    const v = g.get();
-    const to = Math.min(hi, Math.max(lo, v));
-    if (Math.abs(to - v) < 1e-4) return;
-    const t0 = performance.now();
-    const step = () => {
-      const k = Math.min(1, (performance.now() - t0) / 160);
-      g.set(v + (to - v) * (1 - (1 - k) ** 3));
-      this.wb.applyPose(true);
-      this.settle = k < 1 ? requestAnimationFrame(step) : null;
-    };
-    if (this.settle !== null) cancelAnimationFrame(this.settle);
-    this.settle = requestAnimationFrame(step);
+  private stepSprings(dt: number) {
+    for (const s of this.springs.values()) {
+      const target = this.solved.get(s.node)?.[s.id];
+      if (target === undefined) continue;
+      [s.x, s.v] = springStep(s.x, s.v, target, OMEGA, dt);
+      if (Math.abs(s.x - target) < 1e-4 && Math.abs(s.v) < 1e-3) [s.x, s.v] = [target, 0];
+      s.node.pose[s.id] = s.x;
+    }
   }
 
-  // ------------------------------------------------------------------ gizmo and label
+  /** Release: the shown pose is the solved one at once (no lag on letting go). */
+  private commit() {
+    for (const [node, p] of this.solved) Object.assign(node.pose, p);
+    this.solved.clear();
+    this.springs.clear();
+  }
+
+  // ------------------------------------------------------------------ gizmo, handles and label
+
+  /** World size of one screen pixel at a point (measured by projection: right for any camera and zoom). */
+  private pxAt(p: THREE.Vector3) {
+    const cam = this.host.camera;
+    const h = this.host.renderer.domElement.getBoundingClientRect().height || 1;
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion()));
+    const d = p.distanceTo(cam.position) * 0.01 || 1e-3;
+    const a = p.clone().project(cam);
+    const b = p.clone().addScaledVector(up, d).project(cam);
+    const px = (Math.abs(b.y - a.y) * h) / 2;
+    return px > 1e-9 ? d / px : 1e-3;
+  }
 
   private drawGizmo(g: Grab) {
     const show = (...on: THREE.Object3D[]) => {
@@ -450,40 +641,189 @@ export class DirectDrag {
     };
     const m = this.giz.matrix;
     if (g.kind === 'rotary') {
-      const { u } = g;
-      const w = new THREE.Vector3().crossVectors(g.axis, u);
-      m.copy(g.frame())
+      // drawn on the shown pose (the spring's), sized to the screen: 28-140 px whatever the part's size
+      const F = this.liveFrame(g);
+      const w = new THREE.Vector3().crossVectors(g.axis, g.u);
+      const c = g.centre.clone().applyMatrix4(F);
+      const mmPerWorld = 1 / new THREE.Vector3().setFromMatrixScale(F).x;
+      const px = this.pxAt(c) * mmPerWorld;
+      const r = Math.min(140 * px, Math.max(28 * px, g.radius));
+      m.copy(F)
         .multiply(new THREE.Matrix4().makeTranslation(g.centre.x, g.centre.y, g.centre.z))
-        .multiply(new THREE.Matrix4().makeBasis(u, w, g.axis))
-        .multiply(new THREE.Matrix4().makeScale(g.radius, g.radius, g.radius));
-      const sweep = (g.rate * (g.get() - g.v0) * Math.PI) / 180;
+        .multiply(new THREE.Matrix4().makeBasis(g.u, w, g.axis))
+        .multiply(new THREE.Matrix4().makeScale(r, r, r));
+      const sweep = (g.rate * (this.shownValue(g) - g.v0) * Math.PI) / 180;
       const n = Math.max(2, Math.min(96, Math.ceil(Math.abs(sweep) / 0.05)));
       this.arc.geometry.setFromPoints(Array.from({ length: n + 1 }, (_, i) => {
         const t = (sweep * i) / n;
         return new THREE.Vector3(Math.cos(t), Math.sin(t), 0);
       }));
-      (this.dot.geometry.attributes.position as THREE.BufferAttribute).setXYZ(0, Math.cos(sweep), Math.sin(sweep), 0);
-      this.dot.geometry.attributes.position.needsUpdate = true;
+      this.setDot(Math.cos(sweep), Math.sin(sweep), 0);
       show(this.ring, this.arc, this.axisLine, this.dot);
     } else if (g.kind === 'linear') {
       const [lo, hi] = g.limits();
       m.copy(g.frame());
       const at = (v: number) => g.origin.clone().addScaledVector(g.dir, v - g.v0);
       this.track.geometry.setFromPoints([at(lo), at(hi)]);
-      (this.dot.geometry.attributes.position as THREE.BufferAttribute).setXYZ(0, ...at(g.get()).toArray());
-      this.dot.geometry.attributes.position.needsUpdate = true;
+      this.setDot(...at(this.shownValue(g)).toArray());
       show(this.track, this.dot);
-    } else {
+    } else if (g.kind === 'ik') {
       m.identity();
       const p = g.local.clone().applyMatrix4(this.linkWorld(g.node, g.link, (n) => n.pose));
       this.lead.geometry.setFromPoints([p, g.target]);
-      (this.dot.geometry.attributes.position as THREE.BufferAttribute).setXYZ(0, p.x, p.y, p.z);
-      this.dot.geometry.attributes.position.needsUpdate = true;
+      this.setDot(p.x, p.y, p.z);
       show(this.dot, this.lead);
+    } else {
+      m.identity();
+      this.setDot(g.point.x, g.point.y, g.point.z);
+      show(this.dot);
     }
-    this.dot.geometry.computeBoundingSphere();
     this.giz.matrixWorldNeedsUpdate = true;
     this.giz.visible = true;
+  }
+
+  /** A rotary grab's frame at the shown pose. */
+  private liveFrame(g: Rotary) {
+    return this.withShown(() => g.frame());
+  }
+
+  /** Evaluate with the solved pose swapped for the shown one. */
+  private withShown<T>(fn: () => T): T {
+    const saved = this.solved;
+    this.solved = new Map();
+    try {
+      return fn();
+    } finally {
+      this.solved = saved;
+    }
+  }
+
+  private shownValue(g: Rotary | Linear) {
+    return this.withShown(() => g.get());
+  }
+
+  private setDot(x: number, y: number, z: number) {
+    const a = this.dot.geometry.attributes.position as THREE.BufferAttribute;
+    a.setXYZ(0, x, y, z);
+    a.needsUpdate = true;
+    this.dot.geometry.computeBoundingSphere();
+  }
+
+  /** The part whose joint handles show: the selected one, else the one under the pointer. */
+  private handleSource(): THREE.Object3D | null {
+    const sel = this.wb.selected;
+    if (sel) return this.wb.parts.get(sel)?.mesh ?? this.wb.fast.get(sel)?.obj ?? null;
+    return this.hoverMesh;
+  }
+
+  /** Rings and arrows for each joint the part's free drag can move, at the joint, sized to the screen. */
+  private updateHandles() {
+    const src = this.usable() && this.wb.explode < 1e-3 && !this.dragging ? this.handleSource() : null;
+    const t = src && src.visible ? this.targetOf(src, 'default') : null;
+    const chain = t?.kind === 'chain' ? t.chain : t?.kind === 'gear' ? [{ node: t.node, joint: t.joint }] : [];
+    const key = chain.map((c) => `${c.node.key}:${c.joint.id}`).join('|');
+    if (key !== this.handleKey) {
+      this.handleKey = key;
+      for (const h of this.handles) h.obj.traverse((o) => (o as LineSegments2).geometry?.dispose());
+      this.handleGroup.clear();
+      this.hotHandle = null;
+      this.handles = chain.map(({ node, joint }) => {
+        const unit = joint.type === 'prismatic' ? arrowPairs() : circlePairs(64);
+        const geo = new LineSegmentsGeometry().setPositions(unit.flatMap((v) => v.toArray()));
+        const obj = new THREE.Group();
+        obj.matrixAutoUpdate = false;
+        const under = new LineSegments2(geo, this.handleUnder);
+        const top = new LineSegments2(geo, this.handleMat);
+        this.overlay(under, obj);
+        this.overlay(top, obj);
+        top.renderOrder = 61;
+        this.handleGroup.add(obj);
+        return { node, joint, obj, top, unit, pts: [] };
+      });
+    }
+    const cr = this.host.renderer.domElement.getBoundingClientRect();
+    for (const m of [this.handleMat, this.handleHot, this.handleUnder]) m.resolution.set(cr.width, cr.height);
+    if (!this.handles.length || !src) return;
+    src.updateWorldMatrix(true, false);
+    const box = new THREE.Box3().setFromObject(src);
+    const partC = box.getCenter(new THREE.Vector3());
+    this.handles.forEach((h, i) => {
+      const F = this.linkWorld(h.node, h.joint.parent_link, (n) => n.pose);
+      const n = new THREE.Vector3(...h.joint.axis).normalize();
+      const local = partC.clone().applyMatrix4(F.clone().invert());
+      const piv = new THREE.Vector3(...h.joint.pivot);
+      // on the axis, level with the part (a ring's pivot is at the floor)
+      const c = piv.clone().addScaledVector(n, local.clone().sub(piv).dot(n));
+      if (h.joint.type === 'prismatic') c.copy(local);
+      const world = c.clone().applyMatrix4(F);
+      const mm = 1 / new THREE.Vector3().setFromMatrixScale(F).x;
+      const r = (HANDLE_PX + 12 * i) * this.pxAt(world) * mm;
+      const { u, w } = planeBasis(n);
+      h.obj.matrix.copy(F)
+        .multiply(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z))
+        .multiply(new THREE.Matrix4().makeBasis(u, w, n))
+        .multiply(new THREE.Matrix4().makeScale(r, r, r));
+      h.obj.matrixWorldNeedsUpdate = true;
+      h.pts = h.unit.map((v) => v.clone().applyMatrix4(h.obj.matrix));
+      h.top.material = h === this.hotHandle ? this.handleHot : this.handleMat;
+    });
+  }
+
+  /** The handle under a screen point (within 9 px of its outline), and the nearest outline point. */
+  private handleAt(x: number, y: number): { h: Handle; point: THREE.Vector3 } | null {
+    if (!this.handles.length) return null;
+    const r = this.host.renderer.domElement.getBoundingClientRect();
+    const cam = this.host.camera;
+    const scr = (p: THREE.Vector3) => {
+      const s = p.clone().project(cam);
+      return new THREE.Vector2(r.left + ((s.x + 1) / 2) * r.width, r.top + ((1 - s.y) / 2) * r.height);
+    };
+    let best: { h: Handle; point: THREE.Vector3; d: number } | null = null;
+    const m = new THREE.Vector2(x, y);
+    for (const h of this.handles) {
+      for (let k = 0; k + 1 < h.pts.length; k += 2) {
+        const a = h.pts[k];
+        const b = h.pts[k + 1];
+        const sa = scr(a), sb = scr(b);
+        const ab = sb.clone().sub(sa);
+        const t = ab.lengthSq() > 1e-9 ? Math.min(1, Math.max(0, m.clone().sub(sa).dot(ab) / ab.lengthSq())) : 0;
+        const d = sa.clone().addScaledVector(ab, t).distanceTo(m);
+        if (d < 9 && (!best || d < best.d)) best = { h, point: a.clone().lerp(b, t), d };
+      }
+    }
+    return best;
+  }
+
+  /** The drive toggle by a selected push-rod horn: Drive servo | joint. */
+  private syncPill() {
+    const sel = this.wb.selected;
+    const mesh = sel && this.usable() ? this.wb.parts.get(sel)?.mesh ?? this.wb.fast.get(sel)?.obj : null;
+    const t = mesh ? this.targetOf(mesh, 'default') : null;
+    if (t?.kind !== 'servo' || this.dragging) {
+      if (this.pill) this.pill.hidden = true;
+      return;
+    }
+    if (!this.pill) {
+      const p = document.createElement('div');
+      p.className = 'bb-drive';
+      p.setAttribute('role', 'group');
+      p.setAttribute('aria-label', 'Dragging a horn drives');
+      p.innerHTML = '<span>Drive</span><button type="button" data-drive="servo" title="The horn turns its servo; the push rods decide tilt and roll">servo</button>'
+        + '<button type="button" data-drive="joint" title="The horn moves the joint its servo mostly drives; both servos follow (D)">joint</button>';
+      p.addEventListener('click', (e) => {
+        const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-drive]');
+        if (b) this.setDriveMode(b.dataset.drive as DriveMode);
+      });
+      document.body.append(p);
+      this.pill = p;
+    }
+    this.pill.querySelectorAll<HTMLButtonElement>('[data-drive]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.drive === this.driveMode)));
+    const box = new THREE.Box3().setFromObject(mesh!);
+    const c = box.getCenter(new THREE.Vector3()).project(this.host.camera);
+    const r = this.host.renderer.domElement.getBoundingClientRect();
+    this.pill.style.left = `${Math.round(r.left + ((c.x + 1) / 2) * r.width + 22)}px`;
+    this.pill.style.top = `${Math.round(r.top + ((1 - c.y) / 2) * r.height - 34)}px`;
+    this.pill.hidden = false;
   }
 
   private say(text: string | null, x = 0, y = 0, hint = false) {
@@ -498,7 +838,7 @@ export class DirectDrag {
       this.tag.setAttribute('aria-live', 'polite');
       document.body.append(this.tag);
     }
-    this.tag.textContent = text;
+    if (this.tag.textContent !== text) this.tag.textContent = text;
     this.tag.classList.toggle('hint', hint);
     this.tag.style.left = `${Math.round(x + 16)}px`;
     this.tag.style.top = `${Math.round(y + 18)}px`;
@@ -519,15 +859,47 @@ export class DirectDrag {
     if (el.style.cursor !== c) el.style.cursor = c;
   }
 
-  /** The cursor over what the pointer is on: grab on a part that moves, a lock on a grounded one. */
+  /** The cursor over what the pointer is on (a handle, a part that moves, a grounded one) and the hover handles. */
   private hover(x: number, y: number) {
     if (!this.usable()) {
       this.cursor('');
       return;
     }
+    const hh = this.handleAt(x, y);
+    if (hh !== null || this.hotHandle !== null) {
+      this.hotHandle = hh?.h ?? null;
+      this.host.interact();
+    }
+    if (hh) {
+      this.cursor('grab');
+      this.say(`${jointLabel(hh.h.joint.name)} ${sgn(hh.h.node.pose[hh.h.joint.id] ?? 0)}${unitOf(hh.h.joint)}`, x, y, true);
+      return;
+    }
+    if (!this.dragging) this.say(null);
     const hit = this.wb.hitAt(x, y);
-    if (!hit) return this.cursor('');
-    this.cursor(this.targetOf(hit.object, 'default') ? (this.wb.explode > 1e-3 ? '' : 'grab') : LOCK_CURSOR);
+    const t = hit ? this.targetOf(hit.object, 'default') : null;
+    if (hit && t) {
+      if (hit.object !== this.hoverMesh) {
+        this.hoverMesh = hit.object;
+        this.host.interact();
+      }
+    } else if (this.hoverMesh && !this.nearHandles(x, y)) {
+      this.hoverMesh = null;
+      this.host.interact();
+    }
+    this.cursor(!hit ? '' : t ? (this.wb.explode > 1e-3 ? '' : 'grab') : LOCK_CURSOR);
+  }
+
+  /** Within reach of the shown handles (so moving onto them does not make them go away). */
+  private nearHandles(x: number, y: number) {
+    if (!this.handles.length) return false;
+    const r = this.host.renderer.domElement.getBoundingClientRect();
+    const box = new THREE.Box2();
+    for (const h of this.handles) for (const p of h.pts) {
+      const s = p.clone().project(this.host.camera);
+      box.expandByPoint(new THREE.Vector2(r.left + ((s.x + 1) / 2) * r.width, r.top + ((1 - s.y) / 2) * r.height));
+    }
+    return box.expandByScalar(30).containsPoint(new THREE.Vector2(x, y));
   }
 
   // ------------------------------------------------------------------ pointer
@@ -539,14 +911,23 @@ export class DirectDrag {
       return;
     }
     if (!this.usable() || e.button !== 0) return;
-    const hit = this.wb.hitAt(e.clientX, e.clientY);
-    if (!hit) return;
-    const mode: ChainMode = e.altKey ? 'nearest' : e.shiftKey ? 'extend' : 'default';
-    const target = this.targetOf(hit.object, mode);
-    const why = !target ? 'grounded' : this.wb.explode > 1e-3 ? 'exploded' : null;
-    this.down = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, pointer: e.pointerId, touch: e.pointerType === 'touch', hit, target, why };
-    if (!why) {
-      // a part that moves: the press is ours, not the camera's
+    const mods = { shift: e.shiftKey, ground: e.shiftKey && (e.ctrlKey || e.metaKey) };
+    const base = { x: e.clientX, y: e.clientY, pointer: e.pointerId, touch: e.pointerType === 'touch', mods };
+    const hh = this.wb.explode < 1e-3 ? this.handleAt(e.clientX, e.clientY) : null;
+    if (hh) {
+      this.down = { ...base, hit: null, target: null, handle: hh.h, why: null };
+      this.hotHandle = hh.h;
+      (this.down as { handlePoint?: THREE.Vector3 }).handlePoint = hh.point;
+    } else {
+      const hit = this.wb.hitAt(e.clientX, e.clientY);
+      if (!hit) return;
+      const mode: ChainMode = e.altKey ? 'nearest' : mods.ground ? 'extend' : 'default';
+      const target = this.targetOf(hit.object, mode);
+      const why = !target ? 'grounded' : this.wb.explode > 1e-3 ? 'exploded' : null;
+      this.down = { ...base, hit, target, handle: null, why };
+    }
+    if (!this.down.why) {
+      // a part or handle that moves: the press is ours, not the camera's
       this.controlsWere = this.host.controls.enabled;
       this.host.controls.enabled = false;
     }
@@ -569,16 +950,21 @@ export class DirectDrag {
       }
       return;
     }
-    const dist = Math.hypot(e.clientX - d.x, e.clientY - d.y);
+    // the newest of the events the browser coalesced into this one: the solve runs once per frame on it
+    const list = e.getCoalescedEvents?.() ?? [];
+    const last = list.length ? list[list.length - 1] : e;
+    const x = last.clientX, y = last.clientY;
+    const dist = Math.hypot(x - d.x, y - d.y);
     if (!this.dragging) {
       if (dist <= (d.touch ? 8 : 4)) return;
-      if (d.why || !d.target) {
-        if (d.why === 'grounded') this.hint('Grounded: it does not move', e.clientX, e.clientY);
-        else if (d.why === 'exploded') this.hint('Collapse the explode to drag parts', e.clientX, e.clientY);
+      if (d.why || (!d.target && !d.handle)) {
+        if (d.why === 'grounded') this.hint('Grounded: it does not move', x, y);
+        else if (d.why === 'exploded') this.hint('Collapse the explode to drag parts', x, y);
         this.down = null;
         return;
       }
-      const g = this.begin(d.target, d.hit);
+      const hp = (d as { handlePoint?: THREE.Vector3 }).handlePoint;
+      const g = d.handle && hp ? this.single(d.handle.node, d.handle.joint, hp) : this.begin(d.target!, d.hit!.point.clone(), d.mods);
       if (!g) {
         this.release();
         return;
@@ -587,16 +973,19 @@ export class DirectDrag {
       this.wb.pushUndo();
       this.grab = g;
       this.dragging = true;
+      this.lastTick = 0;
+      this.updateHandles(); // hidden while dragging
       try { this.host.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* the pointer is gone */ }
       this.cursor('grabbing');
     }
-    const g = this.grab!;
-    this.update(g, e.clientX, e.clientY, e.clientX - d.lastX, e.clientY - d.lastY);
-    d.lastX = e.clientX;
-    d.lastY = e.clientY;
-    this.wb.applyPose(true);
-    this.drawGizmo(g);
-    this.say(g.label(), e.clientX, e.clientY);
+    if (this.grab?.kind === 'lock') {
+      if (dist < LOCK_PX) return;
+      const locked = this.lockOn(this.grab, x - d.x, y - d.y);
+      if (!locked) return;
+      this.grab = locked;
+    }
+    this.ptr = { x, y, dirty: true };
+    this.host.interact();
     e.preventDefault();
   }
 
@@ -606,13 +995,17 @@ export class DirectDrag {
   }
 
   private end(e: PointerEvent) {
+    const was = this.dragging && !!this.grab;
     if (this.dragging && this.grab) {
-      this.finish(this.grab);
+      // the last position counts, then the pose lands where it was solved
+      if (this.ptr.dirty) this.solve(this.grab, this.ptr.x, this.ptr.y);
+      this.ptr.dirty = false;
+      this.commit();
       this.justDragged = true;
       try { this.host.renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* released */ }
-      this.wb.applyPose(true);
     }
     this.release();
+    if (was) this.wb.applyPose(true); // the whole panel, now the drag is over
     this.cursor(this.usable() ? 'grab' : '');
   }
 
@@ -621,6 +1014,8 @@ export class DirectDrag {
     this.down = null;
     this.grab = null;
     this.dragging = false;
+    this.solved.clear();
+    this.springs.clear();
     this.giz.visible = false;
     this.say(null);
     this.host.interact();
@@ -637,10 +1032,14 @@ export class DirectDrag {
       return;
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const onModel = !t || t === document.body || t === this.host.renderer.domElement || t === document.documentElement;
+    if ((e.key === 'd' || e.key === 'D') && onModel && (this.pill && !this.pill.hidden || this.dragging)) {
+      this.setDriveMode(this.driveMode === 'servo' ? 'joint' : 'servo');
+      e.preventDefault();
+      return;
+    }
     const dir = { ArrowRight: 1, ArrowLeft: -1, ArrowUp: 1, ArrowDown: -1 }[e.key];
-    if (!dir || !this.wb.selected) return;
-    // only with the model's focus (the panel's lists use the arrows themselves)
-    if (t && t !== document.body && t !== this.host.renderer.domElement && t !== document.documentElement) return;
+    if (!dir || !this.wb.selected || !onModel) return;
     const sel = this.wb.selected;
     const mesh = this.wb.parts.get(sel)?.mesh ?? this.wb.fast.get(sel)?.obj;
     const target = mesh && this.targetOf(mesh, 'default');
@@ -653,8 +1052,9 @@ export class DirectDrag {
     const k = e.shiftKey ? 5 : 1;
     let text = '';
     if (target.kind === 'servo') {
-      this.setServo(target.a, (servoAngle(target.a) ?? 0) + 2 * k * dir);
-      text = `${SERVO_NAME[target.a.servo] ?? target.a.servo} ${sgn(servoAngle(target.a) ?? 0)}°`;
+      const a = target.a;
+      this.setServo(a, (servoAngle(a) ?? 0) + 2 * k * dir, (id, v) => (a.node.pose[id] = v));
+      text = `${servoName(a.servo)} ${sgn(servoAngle(a) ?? 0)}°`;
     } else {
       const { node, joint } = target.kind === 'gear' ? target : target.chain[e.key === 'ArrowUp' || e.key === 'ArrowDown' ? Math.min(1, target.chain.length - 1) : 0];
       const [lo, hi] = this.limitsOf(node, joint);
@@ -670,4 +1070,28 @@ export class DirectDrag {
     clearTimeout(this.hintTimer);
     this.hintTimer = window.setTimeout(() => { if (!this.dragging) this.say(null); }, 1200);
   }
+}
+
+/** A unit circle in the XY plane. */
+function circleGeometry(n: number) {
+  return new THREE.BufferGeometry().setFromPoints(Array.from({ length: n }, (_, i) => new THREE.Vector3(Math.cos((i / n) * 2 * Math.PI), Math.sin((i / n) * 2 * Math.PI), 0)));
+}
+
+/** A unit circle in the XY plane, as segment pairs. */
+function circlePairs(n: number) {
+  const at = (i: number) => new THREE.Vector3(Math.cos((i / n) * 2 * Math.PI), Math.sin((i / n) * 2 * Math.PI), 0);
+  return Array.from({ length: n }, (_, i) => [at(i), at(i + 1)]).flat();
+}
+
+/** A double-headed arrow along Z (unit half-length), as segment pairs. */
+function arrowPairs() {
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  const h = 0.22;
+  return [
+    V(0, 0, -1), V(0, 0, 1),
+    V(0, 0, 1), V(h, 0, 1 - h), V(0, 0, 1), V(-h, 0, 1 - h),
+    V(0, 0, -1), V(h, 0, -1 + h), V(0, 0, -1), V(-h, 0, -1 + h),
+    V(0, 0, 1), V(0, h, 1 - h), V(0, 0, 1), V(0, -h, 1 - h),
+    V(0, 0, -1), V(0, h, -1 + h), V(0, 0, -1), V(0, -h, -1 + h),
+  ];
 }

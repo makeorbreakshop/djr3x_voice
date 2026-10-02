@@ -1277,8 +1277,20 @@ export class Workbench {
   /** Re-pose after `node.pose` was written in place; `notify`: the panel and listeners too. */
   applyPose(notify = true) {
     this.pose();
-    if (notify) this.emit();
+    if (notify && this.dragging) {
+      // a drag notifies every frame: only what follows the pose (the joint sliders), not the whole panel
+      for (const f of this.poseListeners) f();
+      this.host.interact();
+    } else if (notify) this.emit();
     else this.host.interact();
+  }
+
+  private readonly poseListeners = new Set<() => void>();
+
+  /** Called when only the pose changed, every frame of a drag (the full onChange follows on release). */
+  onPose(fn: () => void) {
+    this.poseListeners.add(fn);
+    return () => this.poseListeners.delete(fn);
   }
 
   /** Anything animating the pose (How it works, a sweep) stops: the hand is on the model. */
@@ -2642,6 +2654,7 @@ export class Workbench {
   /** Per frame (main.ts). */
   tick(now = performance.now()) {
     if (!this.active) return;
+    this.direct.tick(now);
     this.holdInspection();
     let moving = false;
     if (this.demo) {

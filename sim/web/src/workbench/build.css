@@ -248,6 +248,14 @@ body:not([data-mode="build"]) .bb-labels { display: none; }
   font-variant-numeric: tabular-nums; color: #f2f3f5; background: rgba(14,16,21,.84); border: 1px solid rgba(232,118,42,.55); white-space: nowrap; }
 .bb-drag-tag.hint { border-color: rgba(242,243,245,.18); color: #c9ccd2; }
 body:not([data-mode="build"]) .bb-drag-tag { display: none; }
+/* the drive toggle by a selected push-rod horn: the horn turns its servo, or moves the joint it mostly drives */
+.bb-drive { position: fixed; z-index: 6; display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 8px; border-radius: 6px;
+  font: 11.5px/1 system-ui, sans-serif; color: #c9ccd2; background: rgba(14,16,21,.84); border: 1px solid rgba(242,243,245,.14); }
+.bb-drive span { margin-right: 4px; }
+.bb-drive button { font: inherit; color: #c9ccd2; background: none; border: 0; border-radius: 4px; padding: 4px 7px; cursor: pointer; }
+.bb-drive button[aria-pressed="true"] { color: #f2f3f5; background: rgba(232,118,42,.32); }
+.bb-drive button:focus-visible { outline: 1px solid #e8762a; }
+body:not([data-mode="build"]) .bb-drive { display: none; }
 /* the overlap picked in Checks: what it is, in words */
 .intf li.on > button { background: rgba(255,59,48,.08); }
 .intf li.known.on > button { background: rgba(242,194,48,.08); }

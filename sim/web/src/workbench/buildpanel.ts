@@ -534,6 +534,8 @@ export function mountBuildPanel(wb: Workbench) {
 
 
   wb.onChange(() => render());
+  // a drag on the model: the sliders follow it every frame (the rest of the panel when it ends)
+  wb.onPose(() => { if (wb.active) renderJoints(); });
 
   // ------------------------------------------------------------------ render
   function render() {

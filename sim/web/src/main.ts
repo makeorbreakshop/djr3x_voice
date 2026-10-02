@@ -1524,7 +1524,8 @@ function updateJointTable() {
   let last: PointerEvent | null = null;
   renderer.domElement.addEventListener('pointermove', (e) => {
     last = e;
-    if (pending || !centres?.shown || !rig) return;
+    // not in Build: the droid is hidden there, and this raycast (~14 ms) would stall every drag and orbit
+    if (pending || !centres?.shown || !rig || workbench.active) return;
     pending = true;
     setTimeout(() => {
       pending = false;
