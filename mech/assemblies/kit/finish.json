@@ -14,8 +14,8 @@
   "`paint_regions`: a part painted in more than one colour, by region. Faces whose normal points along the part's",
   "own axis (its least-variance direction; `facing` out = away from the droid's vertical axis) at a radius `r`",
   "(fractions of the part's radius about that axis) take the region's `paint`. Read by both readers (Build's",
-  "shader, build_r3x.py's material slots). The ear cups: charcoal, a blue ring on the outer face, a grey hub",
-  "(the Black Series figure, mech/vendor/refs/figure-head_futureoftheforce.jpg)."
+  "shader, build_r3x.py's material slots). Empty: the Original's bake is the reference for the head's paint (the",
+  "ear cups stay accent_blue as baked); a rule here would repaint the Original too."
  ],
  "print": {"filament": "PLA", "color": "#8e9195", "color_name": "Grey"},
  "print_overrides": {
@@ -45,9 +45,9 @@
   "P_M_1": "paint_charcoal",
   "P_M_2": "paint_charcoal",
   "P_M_3": "paint_charcoal",
-  "H_LE_1": "paint_charcoal",
+  "H_LE_1": "accent_blue",
   "H_LE_2": "metal_dark",
-  "H_RE_1": "paint_charcoal",
+  "H_RE_1": "accent_blue",
   "H_RE_2": "metal_dark",
   "H_V_1": "visor_stripes",
   "H_V_2": "paint_charcoal",
@@ -174,8 +174,5 @@
   "TR_RR_Full": "rubber",
   "TR_SR_Full": "metal_grey"
  },
- "paint_regions": {
-  "H_LE_1": [{"paint": "accent_blue", "facing": "out", "r": [0.62, 1.0]}, {"paint": "metal_grey", "facing": "out", "r": [0.0, 0.3]}],
-  "H_RE_1": [{"paint": "accent_blue", "facing": "out", "r": [0.62, 1.0]}, {"paint": "metal_grey", "facing": "out", "r": [0.0, 0.3]}]
- }
+ "paint_regions": {}
 }

@@ -1,5 +1,5 @@
 // Dev-server route for Build mode (vite.config.ts registers the plugin):
-//   GET /mech/out/<path> -> the file under the repo's mech/out/ (manifest.json, GLB, STL, 3MF)
+//   GET /mech/out/<path> -> the file under the repo's mech/out/ (manifest.json, GLB, uv.bin, STL, 3MF)
 // mech/out/ is written by the workbench (`mech/.venv/bin/python -m workbench build <asm>`).
 // It is gitignored and holds converted third-party meshes, so it is served only by the dev
 // server and never bundled into a build.
@@ -11,6 +11,8 @@ const OUT = fileURLToPath(new URL('../../../../mech/out/', import.meta.url));
 const TYPES = {
   json: 'application/json', glb: 'model/gltf-binary', stl: 'model/stl',
   '3mf': 'model/3mf', png: 'image/png',
+  // <mesh>.uv.bin: the Original's UVs transferred onto a part (mech/workbench/uvtransfer.py)
+  bin: 'application/octet-stream',
 };
 
 export function mechOut() {
@@ -46,7 +48,7 @@ export function mechOut() {
         }
         res.setHeader('content-type', TYPES[ext]);
         res.setHeader('cache-control', 'no-store');
-        if (ext !== 'json' && ext !== 'glb') {
+        if (ext !== 'json' && ext !== 'glb' && ext !== 'bin') {
           res.setHeader('content-disposition', `attachment; filename="${path.basename(full)}"`);
         }
         fs.createReadStream(full).pipe(res);

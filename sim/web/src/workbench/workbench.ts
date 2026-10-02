@@ -409,10 +409,22 @@ export class Workbench {
     const geometry = (u: string) => {
       let g = geoCache.get(u);
       if (!g) {
-        g = loader.loadAsync(u).then((gltf) => {
+        const plain = u.split('?')[0];
+        const uvUrl = this.uvUrls.has(plain) ? plain.replace(/\.glb$/, '.uv.bin') + (u.includes('?') ? u.slice(u.indexOf('?')) : '') : null;
+        g = Promise.all([loader.loadAsync(u), uvUrl ? fetch(uvUrl).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : null]).then(([gltf, uvb]) => {
           // Round faces render round, hard edges stay sharp: weld, then crease at 30 deg.
           let geo = meshGeometry(gltf.scene, u);
           geo.deleteAttribute('normal');
+          // the Original's UVs for this mesh (mech/workbench/uvtransfer.py), per face corner in the GLB's index
+          // order: unindex first, and the weld below keeps the seams between UV islands split
+          if (uvb) {
+            const uv = new Float32Array(uvb);
+            const n = geo.index ? geo.index.count : geo.attributes.position.count;
+            if (uv.length === n * 2) {
+              if (geo.index) geo = geo.toNonIndexed();
+              geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+            }
+          }
           geo = toCreasedNormals(mergeVertices(geo, 1e-4), CREASE);
           saneNormals(geo);
           return geo;
@@ -662,6 +674,7 @@ export class Workbench {
       node.links.set(l.id, g);
     }
     const base = asm.base ?? '/';
+    await this.loadUvSummary(base, asm);
     const gearOf = new Map<string, MGear>();
     for (const g of asm.gears ?? []) for (const id of [...g.parts, ...(g.fasteners ?? [])]) gearOf.set(id, g);
     await Promise.all(asm.parts.map(async (p) => {
@@ -773,6 +786,49 @@ export class Workbench {
 
   private lazyHidden = new Set<MAssembly>();
   private geometryFn: ((u: string) => Promise<THREE.BufferGeometry>) | null = null;
+  /** Meshes (URLs, no query) that carry the Original's UVs, and the parts that wear its textures (uvtransfer.json). */
+  private uvUrls = new Set<string>();
+  private textured = new Set<string>();
+  private texAtlas = new Map<string, 'head' | 'body'>();
+  /** The Original's baked textures (its materials in the scene: the droid, hidden while Build is open). */
+  private origTex = new Map<string, THREE.MeshStandardMaterial | null>();
+  private originalMaterial(atlas: 'head' | 'body'): THREE.MeshStandardMaterial | null {
+    if (this.origTex.has(atlas) && this.origTex.get(atlas)) return this.origTex.get(atlas)!;
+    const want = atlas === 'head' ? 'paint_charcoal__head' : 'paint_charcoal';
+    let hit: THREE.MeshStandardMaterial | null = null;
+    this.host.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!hit && m && !Array.isArray(m) && m.name === want && m.map) hit = m;
+    });
+    this.origTex.set(atlas, hit);
+    return hit;
+  }
+  private uvSummaries = new Map<string, Promise<unknown>>();
+  /** Which of an assembly's parts take the Original's textures: each mesh's folder's uvtransfer.json (read once
+   *  per folder - a referenced child, Hunter's head, keeps its own). */
+  private loadUvSummary(base: string, asm: MAssembly): Promise<void> {
+    const dirs = new Map<string, MPart[]>();
+    for (const part of asm.parts) {
+      const dir = joinUrl(base, part.mesh).split('?')[0].replace(/\/parts\/[^]*$/, '/');
+      (dirs.get(dir) ?? dirs.set(dir, []).get(dir)!).push(part);
+    }
+    return Promise.all([...dirs].map(async ([dir, parts]) => {
+      let p = this.uvSummaries.get(dir);
+      if (!p) {
+        p = fetch(`${dir}uvtransfer.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        this.uvSummaries.set(dir, p);
+      }
+      const d = (await p) as { parts?: Record<string, { textured: boolean; atlas: string }> } | null;
+      if (!d?.parts) return;
+      for (const part of parts) {
+        if (!d.parts[part.id]?.textured) continue;
+        this.textured.add(part.id);
+        this.texAtlas.set(part.id, d.parts[part.id].atlas.includes('head') ? 'head' : 'body');
+        this.uvUrls.add(joinUrl(base, part.mesh).split('?')[0]);
+        if (part.mesh_full) this.uvUrls.add(joinUrl(base, part.mesh_full).split('?')[0]);
+      }
+    })).then(() => undefined);
+  }
 
   /** Variant picks for a tree: a group can span nodes (the droid's `internals`: the column under the
    * base, Anderson's ring drives under the rings), so a default option anywhere wins over another
@@ -2689,6 +2745,19 @@ export class Workbench {
         const real = finish !== GHOST_FINISH && (this.video || look === 'exterior');
         const paint = p.finish?.paint && p.finish.paint !== 'none' ? p.finish.paint : undefined;
         const wu = m.userData.weather as WeatherUniforms;
+        // the Original's baked paint (mech/workbench/uvtransfer.py): its own textures on this mesh
+        const orig = real && this.textured.has(id) && po.mesh.geometry.attributes.uv ? this.originalMaterial(this.texAtlas.get(id) ?? 'head') : null;
+        const want = orig ? orig.map : null;
+        if (m.map !== want) {
+          m.map = want;
+          m.roughnessMap = orig?.roughnessMap ?? null;
+          m.metalnessMap = orig?.metalnessMap ?? null;
+          m.normalMap = orig?.normalMap ?? null;
+          if (orig) m.normalScale.copy(orig.normalScale);
+          m.aoMap = orig?.aoMap ?? null;
+          m.needsUpdate = true;
+        }
+        m.userData.textured = !!orig;
         // how faceted the shown mesh is against its source: a coarse one gets less edge wear (its creases are not edges)
         const g0 = po.mesh.geometry;
         const tris = g0.index ? g0.index.count / 3 : (g0.attributes.position?.count ?? 0) / 3;
@@ -2698,9 +2767,9 @@ export class Workbench {
         const sz = [0, 1, 2].map((k) => Math.abs(bb[1][k] - bb[0][k]) / 10);
         const density = (p.triangles?.display ?? tris) / Math.max(1, 2 * (sz[0] * sz[1] + sz[1] * sz[2] + sz[0] * sz[2]));
         const edgeScale = Math.min(1, Math.max(0.15, Math.sqrt(tris / Math.max(1, src)) * 2) * Math.min(1, 4 / Math.max(1e-3, density)));
-        setWeather(wu, paint, real ? 1 : 0, real && !paint && !!p.printed, edgeScale);
+        setWeather(wu, paint, real && !m.userData.textured ? 1 : 0, real && !paint && !!p.printed, edgeScale);
         // painted by region (finish `regions`): computed once per mesh
-        const regions = real ? p.finish?.regions : undefined;
+        const regions = real && !m.userData.textured ? p.finish?.regions : undefined; // (a fallback: the Original's bake rules)
         const key = regions ? po.mesh.geometry.uuid : '';
         if (m.userData.regionKey !== key) {
           m.userData.regionKey = key;
@@ -2720,6 +2789,14 @@ export class Workbench {
       m.metalness = finish.metalness;
       if (this.video && finish.metalness < 0.1) finish = { ...finish, roughness: p.finish?.paint && p.finish.paint !== 'none' ? Math.min(finish.roughness, 0.42) : Math.max(finish.roughness, 0.68) };
       m.roughness = finish.roughness;
+      // textured from the Original: its maps carry the colour, roughness and metal (the factors at their glTF 1)
+      if (m.userData.textured) {
+        const src = this.originalMaterial(this.texAtlas.get(id) ?? 'head')!;
+        m.color.setRGB(1, 1, 1);
+        m.userData.base = m.color.getHex();
+        m.roughness = src.roughness;
+        m.metalness = src.metalness;
+      }
       m.emissive.setHex(0x000000);
       setLook(m, opacity, clip);
       po.mesh.renderOrder = opacity < 1 ? 2 : 0;
