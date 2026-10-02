@@ -621,3 +621,41 @@ dialog.sheet::backdrop { background: rgba(4,5,8,.55); }
   body.diag-open #panel { width: auto; }
   .view-bar { top: 8px; }
 }
+
+/* ---------------------------------------------------------------- camera pane (camerapane.ts) */
+.cam-pane { position: fixed; z-index: 20; display: flex; flex-direction: column; background: #07080b;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.55); }
+.cam-pane[hidden] { display: none; }
+.cam-pane.moving { user-select: none; -webkit-user-select: none; }
+.cam-head { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 4px 0 10px; background: var(--panel);
+  border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; }
+.cam-pane.moving .cam-head { cursor: grabbing; }
+.cam-title { flex: 1 1 auto; min-width: 28px; font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cam-head .cam-chip { flex: 0 0 auto; width: auto; padding: 3px 8px; border-radius: 99px; font-size: 11px;
+  color: var(--muted); background: transparent; border: 1px solid var(--line); }
+.cam-head .cam-chip:hover { color: var(--text); }
+.cam-head .cam-chip[aria-pressed="true"] { color: var(--accent); border-color: rgba(232,118,42,.6); background: rgba(232,118,42,.1); }
+.cam-head .cam-chip:disabled { opacity: .45; cursor: default; }
+.cam-head button.icon { flex: 0 0 auto; width: 24px; height: 24px; padding: 0; }
+.cam-head select { flex: 0 1 110px; width: auto; min-width: 0; margin: 0; padding: 3px; font-size: 11px; }
+.cam-head select[hidden] { display: none; }
+.cam-body { position: relative; cursor: grab; touch-action: none; }
+.cam-pane.moving .cam-body { cursor: grabbing; }
+.cam-body video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+.cam-body video.mirror { transform: scaleX(-1); }
+.cam-body canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cam-note { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 16px; text-align: center;
+  color: var(--muted); font-size: 12px; pointer-events: none; }
+.cam-note[hidden] { display: none; }
+.cam-grip { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, rgba(217,220,227,.35) 50%, rgba(217,220,227,.35) 58%, transparent 58%,
+    transparent 70%, rgba(217,220,227,.35) 70%, rgba(217,220,227,.35) 78%, transparent 78%); }
+
+/* ---------------------------------------------------------------- recorder (recorder.ts) */
+button.rec-go.recording { background: #d23b3b; border-color: #d23b3b; color: #fff; font-variant-numeric: tabular-nums; }
+#rail-rec .rec-dot { fill: currentColor; stroke: none; }
+body.rec-on #rail-rec { color: #ff5a5a; }
+body.rec-on #rail-rec .rec-dot { animation: rec-pulse 1.2s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { body.rec-on #rail-rec .rec-dot { animation: none; } }

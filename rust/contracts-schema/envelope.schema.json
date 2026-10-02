@@ -144,7 +144,8 @@
     "AudioDirection": {
       "enum": [
         "in",
-        "out"
+        "out",
+        "mix"
       ],
       "type": "string"
     },
@@ -158,7 +159,7 @@
         },
         "direction": {
           "$ref": "#/$defs/AudioDirection",
-          "description": "`in` = client mic to runtime, `out` = runtime TTS to client."
+          "description": "`in` = client mic to runtime, `out` = runtime TTS to client, `mix` = the runtime's\nwhole output mix to a client that asked for it (`telemetry.mix_audio`)."
         },
         "sample_rate": {
           "format": "uint32",
@@ -1390,6 +1391,67 @@
         }
       ]
     },
+    "FaceBox": {
+      "description": "One detected face, normalised to the analysed frame (0..1, origin top left).",
+      "properties": {
+        "bbox": {
+          "description": "x, y, w, h.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "landmarks": {
+          "description": "Right eye, left eye, nose, right mouth corner, left mouth corner (image left to right).",
+          "items": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "maxItems": 5,
+          "minItems": 5,
+          "type": "array"
+        },
+        "name": {
+          "description": "Who it is, when the nearest enrolled person clears the threshold.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "description": "The face recognition ran on (the largest): the gaze target.",
+          "type": "boolean"
+        },
+        "score": {
+          "description": "Detector score.",
+          "format": "float",
+          "type": "number"
+        },
+        "similarity": {
+          "description": "Similarity to the nearest enrolled person (primary face only), matched or not.",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bbox",
+        "landmarks",
+        "score",
+        "primary"
+      ],
+      "type": "object"
+    },
     "Frames": {
       "description": "50 Hz body snapshot for the sim, the virtual driver and logs (plan §3b, D6).\nHardware servo controllers receive goals at event time, not frames.",
       "properties": {
@@ -1646,6 +1708,57 @@
         "v_max",
         "a_max",
         "j_max"
+      ],
+      "type": "object"
+    },
+    "JointCoupling": {
+      "description": "`joint`'s range as a function of `depends_on` (profile joint names): rows `[a, min, max]`\nsorted by `a`, linear in between, the ends held past the table; `min`/`max` null where no\nvalue of `joint` clears.",
+      "properties": {
+        "depends_on": {
+          "type": "string"
+        },
+        "joint": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "table": {
+          "items": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              {
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "joint",
+        "depends_on",
+        "table"
       ],
       "type": "object"
     },
@@ -1937,6 +2050,20 @@
         "target",
         "message"
       ],
+      "type": "object"
+    },
+    "MechInfo": {
+      "description": "What the runtime reads from a generated profile's `mech` block.",
+      "properties": {
+        "couplings": {
+          "default": [],
+          "description": "Coupled joint limits (`mech/workbench/SCHEMA.md` root `couplings`): one joint's range as\na function of another's. The performer's safety layer clamps to them.",
+          "items": {
+            "$ref": "#/$defs/JointCoupling"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "MessageClass": {
@@ -3424,6 +3551,22 @@
       ],
       "type": "object"
     },
+    "RecordAction": {
+      "oneOf": [
+        {
+          "enum": [
+            "start",
+            "stop"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "marker",
+          "description": "A timestamp in the take's `session.json`, for the edit.",
+          "type": "string"
+        }
+      ]
+    },
     "RetainedState": {
       "description": "All retained state; the gateway `hello` body.",
       "properties": {
@@ -3547,6 +3690,17 @@
             "$ref": "#/$defs/LightGroup"
           },
           "type": "array"
+        },
+        "mech": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MechInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The mech model's block (`robot.generated.json`, written by rigsync): only what the\nruntime enforces is read; the rest of it is for people."
         },
         "name": {
           "type": "string"
@@ -4328,6 +4482,40 @@
             "enabled"
           ],
           "type": "object"
+        },
+        {
+          "description": "Subscribe this client to the runtime's output mix (everything R3X plays: speech, music,\nsfx) as binary PCM after `audio` metas with direction `mix` - the panel's recorder.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "mix_audio",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The runtime's recorder: screen + mic (ffmpeg) and R3X's output mix, one folder per take\nunder `R3X_RECORD_DIR` (default `~/Movies/R3X`). State: the `recorder` service status.",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/RecordAction"
+            },
+            "type": {
+              "const": "record",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -4462,6 +4650,39 @@
           },
           "required": [
             "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Every face found in one analysed frame (2-5 Hz, per the recognition cadence), for the\npanel's camera overlay. An empty list once when the last face goes (or vision stops).",
+          "properties": {
+            "faces": {
+              "items": {
+                "$ref": "#/$defs/FaceBox"
+              },
+              "type": "array"
+            },
+            "height": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "faces",
+              "type": "string"
+            },
+            "width": {
+              "description": "Analysed frame size in pixels; boxes are normalised to it.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "width",
+            "height",
+            "faces"
           ],
           "type": "object"
         },

@@ -233,6 +233,21 @@ pub enum TelemetryCommand {
     SetLogLevel { level: String },
     /// Subscribe this client to 50 Hz `frames`.
     Frames { enabled: bool },
+    /// Subscribe this client to the runtime's output mix (everything R3X plays: speech, music,
+    /// sfx) as binary PCM after `audio` metas with direction `mix` - the panel's recorder.
+    MixAudio { enabled: bool },
+    /// The runtime's recorder: screen + mic (ffmpeg) and R3X's output mix, one folder per take
+    /// under `R3X_RECORD_DIR` (default `~/Movies/R3X`). State: the `recorder` service status.
+    Record { action: RecordAction },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordAction {
+    Start,
+    Stop,
+    /// A timestamp in the take's `session.json`, for the edit.
+    Marker,
 }
 
 /// Reply to every command.
@@ -489,6 +504,14 @@ pub enum VisionEvent {
     FaceAt { pan: f64, tilt: f64 },
     /// No face in view any more.
     FaceLost,
+    /// Every face found in one analysed frame (2-5 Hz, per the recognition cadence), for the
+    /// panel's camera overlay. An empty list once when the last face goes (or vision stops).
+    Faces {
+        /// Analysed frame size in pixels; boxes are normalised to it.
+        width: u32,
+        height: u32,
+        faces: Vec<FaceBox>,
+    },
     /// A Claude description of the current frame; `reason` is why it was taken.
     SceneCaptured {
         description: String,
@@ -497,6 +520,27 @@ pub enum VisionEvent {
         #[ts(optional)]
         person: Option<String>,
     },
+}
+
+/// One detected face, normalised to the analysed frame (0..1, origin top left).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
+pub struct FaceBox {
+    /// x, y, w, h.
+    pub bbox: [f32; 4],
+    /// Right eye, left eye, nose, right mouth corner, left mouth corner (image left to right).
+    pub landmarks: [[f32; 2]; 5],
+    /// Detector score.
+    pub score: f32,
+    /// The face recognition ran on (the largest): the gaze target.
+    pub primary: bool,
+    /// Who it is, when the nearest enrolled person clears the threshold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    /// Similarity to the nearest enrolled person (primary face only), matched or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub similarity: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]

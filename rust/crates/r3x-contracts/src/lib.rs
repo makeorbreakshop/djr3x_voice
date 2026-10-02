@@ -19,8 +19,8 @@ pub use envelope::{
 pub use electronics::ElectronicsPackage;
 pub use frames::{Frames, PadBinding, PadControls, PadFrame, PadLayer, PadLayers, PadMapping, PadMenuView, Rgb, StickTarget};
 pub use messages::{
-    Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, IntentCommand,
-    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RunKind, ServoChannelTelemetry,
+    Ack, Command, ConversationEvent, DjEvent, Domain, EndReason, Event, FaceBox, IntentCommand,
+    MessageClass, MusicCommand, MusicEvent, OpsEvent, PerfCommand, PerfEvent, PerfLayer, RecordAction, RunKind, ServoChannelTelemetry,
     StageCommand,
     StageEvent, StopTarget, TelemetryCommand, VisionEvent,
 };

@@ -3,6 +3,7 @@ import type { AudioDirection } from "./AudioDirection";
 
 export type AudioMeta = { 
 /**
- * `in` = client mic to runtime, `out` = runtime TTS to client.
+ * `in` = client mic to runtime, `out` = runtime TTS to client, `mix` = the runtime's
+ * whole output mix to a client that asked for it (`telemetry.mix_audio`).
  */
 direction: AudioDirection, sample_rate: number, channels: number, };

@@ -7,7 +7,7 @@
 //! that bus's gain. Each source can also carry an equal-power envelope, so a crossfade is one
 //! command and both sides of it start on the same frame ([`MixerCommand::Crossfade`]).
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -144,6 +144,8 @@ pub struct Mixer {
     commands: rtrb::Consumer<MixerCommand>,
     scratch: Vec<f32>,
     voice_buf: Vec<f32>,
+    tap: rtrb::Producer<f32>,
+    tap_on: Arc<AtomicBool>,
 }
 
 impl Mixer {
@@ -217,6 +219,57 @@ impl Mixer {
         for s in out.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
         }
+        if self.tap_on.load(Ordering::Relaxed) {
+            // A reader that fell behind loses the newest audio, never blocks the device.
+            let n = out.len().min(self.tap.slots());
+            if let Ok(chunk) = self.tap.write_chunk_uninit(n) {
+                chunk.fill_from_iter(out.iter().copied());
+            }
+        }
+    }
+}
+
+/// The final output mix, as rendered (interleaved, the device's rate and channels), for
+/// whoever records it (the panel's recorder via the gateway). Off until [`MixTap::set`].
+pub struct MixTap {
+    on: Arc<AtomicBool>,
+    rx: Mutex<rtrb::Consumer<f32>>,
+    sample_rate: u32,
+    channels: usize,
+}
+
+impl MixTap {
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.on.load(Ordering::Relaxed)
+    }
+
+    /// Start or stop copying the mix. Turning it on discards anything left from before.
+    pub fn set(&self, on: bool) {
+        if on && !self.is_on() {
+            let mut rx = self.rx.lock().unwrap();
+            let n = rx.slots();
+            if let Ok(c) = rx.read_chunk(n) {
+                c.commit_all();
+            }
+        }
+        self.on.store(on, Ordering::Relaxed);
+    }
+
+    /// Append everything rendered since the last call to `out`.
+    pub fn drain(&self, out: &mut Vec<f32>) {
+        let mut rx = self.rx.lock().unwrap();
+        let n = rx.slots();
+        if let Ok(c) = rx.read_chunk(n) {
+            out.extend(c);
+        }
     }
 }
 
@@ -241,6 +294,7 @@ fn fade_out_all(bus: &mut Bus, frames: u32) {
 pub struct MixerHandle {
     tx: Arc<Mutex<rtrb::Producer<MixerCommand>>>,
     meters: Arc<Meters>,
+    tap: Arc<MixTap>,
     sample_rate: u32,
     channels: usize,
 }
@@ -252,6 +306,11 @@ impl MixerHandle {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// The output mix, for recording.
+    pub fn tap(&self) -> Arc<MixTap> {
+        self.tap.clone()
     }
 
     /// Output level per bus (e.g. to verify sfx are audible without a listener).
@@ -295,8 +354,21 @@ pub fn mixer(sample_rate: u32, channels: usize) -> (Mixer, MixerHandle) {
     let (tx, rx) = rtrb::RingBuffer::new(256);
     let bus = || Bus { gain: GainRamp::new(1.0), sources: Vec::new() };
     let meters = Arc::new(Meters::default());
-    let m = Mixer { channels, meters: meters.clone(), buses: [bus(), bus(), bus()], commands: rx, scratch: vec![0.0; 4096], voice_buf: vec![0.0; 4096] };
-    (m, MixerHandle { tx: Arc::new(Mutex::new(tx)), meters, sample_rate, channels })
+    // Two seconds of output: the reader drains every 20 ms.
+    let (tap_tx, tap_rx) = rtrb::RingBuffer::new((sample_rate as usize * channels * 2).max(4096));
+    let tap_on = Arc::new(AtomicBool::new(false));
+    let tap = Arc::new(MixTap { on: tap_on.clone(), rx: Mutex::new(tap_rx), sample_rate, channels });
+    let m = Mixer {
+        channels,
+        meters: meters.clone(),
+        buses: [bus(), bus(), bus()],
+        commands: rx,
+        scratch: vec![0.0; 4096],
+        voice_buf: vec![0.0; 4096],
+        tap: tap_tx,
+        tap_on,
+    };
+    (m, MixerHandle { tx: Arc::new(Mutex::new(tx)), meters, tap, sample_rate, channels })
 }
 
 #[cfg(test)]
@@ -336,5 +408,30 @@ mod tests {
         assert_eq!(h.level(BusId::Speech).rms, 0.0, "silent bus meters zero");
         assert_eq!(h.level(BusId::Speech).audible_buffers, 1);
         assert_eq!(h.level(BusId::Sfx).audible_buffers, 0);
+    }
+
+    #[test]
+    fn tap_copies_the_output_only_while_on() {
+        let (mut m, h) = mixer(1000, 2);
+        let tap = h.tap();
+        h.add(BusId::Music, Box::new(Dc(0.25, usize::MAX)));
+        let mut out = vec![0.0; 20];
+        m.render(&mut out, &RenderTime::now());
+        let mut got = Vec::new();
+        tap.drain(&mut got);
+        assert!(got.is_empty(), "off by default");
+
+        tap.set(true);
+        m.render(&mut out, &RenderTime::now());
+        m.render(&mut out, &RenderTime::now());
+        tap.drain(&mut got);
+        assert_eq!(got.len(), 40);
+        assert!(got.iter().all(|s| (s - 0.25).abs() < 1e-6));
+
+        tap.set(false);
+        m.render(&mut out, &RenderTime::now());
+        got.clear();
+        tap.drain(&mut got);
+        assert!(got.is_empty());
     }
 }

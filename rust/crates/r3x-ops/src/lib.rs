@@ -9,7 +9,7 @@ use std::sync::Arc;
 use r3x_bus::{Bus, Received};
 use r3x_contracts::{
     Ack, Command, Domain, Event, LogLine, MessageClass, OpsEvent, ServiceHealth, ServiceStatus,
-    ServicesState, Source, TelemetryCommand,
+    RecordAction, ServicesState, Source, TelemetryCommand,
 };
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -48,6 +48,11 @@ pub fn spawn_health(bus: &Bus) -> JoinHandle<()> {
 
 /// Changes the runtime's log filter (`debug`, `info`, `r3x_gateway=trace`, ...).
 pub type LevelControl = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// The recorder's `telemetry.record` handler; set once the recorder exists (it needs the
+/// output mix, which comes up after telemetry). Unset = "no recorder in this runtime".
+pub type RecordControl = Arc<dyn Fn(RecordAction) -> Ack + Send + Sync>;
+pub type RecordSlot = Arc<std::sync::OnceLock<RecordControl>>;
 
 /// Runtime log lines for gateway clients.
 #[derive(Clone)]
@@ -118,8 +123,9 @@ impl tracing::field::Visit for MessageVisitor {
     }
 }
 
-/// Own the `telemetry` class: log level. (`frames` is per connection; the gateway answers it.)
-pub fn spawn_telemetry(bus: &Bus, level: LevelControl) -> Option<JoinHandle<()>> {
+/// Own the `telemetry` class: log level and the recorder. (`frames` and `mix_audio` are per
+/// connection; the gateway answers them.)
+pub fn spawn_telemetry(bus: &Bus, level: LevelControl, record: RecordSlot) -> Option<JoinHandle<()>> {
     let mut rx = bus.take_commands(MessageClass::Telemetry)?;
     Some(tokio::spawn(async move {
         while let Some(req) = rx.recv().await {
@@ -134,7 +140,11 @@ pub fn spawn_telemetry(bus: &Bus, level: LevelControl) -> Option<JoinHandle<()>>
                         Err(e) => Ack::rejected(format!("bad log filter {spec:?}: {e}")),
                     }
                 }
-                Command::Telemetry(TelemetryCommand::Frames { .. }) => Ack::Accepted,
+                Command::Telemetry(TelemetryCommand::Frames { .. } | TelemetryCommand::MixAudio { .. }) => Ack::Accepted,
+                Command::Telemetry(TelemetryCommand::Record { action }) => match record.get() {
+                    Some(r) => r(*action),
+                    None => Ack::rejected("this runtime has no recorder"),
+                },
                 other => Ack::rejected(format!("ops does not handle {:?}", other.class())),
             };
             req.ack(ack);
@@ -174,6 +184,7 @@ mod tests {
                 s2.lock().unwrap().push(f.to_string());
                 Ok(())
             }),
+            RecordSlot::default(),
         );
         let set = |l: &str| Command::Telemetry(TelemetryCommand::SetLogLevel { level: l.into() });
         assert!(bus.command(Source::Ui, None, set("DEBUG")).await.is_accepted());

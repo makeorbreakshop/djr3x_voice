@@ -43,6 +43,9 @@ pub struct AudioHooks {
     pub inbound: Option<mpsc::Sender<AudioIn>>,
     /// Runtime TTS audio for clients.
     pub outbound: Option<broadcast::Sender<Arc<AudioOut>>>,
+    /// The runtime's whole output mix, only to clients that ask (`telemetry.mix_audio`). The
+    /// producer copies the mix only while someone is subscribed.
+    pub mix: Option<broadcast::Sender<Arc<AudioOut>>>,
 }
 
 #[derive(Debug)]
@@ -216,6 +219,7 @@ async fn connection(socket: WebSocket, sh: Shared, info: ClientInfo) {
     let mut frames: Option<broadcast::Receiver<Arc<Frames>>> = None;
     let mut logs = sh.cfg.logs.as_ref().map(|l| l.subscribe());
     let mut audio_out = sh.cfg.audio.outbound.as_ref().map(|a| a.subscribe());
+    let mut mix: Option<broadcast::Receiver<Arc<AudioOut>>> = None;
     let mut audio_meta: Option<AudioMeta> = None;
     push(text(&hello(&sh, &info)));
 
@@ -245,12 +249,21 @@ async fn connection(socket: WebSocket, sh: Shared, info: ClientInfo) {
                 Err(broadcast::error::RecvError::Lagged(_)) => true,
                 Err(broadcast::error::RecvError::Closed) => { audio_out = None; true }
             },
+            a = recv_opt(&mut mix) => match a {
+                Ok(chunk) => push(text(&loose(&sh.bus, Body::Audio(chunk.meta.clone()))))
+                    && push(Message::Binary(chunk.pcm.clone())),
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(client = %info.name, chunks = n, "mix audio lagged; recording has a gap");
+                    true
+                }
+                Err(broadcast::error::RecvError::Closed) => { mix = None; true }
+            },
             msg = stream.next() => match msg {
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
                 Some(Ok(Message::Text(t))) => {
                     match serde_json::from_str::<ClientMessage>(t.as_str()) {
                         Ok(ClientMessage { id, body: ClientBody::Command(cmd) }) => {
-                            on_command(&sh, &info, &out, id, cmd, &mut frames);
+                            on_command(&sh, &info, &out, id, cmd, &mut frames, &mut mix);
                         }
                         Ok(ClientMessage { body: ClientBody::Audio(meta), .. }) => audio_meta = Some(meta),
                         Err(e) => {
@@ -287,6 +300,7 @@ fn on_command(
     id: Option<String>,
     cmd: Command,
     frames: &mut Option<broadcast::Receiver<Arc<Frames>>>,
+    mix: &mut Option<broadcast::Receiver<Arc<AudioOut>>>,
 ) {
     let reply = |ack| {
         let mut env = sh.bus.stamp(Source::System, None, Body::Ack(ack));
@@ -305,6 +319,21 @@ fn on_command(
     if let Command::Telemetry(TelemetryCommand::Frames { enabled }) = cmd {
         *frames = enabled.then(|| sh.bus.subscribe_frames());
         let _ = out.try_send(reply(r3x_contracts::Ack::Accepted));
+        return;
+    }
+    if let Command::Telemetry(TelemetryCommand::MixAudio { enabled }) = cmd {
+        let ack = match (&sh.cfg.audio.mix, enabled) {
+            (Some(tx), true) => {
+                *mix = Some(tx.subscribe());
+                r3x_contracts::Ack::Accepted
+            }
+            (None, true) => r3x_contracts::Ack::rejected("this runtime has no audio output to record"),
+            (_, false) => {
+                *mix = None;
+                r3x_contracts::Ack::Accepted
+            }
+        };
+        let _ = out.try_send(reply(ack));
         return;
     }
     let (bus, out, source) = (sh.bus.clone(), out.clone(), info.source);
