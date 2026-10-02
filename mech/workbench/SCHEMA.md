@@ -151,6 +151,9 @@ A rigid body. Every part rides on exactly one link.
   "explode": [0, 1, 0],                 // unit direction the part leaves along
   "explode_mm": 60,                     // how far at explode = 1
   "bbox": [[minx,miny,minz],[maxx,maxy,maxz]],   // assembly frame, zero pose
+  "mass_props": {"volume_mm3": 28210.5, "centroid": [x,y,z],      // optional: the source mesh's solid (part frame),
+                 "inertia_unit": [9 numbers], "closed": true},  // inertia per unit density about the centroid,
+                                        // part axes; before display LOD/quantization: mass models read this, never the GLB
   "triangles": {"display": 4000, "full": 12000, "source": 51000},
   "inferred": false, "inferred_note": "",
   "note": "",
@@ -457,3 +460,5 @@ The assembly carries its connections (workbench/mates.py):
   `replaced_by` (optional; a reader that does not know it draws a replaced part, as before).
 - v1 (2026-10-01): part `finish` (optional: paint, print filament and colour, purchased colour) and the
   root's `finish` check. Readers that do not know it colour by `material`, as before.
+- v1 (2026-10-02): part `mass_props` (optional): the solid from the source mesh, so mass models (rigsync)
+  never read the decimated, quantized display GLBs. Readers without it keep working.

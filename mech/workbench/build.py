@@ -110,6 +110,33 @@ def _glb(mesh: trimesh.Trimesh, path: Path):
     path.write_bytes(out)
 
 
+def _mass_props(mesh: trimesh.Trimesh, centre) -> dict | None:
+    """The part's solid from its source mesh (SCHEMA.md Part `mass_props`): volume, centroid (part frame)
+    and inertia per unit density about the centroid (part axes = assembly axes), before any display LOD or
+    quantization, so the mass model never depends on how the mesh is drawn. None when the mesh is not a
+    solid (no volume, or larger than its box): readers fall back to the box. A nearly closed mesh is kept
+    (`closed: false`): the divergence integrals are fine for it."""
+    try:
+        if mesh is None or not len(mesh.faces):
+            return None
+        m = mesh
+        closed = bool(m.is_volume)
+        v = float(m.volume)
+        if v < 0:  # inverted: the same solid
+            m = m.copy()
+            m.invert()
+            v = -v
+        box = float(np.prod(np.maximum(m.extents, 1e-6)))
+        c = np.asarray(m.center_mass, float)
+        inertia = np.asarray(m.moment_inertia, float)
+        if not (0 < v <= box * 1.01 and np.all(np.isfinite(c)) and np.all(np.isfinite(inertia))):
+            return None
+        return {"volume_mm3": round(v, 3), "centroid": [round(float(x), 4) for x in c - np.asarray(centre, float)],
+                "inertia_unit": [round(float(x), 3) for x in inertia.ravel()], "closed": closed}
+    except Exception:
+        return None
+
+
 def _atomic_json(obj, path: Path):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(obj, indent=1))
@@ -258,6 +285,7 @@ def assembly_json(asm: Assembly, out: Path, prefix: str = "", export: bool = Tru
             "mass_g": round(p.mass_g, 1) if p.mass_g else None, "mass_note": p.mass_note,
             "linkage": p.linkage, "role": p.role,
             "bbox": [vec(m.bounds[0]), vec(m.bounds[1])],
+            "mass_props": _mass_props(m, centre),
             "triangles": _clean({"display": n_disp, "full": full[1] if full else None, "source": int(len(m.faces))}),
             "inferred": p.inferred, "inferred_note": p.inferred_note, "note": p.note,
             "cad": p.cad, "catalog": p.catalog, "features": {**(p.features or {}), **d_feats.get(p.id, {})}, "stretch": p.stretch, "exposed": p.exposed,
