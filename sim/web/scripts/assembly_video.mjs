@@ -119,7 +119,7 @@ const shells = plan.filter((p) => p.n >= SHELLS_FROM);
 // ------------------------------------------------------------------ the timeline
 // open on the finished head, explode it along the build's own paths (last in, first out), then build it up
 const EXPLODE_S = 2.0;
-const segs = [{ kind: 'open', dur: 3.0 }, { kind: 'explode', dur: EXPLODE_S }, { kind: 'exploded', dur: 1.0 }];
+const segs = [{ kind: 'open', dur: 3.0 }, { kind: 'explode', dur: EXPLODE_S }, { kind: 'exploded', dur: 0.8 }, { kind: 'disperse', dur: 1.2 }];
 for (const p of mech) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
 segs.push({ kind: 'wide', dur: MOVE_S + 0.2 }, { kind: 'motion', dur: MOTION_S });
 for (const p of shells) segs.push({ kind: 'step', p, dur: p.total + STEP_HOLD });
@@ -129,7 +129,9 @@ const nFrames = Math.round(total * FPS);
 console.log(`${shown.length} steps, ${total.toFixed(1)} s, ${nFrames} frames`);
 
 const node = JSON.stringify(SECTION);
-const label = async (num, text, op) => ev(`(() => { const l = document.querySelector('#vid .lab'); l.querySelector('b').textContent = ${JSON.stringify(String(num ?? ''))}; l.querySelector('span').textContent = ${JSON.stringify(text ?? '')}; l.style.opacity = ${op}; 1 })()`);
+// the band is always there; its text fades (0.3 s) in and out
+const label = async (num, text, op) => ev(`(() => { const l = document.querySelector('#vid .lab'); l.querySelector('b').textContent = ${JSON.stringify(String(num ?? ''))}; l.querySelector('span').textContent = ${JSON.stringify(text ?? '')}; l.style.opacity = 1; for (const e of l.children) e.style.opacity = ${op}; 1 })()`);
+const smooth = (x) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
 const AZ0 = 32;
 const EL0 = 24;
@@ -182,7 +184,11 @@ const place = async (sh, orbit = 0) => {
 const stepShot = async (az) => {
   const b = await ev(`JSON.stringify(__r3x.build.videoStepBox())`).then(JSON.parse);
   let best = null;
-  for (const fill of [0.6, 0.45]) for (const el of [EL0, -14, 40]) for (const da of [0, 45, -45, 100, -100, 180]) {
+  // something coming in from below: a low camera looking up at the underside first, and closer
+  const below = await ev(`__r3x.build.videoFromBelow()`);
+  const els = below ? [-22, EL0, 40] : [EL0, -14, 40];
+  const fills = below ? [0.72, 0.6, 0.45] : [0.6, 0.45];
+  for (const fill of fills) for (const el of els) for (const da of [0, 45, -45, 100, -100, 180]) {
     const sh = boxShot(b, az + da, el, fill, 1.15);
     await place(sh);
     const bad = await ev(`JSON.stringify(__r3x.build.videoShotCheck(${JSON.stringify(SAFE)}))`).then(JSON.parse);
@@ -203,12 +209,13 @@ for (const sg of segs) {
   for (let k = 0; k < n; k++, f++) {
     const t = k / FPS;
     let orbit = 0;
-    if (sg.kind === 'open' || sg.kind === 'explode' || sg.kind === 'exploded') {
+    if (sg.kind === 'open' || sg.kind === 'explode' || sg.kind === 'exploded' || sg.kind === 'disperse') {
       if (sg.kind === 'open' && k === 0) {
         await ev(`(() => { const wb = __r3x.build; wb.setGuideStep(-1, false); 1 })()`);
         cur = await wholeShot(AZ0 - 25, EL0, 0.78);
-        await label('', TITLE, 1);
       }
+      if (sg.kind === 'open') await label('', TITLE, smooth(t / 0.4));
+      if (sg.kind === 'disperse') await label('', TITLE, 1 - smooth(t / 0.4));
       if (sg.kind === 'explode' && k === 0) {
         // where the camera ends up: the exploded view, framed whole
         await ev(`__r3x.build.videoExplodeAt(1)`);
@@ -223,6 +230,13 @@ for (const sg of segs) {
         cur = { c: from.c.map((v, j) => v + (to.c[j] - v) * e), r: from.r + (to.r - from.r) * e, az: from.az, el: from.el };
       }
       if (sg.kind === 'exploded') await ev(`__r3x.build.videoExplodeAt(1)`);
+      if (sg.kind === 'disperse') {
+        // what the first step needs stays where the explode left it; the rest flies on out, fading
+        if (k === 0) await ev(`(() => { const wb = __r3x.build; const st = wb.steps[${plan[0].i}]; const ids = new Set((st.sequence ?? []).flatMap((it) => it.ids));
+          for (const s of wb.steps) for (const it of s.sequence ?? []) for (const id of it.ids) { const f = wb.fastenerInfo(id); if (f && f.joins.some((j) => ids.has(j))) ids.add(id); }
+          wb.videoStay = ids; 1 })()`);
+        await ev(`__r3x.build.videoExplodeAt(1, ${smooth((k + 1) / n).toFixed(4)})`); // (the last frame fully gone)
+      }
       await place(cur);
     } else if (sg.kind === 'step') {
       const p = sg.p;
@@ -230,14 +244,16 @@ for (const sg of segs) {
         await ev(`(() => { const wb = __r3x.build; const n = wb.nodeOf(${node}); for (const j of ['head_tilt','head_roll','visor']) wb.setJoint(n, j, 0); wb.setGuideStep(${p.i}, true); wb.seqSetTime(0); 1 })()`);
         const got = await stepShot(AZ0 + T * DRIFT);
         report.push({ step: p.n, az: Math.round(got.sh.az), el: got.sh.el, fill: got.sh.r, bad: got.bad });
+        if (p !== plan[0]) await ev(`(() => { __r3x.build.videoStay = new Set(); 1 })()`);
         from = cur;
         to = got.sh;
       }
       await ev(`__r3x.build.seqSetTime(${t.toFixed(4)})`);
-      await label(p.n, p.title, 1);
+      await label(p.n, p.title, Math.min(smooth(t / 0.3), smooth((sg.dur - t) / 0.3)));
     } else {
       if (k === 0 && sg.kind === 'wide') {
         await label('', '', 0);
+        await ev(`(() => { __r3x.build.videoStay = new Set(); 1 })()`);
         from = cur;
         to = await wholeShot(AZ0 + T * DRIFT, EL0, 0.74);
       }
@@ -277,6 +293,20 @@ if (r.status) process.exit(r.status);
 const small = mp4.replace(/\.mp4$/, '_720.mp4');
 spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-framerate', String(FPS), '-i', path.join(OUT, 'frames', '%05d.png'), '-vf', 'scale=720:-2',
   '-c:v', 'libx264', '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', small], { stdio: 'inherit' });
+// one-frame glitches: consecutive frames' difference (64x64 grey) spiking above both neighbours
+{
+  const raw = spawnSync('ffmpeg', ['-loglevel', 'error', '-i', mp4, '-vf', 'scale=64:64,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 30 }).stdout;
+  const N = 64 * 64, n = Math.floor(raw.length / N);
+  const d = [];
+  for (let i = 1; i < n; i++) {
+    let s = 0;
+    for (let j = 0; j < N; j++) s += Math.abs(raw[i * N + j] - raw[(i - 1) * N + j]);
+    d.push(s / N);
+  }
+  const spikes = [];
+  for (let i = 1; i < d.length - 1; i++) if (d[i] > 3 && d[i] > 4 * Math.max(d[i - 1], d[i + 1], 0.5)) spikes.push(`${i + 1} (${d[i].toFixed(1)})`);
+  console.log(spikes.length ? `frame-diff spikes at: ${spikes.join(', ')}` : 'frame-diff: no one-frame spikes');
+}
 const every = Math.max(1, Math.floor(f / 12));
 spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', mp4, '-vf', `select='not(mod(n\\,${every}))',scale=360:-1,tile=4x3`, '-frames:v', '1',
   path.join(OUT, 'contact_sheet.png')], { stdio: 'inherit' });

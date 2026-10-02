@@ -211,3 +211,59 @@ def test_hunter_head_paths_cross_nothing():
             if not it.get("clean", True):
                 bad |= set(it["ids"])
     assert bad <= set(HUNTER_KNOWN), sorted(bad - set(HUNTER_KNOWN))
+
+
+def test_hunter_screws_seat_in_their_holes():
+    """Every Hunter screw on its hole's axis, its head on the face it seats on, its thread engaged; every fastener
+    has a path along its own axis (or in from the side into a gap) ending at that seat."""
+    f = MECH / "out" / "hunter_head" / "manifest.json"
+    if not f.exists():
+        pytest.skip("no mech/out/hunter_head manifest")
+    root = json.loads(f.read_text())["root"]
+    feats = {p["id"]: p.get("features") or {} for p in root["parts"]}
+    fast = {x["id"]: x for x in root["fasteners"]}
+    feats.update({k: v.get("features") or {} for k, v in fast.items()})
+    unit = lambda v: np.asarray(v, float) / np.linalg.norm(v)
+    checked = 0
+    for m in root["mates"]:
+        a, b = m["a"], m["b"]
+        if a["part"] not in fast:
+            a, b = b, a
+        if a["part"] not in fast:
+            continue
+        fa, fb = feats[a["part"]].get(a["feature"]), feats.get(b["part"], {}).get(b["feature"])
+        if not fa or not fb:
+            continue
+        if m["type"] == "concentric" and fa.get("type") == "axis" and fb.get("type") == "axis":
+            da, db = unit(fa["d"]), unit(fb["d"])
+            assert abs(abs(da @ db) - 1) < 1e-3, m["id"]
+            off = np.asarray(fa["p"]) - np.asarray(fb["p"])
+            assert np.linalg.norm(off - db * (off @ db)) < 0.3, m["id"]  # on the hole's axis
+            checked += 1
+        elif m["type"] == "seated" and fa.get("type") == "plane" and fb.get("type") == "plane":
+            na, nb = unit(fa["n"]), unit(fb["n"])
+            assert na @ nb < -0.999, m["id"]  # face to face
+            assert abs((np.asarray(fa["p"]) - np.asarray(fb["p"])) @ nb) < 0.3, m["id"]  # flush: no float, no sink
+            checked += 1
+        elif m["type"] == "threaded":
+            prm = m.get("params") or {}
+            if "engage_mm" in prm:
+                assert prm["engage_mm"] > 0, m["id"]  # not stopping short
+                if prm.get("hole_depth_mm"):
+                    assert prm["engage_mm"] <= prm["hole_depth_mm"] + 0.3, m["id"]  # not through a blind hole
+            checked += 1
+    assert checked > 100
+    # the path ends at the seat (an offset of zero) and starts on its own axis or square to it
+    for s in root["steps"]:
+        for it in s.get("sequence") or []:
+            if it["kind"] != "fastener":
+                continue
+            fid = it["ids"][0]
+            q = fast[fid]["transform"].get("q", [0, 0, 0, 1])
+            x, y, z, w = q
+            ax = np.array([2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)])
+            p0 = np.asarray(it["paths"][fid][0], float)
+            if np.linalg.norm(p0) < 1e-6:
+                continue
+            c = abs(unit(p0) @ ax)
+            assert c > 0.999 or c < 0.02, (fid, c)

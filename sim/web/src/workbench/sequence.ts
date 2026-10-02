@@ -50,8 +50,8 @@ export function fastenerKind(spec: MSpec): Kind {
 export function fastenerTravel(spec: MSpec): { mm: number; side: 1 | -1; turns: number } {
   const k = fastenerKind(spec);
   const len = Number(spec.length_mm) || 8;
-  if (k === 'nut') return { mm: 16, side: -1, turns: 3 };
-  if (k === 'screw') return { mm: Math.max(18, len * 1.6), side: 1, turns: 3 };
+  if (k === 'nut') return { mm: 16, side: -1, turns: 1.5 };
+  if (k === 'screw') return { mm: Math.max(18, len * 1.6), side: 1, turns: 1.5 };
   if (k === 'washer') return { mm: 14, side: 1, turns: 0 };
   if (k === 'insert') return { mm: 12, side: 1, turns: 0 };
   return { mm: Math.max(12, len * 1.2), side: 1, turns: 0 };

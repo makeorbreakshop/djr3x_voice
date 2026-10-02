@@ -1532,7 +1532,21 @@ export class Workbench {
     const q = this.seq;
     const started = (id: string) => {
       const it = q?.of.get(id);
-      return !it || q!.force !== null || q!.t >= it.start;
+      return !it || q!.force !== null || q!.t >= it.start || this.videoStay.has(id);
+    };
+    // an item fades in over its first 0.3 s (one that stayed from the explode is already there)
+    const alphaOf = (id: string) => {
+      const it = q?.of.get(id);
+      if (!it || q!.force !== null || this.videoStay.has(id)) return 1;
+      const k = Math.min(1, Math.max(0, (q!.t - it.start) / 0.3));
+      return k * k * (3 - 2 * k);
+    };
+    const fade = (m: THREE.MeshStandardMaterial, mesh: THREE.Object3D, a: number) => {
+      if (a >= 1) return;
+      setLook(m, Math.max(0.001, a), null);
+      mesh.renderOrder = 2;
+      const e = mesh.getObjectByName('edges');
+      if (e) e.visible = false;
     };
     // what is moving in a warm accent while it travels, settling to its own colour as it seats
     const warm = new THREE.Color(0xf09a3e);
@@ -1540,7 +1554,10 @@ export class Workbench {
       if (m.userData.base === undefined) return;
       m.color.setHex(m.userData.base);
       const u = q?.of.has(id) ? this.seqU(id) : 0;
-      if (u > 0) m.color.lerp(warm, Math.min(1, u * 1.6) * 0.85);
+      // (warming over 0.4 s up to its start, so a part already in sight does not flash)
+      const it = q?.of.get(id);
+      const on = it && q!.force === null ? Math.min(1, Math.max(0, (q!.t - it.start + 0.4) / 0.4)) : 1;
+      if (u > 0) m.color.lerp(warm, Math.min(1, u * 1.6) * 0.85 * on * on * (3 - 2 * on));
     };
     for (const po of this.parts.values()) {
       const v = !!po.mesh.userData.vis && (!inStep.has(po.part.id) || started(po.part.id));
@@ -1548,6 +1565,7 @@ export class Workbench {
       po.holder.visible = v;
       if (!v) continue;
       tint(po.mat, po.part.id);
+      if (inStep.has(po.part.id)) fade(po.mat, po.mesh, alphaOf(po.part.id));
       // the shells see-through (the mechanism working under them), or as they are
       if (po.part.class === 'shell') {
         setLook(po.mat, this.videoShellAlpha < 1 ? this.videoShellAlpha : 1, null);
@@ -1560,7 +1578,12 @@ export class Workbench {
       const own = fo.f.joins.filter((j) => this.parts.has(j));
       const ok = fastIn.has(fo.f.id) ? started(fo.f.id) : own.every((j) => !inStep.has(j) || started(j));
       fo.obj.visible = !!fo.obj.userData.vis && ok && own.some((j) => this.parts.get(j)?.mesh.visible);
-      if (fo.obj.visible) tint(fo.mat, fo.f.id);
+      if (fo.obj.visible) {
+        tint(fo.mat, fo.f.id);
+        // its own fade, or (put in before its part goes in) its part's
+        const a = fastIn.has(fo.f.id) ? alphaOf(fo.f.id) : Math.min(1, ...own.filter((j) => inStep.has(j)).map(alphaOf));
+        fade(fo.mat, fo.obj, a);
+      }
     }
   }
 
@@ -1669,11 +1692,13 @@ export class Workbench {
 
   /** The video's opening: the finished section coming apart along the build's own paths, the last step first
    *  (k 0: assembled, 1: every item at its start). Call on the title card (everything shown). */
-  videoExplodeAt(k: number) {
+  videoExplodeAt(k: number, away = 0) {
     const g = this.guide;
     if (!g) return;
     const items: { ids: string[]; paths: Record<string, number[][]> }[] = [];
     for (const st of this.steps) for (const it of (st as AStep & { sequence?: { ids: string[]; paths?: Record<string, number[][]> }[] }).sequence ?? []) items.push({ ids: it.ids, paths: it.paths ?? {} });
+    const rankIn = new Map<string, number>();
+    items.forEach((it, r) => it.ids.forEach((id) => rankIn.set(id, r)));
     items.reverse(); // the last in, the first out
     const n = Math.max(1, items.length);
     const w = 0.22;
@@ -1686,15 +1711,32 @@ export class Workbench {
         const pts = (it.paths[id] ?? []).map((p) => new THREE.Vector3(...(p as [number, number, number])));
         if (!pts.length) continue;
         const o = pathAt(pts, u);
+        // after the explode, what the first step does not need flies on out the way it came, fading
+        const gone = away > 0 && !this.videoStay.has(id);
+        if (gone) o.add(pts[0].clone().multiplyScalar(2.5 * away));
         const po = this.parts.get(id);
         if (po) {
           po.mesh.position.copy(po.sBase ?? po.base).add(o);
+          setLook(po.mat, gone ? Math.max(0.001, 1 - away) : po.part.class === 'shell' && this.videoShellAlpha < 1 ? this.videoShellAlpha : 1, null);
+          po.mesh.renderOrder = gone ? 2 : 0;
+          const ed = po.mesh.getObjectByName('edges');
+          if (ed) ed.visible = !gone; // (a fading part's edge lines would stay as a wireframe)
+          if (gone && away >= 0.999) po.mesh.visible = false;
           continue;
         }
         const fo = this.fast.get(id);
         if (fo) {
-          const spin = fastenerTravel(fo.f.spec).turns * u * Math.PI * 2;
-          fo.obj.matrix.copy(fo.base).multiply(new THREE.Matrix4().makeRotationZ(spin)).premultiply(new THREE.Matrix4().makeTranslation(o.x, o.y, o.z));
+          // hardware put in before its part goes in rides with that part
+          const own = fo.f.joins.filter((j) => this.parts.has(j));
+          const carrier = own.length && own.every((j) => (rankIn.get(j) ?? -1) > (rankIn.get(id) ?? 0)) ? this.parts.get(own[0]) : null;
+          let off = o;
+          if (carrier) off = carrier.mesh.position.clone().sub(carrier.sBase ?? carrier.base);
+          const spin = carrier ? 0 : fastenerTravel(fo.f.spec).turns * u * Math.PI * 2;
+          fo.obj.matrix.copy(fo.base).multiply(new THREE.Matrix4().makeRotationZ(spin)).premultiply(new THREE.Matrix4().makeTranslation(off.x, off.y, off.z));
+          const ga = carrier ? (away > 0 && !this.videoStay.has(carrier.part.id) ? 1 - away : 1) : gone ? 1 - away : 1;
+          setLook(fo.mat, Math.max(0.001, ga), null);
+          fo.obj.renderOrder = ga < 1 ? 2 : 0;
+          if (ga <= 0.001) fo.obj.visible = false;
         }
       }
     });
@@ -1724,11 +1766,29 @@ export class Workbench {
       const fo = this.fast.get(id);
       return fo ? new THREE.Vector3().setFromMatrixPosition(fo.obj.matrixWorld) : null;
     };
+    /** Its height on screen (share of the frame). */
+    const size = (id: string) => {
+      const po = this.parts.get(id);
+      const obj = po?.mesh ?? this.fast.get(id)?.obj;
+      if (!obj) return 1;
+      const g = (obj as THREE.Mesh).geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const b = g.boundingBox!;
+      let lo = Infinity, hi = -Infinity;
+      for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+        const v = new THREE.Vector3(x, y, z).applyMatrix4(obj.matrixWorld).project(cam);
+        lo = Math.min(lo, v.y);
+        hi = Math.max(hi, v.y);
+      }
+      return (hi - lo) / 2;
+    };
     const look = (id: string) => {
       const p = centre(id);
       if (!p) return { inside: true, seen: true };
       const n = p.clone().project(cam);
-      const inside = n.x > safe[0] && n.x < safe[2] && n.y > safe[1] && n.y < safe[3] && n.z < 1;
+      // inside the safe area, and big enough to read (a part a twentieth of the frame, hardware a fortieth)
+      const big = size(id) >= (this.parts.has(id) ? 0.05 : 0.025);
+      const inside = big && n.x > safe[0] && n.x < safe[2] && n.y > safe[1] && n.y < safe[3] && n.z < 1;
       const d = p.distanceTo(cam.position);
       ray.set(cam.position, p.clone().sub(cam.position).normalize());
       ray.far = d;
@@ -1750,6 +1810,17 @@ export class Workbench {
     q.force = was;
     this.applyOffsets(0);
     return bad;
+  }
+
+  /** Does anything in the step come in from below (its path starts under its seat)? */
+  videoFromBelow(): boolean {
+    const q = this.seq;
+    if (!q) return false;
+    for (const it of q.items) for (const id of it.ids) {
+      const p = this.seqPaths.get(id)?.[0];
+      if (p && p.length() > 1 && p.y < -0.5 * p.length()) return true;
+    }
+    return false;
   }
 
   /** The video's wide shot: the section as it stands. */
@@ -1879,10 +1950,29 @@ export class Workbench {
   private seqU(id: string): number {
     const q = this.seq;
     if (!q) return 0;
+    if (this.videoStay.has(id) && q.force === null && !q.of.get(id)) return 0;
     const it = q.of.get(id);
     if (!it) return 0;
     return q.force ?? itemU(it, q.t);
   }
+  /** Linear progress left (1 at its start, 0 seated): a fastener spins at a steady rate, so it reads as screwing. */
+  private seqLin(id: string): number {
+    const q = this.seq;
+    const it = q?.of.get(id);
+    if (!q || !it) return 0;
+    if (q.force !== null) return q.force;
+    return 1 - Math.min(1, Math.max(0, (q.t - it.start) / it.dur));
+  }
+  /** The video: an item comes back from further out the way it left (its path's first leg, extended), fading in. */
+  private videoExtra(id: string, path: THREE.Vector3[]): THREE.Vector3 {
+    const q = this.seq;
+    if (!this.video || !q || q.force !== null || this.videoStay.has(id) || !path.length) return new THREE.Vector3();
+    const u = this.seqU(id);
+    const k = Math.min(1, Math.max(0, (u - 0.6) / 0.4));
+    return path[0].clone().multiplyScalar(1.5 * k * k * (3 - 2 * k));
+  }
+  /** Items that stay where the explode left them (the first step's): no fade, no extra approach. */
+  videoStay = new Set<string>();
 
   /** Where each of a step's new parts comes from (link frame, mm): straight out from what is already built -
    *  from the nearest face of its bounds (a plate under the foot plate comes from below), or from its centre
@@ -2746,7 +2836,7 @@ export class Workbench {
       const path = g ? this.seqPaths.get(po.part.id) : undefined;
       // a step's new parts come in along their path (the manifest's), else from where the explode would take them
       const step = inStep.has(po.part.id) && (u > 0 || (!g && insert > 0))
-        ? (g ? (path ? pathAt(path, u) : (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u))
+        ? (g ? (path ? pathAt(path, u).add(this.videoExtra(po.part.id, path)) : (this.guideFrom.get(po.part.id)?.clone() ?? this.arrival(po)).multiplyScalar(GUIDE_PULL.part * u))
           : this.arrival(po).multiplyScalar(insert)) : null;
       po.mesh.position.copy(po.sBase ?? po.base).add(this.offsetOf(po, this.explode));
       if (step) po.mesh.position.add(step);
@@ -2772,8 +2862,8 @@ export class Workbench {
         if (fpath) {
           // its manifest path (along its own axis, or in from the side into a gap), spinning on as it drives
           const uf = this.seqU(fo.f.id);
-          const o = pathAt(fpath, uf);
-          const spin = fastenerTravel(fo.f.spec).turns * uf * Math.PI * 2;
+          const o = pathAt(fpath, uf).add(this.videoExtra(fo.f.id, fpath));
+          const spin = fastenerTravel(fo.f.spec).turns * this.seqLin(fo.f.id) * Math.PI * 2;
           fo.obj.matrix.copy(fo.base).multiply(new THREE.Matrix4().makeRotationZ(spin)).premultiply(new THREE.Matrix4().makeTranslation(o.x, o.y, o.z));
           continue;
         }
