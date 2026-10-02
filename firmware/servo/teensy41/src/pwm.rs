@@ -201,10 +201,12 @@ const QT_CSCTRL_LOADS: u16 = 0b10   // CL1: COMP1 <- CMPLD1 on a COMP2 compare (
     | (0b01 << 2); // CL2: COMP2 <- CMPLD2 on a COMP1 compare (rising edge)
 
 impl Servos {
-    /// Mux the pins and start every output low (no pulse). `ccm` turns on QuadTimer 1's
-    /// clock gate, which the BSP's clock policy does not cover.
+    /// Mux the pins and start every output low (no pulse). `ccm` turns on the QuadTimer 1 and 3
+    /// clock gates, which the BSP's clock policy does not cover.
     pub fn new(p: Pins, ccm: &mut ral::ccm::CCM) -> Self {
-        // QuadTimer 1 (CG13) and 3 (CG15) clock gates
+        // QuadTimer 1 (CCGR6 CG13) and 3 (CCGR6 CG15) clock gates: imxrt-ral `timer1/3_clk_enable`,
+        // Teensyduino CCM_CCGR6_QTIMER1 (<< 26) / QTIMER3 (<< 30). Output-only, so pin 14 needs no
+        // QTIMER3_TIMER2_SELECT_INPUT daisy write (Teensyduino's pwm.c writes none either).
         ral::modify_reg!(ral::ccm, ccm, CCGR6, CG13: 0b11, CG15: 0b11);
         let map = [
             ab(p.p2),                   // 0  PWM4 SM2 A
