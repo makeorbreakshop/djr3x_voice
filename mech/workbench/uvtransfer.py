@@ -154,6 +154,7 @@ def transfer(name: str, orig: Original, mount: np.ndarray, atlas_of) -> dict:
         if best is None or cost < best[2]:
             best = (atlas, T, cost)
     T = best[1]
+    print(f"{name}: {len(items)} exterior parts, registered on {best[0]} (rms {np.sqrt(best[2]):.2f} mm)", flush=True)
     summary = {"source": "sim/web/public/model/r3x.glb", "registration_rms_mm": round(float(np.sqrt(best[2])), 2), "parts": {}}
     for p, files, M, _W, _F in items:
         atl = atlas_of(p)
@@ -165,6 +166,7 @@ def transfer(name: str, orig: Original, mount: np.ndarray, atlas_of) -> dict:
             (d / fn).with_suffix(".uv.bin").write_bytes(uv.tobytes())
             cover.append(float(ok.mean()))
         c = min(cover)
+        print(f"  {name}/{p['id']}: {atl} {c:.0%}", flush=True)
         summary["parts"][p["id"]] = {"atlas": atl, "coverage": round(c, 3), "textured": c >= MIN_COVER,
                                      "files": [f.replace(".glb", ".uv.bin") for f in files]}
     (d / "uvtransfer.json").write_text(json.dumps(summary, indent=1))
