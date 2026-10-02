@@ -21,7 +21,6 @@ RANDALL = C / "Riane Randall - Files"
 TREVOR = C / "Trevor Zaharichuk - Files/Mic-Mouth-Split/Mic-Mouth-Split"
 
 STATIC = roty(frames.KIT_YAW_DEG["static"])
-HEAD = roty(frames.KIT_YAW_DEG["head"])
 
 
 def extrusion_2020(length):
@@ -124,11 +123,13 @@ def randall_frame() -> Asm:
 
 def mouth_split_parts(link="head"):
     """Trevor's holed grille + light pipe + back mount; build_r3x.py's fit: y' = 1471.3 - y, z' = -z,
-    grille extent = kit H_M_1 (both 83.5 mm tall)."""
+    grille extent = kit H_M_1 (both 83.5 mm tall). That fit already lands them on the head's front: the kit head's
+    yaw (52.2, which turns H_M_1's STL to the front) is not applied again, or they sit 52 deg round the head from it
+    (flipped only: grille y 683.1-766.6 vs H_M_1 683.1-766.7, centred on x, back mount's back 0.5 mm off H_M_1's)."""
     flip = np.array([[1, 0, 0, 0], [0, -1, 0, 1471.3], [0, 0, -1, 0], [0, 0, 0, 1]], float)
     out = []
     for n, id_ in (("Grill", "mouth_grill"), ("LightPipe", "mouth_light_pipe"), ("BackMount", "mouth_back_mount")):
-        out.append(_p(id_, f"Mic-Mouth-Split {n} (replaces H_M_1)", "mech", HEAD @ flip, TREVOR / f"{n}.stl",
+        out.append(_p(id_, f"Mic-Mouth-Split {n} (replaces H_M_1)", "mech", flip, TREVOR / f"{n}.stl",
                       link=link, material="PLA", placement="fitted", replaces=["h_m_1"],
                       evidence="sim/model/build_r3x.py MOUTH_FLIP_Y fit", exposed=n != "BackMount"))
     _finishes(out, MOUTH_FINISH)

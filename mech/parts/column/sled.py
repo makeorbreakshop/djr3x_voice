@@ -92,6 +92,11 @@ def _side(sx):
             body = clearance_hole(body, feats, f"arm{i + 1}", p, (1, 0, 0), "M4", S["t"])
             keep.append(((sx * sx_in, ya, zs + dz), 6.0))
     body = _grid(body, (sx * sx_in, (y0 + y1) / 2, 0), (0, 0, 1), (0, 1, 0), 2 * S["z_in"], y1 - y0, keep)
+    if sx > 0:  # the pan servo's two +X flange screws come up under this plate: a relief over their lock nuts
+        (fx, fz0), (_, fz1) = sorted(pan_flange_holes())[-2:]
+        rz = max(abs(fz0), abs(fz1)) + 4.0                       # the M3 nut's corners (3.1) + 0.9
+        body = body - box(x0 - 0.1, x1 + 0.1, y0 - 0.1, y0 + 6.0, -rz, rz)
+        feats["pan_relief"] = plane((sx * (sx_in + S["t"] / 2), y0 + 6.0, 0), (0, -1, 0))
     return body, feats
 
 
@@ -108,6 +113,10 @@ def _bottom():
     body = body + box(-T["half_x"], T["half_x"], y0, y1, S["z_out"] - 1, T["z1"])   # the service cable's tab
     # the case's top through the plate (spline on the axis, long side +X: case x -10..30, z +-10)
     body = body - box(-10.5, 30.5, y0 - 1, y1 + 1, -10.5, 10.5)
+    # the servo case's chamfer rises 1 mm off the flange's top at each end (goBILDA STEP, measured): a 1 mm step
+    # milled into the plate's underside over it
+    body = body - box(-12.6, 32.6, y0 - 1, y0 + 1.0, -10.5, 10.5)
+    body = body - box(-17.0, 37.0, y0 - 1, y0 + 1.0, -1.2, 1.2)     # and its centre rib, out to the flange's ends
     feats = {"top": plane((0, y1, 0), (0, 1, 0)), "under": plane((0, y0, 0), (0, -1, 0)),
              "cable_under": plane((L.COIL["x"], y0, L.COIL["z"]), (0, -1, 0))}
     for i, (x, z) in enumerate(pan_flange_holes()):

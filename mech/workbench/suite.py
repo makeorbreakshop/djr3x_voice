@@ -278,14 +278,17 @@ class Suite:
             d = _nominal(f.spec["thread"])
             if hole.get("r", 99) * 2 + 1e-6 < d:
                 bad.append(((f.id, m.b[0]), f"{f.id}: {d:.1f} mm shank in a {hole['r'] * 2:.1f} mm hole of {m.b[0]}"))
-        # tool access: from the head straight out, against the parts present at that step
+        # tool access: from the head straight out, against the parts present at that step; a bench step (Step.bench)
+        # sees only its own unit's parts fitted so far (built on the bench, then joined to the rest)
         ms = link_matrices(self.asm, {})
+        bench = [getattr(s, "bench", "") for s in self.asm.steps]
         for f in self.asm.fasteners:
             if f.matrix is None or f.spec.get("type") not in ("shcs", "bhcs", "fhcs", "shcs_low", "pan"):
                 continue
             k = steps.index(f.step) if f.step in steps else len(steps)
+            unit = bench[k] if k < len(steps) else ""
             present = [b for b in self.bodies.values() if b.kind != "fastener" and first.get(b.id, 0) <= k
-                       and b.id not in f.joins]
+                       and b.id not in f.joins and (not unit or (b.id in first and bench[first[b.id]] == unit))]
             p0 = f.matrix[:3, 3]
             out = -f.matrix[:3, 2]
             head_top = p0 + out * (_nominal(f.spec["thread"]) * 1.1)

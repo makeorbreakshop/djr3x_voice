@@ -1,9 +1,9 @@
 """The clock-spring cassette: the head's cables cross the pan joint here. A flat ribbon (the head
 servos' and eyes' conductors laminated, or a flat flex cable) spirals between the neck tube (its
-inner end clipped to the tube, r ~15) and this case's wall (its outer end fixed, r ~26), and leaves
-through a slot to the carriage's service cable. A ribbon of length L winds L/(2 pi) (1/15 - 1/26)
-turns between tight on the tube and loose on the wall: 0.75 turn (the pan's +-135) needs 166 mm;
-we specify 250 mm, which allows +-200 deg. Printed PETG, on three M4 standoffs from the carriage's
+inner end clipped to the tube, r ~15) and this case's wall (its outer end fixed, r ~24 inside), and leaves
+through a slot to the carriage's service cable. A ribbon of length L winds L/(2 pi) (1/15 - 1/24)
+turns between tight on the tube and loose on the wall: 0.75 turn (the pan's +-135) needs 189 mm;
+we specify 280 mm (L.CASE), which allows +-200 deg. Printed PETG, on four M4 standoffs from the carriage's
 ears (M4 screws down through its floor's ears into them)."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from parts.head._common import Print, finish, plane
 from . import _layout as L
 from ._cad import at_angle, box, clearance_hole, cyl_y, polygon_y
 
-DEFAULTS = dict(case=L.CASE, standoff=L.STANDOFF, ear=L.EAR, ribbon_mm=250.0)
+DEFAULTS = dict(case=L.CASE, standoff=L.STANDOFF, ear=L.EAR, ribbon_mm=L.CASE["ribbon_mm"])
 
 
 def ribbon_turns(length, r_in=L.CASE["inner_r"], r_out=L.CASE["r"] - L.CASE["wall"]):

@@ -193,6 +193,9 @@ class Step:
     derived: bool = False
     # The order things go in and each one's approach path (workbench/paths.py; SCHEMA.md "Step").
     sequence: list = field(default_factory=list)
+    # Built on the bench as a unit before it joins the rest (SCHEMA.md "Step"): the steps sharing a `bench` name are
+    # one unit, and a screw driven in one of them meets only that unit's parts fitted so far (the tool-access test).
+    bench: str = ""
 
 
 @dataclass

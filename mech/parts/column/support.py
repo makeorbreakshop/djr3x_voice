@@ -41,7 +41,7 @@ def _wedge(a0, a1, r0, r1, y0, y1):
 def bracket_points(level: str = "core", B=None):
     """The plate's bracket bolts (x, z): one per post, on the post's outer X face's side."""
     B = B or L.BRACKET
-    return [(sx * (L.HALF + B["leg"] / 2), sz * L.POST_C) for sx in (-1, 1) for sz in (-1, 1)]
+    return [(sx * (L.HALF + B.get("plate_hole", B["leg"] / 2)), sz * L.POST_C) for sx in (-1, 1) for sz in (-1, 1)]
 
 
 def _plate(level: str, S, B):
@@ -77,7 +77,7 @@ def _bracket(sx, sz, y_top, B):
              "plate_face": plane((xf + sx * B["leg"] / 2, y_top, zc), (0, 1, 0))}
     yp = yv0 + (B["leg"] - B["t"]) / 2
     body = clearance_hole(body, feats, "post", (xf + sx * B["t"], yp, zc), (-sx, 0, 0), "M4", B["t"])
-    xh = xf + sx * B["leg"] / 2
+    xh = xf + sx * B.get("plate_hole", B["leg"] / 2)
     body = clearance_hole(body, feats, "plate", (xh, y_top, zc), (0, -1, 0), "M5", B["t"])
     feats["nut_face"] = plane((xh, y_top - B["t"], zc), (0, -1, 0))
     return body, feats

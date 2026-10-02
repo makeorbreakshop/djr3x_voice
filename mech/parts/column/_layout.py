@@ -118,10 +118,13 @@ TOP_PLATE_SLED = dict(t=8.0, y1=HOUSING["y1"])            # the sled's top plate
 TOP_PLATE_SLED["y0"] = TOP_PLATE_SLED["y1"] - TOP_PLATE_SLED["t"]
 SLED["y0"], SLED["y1"] = BOTTOM["y1"], HOUSING["y1"]      # the four plates: 375.61..474.5
 WHEEL_Y = (BOTTOM["y1"] + VWHEEL["od"] / 2 + 1.0, HOUSING["y1"] - VWHEEL["od"] / 2 - 0.3)   # 388.8, 462.0
-STANDOFF = dict(r=33.0, angles=(45.0, 135.0, 225.0, 315.0), length=24.0)   # McMaster 92871A317 (6 OD, M4, 24)
-EAR = dict(t=6.0, r=38.0, w=12.0)
-CASE = dict(y0=HOUSING["y1"] + STANDOFF["length"], floor=3.0, h=14.0, r=28.0, wall=2.0, hole_r=18.0, top_hole_r=14.5,
-            inner_r=15.0)
+# r 29.8 at +-29 deg off the X axis: the screws' heads under the sled top clear the bearing housing (r 25), the front/back
+# plates (z 25.9) and the upper axle screws' heads (z 20.9-25.9 at x 15-23.7)
+STANDOFF = dict(r=29.8, angles=(61.0, 119.0, 241.0, 299.0), length=24.0)   # McMaster 92871A317 (6 OD, M4, 24)
+EAR = dict(t=6.0, r=34.0, w=12.0)   # to the standoffs (r 29.8 + 3) and 1.2 past
+CASE = dict(y0=HOUSING["y1"] + STANDOFF["length"], floor=3.0, h=14.0, r=26.0, wall=2.0, hole_r=18.0, top_hole_r=14.5,
+            inner_r=15.0, ribbon_mm=280.0)   # r 26: the standoff screws' heads (r 29.8 - 3.5) clear its wall; 280 mm of
+                                             # ribbon keeps +-200 deg in the smaller case
 COIL = dict(x=0.0, z=40.0, r=5.0, wire_r=2.0)             # retractile service cable (the column's front opening)
 
 # ------------------------------------------------------------------ lift (a rack climber, after Jason Charlton)
@@ -178,7 +181,9 @@ SUPPORT = dict(
 )
 LS_IC_RING_TOP = 361.1   # LS_IC_1's screw recesses' top (the 9.8 mm countersinks at r 104.4, read from its mesh)
 TOP_RACE_TOP = 488.0     # the top lazy susan's inner race on TR-MR_SC's flange, y 480-488 (assemblies/kit/fastening.py)
-BRACKET = dict(leg=20.0, w=20.0, t=5.0)   # 2020 corner bracket (cast aluminium, 20 x 20 x 20 x 5; inferred dims)
+BRACKET = dict(leg=20.0, w=20.0, t=5.0,   # 2020 corner bracket (cast aluminium, 20 x 20 x 20 x 5; inferred dims)
+               plate_hole=14.5)          # the plate's M5 14.5 out from the post (not the leg's middle): its lock nut
+                                         # under the leg then clears the post screw's head (drill/slot the leg there)
 # the clamp: one M4 into a drop-in T-nut per bracket (inferred: what a drop-in nut in 6063 holds before its
 # lips yield, and anodised aluminium on aluminium)
 CLAMP = dict(preload_n=1200.0, mu=0.2)   # M4 (8.8) at ~2.5 N m

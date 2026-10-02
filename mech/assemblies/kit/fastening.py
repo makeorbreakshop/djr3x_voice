@@ -20,10 +20,16 @@ The chain, per the kit's guide (pages in the notes; its transcription is in asse
 * base top: 4 x M4 button heads through B_T into heat-set inserts in the column's shell support ring
   (ours: the kit's B_T has no holes there; the column carries it).
 
-Hole positions are the prints' (read from the meshes: the spacer rings', LS_IC_1's, TR-MR_SC's, P_M_3's);
-the races' section is not stated by the kit: a 10 mm stack (the gap the kit leaves between the parts that
-clamp them) split as two rings, drawn 0.1 mm clear of their seats (inferred). Every placed screw is `inferred` where the guide does not fix
-its exact hole; each carries the guide's McMaster number.
+Hole positions are the prints' (read from the meshes: the spacer rings', LS_IC_1's, TR-MR_SC's, P_M_3's).
+The lazy susans are the guide's TamBee 10 in aluminium bearing (Anderson's hardware list: a.co/d/aPCygCY, Amazon
+B01MQSBP7B: "10 Inch ... Aluminum ... 130lb"; a reseller's copy of the listing gives 10 mm thick; the guide: "drill own
+holes"). The listing gives no section, so it is inferred from the kit itself: a 10 mm bearing (the gap the kit leaves
+between the parts that clamp it) whose outer ring runs its full height and whose inner ring sits 1.9 mm low (the middle
+and top rings, where the kit's parts clamp each ring on one face only). That reading is the one the guide's screw
+lengths fit against the kit's measured holes: 3/4 in from under the middle outer ring ends in MS_Main's 5.8 mm insert
+pocket, 1/2 in from under the top outer ring ends at TR_RR_Full's underside (a shorter outer ring bottoms both out). The
+holes are drilled where the kit's screws go and countersunk on the head's side for the guide's flat heads (82 deg).
+Every placed screw is `inferred` where the guide does not fix its exact hole; each carries the guide's McMaster number.
 """
 
 from __future__ import annotations
@@ -38,20 +44,49 @@ INCH = 25.4
 R_IN = (98.5, 111.0)       # inner race: LS_IC_1's footprint (r 98.5-110.3) and on to the ball track
 R_OUT = (111.4, 124.6)     # outer race: the spacer rings' footprint (r 111.8-124.6)
 D10_32, D6_32 = 4.83, 3.51
+M4_FH = 4.48               # ISO 10642 M4 head radius (the column's screws through the top inner race)
 
 # per lazy susan: (assembly, link) of each race, its y range, its screw holes (r, angles)
 RACES = {
     "lower": dict(inner=("lower_ring", "lower_ring_mount", (342.2, 352.0), 104.4, [1.1 + 90 * k for k in range(4)]),
                   outer=("lower_ring", "lower_ring", (342.2, 352.0), 118.3, [60.0 * k for k in range(6)]),
-                  step_in="lower_ring_s03", step_out="lower_ring_s04"),
+                  step_in="lower_ring_s03", step_out="lower_ring_s04", cs_in=None, cs_out=("top", D10_32)),
     # the middle race's inner ring is bolted to LS_IC_1's pillars: it lives with LS_IC_1 (lower_ring_mount)
     "middle": dict(inner=("lower_ring", "lower_ring_mount", (407.3, 415.2), 104.4, [46.1 + 90 * k for k in range(4)]),
-                   outer=("middle_ring", "middle_ring", (409.2, 417.1), 118.3, [28.7 + 60 * k for k in range(6)]),
-                   step_in=None, step_out="middle_ring_s02"),
+                   outer=("middle_ring", "middle_ring", (407.3, 417.1), 118.3, [28.7 + 60 * k for k in range(6)]),
+                   step_in=None, step_out="middle_ring_s02", cs_in=("top", D10_32), cs_out=("bottom", D10_32)),
     "top": dict(inner=("top_ring", "top_ring_mount", (480.2, 488.0), 104.4, [78.0 + 90 * k for k in range(4)]),
-                outer=("top_ring", "top_ring", (482.0, 489.9), 118.3, [28.3 + 60 * k for k in range(6)]),
-                step_in="top_ring_s05", step_out="top_ring_s04"),
+                outer=("top_ring", "top_ring", (480.2, 489.9), 118.3, [28.3 + 60 * k for k in range(6)]),
+                step_in="top_ring_s05", step_out="top_ring_s04", cs_in=("top", M4_FH), cs_out=("bottom", D10_32)),
 }
+
+
+# the kit's own fastening limits the droid suite finds, measured on the kit's prints (workbench/droid.py adds these)
+EXPLAINED = [
+    {"test": "fasteners_real", "parts": ["ksh_lower_race_out_*", "ls_sr_1", "ksh_top_race_out_*", "tr_sr_full"],
+     "cause": "the guide threads the outer races' 10-32 screws into LS_SR_1 and TR_SR_Full: printed rings 3.2 mm thick "
+              "with 4.0 mm pilot holes right through (measured on the prints), so at most 3.2 mm of plastic (2.7-2.9 at "
+              "these lengths) where the rule wants 2 d (9.7)",
+     "fix": "LS_SR_1: a 10-32 nylock on each screw under the ring (the standoffs leave 11 mm; a 1/2 in screw stands 6 mm "
+            "through); TR_SR_Full has TR_RR_Full on it: thread-locker, or a thicker TR_SR_Full with 10-32 inserts"},
+    {"test": "inserts", "parts": ["ksh_lower_race_out_*", "ls_sr_1", "ksh_top_race_out_*", "tr_sr_full"],
+     "cause": "the same screws thread straight into the 3.2 mm printed rings (the guide has no inserts there; the rings "
+              "are too thin for one)",
+     "fix": "as above: nylocks under LS_SR_1; TR_SR_Full thicker if inserts are wanted"},
+    {"test": "no_overlap", "parts": ["ksh_lower_race_out_*", "ls_sr_1"], "max_mm": 0.6,
+     "cause": "the 10-32 screws cut their own thread in LS_SR_1's 4.0 mm pilot holes: the shank (4.83) runs 0.42 into "
+              "the plastic all round, by design (the guide's self-tapping fix)",
+     "fix": "none (or the nylocks above, with the pilot opened to 5 mm)"},
+    {"test": "fasteners_real", "parts": ["ksh_lower_sr_*", "ksh_lower_standoff_*"],
+     "cause": "the guide's 6-32 x 1/4 in flat heads through LS_SR_1's 3.2 mm countersunk holes leave 3.15 mm in the "
+              "standoffs' thread; the rule wants 1 d (3.5) in metal",
+     "fix": "6-32 x 5/16 in flat heads (the 7/16 in standoffs take it), or accept: 0.9 d in an aluminium thread"},
+    {"test": "fasteners_real", "parts": ["ksh_middle_race_in_*", "ls_ic_1"],
+     "cause": "the guide's 1/2 in screws through the middle inner ring (7.9 mm) leave 4.7 mm in LS_IC_1's 10-32 inserts "
+              "(5.7 long); the rule wants min(insert, 1.5 d) = 5.2",
+     "fix": "10-32 x 5/8 in flat heads: LS_IC_1's pillars carry a 4.7 mm pilot on below the insert pocket (measured), "
+            "so the longer screw runs the insert's full length"},
+]
 
 
 def at(r, deg, y):
@@ -59,16 +94,26 @@ def at(r, deg, y):
     return np.array([r * np.sin(a), y, r * np.cos(a)])
 
 
-def _ring(r0, r1, y0, y1, holes, hole_r):
+def _ring(r0, r1, y0, y1, holes, hole_r, csink=None):
+    """A race: a ring r0..r1, y0..y1, drilled at `holes`; `csink` (face 'top'|'bottom', head radius): each hole
+    countersunk 82 deg on that face for a flat head (0.2 mm over the head)."""
     import manifold3d as mf
 
-    def cyl(r, h, x=0.0, z=0.0, ylo=0.0):
-        c = mf.Manifold.cylinder(h, r, r, 96 if r > 20 else 20)
+    def cyl(r, h, x=0.0, z=0.0, ylo=0.0, r_hi=None):
+        c = mf.Manifold.cylinder(h, r, r if r_hi is None else r_hi, 96 if r > 20 else 20)
         return c.rotate([-90, 0, 0]).translate([x, ylo, z])
 
     body = cyl(r1, y1 - y0, ylo=y0) - cyl(r0, y1 - y0 + 2, ylo=y0 - 1)
     for p in holes:
         body = body - cyl(hole_r, y1 - y0 + 2, p[0], p[2], y0 - 1)
+        if csink:
+            face, rh = csink
+            R = rh + 0.2
+            dep = (R - hole_r) / np.tan(np.radians(41.0))
+            if face == "top":
+                body = body - cyl(hole_r, dep + 0.02, p[0], p[2], y1 - dep, r_hi=R + 0.02)
+            else:
+                body = body - cyl(R + 0.02, dep + 0.02, p[0], p[2], y0 - 0.02, r_hi=hole_r)
     m = body.to_mesh()
     return trimesh.Trimesh(np.asarray(m.vert_properties)[:, :3], np.asarray(m.tri_verts), process=False)
 
@@ -89,6 +134,15 @@ def _index(root: Assembly) -> dict[str, Assembly]:
 def _step(asm: Assembly, sid: str | None) -> Step:
     st = next((s for s in asm.steps if s.id == sid), None) if sid else None
     return st
+
+
+def _bom_less(asm: Assembly, key: str, n: int, why: str):
+    """A kit BOM line the chosen internals do not use (in part): its quantity less n, the reason on the line."""
+    for b in asm.bom:
+        if b.key == key:
+            b.qty = max(0, b.qty - n)
+            b.inferred_note = "; ".join(x for x in (b.inferred_note, why) if x)
+    asm.bom = [b for b in asm.bom if b.qty > 0 or b.key != key]
 
 
 def _drop_line(asm: Assembly, key: str, sid: str | None = None):
@@ -152,7 +206,7 @@ def _races(A: dict[str, Assembly]):
             a = A[aid]
             r0, r1 = R_IN if side == "inner" else R_OUT
             holes = [at(rh, g, y0) for g in angs]
-            mesh = _ring(r0, r1, y0, y1, holes, 2.45)
+            mesh = _ring(r0, r1, y0, y1, holes, 2.45, R.get("cs_in" if side == "inner" else "cs_out"))
             pid = f"ls_race_{key}_{side}"
             feats = {"top": plane((0, y1, (r0 + r1) / 2), (0, 1, 0)), "bottom": plane((0, y0, (r0 + r1) / 2), (0, -1, 0))}
             for i, g in enumerate(angs):
@@ -166,8 +220,10 @@ def _races(A: dict[str, Assembly]):
                       "evidence": "kit guide p20 (lower), p33-34 (middle), p51-52 (top): 'lazy_susan_10in'"},
                      "steel (zinc plated)", False, (0, -1, 0) if side == "inner" else (0, 1, 0), 30.0, 250.0,
                      "inferred (a 10 in ring turntable ~0.5 kg, half per race)", cad="placeholder",
-                     inferred=True, inferred_note="the races' section is not in the kit: a 10 mm stack (the gap the kit "
-                                                  "leaves) split into two rings; holes drilled to the kit's screw circles",
+                     inferred=True, inferred_note="TamBee 10 in aluminium (B01MQSBP7B; 10 mm per a reseller listing): the "
+                                                  "section is not published; outer ring full height, inner 1.9 mm low "
+                                                  "(the kit's clamps and screw lengths); holes drilled and countersunk "
+                                                  "to the kit's screw circles",
                      note=("static: on the column's side" if side == "inner" else "turns with its ring"),
                      features=feats)
             a.parts.append(p)
@@ -242,7 +298,14 @@ def fasten(root: Assembly, internals: str = "column"):
     # -- the lower inner race: the kit's four 1 in screws through LS_IC_1 and the race (into the column's core
     #    plate: the column's col_scr_rpcore_race; into P_M_3 with Anderson's internals: placed with that P_M_3)
     _drop_line(LR, "mcmaster-91500A833")
-    _drop_line(LR, "mcmaster-93365A154")
+    # (LR's 10-32 inserts, guide p20 step 3, are LS_IC_1's: the middle inner race's screws go into them, below)
+    if internals == "column":
+        # the column's core plate takes the lower inner race (four M4 flat heads, the column's col_scr_rpcore_race,
+        # counted in its BOM) in the place of the kit's 1 in screws into P_M_3's inserts
+        why = "the column internals clamp the lower inner race to the core plate with their own M4 screws"
+        _bom_less(LR, "mcmaster-91500A833", 4, why)
+        _bom_less(A["base"], "mcmaster-93365A154", 4, why + " (P_M_3's four 10-32 inserts are not used)")
+        _drop_line(A["base"], "mcmaster-93365A154")
     # -- the middle inner race on LS_IC_1's pillars (4 x 10-32 x 1/2 into the pillars' inserts)
     st_mi = _step(LR, "lower_ring_ls_middle")
     for i, g in enumerate(RACES["middle"]["inner"][4]):
@@ -262,22 +325,23 @@ def fasten(root: Assembly, internals: str = "column"):
     st_mo = _step(MR, "middle_ring_s02")
     for i, g in enumerate(RACES["middle"]["outer"][4]):
         _hole(hw, "ms_sr_1", f"race{i + 1}", at(118.3, g, 417.2), (0, 1, 0), 2.38)
-        _hole(hw, "ms_main_full", f"race{i + 1}", at(118.3, g, 420.4), (0, 1, 0), 2.4, depth=5.7)
-        hw.put(f"ksh_middle_race_out_{i + 1}", fhcs10(0.75 * INCH), "mcmaster-91500A831", at(118.3, g, 409.2), (0, 1, 0),
+        _hole(hw, "ms_main_full", f"race{i + 1}", at(118.3, g, 420.4), (0, 1, 0), 2.4, depth=5.8)  # insert pocket (measured)
+        hw.put(f"ksh_middle_race_out_{i + 1}", fhcs10(0.75 * INCH), "mcmaster-91500A831", at(118.3, g, 407.3), (0, 1, 0),
                ["ls_race_middle_outer", "ms_sr_1", "ms_main_full"], "middle_ring", st_mo,
                "kit guide p33: from below, the outer race and MS_SR_1 onto MS_Main_Full's inserts",
                clamps=[("ls_race_middle_outer", f"u{i + 1}"), ("ms_sr_1", f"race{i + 1}")],
-               into=("ms_main_full", f"hole_race{i + 1}"), into_kind="insert", engage=0.75 * INCH - 11.2)
+               into=("ms_main_full", f"hole_race{i + 1}"), into_kind="insert", engage=round(0.75 * INCH - (420.4 - 407.3), 2))
     _drop_line(MR, "mcmaster-91500A831", "middle_ring_s02")
     # -- top outer race: 6 x 10-32 x 1/2 from below through the race into TR_SR_Full
     hw = _Hw(TR)
     st_to = _step(TR, "top_ring_s04")
     for i, g in enumerate(RACES["top"]["outer"][4]):
         _hole(hw, "tr_sr_full", f"race{i + 1}", at(118.3, g, 490.0), (0, 1, 0), 2.02, depth=3.2)
-        hw.put(f"ksh_top_race_out_{i + 1}", fhcs10(INCH / 2), "mcmaster-91500A829", at(118.3, g, 482.0), (0, 1, 0),
+        hw.put(f"ksh_top_race_out_{i + 1}", fhcs10(INCH / 2), "mcmaster-91500A829", at(118.3, g, 480.2), (0, 1, 0),
                ["ls_race_top_outer", "tr_sr_full"], "top_ring", st_to,
                "kit guide p52: through the turntable's race into TR_SR_Full's holes",
-               clamps=[("ls_race_top_outer", f"u{i + 1}")], into=("tr_sr_full", f"hole_race{i + 1}"), engage=3.2)
+               clamps=[("ls_race_top_outer", f"u{i + 1}")], into=("tr_sr_full", f"hole_race{i + 1}"),
+               engage=round(INCH / 2 - (490.0 - 480.2), 2))  # the tip at TR_RR_Full's underside
     _drop_line(TR, "mcmaster-91500A829", "top_ring_s04")
     st = _step(TR, "top_ring_s05")
     if st is not None:
@@ -321,4 +385,9 @@ def fasten(root: Assembly, internals: str = "column"):
                        "kit guide p20: through LS_IC_1's recess and the lazy susan's inner race into P_M_3's insert "
                        "(the model's P_M_3 has its inserts 44 deg round from LS_IC_1's holes: the kit's exports are "
                        "clocked differently; placed on LS_IC_1's holes)")
+    # each ring is built on the bench as the guide has it (its own section), then stacked on the column: the race
+    # screws are driven with only that ring's parts round them (the tool-access test reads Step.bench)
+    for aid in ("lower_ring", "middle_ring", "top_ring"):
+        for st in A[aid].steps:
+            st.bench = aid
     return races

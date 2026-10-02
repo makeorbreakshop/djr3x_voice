@@ -202,6 +202,14 @@ def kit_arm_joints() -> dict[str, Joint]:
     return J
 
 
+# Corrections to the guide's per-section parts lists, each from its own transcription notes (_guide/guide_steps.json
+# "unresolved"): (section, McMaster) -> (qty, why)
+GUIDE_LIST_FIXES = {
+    ("top_ring_hero_arm", "96505A112"): (0, "the hero list has 1 but no hero step uses it (p62 uses the 3088A609 "
+                                            "shim as the washer)"),
+}
+
+
 def _guide():
     f = GUIDE / "guide_steps.json"
     return json.loads(f.read_text()) if f.exists() else None
@@ -249,11 +257,30 @@ def attach_guide(asms: dict[str, Asm], parts_by_stem: dict[str, list[str]]):
                 "guide_page": st.get("page"), "subassembly": st.get("subassembly"),
                 "inferred": False, "inferred_note": "",
             })
+        n_steps = len(sec.get("steps", []))
+        sec_steps = a.steps[len(a.steps) - n_steps:]
         for h in sec.get("hardware", []):
-            a.bom.append({"key": f"mcmaster-{h.get('mcmaster')}", "item": h.get("desc", ""), "qty": h.get("qty"),
+            key, qty, note = f"mcmaster-{h.get('mcmaster')}", h.get("qty"), ""
+            fix = GUIDE_LIST_FIXES.get((sec["id"], h.get("mcmaster")))
+            if fix is not None:
+                qty, note = fix
+            # the guide states a part's total for the section but not every step's share (the transcription leaves
+            # those null): the steps that name it without a count share what the stated ones leave, in order
+            uses = [u for st in sec_steps for u in st["unplaced"] if u["key"] == key]
+            open_ = [u for u in uses if u.get("count") is None]
+            left = (qty or 0) - sum(u["count"] for u in uses if u.get("count") is not None)
+            if open_ and left > 0:
+                for k, u in enumerate(open_):
+                    u["count"] = left // len(open_) + (1 if k < left % len(open_) else 0)
+                    u["count_inferred"] = True
+                    u["note"] = (u.get("note") or "") + " (count inferred: the section's list less the stated steps)"
+            if qty == 0:
+                a.notes.append(f"{key}: left off the BOM: {note}")
+                continue
+            a.bom.append({"key": key, "item": h.get("desc", ""), "qty": qty,
                           "category": "fastener", "spec": {"mcmaster": h.get("mcmaster")},
-                          "source": f"https://www.mcmaster.com/{h.get('mcmaster')}", "inferred": False,
-                          "inferred_note": ""})
+                          "source": f"https://www.mcmaster.com/{h.get('mcmaster')}", "inferred": bool(note),
+                          "inferred_note": note})
 
 
 # The droid's internals (a variant group, `internals`): "column" = our central column

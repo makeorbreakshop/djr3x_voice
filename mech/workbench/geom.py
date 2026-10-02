@@ -46,7 +46,9 @@ def code_sig(module_name: str) -> str:
     while todo:
         src = todo.pop().read_text()
         deps = []
-        for pkg_rel, names in re.findall(r"^\s*from\s+(\.+[\w.]*|parts\.[\w.]+)\s+import\s+\(?([\w\s,]+)", src, re.M):
+        # names: one line, or a parenthesised list (a greedy [\w\s,]+ ran on into the next line's `from`)
+        for pkg_rel, names in re.findall(r"^\s*from\s+(\.+[\w.]*|parts\.[\w.]+)\s+import\s+(\([^)]*\)|[^\n]+)", src, re.M):
+            names = names.strip("() \n")
             if pkg_rel.startswith("parts."):
                 base = root.parent / Path(*pkg_rel.split("."))
             else:
@@ -56,7 +58,8 @@ def code_sig(module_name: str) -> str:
                 rest = pkg_rel.lstrip(".")
                 if rest:
                     base = base / Path(*rest.split("."))
-            cands = [base.with_suffix(".py")] + [base / f"{n.strip()}.py" for n in names.split(",") if n.strip()]
+            # `from . import _layout as L`: the module is the name before `as`
+            cands = [base.with_suffix(".py")] + [base / f"{n.split()[0]}.py" for n in names.split(",") if n.split()]
             deps += [c for c in cands if c.is_file()]
             if (base / "__init__.py").is_file():
                 deps.append(base / "__init__.py")

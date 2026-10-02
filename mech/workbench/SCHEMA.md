@@ -343,7 +343,9 @@ Unplaced fasteners omit `transform`/`mesh`; the panel lists them under their ste
   "pose": {"head_tilt": 0},             // pose to show the step in (optional)
   "guide_page": 64,                     // page in the source guide (optional)
   "inferred": true, "inferred_note": "order not stated by the source",
-  "derived": true                       // grouped by workbench/steps.py, not authored (below)
+  "derived": true,                      // grouped by workbench/steps.py, not authored (below)
+  "bench": "lift"                       // built on the bench as a unit (optional): steps sharing the name are one
+                                        // unit; a screw driven there meets only that unit's parts (tool access)
 }
 ```
 

@@ -147,7 +147,7 @@ def flatten(root: Assembly) -> tuple[Assembly, dict]:
                                   [pmap.get(x, x) for x in st.fasteners], st.unplaced, st.tools, st.notes,
                                   [pmap.get(x, x) for x in st.context], f"{a.id}:{st.joint}" if st.joint else None,
                                   {f"{a.id}:{k}": v for k, v in (st.pose or {}).items()}, st.guide_page,
-                                  text=st.text))
+                                  text=st.text, bench=f"{a.id}:{st.bench}" if getattr(st, "bench", "") else ""))
         for f in out.fasteners[len(out.fasteners) - len(a.fasteners):]:
             f.step = f"{a.id}:{f.step}" if f.step else f.step
         for bl in a.bom:
@@ -301,6 +301,10 @@ def explained_placement(info, flat) -> list[dict]:
                     "cause": "the cosmetic neck spring is rigid in the suite; on the droid it compresses as the head "
                              "comes down (the manifest's stretch)",
                     "fix": "none"})
+    if "ls_race_lower_outer" in ids:  # the kit's shell fastening, modelled (assemblies/kit/fastening.py)
+        from assemblies.kit.fastening import EXPLAINED as KIT_FASTENING
+
+        out += list(KIT_FASTENING)
     for ring in ("lower", "middle", "top"):  # the lazy susans modelled as two races (assemblies/kit/fastening.py)
         if f"ls_race_{ring}_inner" in ids and f"ls_race_{ring}_outer" in ids:
             out.append({"test": "clearance", "parts": [f"ls_race_{ring}_inner", f"ls_race_{ring}_outer"],

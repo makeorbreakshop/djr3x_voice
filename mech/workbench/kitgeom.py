@@ -17,7 +17,6 @@ is a hole (or a pocket) opening on that face, its axis the face's normal.
 
 from __future__ import annotations
 
-import math
 import re
 
 import numpy as np
@@ -104,9 +103,9 @@ def hardware_mesh(spec: dict) -> trimesh.Trimesh:
     shank = trimesh.creation.cylinder(radius=d / 2, height=L, sections=16)
     shank.apply_translation([0, 0, L / 2])
     if spec["type"] == "fhcs":
-        head = trimesh.creation.cone(radius=d, height=d * 0.6, sections=20)
-        head.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
-        head.apply_translation([0, 0, d * 0.6])
+        # wide face at the origin (flush with the countersunk face), narrowing inward: an 82-90 deg cone
+        # meets the shank's radius at ~0.58 d (inside the shank below that)
+        head = trimesh.creation.cone(radius=d, height=d * 1.15, sections=20)
     else:
         hh = d * (0.55 if spec["type"] == "bhcs" else 1.0)
         head = trimesh.creation.cylinder(radius=d * (0.95 if spec["type"] == "bhcs" else 0.8), height=hh, sections=20)
