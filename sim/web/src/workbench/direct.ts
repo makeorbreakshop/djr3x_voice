@@ -1,25 +1,25 @@
 /**
- * Direct manipulation in Build, the way Fusion and Onshape do it: press on a part and drag, and the
- * mechanism moves the way its joints allow (drag.ts has the maths).
+ * Moving parts in Build, the way Fusion and Onshape do it - navigation first:
  *
- * - Handles: a selected (or hovered) part that moves shows a thin ring per revolute joint of its chain and an
- *   arrow per prismatic one, at the joint, sized to the screen. A handle drags that one joint only.
- * - A drag on the part itself: one joint in its chain, it turns like a door (the swept angle about its axis) or
- *   slides along its axis. Several (Hunter's head: tilt and roll; the neck: pan and lift): the first ~8 px
- *   pick the joint whose motion best matches the cursor, and that joint alone moves (the label names it).
- *   Shift: the grabbed point follows the cursor on all of them (damped least squares); Ctrl/Cmd+Shift: on
- *   through every joint to the ground. Alt: the nearest joint only.
- * - An actuator's output: a pinion, spline or horn of a direct drive turns its joint through its ratio (either
- *   visor horn turns the visor; the mirrored servos follow). A push-rod horn, its rod or ball stud: "Drive:
- *   servo" turns that servo and the rods decide the joints (the label shows them); "Drive: joint" (the pill by
- *   a selected horn, or D) moves the joint that servo mostly drives, and both servos follow.
- * - Smooth: pointer input is only recorded; the solve runs once per frame (warm-started from the last
- *   solution) and the model follows it through a critically damped spring (~60 ms), snapping home on release.
- *   Limits ease in (tanh), the manifest's coupled limits hold, and a push-rod pose the rods cannot reach keeps
- *   the last good one. While a drag lasts the frame pacer stays at full rate (no still frames mid-drag).
- * - Grounded parts do not drag (a lock cursor; a drag on one orbits). No drag while exploded or in
- *   Instructions. A press without a drag selects; Ctrl/Cmd+Z puts back the pose before a drag; the arrow keys
- *   nudge the selected part's joint (Left/Right the nearest, Up/Down the next one up; Shift: x5).
+ * - A plain left drag orbits, on a part or not (right drag orbits too, middle pans; Workbench sets the
+ *   buttons); a click without a drag selects.
+ * - Handles: a selected part (or, with ⌘/Ctrl held or in Move mode, a hovered one) shows a thin ring per
+ *   revolute joint of its chain and an arrow per prismatic one, at the joint, sized to the screen. A handle
+ *   always drags its one joint.
+ * - ⌘ (Ctrl on Windows/Linux) + drag on a part's body moves it - grab cursor and a tint on what moves while
+ *   held, a lock on a grounded part. Move mode (M, or Move in the view bar; Esc leaves) does the same with no
+ *   key. Touch: one finger orbits; a long-press on a part, then drag, moves it.
+ * - One joint in its chain turns like a door or slides along its axis. Several (Hunter's head: tilt and
+ *   roll): the first ~8 px lock onto the joint whose motion matches the cursor. Shift: all of them by IK;
+ *   Shift+Alt: on to the ground; Alt: the nearest only.
+ * - An actuator's output: a pinion or direct-drive horn turns its joint through its ratio (either visor horn
+ *   turns the visor). A push-rod horn: "Drive: servo" turns that servo and the rods decide the joints;
+ *   "Drive: joint" (the pill by a selected horn, or D) moves the joint it mostly drives.
+ * - Smooth: the solve runs once per frame on the newest pointer position, warm-started; the model follows
+ *   through a critically damped spring (~65 ms), landing on the solve at release. Limits ease in (tanh),
+ *   coupled limits hold, a push-rod pose the rods cannot reach keeps the last good one.
+ * - No moving parts while exploded or in Instructions. Ctrl/Cmd+Z puts back the pose before a move; the arrow
+ *   keys nudge the selected part's joint (Left/Right the nearest, Up/Down the next one up; Shift: x5).
  */
 
 import * as THREE from 'three';
@@ -30,7 +30,7 @@ import { actuators, servoAngle, solveServo, type Actuator } from '../mechrig/ser
 import { linkMatrices, type Pose } from './kinematics';
 import {
   couplingAt, couplingRangeA, jointChain, moves, partDrive, pickByDirection, pickChain, planeBasis, rayAngle, rayLineParam,
-  rotaryValue, softLimit, solveIK, springStep, type ChainJoint, type ChainMode, type Coupling,
+  dragMode, nextMoveMode, pressAction, rotaryValue, softLimit, solveIK, springStep, type ChainJoint, type ChainMode, type Coupling,
 } from './drag';
 import type { MGear, MJoint, MLinkage } from './manifest';
 import { jointLabel } from './systems';
@@ -135,6 +135,8 @@ const LOCK_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
   + "<path d='M15.5 15v-2a2.5 2.5 0 0 1 5 0v2' fill='none' stroke='#2a2c31' stroke-width='1.4'/><rect x='13.5' y='15' width='9' height='7' rx='1.2' fill='#8a8f99' stroke='#2a2c31'/></svg>",
 )}") 2 1, default`;
 const DRIVE_KEY = 'r3x.build.drive';
+const LONG_PRESS_MS = 450;
+const MOD_NAME = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
 
 export class DirectDrag {
   /** A drag is moving the model (the puppet and the camera stand down). */
@@ -149,7 +151,7 @@ export class DirectDrag {
   })();
   private down: {
     x: number; y: number; pointer: number; touch: boolean; hit: THREE.Intersection | null; target: Target | null;
-    handle: Handle | null; why: 'grounded' | 'exploded' | null; mods: { shift: boolean; ground: boolean };
+    handle: Handle | null; why: 'grounded' | 'exploded' | null; mods: { free: boolean; ground: boolean };
   } | null = null;
   private grab: Grab | null = null;
   /** The latest pointer position, and whether the solve has seen it. */
@@ -182,6 +184,17 @@ export class DirectDrag {
   private hoverMesh: THREE.Object3D | null = null;
   private hoverAt = 0;
   private hoverTimer = 0;
+  private longFrom: { x: number; y: number; pointer: number } | null = null;
+  /** Move mode (M, or the view bar's Move): a plain left drag moves parts instead of orbiting. */
+  moveMode = false;
+  /** ⌘ (Mac) or Ctrl held: a drag on a part's body moves it. */
+  private modHeld = false;
+  private lastPtr = { x: -1, y: -1 };
+  private longTimer = 0;
+  /** The joint tint (Workbench.setHover) is ours: the parts a ⌘-drag here would move. */
+  private tinting = false;
+  private moveBtn: HTMLButtonElement | null = null;
+  private moveBadge: HTMLDivElement | null = null;
   private lastNudge = 0;
 
   constructor(private readonly wb: Workbench, private readonly host: BuildHost) {
@@ -211,8 +224,84 @@ export class DirectDrag {
     el.addEventListener('pointermove', (e) => this.onMove(e), { capture: true });
     el.addEventListener('pointerup', (e) => this.onUp(e), { capture: true });
     el.addEventListener('pointercancel', (e) => this.onUp(e), { capture: true });
-    el.addEventListener('pointerleave', () => { if (!this.down) this.cursor(''); });
+    el.addEventListener('pointerleave', () => {
+      if (this.down) return;
+      this.cursor('');
+      this.say(null);
+      this.tint(null);
+      this.lastPtr = { x: -1, y: -1 };
+      if (this.hotHandle) {
+        this.hotHandle = null;
+        this.host.interact();
+      }
+    });
     addEventListener('keydown', (e) => this.onKey(e));
+    // ⌘/Ctrl down or up changes what a drag on the part under the pointer would do: the cursor and tint follow
+    const modKey = (e: KeyboardEvent) => {
+      const held = e.metaKey || e.ctrlKey;
+      if (held !== this.modHeld) {
+        this.modHeld = held;
+        if (this.lastPtr.x >= 0 && !this.down) this.hover(this.lastPtr.x, this.lastPtr.y);
+        this.host.interact(); // the handles come and go with it
+      }
+    };
+    addEventListener('keydown', modKey);
+    addEventListener('keyup', modKey);
+    addEventListener('blur', () => {
+      this.modHeld = false;
+      this.tint(null);
+    });
+    this.mountMoveButton();
+  }
+
+  /** The view bar's Move toggle, beside the looks (Build only, CSS). */
+  private mountMoveButton() {
+    const looks = document.querySelector('#view-bar .bb-looks');
+    if (!looks || this.moveBtn) return;
+    const seg = document.createElement('div');
+    seg.className = 'vb-seg bb-move';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-pressed', 'false');
+    b.title = `Move parts: a drag on a part moves it instead of turning the view (M; or hold ${MOD_NAME} and drag)`;
+    b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M8 1.5 6 3.5M8 1.5l2 2M8 14.5l-2-2M8 14.5l2-2M1.5 8l2-2M1.5 8l2 2M14.5 8l-2-2M14.5 8l-2 2"/></svg><span>Move</span>';
+    b.onclick = () => {
+      this.setMoveMode(!this.moveMode);
+      b.blur();
+    };
+    seg.append(b);
+    looks.after(seg);
+    this.moveBtn = b;
+  }
+
+  setMoveMode(on: boolean) {
+    if (on === this.moveMode) return;
+    this.moveMode = on;
+    this.moveBtn?.setAttribute('aria-pressed', String(on));
+    if (on && !this.moveBadge) {
+      const d = document.createElement('div');
+      d.className = 'bb-move-badge';
+      d.setAttribute('role', 'status');
+      d.innerHTML = '<b>Move</b> drag a part to move it · <kbd>M</kbd> or <kbd>Esc</kbd> to orbit again';
+      document.body.append(d);
+      this.moveBadge = d;
+    }
+    if (this.moveBadge) this.moveBadge.hidden = !on;
+    document.body.classList.toggle('bb-moving', on);
+    if (this.lastPtr.x >= 0) this.hover(this.lastPtr.x, this.lastPtr.y);
+    this.host.interact();
+  }
+
+  /** Tint what a part drag would move (null: none), only while a ⌘-drag or Move mode would move it. */
+  private tint(t: Target | null) {
+    const pick = !t ? null : t.kind === 'chain' ? t.chain[0] : t.kind === 'gear' ? { node: t.node, joint: t.joint } : { node: t.a.node, joint: t.a.joints[0] };
+    if (!pick) {
+      if (this.tinting) this.wb.setHover(null, null);
+      this.tinting = false;
+      return;
+    }
+    this.wb.setHover(pick.node, pick.joint.id);
+    this.tinting = true;
   }
 
   private overlay(o: THREE.Object3D, parent: THREE.Object3D) {
@@ -443,7 +532,7 @@ export class DirectDrag {
     return { kind: 'rotary', ...o, centre, axis: n, u, raw: o.v0, radius, local };
   }
 
-  private begin(t: Target, point: THREE.Vector3, mods: { shift: boolean; ground: boolean }): Grab | null {
+  private begin(t: Target, point: THREE.Vector3, mods: { free: boolean; ground: boolean }): Grab | null {
     if (t.kind === 'servo') {
       const { a, lk } = t;
       if (this.driveMode === 'joint') {
@@ -483,7 +572,7 @@ export class DirectDrag {
     }
     const { chain } = t;
     if (chain.length === 1) return this.single(chain[0].node, chain[0].joint, point);
-    if (mods.shift) {
+    if (mods.free) {
       // free: the grabbed point follows the cursor on every joint, in the plane facing the camera
       const lw = this.linkWorld(t.node, t.link, this.poseOf);
       const local = point.clone().applyMatrix4(lw.invert());
@@ -516,7 +605,7 @@ export class DirectDrag {
     const i = pickByDirection(motion, { x: dx, y: dy });
     const pick = g.chain[Math.max(0, i)];
     const others = g.chain.length > 1;
-    return this.single(pick.node, pick.joint, g.point, () => `${this.jointText(pick.node, pick.joint)}${others ? '  ·  Shift: free' : ''}`);
+    return this.single(pick.node, pick.joint, g.point, () => `${this.jointText(pick.node, pick.joint)}${others ? '  ·  ⇧ all joints' : ''}`);
   }
 
   /** Solve the grab for the cursor (once per frame). */
@@ -586,6 +675,7 @@ export class DirectDrag {
   tick(now: number) {
     const dt = Math.min(0.05, Math.max(0, (now - (this.lastTick || now)) / 1000));
     this.lastTick = now;
+    if (this.moveMode && !this.usable()) this.setMoveMode(false); // Instructions, a video: no parts to move
     if (!this.dragging || !this.grab) {
       this.updateHandles();
       this.syncPill();
@@ -713,7 +803,9 @@ export class DirectDrag {
   private handleSource(): THREE.Object3D | null {
     const sel = this.wb.selected;
     if (sel) return this.wb.parts.get(sel)?.mesh ?? this.wb.fast.get(sel)?.obj ?? null;
-    return this.hoverMesh;
+    // a hovered part's handles only when a drag would move parts anyway (⌘/Ctrl, Move mode): otherwise they
+    // would sit on the part and catch drags meant to orbit
+    return this.modHeld || this.moveMode ? this.hoverMesh : null;
   }
 
   /** Rings and arrows for each joint the part's free drag can move, at the joint, sized to the screen. */
@@ -859,10 +951,13 @@ export class DirectDrag {
     if (el.style.cursor !== c) el.style.cursor = c;
   }
 
-  /** The cursor over what the pointer is on (a handle, a part that moves, a grounded one) and the hover handles. */
+  /** The cursor over what the pointer is on, and the hover handles: a handle grabs; a part orbits (default
+   *  cursor) unless ⌘/Ctrl or Move mode would move it (grab, and a tint on what moves; a lock if grounded). */
   private hover(x: number, y: number) {
+    this.lastPtr = { x, y };
     if (!this.usable()) {
       this.cursor('');
+      this.tint(null);
       return;
     }
     const hh = this.handleAt(x, y);
@@ -872,6 +967,7 @@ export class DirectDrag {
     }
     if (hh) {
       this.cursor('grab');
+      this.tint(null);
       this.say(`${jointLabel(hh.h.joint.name)} ${sgn(hh.h.node.pose[hh.h.joint.id] ?? 0)}${unitOf(hh.h.joint)}`, x, y, true);
       return;
     }
@@ -887,7 +983,10 @@ export class DirectDrag {
       this.hoverMesh = null;
       this.host.interact();
     }
-    this.cursor(!hit ? '' : t ? (this.wb.explode > 1e-3 ? '' : 'grab') : LOCK_CURSOR);
+    const act = pressAction({ button: 0, mod: this.modHeld, moveMode: this.moveMode, onHandle: false,
+      target: !hit ? 'none' : t ? 'movable' : 'grounded', exploded: this.wb.explode > 1e-3 });
+    this.tint(act === 'move' ? t : null);
+    this.cursor(act === 'move' ? 'grab' : act === 'blocked' ? LOCK_CURSOR : '');
   }
 
   /** Within reach of the shown handles (so moving onto them does not make them go away). */
@@ -910,30 +1009,54 @@ export class DirectDrag {
       this.end(e);
       return;
     }
-    if (!this.usable() || e.button !== 0) return;
-    const mods = { shift: e.shiftKey, ground: e.shiftKey && (e.ctrlKey || e.metaKey) };
-    const base = { x: e.clientX, y: e.clientY, pointer: e.pointerId, touch: e.pointerType === 'touch', mods };
-    const hh = this.wb.explode < 1e-3 ? this.handleAt(e.clientX, e.clientY) : null;
-    if (hh) {
-      this.down = { ...base, hit: null, target: null, handle: hh.h, why: null };
-      this.hotHandle = hh.h;
-      (this.down as { handlePoint?: THREE.Vector3 }).handlePoint = hh.point;
+    clearTimeout(this.longTimer);
+    if (!this.usable() || e.button !== 0) return; // right drag orbits, middle pans: the camera's
+    const dm = dragMode({ shift: e.shiftKey, alt: e.altKey });
+    const touch = e.pointerType === 'touch';
+    const base = { x: e.clientX, y: e.clientY, pointer: e.pointerId, touch, mods: { free: dm.free, ground: dm.chain === 'extend' } };
+    const exploded = this.wb.explode > 1e-3;
+    const hh = !exploded ? this.handleAt(e.clientX, e.clientY) : null;
+    const hit = hh ? null : this.wb.hitAt(e.clientX, e.clientY);
+    const target = hit ? this.targetOf(hit.object, dm.chain) : null;
+    const input = { button: 0, mod: e.metaKey || e.ctrlKey, moveMode: this.moveMode, onHandle: !!hh,
+      target: (!hit ? 'none' : target ? 'movable' : 'grounded') as 'none' | 'movable' | 'grounded', exploded };
+    const act = pressAction(input);
+    if (act === 'navigate') {
+      // a touch held still on a part that moves: after a moment, it is the part's (long-press)
+      if (touch && hit && target && !exploded) {
+        const { clientX, clientY, pointerId } = e;
+        this.longTimer = window.setTimeout(() => {
+          if (this.down || pressAction({ ...input, longPress: true }) !== 'move') return;
+          this.down = { ...base, x: clientX, y: clientY, pointer: pointerId, hit, target, handle: null, why: null };
+          this.controlsWere = this.host.controls.enabled;
+          this.host.controls.enabled = false;
+          this.say('Move', clientX, clientY - 40, true);
+        }, LONG_PRESS_MS);
+        this.longFrom = { x: e.clientX, y: e.clientY, pointer: e.pointerId };
+      }
+      return;
+    }
+    if (act === 'handle') {
+      this.down = { ...base, hit: null, target: null, handle: hh!.h, why: null };
+      this.hotHandle = hh!.h;
+      (this.down as { handlePoint?: THREE.Vector3 }).handlePoint = hh!.point;
     } else {
-      const hit = this.wb.hitAt(e.clientX, e.clientY);
-      if (!hit) return;
-      const mode: ChainMode = e.altKey ? 'nearest' : mods.ground ? 'extend' : 'default';
-      const target = this.targetOf(hit.object, mode);
-      const why = !target ? 'grounded' : this.wb.explode > 1e-3 ? 'exploded' : null;
-      this.down = { ...base, hit, target, handle: null, why };
+      // move, or blocked (grounded, exploded): the camera keeps a blocked drag, with a hint
+      this.down = { ...base, hit, target, handle: null, why: act === 'blocked' ? (target ? 'exploded' : 'grounded') : null };
     }
     if (!this.down.why) {
-      // a part or handle that moves: the press is ours, not the camera's
+      // a handle or a part to move: the press is ours, not the camera's
       this.controlsWere = this.host.controls.enabled;
       this.host.controls.enabled = false;
     }
   }
 
   private onMove(e: PointerEvent) {
+    const lf = this.longFrom;
+    if (lf && e.pointerId === lf.pointer && Math.hypot(e.clientX - lf.x, e.clientY - lf.y) > 8 && !this.down) {
+      clearTimeout(this.longTimer); // the finger moved first: it is orbiting
+      this.longFrom = null;
+    }
     const d = this.down;
     if (!d || e.pointerId !== d.pointer) {
       if (e.buttons === 0 && e.pointerType !== 'touch') {
@@ -958,8 +1081,8 @@ export class DirectDrag {
     if (!this.dragging) {
       if (dist <= (d.touch ? 8 : 4)) return;
       if (d.why || (!d.target && !d.handle)) {
-        if (d.why === 'grounded') this.hint('Grounded: it does not move', x, y);
-        else if (d.why === 'exploded') this.hint('Collapse the explode to drag parts', x, y);
+        if (d.why === 'grounded') this.hint('Grounded', x, y);
+        else if (d.why === 'exploded') this.hint('Collapse the explode to move parts', x, y);
         this.down = null;
         return;
       }
@@ -990,6 +1113,8 @@ export class DirectDrag {
   }
 
   private onUp(e: PointerEvent) {
+    clearTimeout(this.longTimer);
+    this.longFrom = null;
     if (!this.down || e.pointerId !== this.down.pointer) return;
     this.end(e);
   }
@@ -1006,7 +1131,8 @@ export class DirectDrag {
     }
     this.release();
     if (was) this.wb.applyPose(true); // the whole panel, now the drag is over
-    this.cursor(this.usable() ? 'grab' : '');
+    this.cursor('');
+    if (!(e.pointerType === 'touch')) this.hover(e.clientX, e.clientY);
   }
 
   private release() {
@@ -1032,6 +1158,14 @@ export class DirectDrag {
       return;
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if ((e.key === 'Escape' && this.moveMode) || ((e.key === 'm' || e.key === 'M') && !e.repeat)) {
+      const t2 = e.target as HTMLElement | null;
+      if (e.key !== 'Escape' && t2 && t2 !== document.body && t2 !== this.host.renderer.domElement && !t2.closest('#view-bar')) return;
+      this.setMoveMode(nextMoveMode(this.moveMode, e.key));
+      e.preventDefault();
+      e.stopImmediatePropagation(); // Esc leaves Move mode only (not the focus too)
+      return;
+    }
     const onModel = !t || t === document.body || t === this.host.renderer.domElement || t === document.documentElement;
     if ((e.key === 'd' || e.key === 'D') && onModel && (this.pill && !this.pill.hidden || this.dragging)) {
       this.setDriveMode(this.driveMode === 'servo' ? 'joint' : 'servo');

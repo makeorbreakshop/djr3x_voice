@@ -271,3 +271,33 @@ body:not([data-mode="build"]) .bb-drive { display: none; }
 .bb-guide svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
 .bb-guide:hover { border-color: #444a58; }
 .bh-title .bh-guide { flex: 0 0 auto; font-size: 12px; font-weight: 500; color: var(--accent-2); padding: 0 2px; margin-left: auto; }
+
+/* Move mode (direct.ts): the view bar's toggle, and the badge while it is on */
+.bb-move button { display: inline-flex; align-items: center; gap: 5px; }
+.bb-move svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+.bb-move button[aria-pressed="true"] { color: #fff; background: rgba(232,118,42,.85); }
+body:not([data-mode="build"]) .bb-move { display: none; }
+.bb-move-badge { position: fixed; left: 50%; top: 58px; transform: translateX(-50%); z-index: 6; pointer-events: none; padding: 4px 10px;
+  border-radius: 6px; font: 12px/1.3 system-ui, sans-serif; color: #f2f3f5; background: rgba(14,16,21,.84); border: 1px solid rgba(232,118,42,.6); }
+.bb-move-badge b { color: #e8762a; margin-right: 4px; }
+.bb-move-badge kbd { font: 11px ui-monospace, monospace; padding: 0 4px; border: 1px solid rgba(242,243,245,.25); border-radius: 3px; }
+body:not([data-mode="build"]) .bb-move-badge { display: none; }
+
+/* The view cube (viewcube.ts): the viewport's top-right corner, turning with the camera */
+.bb-cube { position: fixed; z-index: 5; width: 84px; height: 84px; --s: 54px; --h: 27px; user-select: none; -webkit-user-select: none; }
+.bb-cube[hidden], body:not([data-mode="build"]) .bb-cube { display: none; }
+.bb-cube-stage { position: absolute; inset: 0; perspective: 320px; cursor: grab; touch-action: none; }
+.bb-cube-stage:active { cursor: grabbing; }
+.bb-cube-box { position: absolute; left: 15px; top: 15px; width: var(--s); height: var(--s); transform-style: preserve-3d; }
+.bb-cube .f { position: absolute; inset: 0; display: grid; grid-template-columns: 22% 56% 22%; grid-template-rows: 22% 56% 22%;
+  backface-visibility: hidden; background: rgba(36,39,46,.82); border: 1px solid rgba(242,243,245,.22); box-sizing: border-box; }
+.bb-cube .z { margin: 0; padding: 0; border: 0; background: transparent; }
+.bb-cube .z.c { font: 600 9.5px/1 system-ui, sans-serif; letter-spacing: .04em; text-transform: uppercase; color: #c9ccd2; cursor: pointer; }
+.bb-cube .z.e, .bb-cube .z.k { cursor: pointer; }
+.bb-cube .z:hover { background: rgba(232,118,42,.55); color: #fff; }
+.bb-cube .z.c:focus-visible { outline: 1px solid #e8762a; outline-offset: -2px; }
+.bb-cube-home { position: absolute; left: -6px; top: -4px; width: 22px; height: 22px; padding: 3px; border-radius: 5px; border: 0;
+  background: rgba(14,16,21,.6); color: #c9ccd2; cursor: pointer; }
+.bb-cube-home:hover { color: #fff; background: rgba(14,16,21,.85); }
+.bb-cube-home svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
+@media (max-width: 720px) { .bb-cube { transform: scale(.85); transform-origin: top right; } }

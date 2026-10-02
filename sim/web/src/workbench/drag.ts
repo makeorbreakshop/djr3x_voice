@@ -304,3 +304,52 @@ export function partDrive(asm: MAssembly, id: string): PartDrive | null {
   const g = (asm.gears ?? []).find((x) => x.parts.includes(id) || (x.fasteners ?? []).includes(id));
   return g ? { kind: 'gear', gear: g } : null;
 }
+
+// ------------------------------------------------------------------ navigation or move
+
+/** What a press in the Build viewport does. */
+export type PressAction = 'handle' | 'move' | 'navigate' | 'blocked';
+
+export interface PressInput {
+  /** Pointer button (0 left; a touch is 0). */
+  button: number;
+  /** ⌘ (Mac) or Ctrl held. */
+  mod: boolean;
+  /** Move mode (M) is on. */
+  moveMode: boolean;
+  /** A touch held still on the part long enough (long-press). */
+  longPress?: boolean;
+  /** On a joint handle (ring or arrow). */
+  onHandle: boolean;
+  /** What is under the pointer. */
+  target: 'movable' | 'grounded' | 'none';
+  exploded: boolean;
+}
+
+/**
+ * Navigation first, as in Onshape and Fusion: a plain left drag orbits even on a part (right drag orbits,
+ * middle pans - OrbitControls). A handle always drags its joint. A part's body moves with ⌘/Ctrl held, in
+ * Move mode, or after a touch long-press; a grounded part (or any while exploded) is `blocked`: the camera
+ * keeps the drag and a hint says why.
+ */
+export function pressAction(p: PressInput): PressAction {
+  if (p.button !== 0) return 'navigate';
+  if (p.onHandle && !p.exploded) return 'handle';
+  if (!(p.mod || p.moveMode || p.longPress) || p.target === 'none') return 'navigate';
+  if (p.target === 'grounded' || p.exploded) return 'blocked';
+  return 'move';
+}
+
+/** Which joints a part drag moves, by modifier: Alt the nearest only, Shift all of them freely (Shift+Alt: on
+ *  to the ground), else the direction lock over the part's own joints. */
+export function dragMode(m: { shift: boolean; alt: boolean }): { chain: ChainMode; free: boolean } {
+  if (m.shift) return { chain: m.alt ? 'extend' : 'default', free: true };
+  return { chain: m.alt ? 'nearest' : 'default', free: false };
+}
+
+/** Move mode's switch: M toggles it, Esc leaves it (anything else leaves it as it is). */
+export function nextMoveMode(on: boolean, key: string): boolean {
+  if (key === 'm' || key === 'M') return !on;
+  if (key === 'Escape') return false;
+  return on;
+}

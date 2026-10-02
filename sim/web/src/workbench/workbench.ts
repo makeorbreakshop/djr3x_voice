@@ -20,6 +20,7 @@ import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeomet
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DirectDrag } from './direct';
+import { poleSafe, ViewCube } from './viewcube';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
   assemblyLabel, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
@@ -211,6 +212,9 @@ export class Workbench {
   private saved: { pos: THREE.Vector3; target: THREE.Vector3; min: number; max: number; polar: [number, number]; az: [number, number] } | null = null;
   private sweep: { node: AsmNode; joint: string; t0: number; path: [number, number][]; contact: number | null } | null = null;
   private picking = { x: 0, y: 0, down: false };
+  private savedButtons: OrbitControls['mouseButtons'] | null = null;
+  /** The view cube's turn to a view: the direction swings (slerp) about the target, the distance kept. */
+  private spin: { d0: THREE.Vector3; q: THREE.Quaternion; dist: number; start: number; dur: number } | null = null;
   /** Instructions open on a section (null: Build as usual). */
   guide: GuideState | null = null;
   /** The screen the model gets in the guide: what the text column (right) or sheet (bottom) and the bars leave. */
@@ -227,6 +231,8 @@ export class Workbench {
 
   /** Press-and-drag on the model (direct.ts). */
   readonly direct: DirectDrag;
+  /** The view cube in the viewport's corner (viewcube.ts). */
+  readonly cube: ViewCube;
 
   constructor(private host: BuildHost) {
     this.root.name = 'build';
@@ -269,6 +275,9 @@ export class Workbench {
       this.pick(e.clientX, e.clientY);
     });
     this.direct = new DirectDrag(this, host);
+    this.cube = new ViewCube(this, host);
+    host.controls.addEventListener('start', () => { this.spin = null; });
+    this.cube.update(false);
   }
 
   onChange(fn: () => void) {
@@ -311,6 +320,9 @@ export class Workbench {
       c.maxPolarAngle = Math.PI;
       c.minAzimuthAngle = -Infinity;
       c.maxAzimuthAngle = Infinity;
+      // as in Onshape: left and right drag orbit, middle pans (wheel and pinch zoom; touch as it was)
+      this.savedButtons = { ...c.mouseButtons };
+      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
       if (this.top) this.frame();
     } else if (this.saved) {
       this.host.camera.position.copy(this.saved.pos);
@@ -321,7 +333,11 @@ export class Workbench {
       [c.minAzimuthAngle, c.maxAzimuthAngle] = this.saved.az;
       this.sweep = null;
       this.fly = null;
+      this.spin = null;
       this.stopDemo();
+      if (this.savedButtons) c.mouseButtons = this.savedButtons;
+      this.direct.setMoveMode(false);
+      this.cube.update(false);
     }
     // After the camera limits are back: showing the droid may bring the booth (and its limits) back.
     if (!on) this.host.setDroidVisible(true);
@@ -1272,6 +1288,31 @@ export class Workbench {
   /** A drag is moving the model. */
   get dragging() {
     return this.direct.dragging;
+  }
+
+  /** Look at the target from `dir` (the view cube): an eased ~400 ms swing, or at once (reduced motion). */
+  viewFrom(dir: THREE.Vector3, animate = true) {
+    const cam = this.host.camera;
+    const t = this.host.controls.target;
+    const off = cam.position.clone().sub(t);
+    const dist = off.length();
+    const d1 = poleSafe(dir);
+    this.fly = null;
+    if (!animate || reducedMotion() || !this.active) {
+      this.spin = null;
+      cam.position.copy(t).addScaledVector(d1, dist);
+      cam.lookAt(t);
+    } else {
+      const d0 = off.normalize();
+      this.spin = { d0, q: new THREE.Quaternion().setFromUnitVectors(d0, d1), dist, start: performance.now(), dur: 400 };
+    }
+    this.host.interact();
+  }
+
+  /** A hand on the view (the cube dragged): any swing in progress stops. */
+  stopViewFly() {
+    this.spin = null;
+    this.fly = null;
   }
 
   /** Re-pose after `node.pose` was written in place; `notify`: the panel and listeners too. */
@@ -2655,6 +2696,7 @@ export class Workbench {
   tick(now = performance.now()) {
     if (!this.active) return;
     this.direct.tick(now);
+    this.cube.update(!this.video);
     this.holdInspection();
     let moving = false;
     if (this.demo) {
@@ -2684,6 +2726,17 @@ export class Workbench {
       this.pose();
       this.refresh();
       for (const f of this.listeners) f();
+      moving = true;
+    }
+    if (this.spin) {
+      const s = this.spin;
+      const k = Math.min(1, (now - s.start) / s.dur);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+      const d = s.d0.clone().applyQuaternion(new THREE.Quaternion().slerp(s.q, e));
+      const t = this.host.controls.target;
+      this.host.camera.position.copy(t).addScaledVector(d, s.dist);
+      this.host.camera.lookAt(t);
+      if (k >= 1) this.spin = null;
       moving = true;
     }
     if (this.fly) {
