@@ -3,6 +3,8 @@
 
 pub mod brain;
 pub mod bridge;
+pub mod mixfeed;
+pub mod recorder;
 pub mod music;
 pub mod pad;
 pub mod performer;
@@ -157,8 +159,10 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
     }
     r3x_ops::spawn_health(&bus);
     tokio::task::yield_now().await; // health subscribed before the first report
+    // The recorder fills this once the output mix exists (below).
+    let record = r3x_ops::RecordSlot::default();
     if let Some(level) = level {
-        r3x_ops::spawn_telemetry(&bus, level);
+        r3x_ops::spawn_telemetry(&bus, level, record.clone());
     }
     let voice = match cfg.voice.clone() {
         Some(mut v) => {
@@ -235,12 +239,22 @@ pub async fn boot(bus: Bus, cfg: RuntimeConfig, level: Option<r3x_ops::LevelCont
     stage_cfg.physical_profile = Some(rig_profile_path(r3x_contracts::Rig::Physical));
     r3x_stage::spawn(&bus, stage_cfg, backend).ok_or_else(|| anyhow::anyhow!("stage class taken"))?;
 
+    // Whichever mixer is playing: the voice's device, else the music stack's own.
+    let mix = voice
+        .as_ref()
+        .and_then(|v| v.output.as_ref().map(|o| o.mixer.clone()))
+        .or_else(|| music.as_ref().map(|m| m.mixer.clone()))
+        .map(|m| mixfeed::spawn(&m));
+    let _ = record.set(recorder::Recorder::new(&bus, mix.clone()).control());
     let gateway = GatewayConfig {
         clients: cfg.clients,
         origins: cfg.origins,
         profile: cfg.profile,
         logs: cfg.logs,
-        audio: voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default(),
+        audio: r3x_gateway::AudioHooks {
+            mix,
+            ..voice.as_ref().map(|v| r3x_voice::remote::hooks(&v.voice, &v.remote_sink)).unwrap_or_default()
+        },
         filter: None,
     };
     Ok(Runtime { bus, voice, music, brain, vision, pad, gateway, bridged: cfg.bridge.is_some() })

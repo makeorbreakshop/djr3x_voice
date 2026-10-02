@@ -59,7 +59,59 @@ export class CalSession {
   }
 }
 
+/**
+ * Per-servo trims (us on the centre pulse), live on the controller, saved on request; and the
+ * mirrored pairs on one joint (Hunter's visor: `visor_l` / `visor_r`) to match side by side.
+ */
+export class Trims {
+  readonly trim = new Map<string, number>();
+
+  constructor(readonly servos: Actuator[]) {
+    for (const a of servos) this.trim.set(a.name, a.calibration.trim_us);
+  }
+
+  /** The cal_trim command for `name` at `us` (clamped so the centre stays in the pulse range). */
+  set(name: string, us: number, save = false): Command | null {
+    const a = this.servos.find((x) => x.name === name);
+    if (!a) return null;
+    const c = a.calibration;
+    const t = Math.round(Math.min(c.pulse_max_us - c.center_us, Math.max(c.pulse_min_us - c.center_us, us)));
+    this.trim.set(name, t);
+    return { class: 'perf', type: 'cal_trim', actuator: name, trim_us: t, save };
+  }
+
+  step(name: string, delta: number): Command | null {
+    return this.set(name, (this.trim.get(name) ?? 0) + delta);
+  }
+
+  reset(name: string): Command | null {
+    return this.set(name, 0);
+  }
+
+  save(name: string): Command | null {
+    return this.set(name, this.trim.get(name) ?? 0, true);
+  }
+
+  /** `name`'s mirrored partner: another servo on the same single joint, `_l` / `_r` (left first). */
+  pair(name: string): [Actuator, Actuator] | null {
+    const a = this.servos.find((x) => x.name === name);
+    const m = a && /^(.*)_([lr])$/.exec(a.name);
+    if (!a || !m) return null;
+    const b = this.servos.find((x) => x.name === `${m[1]}_${m[2] === 'l' ? 'r' : 'l'}`);
+    if (!b || JSON.stringify(Object.keys(a.joints)) !== JSON.stringify(Object.keys(b.joints))) return null;
+    return m[2] === 'l' ? [a, b] : [b, a];
+  }
+}
+
+/** What a trim control does when pressed: the command it sends (the panel's buttons call this). */
+export type TrimPress = { name: string; step?: number; reset?: boolean; save?: boolean };
+export async function pressTrim(trims: Trims, p: TrimPress, send: (c: Command) => Promise<boolean>): Promise<boolean> {
+  const c = p.save ? trims.save(p.name) : p.reset ? trims.reset(p.name) : trims.step(p.name, p.step ?? 0);
+  return c ? send(c) : false;
+}
+
 const STEPS = [-50, -10, -1, 1, 10, 50];
+const TRIM_STEPS = [-5, -1, 1, 5];
 
 /** The wizard as a section of the Drive tab. */
 export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (msg: string) => void) {
@@ -84,11 +136,21 @@ export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (m
     </div>
     <p class="hint" data-cal="marks"></p>
     <div class="row"><button class="primary" data-cal="save">Save to profile</button></div>
+    <div class="row wrap" data-cal="trimrow" title="us on the centre pulse, live; Save writes it to the profile">
+      <span>Trim <b data-cal="trim">0 us</b></span>
+      ${TRIM_STEPS.map((s) => `<button data-trim="${s}">${s > 0 ? '+' : ''}${s}</button>`).join('')}
+      <button data-cal="trimreset">Reset</button><button data-cal="trimsave">Save trim</button>
+    </div>
+    <div data-cal="pair" hidden>
+      <p class="hint">Match pair: trim one until the two stop fighting.</p>
+      <div class="row wrap" data-cal="pairrows"></div>
+    </div>
     </div></details>`;
   parent.appendChild(el);
   const q = <T extends HTMLElement>(k: string) => el.querySelector(`[data-cal="${k}"]`) as T;
   const pick = q<HTMLSelectElement>('pick');
   let servos: Actuator[] = [];
+  let trims = new Trims([]);
   let s: CalSession | null = null;
   let bench = false;
 
@@ -106,6 +168,22 @@ export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (m
     q('note').hidden = !note;
     q('ctl').hidden = !servos.length || !bench;
     if (!s) return;
+    q('trim').textContent = `${trims.trim.get(s.actuator.name) ?? 0} us`;
+    const pr = trims.pair(s.actuator.name);
+    q('pair').hidden = !pr;
+    if (pr) {
+      q('pairrows').innerHTML = pr
+        .map((a) => `<span class="pairside">${a.name} <small>ch ${a.channel}${a.calibration.invert ? ', inverted' : ''}</small>
+          <b>${trims.trim.get(a.name) ?? 0} us</b>
+          <button data-ptrim="${a.name}" data-d="-1"${bench ? '' : ' disabled'}>-1</button><button data-ptrim="${a.name}" data-d="1"${bench ? '' : ' disabled'}>+1</button></span>`)
+        .join('');
+      q('pairrows').querySelectorAll<HTMLButtonElement>('[data-ptrim]').forEach((b) => {
+        b.onclick = () => {
+          void pressTrim(trims, { name: b.dataset.ptrim!, step: Number(b.dataset.d) }, send);
+          render();
+        };
+      });
+    }
     q('pulse').textContent = `${s.us} us`;
     q<HTMLInputElement>('invert').checked = s.invert;
     const [a, b] = s.limits;
@@ -126,6 +204,19 @@ export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (m
       render();
     };
   });
+  el.querySelectorAll<HTMLButtonElement>('[data-trim]').forEach((b) => {
+    b.onclick = () => {
+      if (s) void pressTrim(trims, { name: s.actuator.name, step: Number(b.dataset.trim) }, send);
+      render();
+    };
+  });
+  q('trimreset').onclick = () => {
+    if (s) void pressTrim(trims, { name: s.actuator.name, reset: true }, send);
+    render();
+  };
+  q('trimsave').onclick = async () => {
+    if (s && (await pressTrim(trims, { name: s.actuator.name, save: true }, send))) toast(`${s.actuator.name} trim saved`);
+  };
   q('centre').onclick = () => (s?.markCentre(), render());
   q<HTMLInputElement>('invert').onchange = (e) => s && ((s.invert = (e.target as HTMLInputElement).checked), render());
   q('lim0').onclick = () => (s?.markLimit(0), render());
@@ -141,6 +232,7 @@ export function mountCalibrate(gw: GatewayClient, parent: HTMLElement, toast: (m
   gw.subscribe({
     onHello: (h: Hello) => {
       servos = (h.profile?.actuators ?? []).filter((a) => a.driver === 'r3x_servo');
+      trims = new Trims(servos);
       pick.innerHTML = servos.map((a) => `<option value="${a.name}">${a.channel}: ${a.name}</option>`).join('');
       if (servos.length) select(s && servos.some((a) => a.name === s!.actuator.name) ? s.actuator.name : servos[0].name);
       bench = h.state.stage.mode === 'bench';

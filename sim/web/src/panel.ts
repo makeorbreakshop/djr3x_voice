@@ -31,7 +31,7 @@ const clockTime = (epochS: number) =>
 
 const EYE_PATTERNS = ['idle', 'engaged', 'listening', 'thinking', 'speaking', 'happy', 'sad', 'angry', 'surprised', 'flash', 'startup', 'error'];
 /** Too chatty for the event feed by default. */
-const NOISY_TOPICS = new Set(['conversation.reply_delta', 'conversation.transcript']);
+const NOISY_TOPICS = new Set(['conversation.reply_delta', 'conversation.transcript', 'vision.faces']);
 const MAX_LOG_ROWS = 1500;
 const topicOf = (e: R3xEvent) => `${e.domain}.${e.type}`;
 const ok = (a: Ack) => a.status === 'accepted';

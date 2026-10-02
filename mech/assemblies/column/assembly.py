@@ -89,11 +89,17 @@ EXPLAINED = [
     {"test": "clearance", "parts": ["col_wheel_*", "col_post_*"],
      "cause": "the V-wheels bear on the V-slot's flanks (line contact, drawn to touch)",
      "fix": "none: rolling contact"},
-    {"test": "tool_access", "parts": ["col_scr_lpin_*", "col_scr_tpin_*", "p_m_*", "col_lower_*"],
+    {"test": "tool_access", "parts": ["col_scr_lpin_*", "col_scr_tpin_*", "p_m_*", "col_lower_*", "col_core_plate",
+                                      "col_top_ring_plate"],
      "cause": "the ring pinions' four M4 go in from below (the servo hangs spline-down above the pinion); in the "
-              "droid the pedestal top (P_M_3) is 30 mm under the lower one and the lower drive under the top one",
+              "droid the pedestal top (P_M_3) and the ring plates are under the lower one and the lower drive under "
+              "the top one",
      "fix": "build each ring drive (bracket, servo, hub, pinion) on the bench and bolt it to the column as a unit "
             "(its four M4 into the back posts' T-nuts have straight access)"},
+    {"test": "no_overlap", "parts": ["b_t_*", "col_scr_bt_*"], "max_mm": 3.4,
+     "cause": "the base top's four M4 pass through the kit's B_T where its STL is solid (3.4 mm there): ours, the kit "
+              "has no holes there",
+     "fix": "drill B_T 4.5 mm at the four places (col_scr_bt; the base ring's inserts under them)"},
 ]
 TOLERANCES: dict = {}
 
@@ -1102,11 +1108,17 @@ def _bom(asm: Assembly):
                                  spec={"model": p.source.get("model")}))
     names = {"shcs": "socket head cap screw (ISO 4762)", "fhcs": "flat head screw (ISO 10642)", "lock_nut": "lock nut (ISO 10511)",
              "insert": "heat-set insert", "t_nut": "drop-in T-nut, 2020"}
-    for key, fl in sorted(count.items()):
-        s = fl[0].spec
-        size = f"{s['thread']} x {s['length_mm']:g}" if "length_mm" in s else s["thread"]
-        lines.append(BomLine(key, f"{size} {names.get(s['type'], s['type'])}", len(fl), "fastener", s,
-                             fasteners=[f.id for f in fl]))
+    # hardware the steps list but do not place yet (their `unplaced`) is bought all the same
+    extra: dict[str, list] = {}
+    for st in asm.steps:
+        for u in st.unplaced or []:
+            extra.setdefault(u["key"], [u.get("spec") or {}, 0])[1] += u.get("count", 1)
+    for key in sorted(set(count) | set(extra)):
+        fl = count.get(key, [])
+        s = fl[0].spec if fl else extra[key][0]
+        size = f"{s['thread']} x {s['length_mm']:g}" if "length_mm" in s else s.get("thread", "")
+        lines.append(BomLine(key, f"{size} {names.get(s.get('type'), s.get('type'))}", len(fl) + extra.get(key, [None, 0])[1],
+                             "fastener", s, fasteners=[f.id for f in fl]))
     asm.bom = lines
 
 

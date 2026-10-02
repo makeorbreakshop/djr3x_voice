@@ -121,7 +121,8 @@ class _Hw:
         d = np.asarray(d, float) / np.linalg.norm(d)
         head = np.asarray(head, float)
         sd = spec.get("d_mm", 4.0)
-        feats = {"shank": axis(head, d, sd / 2), "head": plane(head, -d)}
+        # the head's bearing face looks along d, into the face it seats on (a seated mate wants opposed normals)
+        feats = {"shank": axis(head, d, sd / 2), "head": plane(head, d)}
         f = Fastener(fid, dict(spec), key, list(joins), link, step.id, frame_on_axis(head, d), inferred,
                      note, mesh=mesh if mesh is not None else hardware_mesh(spec), cad="placeholder", features=feats)
         self.a.fasteners.append(f)
@@ -223,7 +224,8 @@ def fasten(root: Assembly, internals: str = "column"):
         top = at(115.9, g, 338.9)
         _hole(hw, "ls_sr_1", f"so{i + 1}", at(115.9, g, 342.1), (0, -1, 0), 1.83)
         sid = f"ksh_lower_standoff_{i + 1}"
-        so_mesh = trimesh.creation.cylinder(radius=3.175, height=so_spec["length_mm"], sections=16)
+        # a female standoff: bored through at the 6-32 tap drill (#36, 2.7 mm), the way the suite models a thread
+        so_mesh = trimesh.creation.annulus(r_min=1.35, r_max=3.175, height=so_spec["length_mm"], sections=16)
         so_mesh.apply_translation([0, 0, so_spec["length_mm"] / 2])
         f = hw.put(sid, so_spec, "mcmaster-93330A516", top, (0, -1, 0), ["ls_sr_1", "ls_m_full"], "lower_ring", st2,
                    "kit guide p19: standoffs in LS_M_Full's recesses, LS_SR_1 on top", mesh=so_mesh)
@@ -285,6 +287,7 @@ def fasten(root: Assembly, internals: str = "column"):
     # -- P_M_3 to the pedestal: 6 x M4 x 8 socket heads + washers, per P_M_3 variant; Anderson's P_M_3 also takes
     #    the lower inner race's four 1 in screws
     _drop_line(A["base"], "mcmaster-91292A108")
+    _drop_line(LR, "mcmaster-91292A108")  # the guide's p20 line is the same six, "counted in base list"
     _drop_line(A["base"], "mcmaster-96505A112")
     for cid in ("pedestal_cap_kit", "pedestal_cap_column"):
         a = A.get(cid)
@@ -301,13 +304,16 @@ def fasten(root: Assembly, internals: str = "column"):
                        "mcmaster-96505A112", at(88.9, g, 325.8), (0, -1, 0), ["p_m_3"], "pedestal_cap", st,
                        "kit guide p11: under the screw's head",
                        mesh=trimesh.creation.annulus(r_min=2.1, r_max=4.0, height=0.8).apply_translation([0, 0, 0.4]))
-            w.features["face"] = plane(at(88.9, g, 325.8), (0, 1, 0))
+            # the washer bears on P_M_3 with its underside; the screw's head bears on the washer's top
+            w.features["head"] = plane(at(88.9, g, 325.0), (0, -1, 0))
+            w.features["face_w"] = plane(at(88.9, g, 325.8), (0, 1, 0))
+            w.features["hole_w"] = axis(at(88.9, g, 325.8), (0, -1, 0), 2.1)
             hw.mate("seated", (w.id, "head"), ("p_m_3", f"face_ped{i + 1}"))
             hw.put(f"ksh_{cid}_scr_{i + 1}", {"type": "shcs", "thread": "M4", "d_mm": 4.0, "length_mm": 8.0},
                    "mcmaster-91292A108", at(88.9, g, 325.8), (0, -1, 0), ["p_m_3", "p_m_1" if g >= 180 else "p_m_2"],
                    "pedestal_cap", st, "kit guide p11: P_M_3 down onto P_M_1/P_M_2, into their rim's heat-set inserts; "
                    "its head 6.3 mm under the column's core plate",
-                   clamps=[("p_m_3", f"ped{i + 1}")])
+                   clamps=[(w.id, "w"), ("p_m_3", f"ped{i + 1}")])
         if cid == "pedestal_cap_kit":
             for i, g in enumerate(RACES["lower"]["inner"][4]):
                 hw.put(f"ksh_lower_race_in_{i + 1}", fhcs10(INCH), "mcmaster-91500A833", at(104.4, g, 361.1), (0, -1, 0),

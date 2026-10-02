@@ -41,13 +41,14 @@ def make(params: dict | None = None, **kw):
         x, z = at_angle(rc, 45 + 360 / n * k)
         body = body - cyl_y(x, z, rr, y0 - 1, y1 + 1)
     # the base top B_T screwed down into it: four M4 heat-set inserts in its top (ours: B_T is drilled to suit)
-    from parts.head._common import hole_d, hole_features
+    from parts.head._common import hole_features
 
     rb, angs = P["bt"]
-    ri = hole_d("M4", "heatset") / 2
+    # the insert placed here is L.INSERT_M4 (Ruthex RX-M4x8.1): its datasheet hole (5.6), blind depth insert + 1 mm
+    ri, dep = 5.6 / 2, L.INSERT_M4["length_mm"] + 1.0
     for i, a in enumerate(angs):
         x, z = at_angle(rb, a)
-        body = body - cyl_y(x, z, ri, y1 - 8.6, y1 + 1)
-        hole_features(feats, f"bt{i + 1}", (x, y1, z), (0, -1, 0), ri, depth=8.6, bolt="M4", kind="insert")
+        body = body - cyl_y(x, z, ri, y1 - dep, y1 + 1)
+        hole_features(feats, f"bt{i + 1}", (x, y1, z), (0, -1, 0), ri, depth=dep, bolt="M4", kind="insert")
     return finish(body, label="Shell support ring", params=P, features=feats, reference="",
                   printability=Print("top face down", "top", False, "the tabs rise from the bed; no supports"))

@@ -148,7 +148,8 @@ pub struct ClientInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS, JsonSchema)]
 pub struct AudioMeta {
-    /// `in` = client mic to runtime, `out` = runtime TTS to client.
+    /// `in` = client mic to runtime, `out` = runtime TTS to client, `mix` = the runtime's
+    /// whole output mix to a client that asked for it (`telemetry.mix_audio`).
     pub direction: AudioDirection,
     pub sample_rate: u32,
     pub channels: u8,
@@ -159,6 +160,7 @@ pub struct AudioMeta {
 pub enum AudioDirection {
     In,
     Out,
+    Mix,
 }
 
 /// What a gateway client sends. The gateway stamps `seq`, clocks and `source`; a client never

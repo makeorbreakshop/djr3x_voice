@@ -195,7 +195,7 @@ fn routes_to(o: &Out, driver: &str) -> bool {
     match o {
         Out::FaceLine { .. } => driver == "driver.face" || driver == "driver.grnwave",
         Out::ChestLine { .. } | Out::Freeze { .. } => driver == "driver.chest" || driver == "driver.grnwave",
-        Out::ServoGoal { .. } | Out::ServoPulse { .. } => driver == "driver.servo",
+        Out::ServoGoal { .. } | Out::ServoPulse { .. } | Out::ServoTrim { .. } => driver == "driver.servo",
         _ => false,
     }
 }

@@ -41,6 +41,11 @@ pub fn list_devices() -> Result<Vec<DeviceInfo>> {
     Ok(out)
 }
 
+/// The system's default microphone, by name (the recorder matches it in ffmpeg's list).
+pub fn default_input_name() -> Option<String> {
+    cpal::default_host().default_input_device().map(|d| d.to_string())
+}
+
 /// `None` or empty = system default; otherwise the first device whose name contains `name`
 /// (case-insensitive).
 fn pick(input: bool, name: Option<&str>) -> Result<cpal::Device> {

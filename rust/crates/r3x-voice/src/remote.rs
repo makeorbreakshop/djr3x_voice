@@ -59,7 +59,7 @@ pub fn hooks(voice: &Voice, sink: &RemoteSink) -> AudioHooks {
             let _ = tx.send(Arc::new(chunk));
         }
     });
-    AudioHooks { inbound: Some(in_tx), outbound: Some(out) }
+    AudioHooks { inbound: Some(in_tx), outbound: Some(out), mix: None }
 }
 
 #[cfg(test)]

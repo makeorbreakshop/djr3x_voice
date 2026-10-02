@@ -301,6 +301,12 @@ def explained_placement(info, flat) -> list[dict]:
                     "cause": "the cosmetic neck spring is rigid in the suite; on the droid it compresses as the head "
                              "comes down (the manifest's stretch)",
                     "fix": "none"})
+    for ring in ("lower", "middle", "top"):  # the lazy susans modelled as two races (assemblies/kit/fastening.py)
+        if f"ls_race_{ring}_inner" in ids and f"ls_race_{ring}_outer" in ids:
+            out.append({"test": "clearance", "parts": [f"ls_race_{ring}_inner", f"ls_race_{ring}_outer"],
+                        "cause": "the two races of one lazy susan turn on its balls: the placeholder rings are drawn "
+                                 "0.4 mm apart, the bearing's own running gap",
+                        "fix": "none: a bearing"})
     if any(x.startswith("col_") for x in ids):  # the central column (assemblies/column): its own explanations
         from assemblies.column.assembly import EXPLAINED as COLUMN_EXPLAINED
 

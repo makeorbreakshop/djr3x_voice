@@ -137,6 +137,11 @@ EXPLAINED = [
               "its ball link swing into the head top. The clip, not the head, is out of range",
      "fix": "the performer clamps to the coupled limit on the Physical rig (the clip lint warns); or the 40 mm hole "
             "(the uncut arm) if more nod is wanted than Hunter's head gives"},
+    {"test": "coupled_limits", "parts": ["bow", "bow_flourish", "droop", "drop_slam", "power_down_slump", "power_up"],
+     "cause": "these show clips ask head_tilt +13.1..+18 (the visor up), past the +13 Hunter's cut-down horns reach (the "
+              "same cause as the head-top clearance above): the clip, not the head, is out of range",
+     "fix": "the performer clamps to the coupled limit on the Physical rig (the clip lint warns); re-author the clips' "
+            "nod to +13, or the 40 mm hole (the uncut arm) if more nod is wanted"},
     {"test": "mates_hold", "parts": ["h_hp_1", "side_left", "side_right"],
      "cause": "the kit headband (H_HP_1) stands 0.5 mm off Hunter's side piece where it lands (the kit drew it on the "
               "kit's own head); the glue rule wants <= 0.5",

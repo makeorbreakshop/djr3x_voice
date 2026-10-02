@@ -36,6 +36,8 @@ import { Studio } from './studio/studio';
 import { SceneLook, type Backdrop } from './scene';
 import { Centres, atHome, formatValue } from './centres';
 import { mountScenePanel } from './scenepanel';
+import { CameraPane } from './camerapane';
+import { Recorder } from './recorder';
 import { RenderSettings, mountRenderPanel } from './rendersettings';
 import { Workbench } from './workbench/workbench';
 import { injectBuildDom, mountBuildPanel } from './workbench/buildpanel';
@@ -687,6 +689,17 @@ const link = new LiveLink(`ws://${location.hostname || '127.0.0.1'}:8765/?token=
   },
 });
 const panel = new ControlPanel(link);
+// Scene > Camera / Record: the floating camera window and the screen + tracks recorder.
+const camPane = new CameraPane(panel.gw);
+const syncCam = (open: boolean) => {
+  $('cam-open').setAttribute('aria-pressed', String(open));
+  $('rail-cam').setAttribute('aria-pressed', String(open));
+};
+camPane.subscribe(syncCam);
+syncCam(camPane.open);
+$('cam-open').onclick = () => camPane.setOpen(!camPane.open);
+$('rail-cam').onclick = () => camPane.setOpen(!camPane.open);
+new Recorder(panel.gw);
 panel.gw.subscribe({
   onHello: (h) => {
     gwPackage = (h.profile as RobotProfile | null | undefined)?.package ?? null;

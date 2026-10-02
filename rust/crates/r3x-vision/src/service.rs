@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use r3x_bus::Bus;
-use r3x_contracts::{Event, ServiceStatus, Source, VisionEvent};
+use r3x_contracts::{Event, FaceBox, ServiceStatus, Source, VisionEvent};
 use r3x_llm::{LlmClient, Message, MessagesRequest};
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -31,6 +31,10 @@ pub trait Recognizer: Send {
     fn face_centre(&self) -> Option<[f32; 2]> {
         None
     }
+    /// Every face in the last recognised frame, normalised (the panel's camera overlay).
+    fn faces(&self) -> Vec<FaceBox> {
+        Vec::new()
+    }
 }
 
 /// The real recognizer: largest face, nearest gallery match above the threshold.
@@ -42,6 +46,7 @@ pub struct GalleryRecognizer {
     pub engine: FaceEngine,
     pub gallery: Gallery,
     last_face: Option<[f32; 2]>,
+    last_faces: Vec<FaceBox>,
     track: Option<Track>,
     /// Embeddings computed (for measurement and tests).
     pub embeddings: u64,
@@ -50,6 +55,8 @@ pub struct GalleryRecognizer {
 struct Track {
     bbox: [f32; 4],
     who: Option<(String, f32)>,
+    /// Similarity to the nearest enrolled person, matched or not.
+    nearest: Option<f32>,
     at: Instant,
 }
 
@@ -60,7 +67,7 @@ pub const REVERIFY: Duration = Duration::from_secs(10);
 
 impl GalleryRecognizer {
     pub fn new(engine: FaceEngine, gallery: Gallery) -> Self {
-        Self { engine, gallery, last_face: None, track: None, embeddings: 0 }
+        Self { engine, gallery, last_face: None, last_faces: Vec::new(), track: None, embeddings: 0 }
     }
 }
 
@@ -69,9 +76,14 @@ impl Recognizer for GalleryRecognizer {
         self.last_face
     }
 
+    fn faces(&self) -> Vec<FaceBox> {
+        self.last_faces.clone()
+    }
+
     fn recognize(&mut self, frame: &Frame) -> Option<(String, f32)> {
         self.last_face = None;
-        let faces = match self.engine.detector.detect(frame) {
+        self.last_faces.clear();
+        let mut faces = match self.engine.detector.detect(frame) {
             Ok(f) => f,
             Err(e) => {
                 tracing::warn!("face detection failed: {e}");
@@ -79,27 +91,48 @@ impl Recognizer for GalleryRecognizer {
                 return None;
             }
         };
-        let Some(f) = faces.into_iter().max_by(|a, b| a.area().total_cmp(&b.area())) else {
+        faces.sort_by(|a, b| b.area().total_cmp(&a.area()));
+        let Some(f) = faces.first().cloned() else {
             self.track = None;
             return None;
         };
         let [x, y, w, h] = f.bbox;
         self.last_face = Some([(x + w / 2.0) / frame.width as f32, (y + h / 2.0) / frame.height as f32]);
         let now = Instant::now();
-        if let Some(t) = self.track.as_mut().filter(|t| iou(&t.bbox, &f.bbox) >= TRACK_IOU && now.duration_since(t.at) < REVERIFY) {
-            t.bbox = f.bbox;
-            return t.who.clone();
-        }
-        self.embeddings += 1;
-        let who = match self.engine.embedder.embed(&align(frame, &f)) {
-            Ok(e) => self.gallery.identify(&e).map(|m| (m.name, m.similarity)),
-            Err(e) => {
-                tracing::warn!("face embedding failed: {e}");
-                self.track = None;
-                return None;
+        let (who, nearest) = match self.track.as_mut().filter(|t| iou(&t.bbox, &f.bbox) >= TRACK_IOU && now.duration_since(t.at) < REVERIFY) {
+            Some(t) => {
+                t.bbox = f.bbox;
+                (t.who.clone(), t.nearest)
+            }
+            None => {
+                self.embeddings += 1;
+                let nearest = match self.engine.embedder.embed(&align(frame, &f)) {
+                    Ok(e) => self.gallery.nearest(&e),
+                    Err(e) => {
+                        tracing::warn!("face embedding failed: {e}");
+                        self.track = None;
+                        return None;
+                    }
+                };
+                let sim = nearest.as_ref().map(|m| m.similarity);
+                let who = nearest.filter(|m| m.similarity >= self.gallery.threshold).map(|m| (m.name, m.similarity));
+                self.track = Some(Track { bbox: f.bbox, who: who.clone(), nearest: sim, at: now });
+                (who, sim)
             }
         };
-        self.track = Some(Track { bbox: f.bbox, who: who.clone(), at: now });
+        let (fw, fh) = (frame.width.max(1) as f32, frame.height.max(1) as f32);
+        self.last_faces = faces
+            .iter()
+            .enumerate()
+            .map(|(i, f)| FaceBox {
+                bbox: [f.bbox[0] / fw, f.bbox[1] / fh, f.bbox[2] / fw, f.bbox[3] / fh],
+                landmarks: f.landmarks.map(|[lx, ly]| [lx / fw, ly / fh]),
+                score: f.score,
+                primary: i == 0,
+                name: if i == 0 { who.as_ref().map(|w| w.0.clone()) } else { None },
+                similarity: if i == 0 { nearest } else { None },
+            })
+            .collect();
         who
     }
 }
@@ -171,8 +204,8 @@ enum Control {
     Stop,
 }
 
-/// Who recognition matched (name, similarity) and the largest face's centre.
-type Analysis = (Option<(String, f32)>, Option<[f32; 2]>);
+/// Who recognition matched (name, similarity), the largest face's centre, and every face.
+type Analysis = (Option<(String, f32)>, Option<[f32; 2]>, Vec<FaceBox>);
 
 /// A captured frame, and what recognition saw in it if it was analysed (see `cadence`).
 struct Observation {
@@ -402,6 +435,8 @@ impl Vision {
         let mut presence = Presence::new(self.inner.cfg.presence.clone());
         let clock = self.inner.bus.clock();
         let mut gaze: Option<(f64, f64)> = None;
+        // Whether the panel's overlay is showing faces (so it gets one empty list when they go).
+        let mut overlay = false;
         let mut enabled = self.inner.enabled.subscribe();
         loop {
             let obs = tokio::select! {
@@ -419,6 +454,10 @@ impl Vision {
                         if gaze.take().is_some() {
                             self.inner.bus.publish(Source::System, None, Event::Vision(VisionEvent::FaceLost));
                         }
+                        if std::mem::take(&mut overlay) {
+                            let e = VisionEvent::Faces { width: 0, height: 0, faces: Vec::new() };
+                            self.inner.bus.publish(Source::System, None, Event::Vision(e));
+                        }
                         let mut st = lock(&self.inner.status);
                         (st.person, st.present) = (None, false);
                     }
@@ -430,7 +469,13 @@ impl Vision {
                 continue; // a frame read just before the pause
             }
             *lock(&self.inner.latest) = Some((frame.clone(), Instant::now()));
-            let Some((seen, face)) = analysed else { continue };
+            let Some((seen, face, faces)) = analysed else { continue };
+            // The overlay: every analysed frame with a face, then one empty list when they go.
+            if !faces.is_empty() || overlay {
+                overlay = !faces.is_empty();
+                let e = VisionEvent::Faces { width: frame.width, height: frame.height, faces };
+                self.inner.bus.publish(Source::System, None, Event::Vision(e));
+            }
             let at = face.map(|c| face_to_gaze(c, frame.width, frame.height, self.inner.cfg.hfov_deg));
             let moved = match (gaze, at) {
                 (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()) > 1.0,
@@ -585,7 +630,7 @@ fn capture_loop(
                     // the best guess until it has seen it.
                     let present = seen.is_some() || lock(&status).present;
                     cadence.analysed(now, thumb, Seen { face, name: seen.as_ref().map(|s| s.0.clone()) }, present);
-                    (seen, face)
+                    (seen, face, recognizer.faces())
                 });
                 {
                     let mut st = lock(&status);
@@ -626,7 +671,7 @@ pub fn link_memory(bus: &Bus, memory: Arc<r3x_memory::Memory>) -> JoinHandle<()>
             let r = match e {
                 VisionEvent::PersonDetected { name, .. } => memory.person_detected(name).map(|_| ()),
                 VisionEvent::PersonExited { name, .. } => memory.person_exited(name),
-                VisionEvent::SceneCaptured { .. } | VisionEvent::FaceAt { .. } | VisionEvent::FaceLost => Ok(()),
+                VisionEvent::SceneCaptured { .. } | VisionEvent::FaceAt { .. } | VisionEvent::FaceLost | VisionEvent::Faces { .. } => Ok(()),
             };
             if let Err(e) = r {
                 tracing::warn!("memory: {e}");

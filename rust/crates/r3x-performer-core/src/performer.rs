@@ -305,6 +305,11 @@ pub enum Out {
         actuator: String,
         us: f64,
     },
+    /// One actuator's trim (us on its centre pulse), applied live (Bench calibration).
+    ServoTrim {
+        actuator: String,
+        trim_us: f64,
+    },
     Freeze {
         on: bool,
     },
@@ -809,7 +814,7 @@ impl Performer {
                     self.puppet.release();
                 }
             }
-            PerfCommand::CalJog { .. } | PerfCommand::CalSave { .. } => {
+            PerfCommand::CalJog { .. } | PerfCommand::CalSave { .. } | PerfCommand::CalTrim { .. } => {
                 return Err("calibration is the runtime's job".into())
             }
             PerfCommand::Emote { slot } => {

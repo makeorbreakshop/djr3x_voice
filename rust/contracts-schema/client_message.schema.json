@@ -3,7 +3,8 @@
     "AudioDirection": {
       "enum": [
         "in",
-        "out"
+        "out",
+        "mix"
       ],
       "type": "string"
     },
@@ -17,7 +18,7 @@
         },
         "direction": {
           "$ref": "#/$defs/AudioDirection",
-          "description": "`in` = client mic to runtime, `out` = runtime TTS to client."
+          "description": "`in` = client mic to runtime, `out` = runtime TTS to client, `mix` = the runtime's\nwhole output mix to a client that asked for it (`telemetry.mix_audio`)."
         },
         "sample_rate": {
           "format": "uint32",
@@ -491,6 +492,32 @@
           "type": "object"
         },
         {
+          "description": "Bench calibration: one servo's trim (us added to its centre pulse), live on the controller;\n`save` also writes it into the robot profile. How a mirrored pair on one joint (Hunter's\nvisor, `visor_l` / `visor_r`) is matched so the two do not fight. Bench mode, `ui`/`cli` only.",
+          "properties": {
+            "actuator": {
+              "type": "string"
+            },
+            "save": {
+              "default": false,
+              "type": "boolean"
+            },
+            "trim_us": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "cal_trim",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actuator",
+            "trim_us"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and\nthe alive layers off, and hold every joint at the profile's home pose (reached through\nthe followers, inside each joint's v/a/j limits); the hold ends when something moves the\nbody again. With `joints`: hold just those at home. `ui`/`cli` only.",
           "properties": {
             "joints": {
@@ -651,6 +678,22 @@
         {
           "const": "background",
           "description": "Authored loops under the activity (idle/DJ bop); lowest.",
+          "type": "string"
+        }
+      ]
+    },
+    "RecordAction": {
+      "oneOf": [
+        {
+          "enum": [
+            "start",
+            "stop"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "marker",
+          "description": "A timestamp in the take's `session.json`, for the edit.",
           "type": "string"
         }
       ]
@@ -949,6 +992,40 @@
           "required": [
             "type",
             "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Subscribe this client to the runtime's output mix (everything R3X plays: speech, music,\nsfx) as binary PCM after `audio` metas with direction `mix` - the panel's recorder.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "mix_audio",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "enabled"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The runtime's recorder: screen + mic (ffmpeg) and R3X's output mix, one folder per take\nunder `R3X_RECORD_DIR` (default `~/Movies/R3X`). State: the `recorder` service status.",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/RecordAction"
+            },
+            "type": {
+              "const": "record",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "action"
           ],
           "type": "object"
         }

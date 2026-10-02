@@ -64,8 +64,10 @@ def _front_back(sz):
     for yw in L.WHEEL_Y:
         for sx in (-1, 1):
             k += 1
-            p = (sx * L.WHEEL_X, yw, sz * S["z_out"])
-            body = clearance_hole(body, feats, f"axle{k}", p, (0, 0, -sz), "M5", S["t"])
+            # entered from the inside face: the axle screw's head bears there and it runs out through the
+            # eccentric spacer and the wheel to its nut (assemblies/column: col_scr_axle_*)
+            p = (sx * L.WHEEL_X, yw, sz * S["z_in"])
+            body = clearance_hole(body, feats, f"axle{k}", p, (0, 0, sz), "M5", S["t"])
             keep.append(((sx * L.WHEEL_X, yw, sz * S["z_in"]), 6.0))
     body = _grid(body, (0, (y0 + y1) / 2, sz * S["z_in"]), (1, 0, 0), (0, 1, 0), 2 * S["half_x"], y1 - y0, keep)
     return body, feats

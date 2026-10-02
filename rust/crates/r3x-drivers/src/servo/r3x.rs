@@ -294,6 +294,15 @@ impl Driver for R3xServoDriver {
                 }
                 return;
             }
+            Out::ServoTrim { actuator, trim_us } => {
+                // the channel's config again with the new trim: the controller recomputes its pulses
+                let Some(&ch) = self.cfg.actuators.get(actuator) else { return };
+                let Some(c) = self.cfg.channels.values_mut().find(|c| c.ch == ch) else { return };
+                c.trim_us = *trim_us as f32;
+                let msg = Msg::Config(*c);
+                self.send(&msg);
+                return;
+            }
             Out::ServoPulse { actuator, us } => {
                 let Some(&ch) = self.cfg.actuators.get(actuator) else { return };
                 Msg::Direct { ch, us: us.round().clamp(0.0, f64::from(u16::MAX)) as u16 }
@@ -475,6 +484,32 @@ mod tests {
             msgs[msgs.len() - 2..],
             [Msg::Goal { ch, target: 5.0, v_max: 1.0, a_max: 2.0, j_max: 3.0 }, Msg::Heartbeat { outputs_enabled: false, mask: u32::MAX }]
         );
+    }
+
+    /// A Bench trim goes to the controller as the channel's CONFIG with the new trim_us: the
+    /// controller's pulses (the same `r3x_motion::Calibration`) move by exactly the trim.
+    #[test]
+    fn a_trim_reconfigures_the_channel_and_shifts_its_pulses() {
+        let (mut d, o) = start(true);
+        o.last("/dev/servo").unwrap().clear();
+        let ch = d.cfg.actuators["neck"];
+        d.on_out(&Out::ServoTrim { actuator: "neck".into(), trim_us: 12.0 }, 0.5);
+        let msgs = sent(&o);
+        let Some(Msg::Config(c)) = msgs.last() else { panic!("no config: {msgs:?}") };
+        assert_eq!((c.ch, c.trim_us), (ch, 12.0));
+        let cal = |trim: f32| r3x_motion::Calibration {
+            center_us: f64::from(c.center_us), center_value: f64::from(c.center_value), trim_us: f64::from(trim),
+            invert: c.invert, gear: f64::from(c.gear), mm_per_deg: None, pulse_min_us: f64::from(c.pulse_min_us),
+            pulse_max_us: f64::from(c.pulse_max_us), range_deg: f64::from(c.range_deg),
+        };
+        for v in [-20.0, 0.0, 15.0] {
+            assert!((cal(12.0).value_to_us(v) - cal(0.0).value_to_us(v) - 12.0).abs() < 1e-9);
+        }
+        // kept for the next connect, and an unknown actuator sends nothing
+        assert_eq!(d.cfg.channels.values().find(|x| x.ch == ch).unwrap().trim_us, 12.0);
+        let n = sent(&o).len();
+        d.on_out(&Out::ServoTrim { actuator: "nope".into(), trim_us: 1.0 }, 0.6);
+        assert_eq!(sent(&o).len(), n);
     }
 
     #[test]
