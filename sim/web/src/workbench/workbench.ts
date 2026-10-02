@@ -1667,6 +1667,91 @@ export class Workbench {
     return box.isEmpty() ? null : { c: box.getCenter(new THREE.Vector3()).toArray(), s: box.getSize(new THREE.Vector3()).toArray() };
   }
 
+  /** The video's opening: the finished section coming apart along the build's own paths, the last step first
+   *  (k 0: assembled, 1: every item at its start). Call on the title card (everything shown). */
+  videoExplodeAt(k: number) {
+    const g = this.guide;
+    if (!g) return;
+    const items: { ids: string[]; paths: Record<string, number[][]> }[] = [];
+    for (const st of this.steps) for (const it of (st as AStep & { sequence?: { ids: string[]; paths?: Record<string, number[][]> }[] }).sequence ?? []) items.push({ ids: it.ids, paths: it.paths ?? {} });
+    items.reverse(); // the last in, the first out
+    const n = Math.max(1, items.length);
+    const w = 0.22;
+    const e = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
+    this.applyOffsets(0);
+    items.forEach((it, rank) => {
+      const s0 = (rank / n) * (1 - w);
+      const u = e(Math.min(1, Math.max(0, (k - s0) / w)));
+      for (const id of it.ids) {
+        const pts = (it.paths[id] ?? []).map((p) => new THREE.Vector3(...(p as [number, number, number])));
+        if (!pts.length) continue;
+        const o = pathAt(pts, u);
+        const po = this.parts.get(id);
+        if (po) {
+          po.mesh.position.copy(po.sBase ?? po.base).add(o);
+          continue;
+        }
+        const fo = this.fast.get(id);
+        if (fo) {
+          const spin = fastenerTravel(fo.f.spec).turns * u * Math.PI * 2;
+          fo.obj.matrix.copy(fo.base).multiply(new THREE.Matrix4().makeRotationZ(spin)).premultiply(new THREE.Matrix4().makeTranslation(o.x, o.y, o.z));
+        }
+      }
+    });
+    this.root.updateMatrixWorld(true);
+    this.markShadow();
+    this.host.interact();
+  }
+
+  /** The video's check of a shot (the camera as it is): each item of the step, where it starts and where it
+   *  seats, must be in the picture's safe area, and not hidden behind what is built at both ends. Returns the
+   *  items that fail. `safe`: NDC bounds [x0, y0, x1, y1]. */
+  videoShotCheck(safe: number[]): string[] {
+    const q = this.seq;
+    if (!q) return [];
+    const cam = this.host.camera;
+    cam.updateMatrixWorld();
+    const ray = new THREE.Raycaster();
+    const visible: THREE.Object3D[] = [];
+    for (const po of this.parts.values()) if (po.mesh.visible) visible.push(po.mesh);
+    const centre = (id: string): THREE.Vector3 | null => {
+      const po = this.parts.get(id);
+      if (po) {
+        const g = po.mesh.geometry;
+        if (!g.boundingBox) g.computeBoundingBox();
+        return g.boundingBox!.isEmpty() ? null : g.boundingBox!.getCenter(new THREE.Vector3()).applyMatrix4(po.mesh.matrixWorld);
+      }
+      const fo = this.fast.get(id);
+      return fo ? new THREE.Vector3().setFromMatrixPosition(fo.obj.matrixWorld) : null;
+    };
+    const look = (id: string) => {
+      const p = centre(id);
+      if (!p) return { inside: true, seen: true };
+      const n = p.clone().project(cam);
+      const inside = n.x > safe[0] && n.x < safe[2] && n.y > safe[1] && n.y < safe[3] && n.z < 1;
+      const d = p.distanceTo(cam.position);
+      ray.set(cam.position, p.clone().sub(cam.position).normalize());
+      ray.far = d;
+      const self = this.parts.get(id)?.mesh;
+      const hit = ray.intersectObjects(visible, false).find((h) => h.object !== self && h.distance < d - 0.004);
+      return { inside, seen: !hit };
+    };
+    const bad: string[] = [];
+    const was = q.force;
+    for (const it of q.items) for (const id of it.ids) {
+      q.force = 1;
+      this.applyOffsets(0);
+      const a = look(id);
+      q.force = 0;
+      this.applyOffsets(0);
+      const b = look(id);
+      if (!a.inside || !b.inside || (!a.seen && !b.seen)) bad.push(id);
+    }
+    q.force = was;
+    this.applyOffsets(0);
+    return bad;
+  }
+
   /** The video's wide shot: the section as it stands. */
   videoWhole(): { c: number[]; s: number[] } | null {
     const g = this.guide;
