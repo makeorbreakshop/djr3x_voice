@@ -5,7 +5,9 @@
  *   at    lib:<library id> | file:<manifest id> | build | sys:<system id> | asm:<node key>
  *         (absent: the Library list)
  *   look  exterior | mechanism | inspect
- *   ctx   ghost | hide            the rest of the droid
+ *   ctx   ghost | hide | solid    the rest of the droid (the parts tree's context row)
+ *   t     key:s,key:s             the parts tree's overrides (s: s solid, g ghost, h hidden): an assembly
+ *                                 node's key, or a part's `~id`; only what differs from the look's preset
  *   x     explode, 0..1
  *   fast  0                       fasteners off (on when absent)
  *   v     group:id,group:id       variant picks (our build only; a library design brings its own)
@@ -28,6 +30,8 @@ export interface ViewState {
   fasteners?: boolean;
   variants?: Record<string, string>;
   joints?: { node: string; joint: string; value: number }[];
+  /** The parts tree's overrides, key -> state (visibility.ts). */
+  tree?: Record<string, 'solid' | 'ghost' | 'hidden'>;
   cam?: number[];
 }
 
@@ -45,6 +49,8 @@ export function formatView(s: ViewState): string {
   if (s.fasteners === false) put('fast', '0');
   const v = Object.entries(s.variants ?? {});
   if (v.length) put('v', v.map(([g, id]) => `${g}:${id}`).join(','));
+  const t = Object.entries(s.tree ?? {});
+  if (t.length) put('t', t.map(([k, v]) => `${k}:${v[0]}`).join(','));
   if (s.joints?.length) put('j', s.joints.map((j) => `${j.node}/${j.joint}:${r3(j.value)}`).join(','));
   if (s.cam?.length === 6) put('cam', s.cam.map(r3).join(','));
   return q.length ? `#${q.join('&')}` : '';
@@ -67,7 +73,18 @@ export function parseView(hash: string): ViewState | null {
   const look = p.get('look');
   if (look && LOOKS.has(look)) s.look = look;
   const ctx = p.get('ctx');
-  if (ctx === 'ghost' || ctx === 'hide') s.ctx = ctx;
+  if (ctx === 'ghost' || ctx === 'hide' || ctx === 'solid') s.ctx = ctx;
+  const t = p.get('t');
+  if (t) {
+    const full = { s: 'solid', g: 'ghost', h: 'hidden' } as const;
+    s.tree = {};
+    for (const kv of t.split(',')) {
+      const i = kv.lastIndexOf(':');
+      const v = full[kv.slice(i + 1) as keyof typeof full];
+      if (i > 0 && v) s.tree[kv.slice(0, i)] = v;
+    }
+    if (!Object.keys(s.tree).length) delete s.tree;
+  }
   const x = Number(p.get('x'));
   if (p.has('x') && Number.isFinite(x)) s.explode = Math.min(1, Math.max(0, x));
   if (p.get('fast') === '0') s.fasteners = false;
@@ -99,10 +116,11 @@ export function parseView(hash: string): ViewState | null {
  * explode, fasteners on, the rest of the droid ghosted; `look` null: the design's own, our build's
  * Exterior), never what this browser saved: a link shows everyone the same view.
  */
-export function linkSettings(v: ViewState): { look: string | null; ctx: 'ghost' | 'hide'; explode: number; fasteners: boolean; joints: NonNullable<ViewState['joints']> } {
+export function linkSettings(v: ViewState): { look: string | null; ctx: 'ghost' | 'hide' | 'solid'; explode: number; fasteners: boolean; joints: NonNullable<ViewState['joints']>; tree: NonNullable<ViewState['tree']> } {
   return {
     look: v.look ?? (v.at.kind === 'lib' ? null : 'exterior'),
-    ctx: v.ctx === 'hide' ? 'hide' : 'ghost',
+    ctx: v.ctx === 'hide' || v.ctx === 'solid' ? v.ctx : 'ghost',
+    tree: v.tree ?? {},
     explode: v.explode ?? 0,
     fasteners: v.fasteners ?? true,
     joints: v.joints ?? [],

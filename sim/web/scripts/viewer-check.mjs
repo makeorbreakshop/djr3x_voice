@@ -158,6 +158,20 @@ const frames = () => c.js('({ ...window.__viewer.post.buildFrames })');
 const counts = () => c.js(`(() => { const wb = window.__viewer.workbench; let vis = 0, own = 0, faint = 0;
   for (const [id, po] of wb.parts) { if (!po.mesh.visible) continue; vis++; if (po.mat.opacity < 1) faint++; if (!wb.scope || wb.scope.parts.has(id)) own++; }
   return { vis, own, faint, total: wb.scope ? wb.scope.parts.size : wb.parts.size, look: wb.look, ctx: wb.context }; })()`);
+/** Part states by focus and class, and whether every drawn part agrees with the tree's state for it. */
+const STATES = `(() => { const wb = window.__viewer?.workbench ?? window.__r3x.build; const z = () => ({ shellSolid: 0, shellGhost: 0, shellDrawn: 0, innerSolid: 0, innerGhost: 0 });
+  const inScope = z(), out = { solid: 0, ghost: 0 }; let vis = 0, own = 0, agree = true, ownShellsDrawn = 0;
+  for (const [id, po] of wb.parts) {
+    const mine = !!wb.vpart(id)?.inScope; if (mine && wb.nodeShown(po.node) && !po.part.replaced_by) own++;
+    const t = wb.treeStates.get(id);
+    if (!po.mesh.visible) { if (t !== 'hidden' && mine && wb.nodeShown(po.node) && !po.part.replaced_by) agree = false; continue; }
+    vis++; const ghost = po.mat.opacity < 1, shell = po.part.class === 'shell';
+    if ((t === 'ghost') !== ghost || t === 'hidden') agree = false;
+    if (!mine) { out[ghost ? 'ghost' : 'solid']++; continue; }
+    if (shell) { inScope.shellDrawn++; ownShellsDrawn++; inScope[ghost ? 'shellGhost' : 'shellSolid']++; } else inScope[ghost ? 'innerGhost' : 'innerSolid']++;
+  }
+  return { vis, own, inScope, out, ownShellsDrawn, treeAgrees: agree }; })()`;
+const states = () => c.js(STATES);
 const click = (sel) => c.js(`(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) throw new Error('no ' + ${JSON.stringify(sel)}); b.click(); return 0; })()`);
 const openLib = async (id) => { await click(`[data-lib="${id}"]`); await sleep(1500); };
 const CX = 720, CY = 470; // the viewport between the panels
@@ -221,21 +235,60 @@ const CHECKS = {
     check('no pixel ratio but Build\'s own across a drag and its settle', s.foreign.length === 0, `ratios ${s.sets.join(',') || 'none'}; foreign ${s.foreign.join(',') || 'none'}`);
   },
   async context() {
+    // the parts tree's context row (the rest of the droid): its three states, in a library design
     await open('#at=lib:hunter&look=mechanism');
-    await click('[data-ctx="ghost"]');
-    const g = await counts();
-    await click('[data-ctx="hide"]');
-    const h = await counts();
-    check('Ghost and Hide differ in a library design', g.vis > h.vis && h.vis === h.own, `ghost ${g.vis} parts, hide ${h.vis} (own ${h.own})`);
+    const ctx = async (v) => { await click(`[data-vis="${v}"][data-key="@rest"]`); return states(); };
+    const g = await ctx('ghost'), h = await ctx('hidden'), so = await ctx('solid');
+    check('context row: ghost ghosts the rest of the droid', g.out.ghost > 0 && g.out.solid === 0, JSON.stringify(g.out));
+    check('context row: hidden draws none of it', h.out.ghost + h.out.solid === 0 && h.vis > 0, `${JSON.stringify(h.out)}; drawn ${h.vis}`);
+    check('context row: solid draws it solid', so.out.solid > 0, JSON.stringify(so.out));
+    check("context row hidden drops the design's own ghosted shells in Mechanism", h.ownShellsDrawn === 0 && g.ownShellsDrawn > 0, `ghost ${g.ownShellsDrawn}, hidden ${h.ownShellsDrawn}`);
     await click('[data-crumb="library"]');
     await sleep(1500);
-    const off = await c.js("document.querySelector('[data-ctx]').disabled");
-    check('Ghost/Hide disabled with nothing in focus', off === true, `disabled ${off}`);
+    const row = await c.js(`!!document.querySelector('[data-key="@rest"]')`);
+    check('no context row with nothing in focus', row === false, `context row ${row}`);
+  },
+  async presets() {
+    // each look button sets the tree: Exterior shells solid, internals hidden; Mechanism shells hidden (a
+    // focus's own as ghosts), internals solid; X-ray shells ghosted, internals solid
+    const rule = { exterior: (s) => s.inScope.shellGhost === 0, mechanism: (s, focus) => (focus ? s.inScope.shellSolid === 0 : s.inScope.shellDrawn === 0) && s.inScope.innerSolid > 0,
+      inspect: (s) => s.inScope.shellSolid === 0 && s.inScope.innerSolid > 0 && s.inScope.innerGhost === 0 };
+    for (const [d, focus] of [['hunter', true], ['morton', true], ['', false]]) {
+      await open(d ? `#at=lib:${d}` : '#at=build');
+      for (const l of ['exterior', 'mechanism', 'inspect']) {
+        await click(`[data-look="${l}"]`);
+        await sleep(400);
+        const s = await states();
+        const shown = await c.js(`document.querySelector('[data-look][aria-checked="true"]')?.dataset.look ?? 'none'`);
+        check(`preset ${l} on ${d || 'our build'}`, rule[l](s, focus) && s.treeAgrees && shown === l, `${JSON.stringify(s.inScope)} tree agrees ${s.treeAgrees}, button ${shown}`);
+      }
+    }
+    // Kit shells: shells only, Exterior: every one of them solid
+    await open('#at=lib:kit');
+    const k = await states();
+    check('preset exterior on kit: every shell solid', k.inScope.shellSolid > 0 && k.inScope.shellGhost === 0 && k.inScope.innerSolid + k.inScope.innerGhost === 0 && k.treeAgrees, JSON.stringify(k.inScope));
+    // Lower cage in Exterior: its own parts all drawn (nothing the finished droid shows)
+    await open('#at=lib:morton&look=exterior');
+    const m = await states();
+    check('preset exterior on Lower cage: its own parts solid', m.inScope.innerSolid + m.inScope.shellSolid === m.own && m.own > 0, JSON.stringify(m.inScope));
+    // a tree change after a preset: no look selected (custom) until a preset is pressed again
+    await open('#at=lib:hunter&look=inspect');
+    const root = await c.js(`document.querySelector('.pt-root [data-vis]').dataset.key`);
+    await click(`[data-vis="hidden"][data-key="${root}"]`);
+    const cust = await c.js(`({ checked: document.querySelectorAll('[data-look][aria-checked="true"]').length, drawn: (${STATES}).own })`);
+    await click('[data-look="inspect"]');
+    const back = await c.js(`({ checked: document.querySelector('[data-look][aria-checked="true"]')?.dataset.look, overrides: window.__viewer.workbench.overrides.size })`);
+    // a part picked in the view selects its row (the path to it opens)
+    await open('#at=build&look=mechanism');
+    const picked = await c.js(`(async () => { const wb = window.__viewer.workbench; const id = [...wb.parts.keys()].find((k) => wb.parts.get(k).mesh.visible && wb.parts.get(k).node.parent?.parent);
+      wb.select(id); await new Promise((r) => setTimeout(r, 300)); return { id, row: document.querySelector('.pt-part.sel .nm')?.dataset.id ?? null }; })()`);
+    check('a part picked in the view selects its tree row', picked.row === picked.id, JSON.stringify(picked));
+    check('a tree change leaves the looks custom; a preset sets it back', cust.checked === 0 && back.checked === 'inspect' && back.overrides === 0, `${JSON.stringify(cust)} -> ${JSON.stringify(back)}`);
   },
   async looks() {
     await open('#at=lib:morton&look=exterior&ctx=hide');
     const m = await counts();
-    check('Lower cage draws its own parts in Exterior', m.look === 'exterior' && m.own === m.total && m.total > 0, `${m.own}/${m.total} in ${m.look}`);
+    check('Lower cage draws its own parts in Exterior (as before the tree)', m.look === 'exterior' && m.own === m.total && m.total > 0, `${m.own}/${m.total} in ${m.look}`);
     await open('#at=lib:kit&look=mechanism');
     const k = await counts();
     const dis = await c.js("[...document.querySelectorAll('[data-look]')].map((b) => b.dataset.look + ':' + b.disabled).join(' ')");
@@ -245,16 +298,20 @@ const CHECKS = {
   async link() {
     await open('#at=lib:hunter&look=mechanism');
     await click('[data-look="inspect"]');
-    await click('[data-ctx="hide"]');
+    await click('[data-vis="hidden"][data-key="@rest"]');
+    // a tree override: one of the head's shells hidden (X-ray would ghost it)
+    const shellId = await c.js(`(() => { const wb = window.__viewer.workbench; for (const id of wb.scope.parts) if (wb.parts.get(id)?.part.class === 'shell') return id; })()`);
+    await click(`[data-vis="hidden"][data-key="~${shellId}"]`);
     await c.js(`(() => { const x = document.getElementById('bv-explode'); x.value = '0.3'; x.dispatchEvent(new Event('input'));
       const wb = window.__viewer.workbench; let n; wb.forEachNode((m) => { if (m.asm.joints.some((j) => j.id === 'visor')) n = m; });
       wb.setJoint(n, 'visor', -10); const T = wb.cameraState().pos.constructor;
       wb.setCameraState({ pos: new T(-0.4, 1.0, 0.9), target: new T(0, 0.86, 0.02) }); return 0; })()`);
     await sleep(2000);
     const href = await c.js('location.href');
-    const want = { scope: 'hunter', look: 'inspect', ctx: 'hide', explode: 0.3, visor: -10, cam: '-0.400,1.000,0.900' };
+    const want = { scope: 'hunter', look: 'inspect', ctx: 'hide', explode: 0.3, visor: -10, cam: '-0.400,1.000,0.900', tree: `~${shellId}:hidden`, shellDrawn: false };
     const state = () => c.js(`(() => { const wb = window.__viewer.workbench; let v = null; wb.forEachNode((m) => { if (m.pose.visor !== undefined) v = m.pose.visor; });
-      return { scope: wb.scope?.id ?? null, look: wb.look, ctx: wb.context, explode: wb.explode, visor: v, cam: wb.cameraState().pos.toArray().map((x) => x.toFixed(3)).join() }; })()`);
+      return { scope: wb.scope?.id ?? null, look: wb.look, ctx: wb.context, explode: wb.explode, visor: v, cam: wb.cameraState().pos.toArray().map((x) => x.toFixed(3)).join(),
+        tree: [...wb.overrides].map(([k, s]) => k + ':' + s).join(), shellDrawn: !!wb.parts.get(${JSON.stringify(shellId)})?.mesh.visible }; })()`);
     const same = (s) => Object.keys(want).every((k) => (typeof want[k] === 'number' ? Math.abs(s[k] - want[k]) < 1e-3 : s[k] === want[k]));
     await open(href.slice(href.indexOf('#')));
     const fresh = await state();
@@ -264,7 +321,10 @@ const CHECKS = {
     const hc = await state();
     const kept = await c.js('window.__noReload === 1');
     check('a hash change applies the link without a reload', kept && hc.scope === 'column' && hc.look === 'mechanism', JSON.stringify({ kept, ...hc }));
-    check("a link's unmentioned settings take defaults", hc.ctx === 'ghost' && hc.explode === 0 && !hc.visor, JSON.stringify(hc));
+    check("a link's unmentioned settings take defaults", hc.ctx === 'ghost' && hc.explode === 0 && !hc.visor && hc.tree === '', JSON.stringify(hc));
+    await hashTo(`#at=lib:hunter&look=inspect&t=~no_such_part:h,~${shellId}:h`);
+    const stale = await state();
+    check('a link\'s stale tree id is ignored', stale.tree === `~${shellId}:hidden` && !stale.shellDrawn, JSON.stringify(stale));
     await hashTo(href.slice(href.indexOf('#')));
     const back = await state();
     check('a share link round-trips across a hash change', same(back), JSON.stringify(back));
@@ -319,10 +379,27 @@ const CHECKS = {
     await c.send('Page.navigate', { url: `${base}/?check=${Date.now()}` });
     await until("!!document.querySelector('[data-stage-mode=build]')", 90_000, 'the sim to load');
     await c.js("document.querySelector('[data-stage-mode=build]').click(); 0");
-    await until("!!document.querySelector('#bv-tree li')", 90_000, 'the sim\'s Build to load');
+    await until("!!document.querySelector('.ptree li') && !!window.__r3x?.build?.top", 90_000, 'the sim\'s Build to load');
+    await sleep(2000);
     const sim = await c.js(`({ first: document.querySelector('#sc-build [data-src]').dataset.src, viewer: 'viewer' in document.body.dataset,
       tab: document.querySelector('#sc-build [data-src][aria-selected="true"]')?.dataset.src })`);
     check('the sim is unchanged (Our build first and open, no viewer mode)', sim.first === 'build' && sim.tab === 'build' && !sim.viewer, JSON.stringify(sim));
+    // the sim's Build: the same model, its panel keeping Systems and the view controls, the tree in place of
+    // the Assemblies and Parts lists; what Our build draws under each preset as before the tree
+    const panel = await c.js(`({ systems: !!document.querySelector('#bv-systems li'), tree: document.querySelectorAll('.ptree li').length,
+      explode: !!document.getElementById('bv-explode'), oldLists: !!document.querySelector('#bv-tree, #bp-parts, [data-ctx]') })`);
+    check("the sim's Build panel: Systems, the tree, the view controls", panel.systems && panel.tree > 0 && panel.explode && !panel.oldLists, JSON.stringify(panel));
+    const by = {};
+    for (const l of ['exterior', 'mechanism', 'inspect']) {
+      await click(`[data-look="${l}"]`);
+      await sleep(500);
+      by[l] = await states();
+    }
+    const e = by.exterior.inScope, m = by.mechanism.inScope, x = by.inspect.inScope;
+    check('the sim: Our build under each preset as before (exterior / mechanism / X-ray)',
+      e.shellGhost + e.innerGhost === 0 && e.shellSolid > 0 && m.shellDrawn === 0 && m.innerGhost === 0 && x.shellSolid === 0 && x.innerGhost === 0
+        && x.innerSolid === m.innerSolid && x.shellGhost > 0 && by.exterior.treeAgrees && by.mechanism.treeAgrees && by.inspect.treeAgrees,
+      ['exterior', 'mechanism', 'inspect'].map((l) => `${l} ${by[l].inScope.shellSolid + by[l].inScope.innerSolid} solid ${by[l].inScope.shellGhost + by[l].inScope.innerGhost} ghost`).join('; '));
   },
 };
 

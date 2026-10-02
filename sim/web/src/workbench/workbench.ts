@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EDGE_ANGLE, prepareGeometry, toGeometry } from './geomwork';
+import { aggregate, partState, setOverride as putOverride, treeState, type VPart, type Vis } from './visibility';
 import { MeshPacks } from './meshpack';
 import { firstParts, type FirstParts } from './loadorder';
 import { mayExist } from './published';
@@ -42,7 +43,10 @@ import {
 export type { Look } from './systems';
 export type ShellMode = 'solid' | 'xray' | 'hidden';
 export type Axis = 'x' | 'y' | 'z';
-export type Context = 'ghost' | 'hide';
+/** The "Rest of the droid" row: what is outside the focus, solid, ghosted or hidden (visibility.ts). */
+export type Context = 'ghost' | 'hide' | 'solid';
+/** The context row's word as a visibility state. */
+export const contextVis = (c: Context): Vis => (c === 'hide' ? 'hidden' : c);
 
 /** What is in focus: drawn solid, the rest ghosted or hidden (`context`). */
 export interface Scope {
@@ -146,29 +150,6 @@ export function bvhFor(g: THREE.BufferGeometry): MeshBVH {
   return new MeshBVH(g, { indirect: true });
 }
 
-/**
- * Whether a part is drawn in the look and around the focus (refresh(), before steps, isolation and
- * variants have their say). `scope` is the focus's kind (null: the whole build), `inScope` whether the
- * part is in it.
- *
- *   Exterior   what is seen from outside, painted; a library design's own parts are drawn whatever:
- *              it is what was opened (a frame or a column has nothing the finished droid shows, and
- *              Exterior drew it empty)
- *   Mechanism  what is inside (a focus keeps its own shells, as a ghost; with Hide, not even those)
- *   outside the focus  ghosted or hidden, as the control says, for any focus - a system, an assembly or
- *              a library design. (A library design used to stand alone whatever it said, so Ghost did
- *              nothing there while it worked on a system: the "sometimes it ghosts" of the viewer.)
- */
-export function lookShows(p: { look: Look; outside: boolean; shell: boolean; inScope: boolean; scope: Scope['kind'] | null; context: Context }): boolean {
-  if (p.look === 'exterior' && !p.outside && !(p.scope === 'library' && p.inScope)) return false;
-  if (p.look === 'mechanism' && p.shell && !p.scope) return false;
-  // Hide, in Mechanism: the focus's own shells go too (they are ghosts; "Hide" read as "the ghosts stay" is
-  // the Hide that does not work)
-  if (p.look === 'mechanism' && p.shell && p.scope && p.context === 'hide') return false;
-  if (!p.inScope && !(p.scope && p.context === 'ghost')) return false;
-  return true;
-}
-
 /** A library design made only of shells (the kit as published): its one look is Exterior. */
 export function isShellsOnly(kind: Scope['kind'] | null, classes: (string | undefined)[]): boolean {
   return kind === 'library' && classes.length > 0 && classes.every((c) => c === 'shell');
@@ -223,6 +204,14 @@ export class Workbench {
   look: Look = 'exterior';
   /** Around a scope: the rest of the droid as a light ghost, or hidden. */
   context: Context = 'ghost';
+  /**
+   * The parts tree's overrides (visibility.ts): an assembly node's key, or a part's (`~id`), set solid,
+   * ghost or hidden for it and everything under it. Empty: the look preset as it is. Cleared by a preset
+   * and by a new focus.
+   */
+  readonly overrides = new Map<string, Vis>();
+  /** Each part's tree state (rule 5 of visibility.ts: preset, overrides, context row), as of the last refresh. */
+  readonly treeStates = new Map<string, Vis>();
   scope: Scope | null = null;
   /** A joint under the pointer in the panel: the parts it moves, and its drive. */
   hover: { node: AsmNode; joint: string; moved: Set<string>; drive: Set<string> } | null = null;
@@ -1373,6 +1362,7 @@ export class Workbench {
     }
     if (sc?.kind === 'library') this.look = sc.item?.look ?? this.look;
     else if (sc && this.look === 'exterior') this.look = 'mechanism'; // into the mechanics
+    this.overrides.clear(); // a new focus starts from its look's preset
     this.applyScope(sc, true);
   }
 
@@ -1415,8 +1405,63 @@ export class Workbench {
 
   setLook(l: Look) {
     if (this.shellsOnly) l = 'exterior';
-    if (l === this.look) return;
+    // a preset sets the whole tree: its overrides go (a press of the look already shown resets a custom view)
+    if (l === this.look && !this.overrides.size) return;
     this.look = l;
+    this.overrides.clear();
+    this.refresh();
+    this.emit();
+  }
+
+  /** The tree has been changed since the last preset: the look buttons show none selected. */
+  get custom(): boolean {
+    return this.overrides.size > 0;
+  }
+
+  /** A part as the visibility model sees it (its shell class, exposure, focus and tree path). */
+  vpart(id: string): VPart | null {
+    const po = this.parts.get(id);
+    if (!po) return null;
+    const path: string[] = [];
+    for (let n: AsmNode | null = po.node; n; n = n.parent) path.unshift(n.key);
+    const sc = this.scope;
+    const inScope = !sc || sc.parts.has(id) || (!!sc.context?.has(id) && !this.guide);
+    return { id, shell: po.part.class === 'shell', outside: exposed(po.part), inScope, path };
+  }
+
+  /** The parts under a tree row: an assembly node's (its subtree), or one part's (`~id`). */
+  partsUnder(key: string): string[] {
+    if (key.startsWith('~')) return this.parts.has(key.slice(1)) ? [key.slice(1)] : [];
+    const out: string[] = [];
+    for (const [id, po] of this.parts) {
+      for (let n: AsmNode | null = po.node; n; n = n.parent) {
+        if (n.key === key) {
+          out.push(id);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** A tree row's state: what its parts share (rule 5), or 'mixed'; `only` limits it to the focus's parts. */
+  rowState(key: string, only?: (id: string) => boolean): Vis | 'mixed' | null {
+    return aggregate(this.partsUnder(key).filter((id) => !only || only(id)).map((id) => this.treeStates.get(id) ?? 'hidden'));
+  }
+
+  /**
+   * Set a tree row (an assembly node's key or a part's `~id`) solid, ghost or hidden, for it and everything
+   * under it; null: back to the preset. An override that changes nothing is not kept (visibility.ts).
+   */
+  setOverride(key: string, state: Vis | null) {
+    const under = new Set(this.partsUnder(key));
+    const look = this.look;
+    const focus = this.scope?.kind ?? null;
+    const ctx = contextVis(this.context);
+    putOverride(this.overrides, key, state,
+      (k) => (k.startsWith('~') ? under.has(k.slice(1)) : k.startsWith(key + '/')),
+      () => [...under].map((id) => this.vpart(id)).filter((v): v is VPart => !!v)
+        .map((v) => treeState(v, look, focus, new Map([...this.overrides].filter(([k]) => k !== key)), ctx)));
     this.refresh();
     this.emit();
   }
@@ -3068,6 +3113,8 @@ export class Workbench {
     const contact = new Set(this.contact?.parts ?? []);
     const clip = this.section.on ? [this.sectionPlane()] : null;
     const look = this.look;
+    const focus = this.scope?.kind ?? null;
+    const ctxVis = contextVis(this.context);
     const scope0 = this.scope?.parts ?? null;
     // a focus's context (what its parts are mounted to) is drawn as the focus is: solid, in its finish
     const scopeCtx = this.scope?.context;
@@ -3086,21 +3133,24 @@ export class Workbench {
     for (const [id, po] of this.parts) {
       const p = po.part;
       const shell = p.class === 'shell';
-      let visible = !hideV.has(id) && !this.hidden.has(id) && (!this.isolated || this.isolated.has(id)) && !this.variantHidden.has(po.node);
       const inScope = !scope || scope.has(id);
-      // a part our build replaces (the kit's hero elbow under Anderson's arm) is out of the build; a library
-      // design (the kit as published) still shows it
-      if (p.replaced_by && !(inScope && this.scope?.kind === 'library')) visible = false;
-      // Exterior: what is seen from outside, painted. Mechanism: what is inside (a focus keeps its own
-      // shells as a ghost). X-ray: the mechanism under ghosted shells.
-      const outside = exposed(p);
-      // (a library design's own parts are drawn whatever: it is what was opened - a frame or a column has
-      // nothing the finished droid shows, and Exterior drew it empty)
-      if (!lookShows({ look, outside, shell, inScope, scope: this.scope?.kind ?? null, context: this.context })) visible = false;
-      // a step: what is still to come is hidden; the step's context lightly ghosted
+      // One visibility model (visibility.ts, its header has the precedence): variants, replaced_by, isolate,
+      // steps, then the tree (the look preset, the overrides, the context row). The guide, below, overrides it.
+      // (`hidden`: the old per-part eye, kept for anything still setting it.)
+      const vp = this.vpart(id)!;
+      vp.inScope = inScope;
       const f = first.get(id);
       const toCome = !!cur && f !== undefined && f > this.step;
-      if (toCome && !ctx.has(id)) visible = false;
+      this.treeStates.set(id, treeState(vp, look, focus, this.overrides, ctxVis));
+      const state = partState(vp, {
+        variantHidden: hideV.has(id) || this.variantHidden.has(po.node) || this.hidden.has(id),
+        // a part our build replaces (the kit's hero elbow under Anderson's arm) is out of the build; a library
+        // design (the kit as published) still shows it
+        replacedOut: !!p.replaced_by && !(inScope && this.scope?.kind === 'library'),
+        isolatedOut: !!this.isolated && !this.isolated.has(id),
+        toCome, stepContext: ctx.has(id),
+      }, look, focus, this.overrides, ctxVis);
+      let visible = state !== 'hidden';
       // Instructions: the section alone - all of it on its title card, else what is placed so far (and the
       // step's context), whatever the look (a look changes how parts are drawn, not which)
       if (g) {
@@ -3114,7 +3164,13 @@ export class Workbench {
       // ghosts are one neutral grey, whatever the part's paint (no pink X-ray, no purple cups)
       let finish: Finish;
       let opacity = 1;
-      if (!inScope) {
+      if (!g && state === 'ghost') {
+        // a ghost: outside the focus as before; in it, a shell as its look ghosts shells, anything else as mechanism
+        finish = GHOST_FINISH;
+        opacity = !inScope ? (shell ? GHOST.shell : GHOST.mech) : shell ? (look === 'inspect' ? GHOST.inspectShell : GHOST.shell) : GHOST.mech;
+      } else if (!g) {
+        finish = look === 'exterior' ? exteriorFinish(p) : this.video ? exteriorFinish(p) : mechanismFinish(p);
+      } else if (!inScope) {
         finish = GHOST_FINISH;
         opacity = shell ? GHOST.shell : GHOST.mech;
       } else if (look === 'exterior') {

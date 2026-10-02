@@ -9,7 +9,8 @@ import { acceleratedRaycast, type MeshBVH } from 'three-mesh-bvh';
 import { SETTLE_FRAMES, aoStep, buildFrameKind, cameraHash, frameScale, type BuildFrame } from '../src/buildframe';
 import { FramePacer } from '../src/pacer';
 import { PINCH_STEP, WHEEL_GAP_MS, pinchStep, reuseWheelPick, zoomTake } from '../src/workbench/navigate';
-import { bvhFor, isShellsOnly, lookShows, noteArrival } from '../src/workbench/workbench';
+import { bvhFor, contextVis, isShellsOnly, noteArrival, type Context } from '../src/workbench/workbench';
+import { treeState, type Preset } from '../src/workbench/visibility';
 import { LINK_SETTLE_MS, linkSettings, mayWriteLink, parseView } from '../src/viewer/link';
 import { classifyStep } from '../src/viewer/diag';
 import { firstParts } from '../src/workbench/loadorder';
@@ -148,7 +149,7 @@ describe('8. one zoom-point raycast per wheel gesture', () => {
 
 describe('9. share link: defaults and the writer gate', () => {
   it("a link's unmentioned settings take the design's defaults, not saved state", () => {
-    expect(linkSettings(parseView('#at=lib:hunter&look=mechanism')!)).toEqual({ look: 'mechanism', ctx: 'ghost', explode: 0, fasteners: true, joints: [] });
+    expect(linkSettings(parseView('#at=lib:hunter&look=mechanism')!)).toEqual({ look: 'mechanism', ctx: 'ghost', explode: 0, fasteners: true, joints: [], tree: {} });
     expect(linkSettings(parseView('#at=lib:kit')!).look).toBeNull(); // the design's own look
     expect(linkSettings(parseView('#at=build')!).look).toBe('exterior');
   });
@@ -164,15 +165,18 @@ describe('9. share link: defaults and the writer gate', () => {
   });
 });
 
-describe('10-12. looks and the focus (refresh)', () => {
+describe('10-12. looks and the focus (the tree state, visibility.ts)', () => {
+  // drawn at all (solid or ghost) by the look preset and the context row, no overrides
+  const lookShows = (p: { look: Preset; outside: boolean; shell: boolean; inScope: boolean; scope: 'system' | 'assembly' | 'library' | null; context: Context }) =>
+    treeState({ id: 'p', shell: p.shell, outside: p.outside, inScope: p.inScope, path: [] }, p.look, p.scope, new Map(), contextVis(p.context)) !== 'hidden';
   const part = { look: 'mechanism' as const, outside: false, shell: false, inScope: false, scope: 'library' as const };
-  it('10. Ghost/Hide decides the rest of the droid inside a library design', () => {
+  it('10. the context row (ghost / hidden) decides the rest of the droid inside a library design', () => {
     expect(lookShows({ ...part, context: 'ghost' })).toBe(true);
     expect(lookShows({ ...part, context: 'hide' })).toBe(false);
     expect(lookShows({ ...part, scope: 'system', context: 'ghost' })).toBe(true);
     expect(lookShows({ ...part, scope: 'system', context: 'hide' })).toBe(false);
   });
-  it("10b. Hide in Mechanism also drops the focus's own ghosted shells (the Hide that 'did not work')", () => {
+  it("10b. a hidden context row in Mechanism also drops the focus's own ghosted shells (the Hide that 'did not work')", () => {
     const shell = { ...part, shell: true, inScope: true };
     expect(lookShows({ ...shell, context: 'ghost' })).toBe(true); // a ghost over the mechanism
     expect(lookShows({ ...shell, context: 'hide' })).toBe(false);

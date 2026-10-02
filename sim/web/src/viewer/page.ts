@@ -140,9 +140,10 @@ function viewerDom() {
   view.className = 'bv-sec bv-view';
   view.dataset.sec = 'view';
   view.innerHTML = '<summary>View</summary>';
-  const others = nav.querySelector<HTMLElement>(':scope > h3.bv-h');
-  if (others) others.textContent = 'Rest of the droid';
-  let at = others as Element | null;
+  // (Build's own "View" heading starts the run; the fold's summary says it, so the heading goes)
+  const head = nav.querySelector<HTMLElement>(':scope > h3.bv-h');
+  let at = head?.nextElementSibling ?? null;
+  head?.remove();
   while (at) {
     const next = at.nextElementSibling;
     view.append(at);
@@ -246,6 +247,7 @@ function readView(): ViewState | null {
     at,
     look: workbench.look,
     ctx: workbench.context,
+    tree: Object.fromEntries(workbench.overrides),
     explode: workbench.explode,
     fasteners: workbench.fasteners,
     variants: ours ? { ...workbench.variants } : undefined,
@@ -315,6 +317,10 @@ async function restore(v: ViewState) {
   const set = linkSettings(v);
   if (set.look) click(`[data-look="${set.look}"]`);
   wb.setContext(set.ctx);
+  // the tree's overrides, after the look (a preset clears them); a key this build does not have is left out
+  for (const [k, v] of Object.entries(set.tree)) {
+    if (k.startsWith('~') ? wb.partInfo(k.slice(1)) : wb.nodeByKey(k)) wb.setOverride(k, v);
+  }
   const x = $<HTMLInputElement>('bv-explode');
   x.value = String(set.explode);
   x.dispatchEvent(new Event('input'));
