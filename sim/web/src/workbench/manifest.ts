@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { PackSpec } from './meshpack';
+import { notePublished } from './published';
 /**
  * The mech manifest (r3x.mech.manifest v1, mech/workbench/SCHEMA.md) as Build mode reads it,
  * plus the loader: the dev server serves mech/out/ at /mech/out/ (src/workbench/mech.mjs).
@@ -281,11 +283,18 @@ export interface Manifest {
   generated_at: string;
   generator?: string;
   root: MAssembly;
+  /** Publisher-added (publish-viewer.mjs): this folder's meshes in one file (meshpack.ts). */
+  pack?: PackSpec;
+  /** Read here, not in the file: every pack met resolving the tree (its own and referenced ones). */
+  packs?: { url: string; pack: PackSpec }[];
 }
 
 export interface IndexEntry { id: string; name: string; manifest: string; built?: string }
 
-export const MECH_BASE = '/mech/out/';
+/** Where the workbench output is served: the dev server's route, or (the published viewer,
+ * `VITE_MECH_BASE`, relative to the page) the snapshot next to it. */
+const PUBLISHED = import.meta.env?.VITE_MECH_BASE as string | undefined;
+export const MECH_BASE = PUBLISHED ? new URL(PUBLISHED, document.baseURI).pathname : '/mech/out/';
 
 const isRef = (c: MAssembly | MChildRef): c is MChildRef => 'ref' in c && !('parts' in c);
 
@@ -324,12 +333,17 @@ export async function resolveTree(node: MAssembly, base: string, fetchJson: (url
 }
 
 export async function loadManifest(url: string): Promise<Manifest> {
+  const packs: { url: string; pack: PackSpec }[] = [];
   const get = async (u: string) => {
     const r = await fetch(u, { cache: 'no-store' });
     if (!r.ok) throw new Error(`${u}: ${r.status}`);
-    return (await r.json()) as Manifest;
+    const doc = (await r.json()) as Manifest;
+    if (doc.pack) packs.push({ url: u, pack: doc.pack });
+    notePublished(u, (doc as { published_files?: unknown }).published_files);
+    return doc;
   };
   const m = await get(url);
+  m.packs = packs;
   if (m.schema !== 'r3x.mech.manifest') throw new Error(`${url}: not a mech manifest`);
   if (m.version !== 1) throw new Error(`${url}: manifest version ${m.version}, this panel reads 1`);
   m.root = await resolveTree(m.root, url.replace(/[^/]*$/, ''), get);
@@ -340,7 +354,11 @@ export async function loadIndex(): Promise<IndexEntry[]> {
   try {
     const r = await fetch(`${MECH_BASE}index.json`, { cache: 'no-store' });
     if (!r.ok) return [];
-    return ((await r.json()) as { assemblies: IndexEntry[] }).assemblies ?? [];
+    const d = (await r.json()) as { assemblies: IndexEntry[]; files?: unknown };
+    // a published snapshot's root listing covers only the root's own optional files (checks.json):
+    // the assembly folders are listed by their manifests
+    if (Array.isArray(d.files)) notePublished(`${MECH_BASE}index.json`, [...d.files, ...(d.assemblies ?? []).map((a) => a.manifest)]);
+    return d.assemblies ?? [];
   } catch {
     return [];
   }

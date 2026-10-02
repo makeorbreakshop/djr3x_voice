@@ -8,6 +8,7 @@
  */
 
 import './build.css';
+import { mayExist } from './published';
 import type { AsmNode, Look, Workbench } from './workbench';
 import { mountGuide } from './guide';
 import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, printList, subtreeParts, type MotionSystem } from './systems';
@@ -184,7 +185,14 @@ export function injectBuildDom() {
   tabs.parentElement!.querySelector('#more-menu')!.after(bodies);
 }
 
-export function mountBuildPanel(wb: Workbench) {
+/**
+ * `viewer`: the shared viewer (viewer.html, src/viewer/page.ts) rather than the sim's Build. It
+ * opens on the Library, and stepping out of a design goes back to the Library list (in the sim,
+ * to our build); the part drawer leaves out the modelling facts (params, fit, mates). Everything
+ * else the viewer hides is CSS on body[data-viewer] (src/viewer/viewer.css).
+ */
+export function mountBuildPanel(wb: Workbench, opts: { viewer?: boolean } = {}) {
+  const viewer = !!opts.viewer;
   const st = load();
   // Instructions: the guide opens on what is in focus (its section), else at the start
   const guide = mountGuide(wb, { onClose: () => document.getElementById('bb-guide')?.focus() });
@@ -198,7 +206,7 @@ export function mountBuildPanel(wb: Workbench) {
   /** Parts tab filter (the list, and the view isolates what it lists). */
   let filter: Filter = 'all';
   /** Scene panel: Our build or Library. */
-  let src: 'build' | 'library' = 'build';
+  let src: 'build' | 'library' = viewer ? 'library' : 'build';
   let lastKind: string | null = null;
   /** The navigator's search: filters systems, assemblies and parts by name. */
   let query = '';
@@ -344,8 +352,11 @@ export function mountBuildPanel(wb: Workbench) {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-crumb]');
     if (!b) return;
     if (b.dataset.crumb === 'library') {
-      src = 'library';
-      render();
+      if (viewer) void toLibrary();
+      else {
+        src = 'library';
+        render();
+      }
     } else if (b.dataset.crumb === 'build') void openBuild();
   });
 
@@ -357,6 +368,7 @@ export function mountBuildPanel(wb: Workbench) {
     if (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
     if (e.key === 'Escape') {
       if (wb.back()) e.preventDefault();
+      else if (viewer && openAsm !== OUR_BUILD) void toLibrary();
       else if (openAsm !== OUR_BUILD) void openBuild();
       return;
     }
@@ -393,6 +405,13 @@ export function mountBuildPanel(wb: Workbench) {
     wb.frame(false, true);
   }
 
+  /** The viewer: out of a design, back to the Library list (the droid whole behind it). */
+  async function toLibrary() {
+    await openBuild();
+    src = 'library';
+    render();
+  }
+
   async function openLibrary(id: string) {
     const item = libraryFrom(wb.manifest?.root).find((x) => x.id === id);
     if (!item) return;
@@ -403,6 +422,8 @@ export function mountBuildPanel(wb: Workbench) {
     if (sc) wb.setScope(sc);
   }
 
+  let readyR: () => void = () => {};
+  const readyP = new Promise<void>((res) => (readyR = res));
   async function refreshIndex(reload = false) {
     index = await loadIndex();
     torque = await loadTorque();
@@ -415,6 +436,7 @@ export function mountBuildPanel(wb: Workbench) {
       await wb.load(MECH_BASE + e.manifest);
     }
     render();
+    readyR();
   }
 
   // Live reload (dev server, src/workbench/mech.mjs): a rebuilt manifest reloads the open assembly in
@@ -427,6 +449,10 @@ export function mountBuildPanel(wb: Workbench) {
     });
   }
 
+  // Leaving Build: the view bar's looks are the Model's again, none greyed out by a shells-only design
+  window.addEventListener('r3x:mode', (e) => {
+    if ((e as CustomEvent).detail !== 'build') document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => (b.disabled = false));
+  });
   /** Build opens: fetch the index and our build once. */
   window.addEventListener('r3x:mode', (e) => {
     if ((e as CustomEvent).detail === 'build' && !loadedOnce) void refreshIndex();
@@ -558,8 +584,14 @@ export function mountBuildPanel(wb: Workbench) {
       const on = b.dataset.look === wb.look;
       b.setAttribute('aria-checked', String(on));
       b.tabIndex = on ? 0 : -1;
+      // a shells-only design has the one look (workbench shellsOnly): the others greyed out, not gone
+      b.disabled = wb.shellsOnly && b.dataset.look !== 'exterior';
     });
-    document.querySelectorAll<HTMLButtonElement>('[data-ctx]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ctx === wb.context)));
+    // Ghost / Hide acts on what is outside the focus: with nothing in focus there is nothing to ghost
+    document.querySelectorAll<HTMLButtonElement>('[data-ctx]').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.ctx === wb.context));
+      b.disabled = !wb.scope;
+    });
     $('bv-explode-hint').hidden = !(wb.explode > 0.05 && !wb.scope);
     press('bv-section', wb.section.on);
     press('bv-flip', wb.section.flip);
@@ -598,7 +630,8 @@ export function mountBuildPanel(wb: Workbench) {
     const sc = wb.scope;
     const lib = sc?.kind === 'library' || openAsm !== OUR_BUILD;
     if (lib) src = 'library';
-    else if (lastKind === 'library') src = 'build'; // stepped out of a design: back on our build
+    // stepped out of a design: back on our build (the viewer: the list its caller picked - Library, or Our build)
+    else if (lastKind === 'library' && !viewer) src = 'build';
     lastKind = lib ? 'library' : sc?.kind ?? null;
     document.querySelectorAll<HTMLButtonElement>('[data-src]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.src === src)));
     $('bv-build-pane').hidden = src !== 'build';
@@ -606,7 +639,7 @@ export function mountBuildPanel(wb: Workbench) {
 
     // breadcrumb: Our build > Neck, or Library > Head gimbal
     const here = sc?.label ?? (openAsm !== OUR_BUILD ? index.find((x) => x.id === openAsm)?.name ?? openAsm : '');
-    const root = lib ? `<button data-crumb="library" title="Back to the build (Esc)">Library</button>` : `<button data-crumb="build" ${sc ? 'title="The whole build (Esc)"' : 'aria-current="page" disabled'}>Our build</button>`;
+    const root = lib ? `<button data-crumb="library" title="${viewer ? 'Back to the Library' : 'Back to the build'} (Esc)">Library</button>` : `<button data-crumb="build" ${sc ? 'title="The whole build (Esc)"' : 'aria-current="page" disabled'}>Our build</button>`;
     // what upstream is off rest and moves the focus (a turned ring under the arm): shown, one click home
     const up = wb.upstream().map(({ node, joint, value }) => `<button class="bb-chip" data-rest="${esc(node.key)}|${esc(joint.id)}" title="Off rest: it moves ${esc(sc?.label ?? '')}. Click to put it back to 0">${esc(jointLabel(joint.name))} ${signed(value)}${unit(joint)} <span aria-hidden="true">⟲</span></button>`).join('');
     $('bb-crumbs').innerHTML = here ? `${root}<span aria-hidden="true">›</span><b aria-current="page">${esc(here)}</b>${up}` : '';
@@ -816,16 +849,16 @@ export function mountBuildPanel(wb: Workbench) {
     const reg = src.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
     const file = (src.file as string | undefined) ?? (src.reference as string | undefined) ?? (src.model as string | undefined) ?? '';
     el.innerHTML = head(shortName(p.name), srcDot(p.cad)) + `<dl class="facts">
-      ${row('Source', SRC_LABEL[srcOf(p.cad)], SRC_TITLE[srcOf(p.cad)] + (file ? `\n${file}` : '') + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
+      ${viewer ? '' : row('Source', SRC_LABEL[srcOf(p.cad)], SRC_TITLE[srcOf(p.cad)] + (file ? `\n${file}` : '') + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
       ${row('Material', esc(p.material ?? ''))}
       ${row('Joint', j ? `${esc(bare(j.name))}${j.profile_joint ? ` <span class="mono dim">${esc(j.profile_joint)}</span>` : ''}` : 'fixed', j?.name)}
-      ${row('Mates', mates ? String(mates) : '')}
-      ${params ? row('Params', Object.entries(params).map(([k, v]) => `<span class="mono">${esc(k)} ${esc(v)}</span>`).join(' · ')) : ''}
-      ${reg ? row('Fit', `p95 ${num(reg.p95_mm ?? 0, 2)} mm`, `vs ${String(src.reference ?? 'reference')}: mean ${num(reg.mean_mm ?? 0, 2)} mm, volume ${num((reg.volume_ratio ?? 1) * 100, 1)}%`) : ''}
+      ${viewer ? '' : row('Mates', mates ? String(mates) : '')}
+      ${params && !viewer ? row('Params', Object.entries(params).map(([k, v]) => `<span class="mono">${esc(k)} ${esc(v)}</span>`).join(' · ')) : ''}
+      ${reg && !viewer ? row('Fit', `p95 ${num(reg.p95_mm ?? 0, 2)} mm`, `vs ${String(src.reference ?? 'reference')}: mean ${num(reg.mean_mm ?? 0, 2)} mm, volume ${num((reg.volume_ratio ?? 1) * 100, 1)}%`) : ''}
       ${p.mass_g ? row('Mass', `${num(p.mass_g)} g`, p.mass_note ?? '') : ''}
-      ${exp.stl || exp['3mf'] ? row('Export', `${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''}${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}`) : ''}</dl>
-      ${p.inferred ? `<p class="dr-inf">Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}</p>` : ''}
-      ${p.note ? `<details class="bp-disc"><summary>Note</summary><p>${esc(p.note)}</p></details>` : ''}`;
+      ${!viewer && (exp.stl || exp['3mf']) ? row('Export', `${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''}${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}`) : ''}</dl>
+      ${p.inferred && !viewer ? `<p class="dr-inf">Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}</p>` : ''}
+      ${p.note && !viewer ? `<details class="bp-disc"><summary>Note</summary><p>${esc(p.note)}</p></details>` : ''}`;
   }
 
   // ---------------------------------------------------------------- Joints
@@ -995,7 +1028,31 @@ export function mountBuildPanel(wb: Workbench) {
     $('bp-bom-sum').textContent = lines.length || nPrint ? `${lines.length} items · ${nPrint} parts to print` : '';
   }
 
-  return { refreshIndex };
+  return {
+    refreshIndex,
+    /** What is open, for the viewer's header and link: the manifest (our build or a standalone
+     *  design) and which list the navigator shows. */
+    where: () => ({ manifest: openAsm, ourBuild: OUR_BUILD, list: src }),
+    /** Open a library design / a standalone manifest / our build whole; false when the id is unknown. */
+    openLibrary: async (id: string) => {
+      if (!libraryFrom(wb.manifest?.root).some((x) => x.id === id)) return false;
+      await openLibrary(id);
+      return true;
+    },
+    openManifest: async (id: string) => {
+      if (!index.some((x) => x.id === id)) return false;
+      await openManifest(id);
+      return true;
+    },
+    openBuild,
+    /** The navigator on a list (the viewer's link back to the Library or Our build). */
+    showList: (l: 'build' | 'library') => {
+      src = l;
+      render();
+    },
+    /** Resolves once the index and the first manifest are in. */
+    ready: () => readyP,
+  };
 }
 
 // ------------------------------------------------------------------ helpers
@@ -1015,6 +1072,7 @@ export interface TorqueRow {
 
 async function loadTorque(): Promise<TorqueRow[]> {
   try {
+    if (!mayExist(`${MECH_BASE}checks.json`)) return []; // a published snapshot without one (published.ts)
     const r = await fetch(`${MECH_BASE}checks.json`, { cache: 'no-store' });
     if (!r.ok) return [];
     const d = (await r.json()) as { torque?: TorqueRow[] };

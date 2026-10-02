@@ -17,6 +17,11 @@ import * as THREE from 'three';
 import { ControlsCard } from './controlscard';
 import type { BuildHost, Workbench } from './workbench';
 
+/** Wheel events closer than this belong to one gesture (one zoom-point raycast: `wheelPoint`). */
+export const WHEEL_GAP_MS = 250;
+/** The most one pinch event zooms (log factor: about 16%). */
+export const PINCH_STEP = 0.15;
+
 // ------------------------------------------------------------------ pure mapping (tested)
 
 export type Platform = 'mac' | 'other';
@@ -24,6 +29,8 @@ export type ScrollDevice = 'auto' | 'trackpad' | 'mouse';
 export type WheelAction = 'zoom' | 'pinch' | 'pan' | 'orbit';
 
 export const platformOf = (s: string): Platform => (/Mac|iPhone|iPad|iPod/i.test(s) ? 'mac' : 'other');
+/** This browser's platform (the tests pass theirs: Node has a navigator too). */
+const PLATFORM: Platform = platformOf(typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
 
 /** The move-a-part key: ⌘ on a Mac, Ctrl elsewhere (Ctrl-click on a Mac is the context click). */
 export function partKey(e: { metaKey: boolean; ctrlKey: boolean }, p: Platform): boolean {
@@ -34,14 +41,20 @@ export interface WheelLike { deltaX: number; deltaY: number; deltaMode: number; 
 
 /**
  * Mouse wheel or trackpad, from one event's shape. A pinch (and Ctrl+wheel) arrives with ctrlKey. Line or page
- * units, or a large whole-number step on Y alone, is a wheel notch; sideways motion, a fractional delta or a
- * small step is a trackpad's two fingers. (Shift+wheel on a mouse reads as sideways: Chrome swaps the axes.)
+ * units, or a large whole-number step on Y alone, is a wheel notch; sideways motion or a small step is a
+ * trackpad's two fingers. (Shift+wheel on a mouse reads as sideways: Chrome swaps the axes.)
+ *
+ * A fractional delta depends on the platform. On a Mac it is an ordinary mouse wheel: macOS turns a notch into
+ * accelerated pixels (4.000244 for a slow one, then 13.6, 31.2 ...), never whole numbers and never sideways,
+ * while a trackpad's two fingers arrive as whole pixels. Read as a trackpad (as it first was), a slow turn of
+ * the wheel panned the view and a quick one zoomed it: the same wheel doing two things. Elsewhere a fractional
+ * step is a precision touchpad (or a wheel on a scaled display, which is still a large step).
  */
-export function wheelDevice(e: WheelLike): 'trackpad' | 'mouse' {
+export function wheelDevice(e: WheelLike, p: Platform = PLATFORM): 'trackpad' | 'mouse' {
   if (e.deltaMode !== 0) return 'mouse';
   if (e.deltaX !== 0 && !e.shiftKey) return 'trackpad';
   const v = e.shiftKey ? e.deltaX || e.deltaY : e.deltaY;
-  if (!Number.isInteger(v)) return 'trackpad';
+  if (!Number.isInteger(v)) return p === 'mac' || Math.abs(v) >= 50 ? 'mouse' : 'trackpad';
   return Math.abs(v) >= 50 ? 'mouse' : 'trackpad';
 }
 
@@ -52,7 +65,7 @@ export function wheelDevice(e: WheelLike): 'trackpad' | 'mouse' {
 export class WheelClassifier {
   private last = -Infinity;
   private device: 'trackpad' | 'mouse' = 'mouse';
-  constructor(public setting: ScrollDevice = 'auto', private readonly gapMs = 220) {}
+  constructor(public setting: ScrollDevice = 'auto', private readonly gapMs = 220, private readonly platform: Platform = PLATFORM) {}
 
   classify(e: WheelLike, now: number): WheelAction {
     if (e.ctrlKey) {
@@ -62,9 +75,11 @@ export class WheelClassifier {
     let dev: 'trackpad' | 'mouse';
     if (this.setting !== 'auto') dev = this.setting;
     else if (now - this.last < this.gapMs) dev = this.device;
-    else dev = wheelDevice(e);
-    // a trackpad's signature (sideways, fractional) inside a gesture read as a wheel corrects it
-    if (this.setting === 'auto' && dev === 'mouse' && wheelDevice(e) === 'trackpad' && (e.deltaX !== 0 || !Number.isInteger(e.deltaY))) dev = 'trackpad';
+    else dev = wheelDevice(e, this.platform);
+    // a trackpad's signature inside a gesture read as a wheel corrects it: sideways motion anywhere, a
+    // fractional step off the Mac (there it is the wheel's own, see wheelDevice)
+    if (this.setting === 'auto' && dev === 'mouse' && wheelDevice(e, this.platform) === 'trackpad'
+      && (e.deltaX !== 0 || !Number.isInteger(e.deltaY))) dev = 'trackpad';
     this.device = dev;
     this.last = now;
     if (dev === 'mouse') return 'zoom';
@@ -139,10 +154,38 @@ export function dollyToward(pos: THREE.Vector3, target: THREE.Vector3, point: TH
   return { pos: p2, target: t2 };
 }
 
+/**
+ * One pinch event's zoom (log factor), at most PINCH_STEP either way: a pinch's first event after a pause
+ * can carry a whole burst (deltaY -54 seen: x1.7 in a single frame, a jump). Added to the eased zoom
+ * (`pendingZoom`, `zoomTake`), never applied at once.
+ */
+export function pinchStep(deltaY: number): number {
+  return Math.max(-PINCH_STEP, Math.min(PINCH_STEP, Math.log(zoomFactor('pinch', deltaY))));
+}
+
+/** The part of the eased zoom still to apply that one frame of `dt` seconds takes. */
+export function zoomTake(pending: number, dt: number): number {
+  return pending * (1 - Math.exp(-dt * 22));
+}
+
+/**
+ * The wheel gesture's zoom point: reuse it (no new raycast) while events keep coming less than
+ * WHEEL_GAP_MS apart and the cursor stays within 4 px; otherwise the caller picks anew at (x, y).
+ * Updates `w` (the gesture's time and, on a new pick, its cursor).
+ */
+export function reuseWheelPick(w: { at: number; x: number; y: number }, now: number, x: number, y: number): boolean {
+  const same = now - w.at < WHEEL_GAP_MS && Math.hypot(x - w.x, y - w.y) < 4;
+  w.at = now;
+  if (!same) {
+    w.x = x;
+    w.y = y;
+  }
+  return same;
+}
+
 // ------------------------------------------------------------------ the controller
 
 const SCROLL_KEY = 'r3x.build.scroll';
-const PLATFORM: Platform = platformOf(typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
 export const PART_KEY_NAME = PLATFORM === 'mac' ? '⌘' : 'Ctrl';
 
 export class Navigator {
@@ -162,6 +205,13 @@ export class Navigator {
   /** A mouse wheel's zoom still to apply (log factor) and toward where: eased over a few frames. */
   private pendingZoom = 0;
   private zoomAt = new THREE.Vector3();
+  /**
+   * The zoom point of the wheel gesture under way: one raycast per gesture, not per notch (a
+   * trackpad sends 60+ wheel events a second, and a raycast through the build can take 15 ms).
+   * Reused while the notches keep coming (< WHEEL_GAP_MS apart) and the cursor stays put; the
+   * point is on a surface in world space, so it stays right while the camera closes in.
+   */
+  private wheelPick = { at: -Infinity, x: 0, y: 0, p: new THREE.Vector3() };
   private lastTick = 0;
   /** The controls card (? or the ? by the view cube). */
   readonly card: ControlsCard;
@@ -252,7 +302,7 @@ export class Navigator {
       this.pendingZoom = 0;
       return;
     }
-    const take = this.pendingZoom * (1 - Math.exp(-dt * 22));
+    const take = zoomTake(this.pendingZoom, dt);
     this.pendingZoom -= take;
     this.zoom(Math.exp(take), this.zoomAt);
   }
@@ -309,6 +359,12 @@ export class Navigator {
     // the finger left behind continues as a one-finger orbit from where it is
   }
 
+  private wheelPoint(e: WheelEvent): THREE.Vector3 {
+    const w = this.wheelPick;
+    if (reuseWheelPick(w, performance.now(), e.clientX, e.clientY)) return w.p;
+    return w.p.copy(this.pointAt(e.clientX, e.clientY).p);
+  }
+
   private onWheel(e: WheelEvent) {
     if (!this.on()) return;
     e.preventDefault();
@@ -321,11 +377,14 @@ export class Navigator {
       // Shift: the browser may have swapped the axes
       this.orbit(-(e.deltaX || 0) * 0.6, -(e.deltaY || 0) * 0.6);
     } else if (action === 'pinch') {
-      this.pendingZoom = 0;
-      this.zoom(zoomFactor('pinch', e.deltaY), this.pointAt(e.clientX, e.clientY).p);
+      // eased over a few frames like the wheel, and no one event more than PINCH_STEP: a pinch's first
+      // event after a pause can carry a whole burst (deltaY -54 seen: x1.7 in a single frame, a jump)
+      this.zoomAt.copy(this.wheelPoint(e));
+      this.pendingZoom += pinchStep(e.deltaY);
+      this.host.interact();
     } else {
       // a wheel notch: eased over a few frames toward the point under the cursor
-      this.zoomAt.copy(this.pointAt(e.clientX, e.clientY).p);
+      this.zoomAt.copy(this.wheelPoint(e));
       this.pendingZoom += Math.log(zoomFactor('zoom', e.deltaY, e.deltaMode));
       this.host.interact();
     }

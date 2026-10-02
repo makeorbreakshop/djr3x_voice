@@ -16,7 +16,12 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EDGE_ANGLE, prepareGeometry, toGeometry } from './geomwork';
+import { MeshPacks } from './meshpack';
+import { firstParts, type FirstParts } from './loadorder';
+import { mayExist } from './published';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DirectDrag } from './direct';
@@ -60,6 +65,12 @@ export interface BuildHost {
   renderer: THREE.WebGLRenderer;
   /** Draw at full rate for a moment (pacer). */
   interact(): void;
+  /**
+   * Something drawn changed with nobody touching the view (a full-detail mesh arrived, a slice of edges
+   * was built): draw it, but it is not input. Counted as input (`interact`, the default), a close zoom's
+   * stream of arrivals held the view in its moving state for seconds after the hand had left.
+   */
+  changed?(): void;
   /** The droid model (and its overlays) while Build is open. */
   setDroidVisible(on: boolean): void;
   /** The Quality setting: shadows scale with it (off on Performance). */
@@ -82,6 +93,8 @@ interface PartObj {
   /** The full-detail GLB (manifest `mesh_full`), swapped in when in focus or close; `fullState`. */
   full?: string;
   fullState?: 'loading' | 'done';
+  /** Not in the first view (loadorder.ts): its mesh streams in after it (`fillPending`). */
+  pending?: string;
 }
 
 /** A build step as Instructions show it: the manifest's (limited to the focus) or derived from the structure. */
@@ -94,7 +107,7 @@ export type AStep = MStep & {
 
 export interface InterferencePair { a: string; b: string; depth_mm: number; at: [number, number, number]; explained: boolean; volume_mm3?: number | null; mesh?: string }
 
-interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null; lazy?: string }
+interface FastObj { f: MFastener; node: AsmNode; obj: THREE.Mesh; base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; holder: THREE.Object3D | null; lazy?: string; pending?: string }
 
 export interface AsmNode {
   /** Unique: the path of assembly ids (an id may repeat under two variant options). */
@@ -113,9 +126,7 @@ export interface AsmNode {
   gearHolders: { gear: MGear; holder: THREE.Object3D }[];
 }
 
-const CREASE = (30 * Math.PI) / 180;
-/** Feature edges drawn over the parts: folds sharper than this. */
-const EDGE_ANGLE = 40;
+// the crease angle and the feature edges' fold angle (EDGE_ANGLE) live in geomwork.ts
 
 /**
  * Build's lighting, "Inspection": a CAD viewport's neutral rig - a soft key from above front
@@ -127,6 +138,46 @@ const INSPECTION = { key: 1.6, fill: 0.5, rim: 0.9, hemi: 0.22, env: 0.75 };
 /** Status colours (checks, interference) stay apart from the accent, which means "selected" or
  *  "moves with the joint you are on". */
 const HIGHLIGHT = { step: 0x4aa3ff, selected: 0xe8762a, fail: 0xff3b30, warn: 0xf2c230 };
+/** A geometry's bounding volume tree for picking (buildBvhs); `indirect` leaves its index (draw order) as it is. */
+export function bvhFor(g: THREE.BufferGeometry): MeshBVH {
+  return new MeshBVH(g, { indirect: true });
+}
+
+/**
+ * Whether a part is drawn in the look and around the focus (refresh(), before steps, isolation and
+ * variants have their say). `scope` is the focus's kind (null: the whole build), `inScope` whether the
+ * part is in it.
+ *
+ *   Exterior   what is seen from outside, painted; a library design's own parts are drawn whatever:
+ *              it is what was opened (a frame or a column has nothing the finished droid shows, and
+ *              Exterior drew it empty)
+ *   Mechanism  what is inside (a focus keeps its own shells, as a ghost)
+ *   outside the focus  ghosted or hidden, as the control says, for any focus - a system, an assembly or
+ *              a library design. (A library design used to stand alone whatever it said, so Ghost did
+ *              nothing there while it worked on a system: the "sometimes it ghosts" of the viewer.)
+ */
+export function lookShows(p: { look: Look; outside: boolean; shell: boolean; inScope: boolean; scope: Scope['kind'] | null; context: Context }): boolean {
+  if (p.look === 'exterior' && !p.outside && !(p.scope === 'library' && p.inScope)) return false;
+  if (p.look === 'mechanism' && p.shell && !p.scope) return false;
+  if (!p.inScope && !(p.scope && p.context === 'ghost')) return false;
+  return true;
+}
+
+/** A library design made only of shells (the kit as published): its one look is Exterior. */
+export function isShellsOnly(kind: Scope['kind'] | null, classes: (string | undefined)[]): boolean {
+  return kind === 'library' && classes.length > 0 && classes.every((c) => c === 'shell');
+}
+
+/**
+ * Something drawn arrived with nobody touching the view (a full-detail mesh, a slice of edges): the
+ * host's `changed` (draw it, not input) where it has one, else `interact` (the sim, as before). Counted
+ * as input, a close zoom's stream of arrivals held the view in its moving state for seconds.
+ */
+export function noteArrival(host: Pick<BuildHost, 'interact' | 'changed'>) {
+  if (host.changed) host.changed();
+  else host.interact();
+}
+
 /** The context around a scope, and the shells over the mechanism in Inspect. */
 const GHOST = { color: 0x7f858e, mech: 0.1, shell: 0.065, inspectShell: 0.1 };
 const GHOST_FINISH: Finish = { color: GHOST.color, metalness: 0, roughness: 1 };
@@ -209,7 +260,7 @@ export class Workbench {
   private readonly key: THREE.DirectionalLight;
   private shadowQ = '';
   private fly: { p0: THREE.Vector3; t0: THREE.Vector3; p1: THREE.Vector3; t1: THREE.Vector3; start: number; dur: number } | null = null;
-  private readonly edgeGeo = new WeakMap<THREE.BufferGeometry, THREE.EdgesGeometry>();
+  private readonly edgeGeo = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
   private saved: { pos: THREE.Vector3; target: THREE.Vector3; min: number; max: number; polar: [number, number]; az: [number, number] } | null = null;
   private sweep: { node: AsmNode; joint: string; t0: number; path: [number, number][]; contact: number | null } | null = null;
   private picking = { x: 0, y: 0, down: false };
@@ -429,6 +480,15 @@ export class Workbench {
     this.clear();
     this.manifest = m;
     const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder); // the published packs' GLBs (EXT_meshopt_compression)
+    // the published viewer's mesh packs (meshpack.ts): a packed file comes out of its pack, the rest by URL
+    const packs = new MeshPacks();
+    for (const p of m.packs ?? []) packs.add(p.url, p.pack);
+    const glb = (u: string) => (packs.has(u)
+      ? packs.get(u).then((b) => (b ? loader.parseAsync(b, u.replace(/[^/]*$/, '')) : loader.loadAsync(u)))
+      : loader.loadAsync(u));
+    const bin = (u: string) => (packs.has(u) ? packs.get(u) : Promise.resolve(null)).then((b) => b
+      ?? fetch(u).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null));
     // a live reload keeps the meshes it already has (keyed by URL + content hash); a fresh load starts over
     const geoCache = keep ? this.geoCache : new Map<string, Promise<THREE.BufferGeometry>>();
     this.geoCache = geoCache;
@@ -437,24 +497,14 @@ export class Workbench {
       if (!g) {
         const plain = u.split('?')[0];
         const uvUrl = this.uvUrls.has(plain) ? plain.replace(/\.glb$/, '.uv.bin') + (u.includes('?') ? u.slice(u.indexOf('?')) : '') : null;
-        g = Promise.all([loader.loadAsync(u), uvUrl ? fetch(uvUrl).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : null]).then(([gltf, uvb]) => {
-          // Round faces render round, hard edges stay sharp: weld, then crease at 30 deg.
-          let geo = meshGeometry(gltf.scene, u);
-          geo.deleteAttribute('normal');
-          // the Original's UVs for this mesh (mech/workbench/uvtransfer.py), per face corner in the GLB's index
-          // order: unindex first, and the weld below keeps the seams between UV islands split
-          if (uvb) {
-            const uv = new Float32Array(uvb);
-            const n = geo.index ? geo.index.count : geo.attributes.position.count;
-            if (uv.length === n * 2) {
-              if (geo.index) geo = geo.toNonIndexed();
-              geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-            }
-          }
-          geo = toCreasedNormals(mergeVertices(geo, 1e-4), CREASE);
-          saneNormals(geo);
-          return geo;
-        });
+        g = Promise.all([glb(u), uvUrl ? bin(uvUrl) : null]).then(([gltf, uvb]) => {
+          // Round faces render round, hard edges stay sharp: weld, then crease at 30 deg; with the
+          // Original's per-corner UVs (mech/workbench/uvtransfer.py) when it has them, and the
+          // feature edges. In a worker (geomwork.ts): this was most of a cold load's main thread.
+          const src = meshGeometry(gltf.scene, u);
+          const idx = src.index ? (src.index.array as Uint32Array | Uint16Array) : null;
+          return prepareGeometry({ position: src.attributes.position.array as Float32Array, index: idx, uv: uvb ? new Float32Array(uvb) : null });
+        }).then(toGeometry);
         geoCache.set(u, g);
       }
       return g;
@@ -466,6 +516,11 @@ export class Workbench {
     this.buildPicks = keep?.buildPicks ?? null;
     this.lazyHidden = hiddenAssemblies(m.root, this.variants);
     this.geometryFn = geometry;
+    // the viewer's progressive load (loadorder.ts): a fresh load waits for what the link names (or the
+    // shells) and brings the rest in behind it; the sim and a live reload load everything, as before
+    this.first = keep || this.firstDesign === undefined ? null : firstParts(m.root, this.firstDesign);
+    this.firstDesign = undefined; // the first load only: a later pick is the whole build at once
+    (globalThis as { __r3xProgressive?: boolean }).__r3xProgressive = !!this.first;
     const top = await this.buildNode(m.root, null, geometry, parts, fast);
     if (seq !== this.loadSeq) return;
     this.interference = [];
@@ -502,14 +557,191 @@ export class Workbench {
     if (this.active && !keep) this.frame();
     // for load-time measurement (scripts/build_load_time.mjs): when the open assembly is on screen
     (globalThis as { __r3xBuildLoaded?: { url: string; at: number } }).__r3xBuildLoaded = { url, at: performance.now() };
+    // and which parts the first view had (scripts/viewer-check.mjs: a link's design before the context)
+    (globalThis as { __r3xFirstView?: { ids: string[]; pending: number } }).__r3xFirstView = {
+      ids: this.allParts.filter((po) => po.mesh.geometry.attributes.position).map((po) => po.part.id),
+      pending: this.allParts.filter((po) => po.pending).length,
+    };
     // After the first view: feature edges (most of a cold load's CPU) and the suite's overlaps
     // (Inspect only) arrive in the background.
     this.drainEdges(seq);
+    this.warmPrograms(seq);
+    this.buildBvhs(seq);
+    if (this.first) this.fillPending(seq);
     void this.loadInterference(url, geometry).then(() => {
       if (seq !== this.loadSeq) return;
       this.refresh();
       this.emit();
     });
+  }
+
+  /**
+   * The viewer's progressive load (page.ts sets it before the first load): a library design id (a
+   * link's `lib:`), '' (no link: the shells first), null (everything at once). Undefined (the sim, and
+   * every load after the first): everything at once. See loadorder.ts.
+   */
+  firstDesign: string | null | undefined = undefined;
+  private first: FirstParts | null = null;
+  /** fillPending under way, and the full-detail swaps asked for meanwhile (`upgrade`). */
+  private filling = false;
+  private upgradeLater = new Set<string>();
+
+  /**
+   * Bring in the meshes the first view did not wait for (`pending`), in the background: each added
+   * as it arrives, with its edges; the looks, ghosting and shadow brought up to date a few times a
+   * second (one refresh per batch, not per part: ~700 refreshes would hold the main thread); then
+   * the picking trees and shader programs for them. Ghost/Hide need nothing more: a part's material
+   * is set by refresh() whether its mesh is in yet or not.
+   */
+  private fillPending(seq: number) {
+    const geometry = this.geometryFn;
+    if (!geometry) return;
+    const t0 = performance.now();
+    this.filling = true;
+    this.upgradeLater.clear();
+    let left = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      timer = null;
+      if (seq !== this.loadSeq) return;
+      this.drainEdges(seq);
+      this.refresh();
+      this.markShadow();
+      noteArrival(this.host);
+    };
+    const done = () => {
+      if (seq !== this.loadSeq) return;
+      if (--left > 0) {
+        timer ??= setTimeout(flush, 120);
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      this.filling = false;
+      flush();
+      const later = [...this.upgradeLater];
+      this.upgradeLater.clear();
+      if (later.length) this.upgrade(later);
+      this.fitShadow();
+      this.buildBvhs(seq);
+      this.warmPrograms(seq);
+      this.emit();
+      (globalThis as { __r3xDeferredDone?: number }).__r3xDeferredDone = performance.now();
+      (globalThis as { __r3xDeferredMs?: number }).__r3xDeferredMs = performance.now() - t0;
+    };
+    for (const po of this.allParts) {
+      const u = po.pending;
+      if (!u) continue;
+      left++;
+      void geometry(u).then((geo) => {
+        if (seq !== this.loadSeq) return;
+        po.pending = undefined;
+        po.mesh.geometry = geo;
+        this.addEdges(po.mesh, geo, po.part.class === 'shell');
+      }, () => { po.pending = undefined; }).then(done);
+    }
+    for (const fo of this.allFast) {
+      const u = fo.pending;
+      if (!u) continue;
+      left++;
+      void geometry(u).then((geo) => {
+        if (seq !== this.loadSeq) return;
+        fo.pending = undefined;
+        fo.obj.geometry = geo;
+      }, () => { fo.pending = undefined; }).then(done);
+    }
+    if (!left) { left = 1; done(); }
+  }
+
+  /** Materials that only hold shader programs compiled ahead of use (warmPrograms); never drawn. */
+  private warmed: THREE.Material[] = [];
+
+  /**
+   * Compile, in the background a moment after the first view, the shader programs the looks will
+   * ask for: each kind of part material (which maps it has) opaque and ghosted, one- and two-sided,
+   * with and without the section plane, and the edges with it. A program is otherwise compiled
+   * the first frame a part needs it, which stalled that frame: the first section cut 480 ms, the
+   * first X-ray ~40 ms (measured, headless Chrome on Metal). Three's program cache is keyed by the
+   * parameters (and withRim's cache key), so the real materials pick these up when they switch.
+   * compileAsync uses KHR_parallel_shader_compile where the driver has it: no main-thread wait.
+   * The clones are kept (a disposed material releases its program) and dropped on the next load.
+   */
+  private warmPrograms(seq: number) {
+    const run = async () => {
+      if (seq !== this.loadSeq) return;
+      const scene = new THREE.Scene();
+      const plane = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)];
+      const seen = new Set<string>();
+      const add = (geo: THREE.BufferGeometry, m: THREE.Material, line: boolean) => {
+        const a = geo.attributes;
+        const key = [line, m.type, ...['map', 'normalMap', 'aoMap', 'roughnessMap', 'metalnessMap'].map((k) => !!(m as unknown as Record<string, unknown>)[k]),
+          !!a.uv, !!a.color, !!a.normal].join();
+        if (seen.has(key)) return;
+        seen.add(key);
+        for (const transparent of line ? [m.transparent] : [false, true]) {
+          for (const side of line ? [m.side] : [THREE.FrontSide, THREE.DoubleSide]) {
+            for (const clip of [null, plane]) {
+              const c = m.clone();
+              c.onBeforeCompile = m.onBeforeCompile;
+              c.customProgramCacheKey = m.customProgramCacheKey;
+              c.userData = m.userData; // withRim's and weather's uniforms
+              c.transparent = transparent;
+              c.side = side;
+              c.clippingPlanes = clip;
+              this.warmed.push(c);
+              const o = line ? new THREE.LineSegments(geo, c) : new THREE.Mesh(geo, c);
+              o.frustumCulled = false;
+              scene.add(o);
+            }
+          }
+        }
+      };
+      for (const po of this.parts.values()) {
+        const m = po.mesh.material as THREE.Material;
+        if (!Array.isArray(m)) add(po.mesh.geometry, m, false);
+        const e = po.mesh.getObjectByName('edges') as THREE.LineSegments | undefined;
+        if (e && !Array.isArray(e.material)) add(e.geometry, e.material, true);
+      }
+      const r = this.host.renderer;
+      const clip = r.localClippingEnabled;
+      r.localClippingEnabled = true;
+      const t0 = performance.now();
+      try {
+        await r.compileAsync(scene, this.host.camera, this.host.scene);
+      } catch { /* a lost context: the programs compile on first use as before */ }
+      r.localClippingEnabled = clip;
+      scene.clear();
+      (globalThis as { __r3xWarm?: { programs: number; at: number; ms: number } }).__r3xWarm = { programs: r.info.programs?.length ?? 0, at: t0, ms: performance.now() - t0 };
+    };
+    // after the edges (drainEdges) have had a moment: their materials are part of the set
+    const idle = (globalThis as { requestIdleCallback?: (f: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+    setTimeout(() => (idle ? idle(() => void run(), { timeout: 2000 }) : void run()), 1500);
+  }
+
+  /**
+   * A bounding volume tree (three-mesh-bvh) for every part's and fastener's geometry, so a pick
+   * (hitAt: the hover, a click, the zoom point, a drag's surface) tests the few triangles near the
+   * ray instead of every triangle of every mesh the ray's bounding spheres touch: the slowest picks
+   * through the build took 2-17 ms. Built in idle slices of ~6 ms after the first view, so load is
+   * no slower; a mesh without one yet (still queued, or a geometry swapped in since: mesh_full, a
+   * variant) is raycast the plain way. `indirect` leaves the geometry's index (draw order) as it is.
+   */
+  private buildBvhs(seq: number) {
+    const meshes = [...[...this.parts.values()].map((p) => p.mesh), ...[...this.fast.values()].map((f) => f.obj)];
+    for (const m of meshes) m.raycast = acceleratedRaycast;
+    let i = 0;
+    const idle = (globalThis as { requestIdleCallback?: (f: (d: { timeRemaining(): number }) => void, o?: { timeout: number }) => number }).requestIdleCallback
+      ?? ((f: (d: { timeRemaining(): number }) => void) => setTimeout(() => { const t = performance.now(); f({ timeRemaining: () => 8 - (performance.now() - t) }); }, 16));
+    const slice = (d: { timeRemaining(): number }) => {
+      if (seq !== this.loadSeq) return;
+      const t = performance.now();
+      while (i < meshes.length && (d.timeRemaining() > 2 || performance.now() - t < 1)) {
+        const g = meshes[i++].geometry as THREE.BufferGeometry & { boundsTree?: MeshBVH };
+        if (!g.boundsTree && g.attributes.position) g.boundsTree = bvhFor(g);
+        if (performance.now() - t > 6) break;
+      }
+      if (i < meshes.length) idle(slice, { timeout: 500 });
+    };
+    setTimeout(() => idle(slice, { timeout: 500 }), 800);
   }
 
   /** The suite's interference.json next to the manifest: each pair's shared solid (a GLB) or,
@@ -520,6 +752,7 @@ export class Workbench {
     this.ifGroup.clear();
     const dir = url.replace(/[^/]*$/, '');
     try {
+      if (!mayExist(`${dir}interference.json`)) return;
       const r = await fetch(`${dir}interference.json`, { cache: 'no-store' });
       if (!r.ok) return;
       const doc = (await r.json()) as { pairs?: InterferencePair[] };
@@ -673,6 +906,10 @@ export class Workbench {
     this.fast.clear();
     this.allParts = [];
     this.allFast = [];
+    this.filling = false; // (a newer load: the old fill's arrivals are dropped)
+    this.upgradeLater.clear();
+    for (const m of this.warmed) m.dispose(); // (a program the real materials use stays)
+    this.warmed = [];
     this.variantHidden.clear();
     this.top = this.focus = null;
     this.scope = null;
@@ -710,14 +947,15 @@ export class Workbench {
       const sig = (p as { mesh_sig?: string }).mesh_sig;
       const url = joinUrl(base, p.mesh) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`);
       const lazy = this.lazyHidden.has(asm);
-      const geo = lazy ? new THREE.BufferGeometry() : await geometry(url);
+      const pending = !lazy && !!this.first && !this.first.parts.has(p);
+      const geo = lazy || pending ? new THREE.BufferGeometry() : await geometry(url);
       const mat = this.material();
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = p.id;
       mesh.userData.partId = p.id;
       mesh.castShadow = mesh.receiveShadow = false;
       // Feature edges, drawn over the faces (pushed back a hair by polygonOffset).
-      if (!lazy) this.addEdges(mesh, geo, p.class === 'shell');
+      if (!lazy && !pending) this.addEdges(mesh, geo, p.class === 'shell');
       const b = new THREE.Vector3(...p.transform.t);
       mesh.position.copy(b);
       let holder: THREE.Object3D = mesh;
@@ -738,13 +976,14 @@ export class Workbench {
         (node.links.get(p.link) ?? group).add(mesh);
       }
       const full = p.mesh_full ? joinUrl(base, p.mesh_full) + (sig ? `?v=${sig}` : `?r=${this.loadSeq}`) : undefined;
-      parts.push({ part: p, node, holder, mesh, mat, base: b, lazy: lazy ? url : undefined, full });
+      parts.push({ part: p, node, holder, mesh, mat, base: b, lazy: lazy ? url : undefined, full, pending: pending ? url : undefined });
     }));
     const fastMat = this.material(MATERIAL.fastener);
     await Promise.all((asm.fasteners ?? []).filter((f) => f.placed && f.mesh && f.transform).map(async (f) => {
       const furl = joinUrl(base, f.mesh!);
       const flazy = this.lazyHidden.has(asm);
-      const geo = flazy ? new THREE.BufferGeometry() : await geometry(furl);
+      const fpending = !flazy && !!this.first && !this.first.nodes.has(asm);
+      const geo = flazy || fpending ? new THREE.BufferGeometry() : await geometry(furl);
       const mat = withRim(fastMat.clone());
       const obj = new THREE.Mesh(geo, mat);
       obj.name = f.id;
@@ -770,7 +1009,7 @@ export class Workbench {
       } else {
         (node.links.get(f.link) ?? group).add(obj);
       }
-      fast.push({ f, node, obj, base: m, mat, holder, lazy: flazy ? furl : undefined });
+      fast.push({ f, node, obj, base: m, mat, holder, lazy: flazy ? furl : undefined, pending: fpending ? furl : undefined });
     }));
     // Zero-pose rod balls: where the rod meshes were exported.
     const zero = linkMatrices(asm.links, asm.joints, {});
@@ -842,7 +1081,7 @@ export class Workbench {
     return Promise.all([...dirs].map(async ([dir, parts]) => {
       let p = this.uvSummaries.get(dir);
       if (!p) {
-        p = fetch(`${dir}uvtransfer.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        p = !mayExist(`${dir}uvtransfer.json`) ? Promise.resolve(null) : fetch(`${dir}uvtransfer.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         this.uvSummaries.set(dir, p);
       }
       const d = (await p) as { parts?: Record<string, { textured: boolean; atlas: string }> } | null;
@@ -909,10 +1148,16 @@ export class Workbench {
   upgrade(ids: Iterable<string>) {
     const geometry = this.geometryFn;
     if (!geometry) return;
+    // while the rest of the build streams in (fillPending), full detail waits: the context first, then
+    // the detail (they share the visitor's bandwidth, and the overview level is already on screen)
+    if (this.filling) {
+      for (const id of ids) this.upgradeLater.add(id);
+      return;
+    }
     const seq = this.loadSeq;
     for (const id of ids) {
       const po = this.parts.get(id);
-      if (!po?.full || po.fullState || po.lazy || this.variantHidden.has(po.node)) continue;
+      if (!po?.full || po.fullState || po.lazy || po.pending || this.variantHidden.has(po.node)) continue;
       po.fullState = 'loading';
       void geometry(po.full).then((geo) => {
         if (seq !== this.loadSeq) return;
@@ -922,7 +1167,7 @@ export class Workbench {
         this.addEdges(po.mesh, geo, po.part.class === 'shell');
         this.drainEdges(seq);
         this.markShadow();
-        this.host.interact();
+        noteArrival(this.host);
       }, () => (po.fullState = undefined));
     }
   }
@@ -962,7 +1207,16 @@ export class Workbench {
   private buildEdges({ mesh, geo, shell }: { mesh: THREE.Mesh; geo: THREE.BufferGeometry; shell: boolean }) {
     if (mesh.geometry !== geo || mesh.getObjectByName('edges')) return;
     let eg = this.edgeGeo.get(geo);
-    if (!eg) this.edgeGeo.set(geo, (eg = new THREE.EdgesGeometry(geo, EDGE_ANGLE)));
+    if (!eg) {
+      // the edges came with the geometry (geomwork.ts) unless it was made some other way
+      const pre = geo.userData.edges as Float32Array | undefined;
+      if (pre) {
+        eg = new THREE.BufferGeometry();
+        eg.setAttribute('position', new THREE.BufferAttribute(pre, 3));
+        delete geo.userData.edges;
+      } else eg = new THREE.EdgesGeometry(geo, EDGE_ANGLE);
+      this.edgeGeo.set(geo, eg);
+    }
     const edges = new THREE.LineSegments(eg, shell ? this.shellEdgeMat : this.edgeMat);
     edges.name = 'edges';
     edges.raycast = () => {};
@@ -981,7 +1235,7 @@ export class Workbench {
       const t0 = performance.now();
       this.edgeQueue.sort((a, b) => Number(b.mesh.visible) - Number(a.mesh.visible));
       while (this.edgeQueue.length && performance.now() - t0 < 10) this.buildEdges(this.edgeQueue.shift()!);
-      this.host.interact();
+      noteArrival(this.host);
       if (this.edgeQueue.length) setTimeout(step, 0);
       else this.drainSeq = -1;
     };
@@ -1118,6 +1372,7 @@ export class Workbench {
 
   private applyScope(sc: Scope | null, frame: boolean) {
     this.scope = sc;
+    if (this.shellsOnly) this.look = 'exterior';
     this.stopDemo();
     this.buildPlan();
     this.focus = sc?.owner ?? this.top;
@@ -1145,7 +1400,15 @@ export class Workbench {
     return false;
   }
 
+  /** The focus is a library design made only of shells (the kit as published): Mechanism and X-ray
+   *  would ghost all of it, so it has the one look, Exterior. */
+  get shellsOnly(): boolean {
+    const sc = this.scope;
+    return isShellsOnly(sc?.kind ?? null, sc ? [...sc.parts].map((id) => this.parts.get(id)?.part.class) : []);
+  }
+
   setLook(l: Look) {
+    if (this.shellsOnly) l = 'exterior';
     if (l === this.look) return;
     this.look = l;
     this.refresh();
@@ -1475,6 +1738,11 @@ export class Workbench {
   /** The camera as it is (the guide puts Build's view back on Done). */
   cameraState() {
     return { pos: this.host.camera.position.clone(), target: this.host.controls.target.clone() };
+  }
+
+  /** The camera is flying to a framing (a focus, Frame): a camera set now would be overtaken. */
+  get flying() {
+    return this.fly !== null;
   }
 
   setCameraState(s: { pos: THREE.Vector3; target: THREE.Vector3 }) {
@@ -2795,8 +3063,6 @@ export class Workbench {
     const clip = this.section.on ? [this.sectionPlane()] : null;
     const look = this.look;
     const scope = this.scope?.parts ?? null;
-    // a library design stands alone; a system or assembly keeps the droid around it (or not)
-    const ghosts = !!scope && this.context === 'ghost' && this.scope?.kind !== 'library';
     // overlay marks (rims): the selected pair's two parts while Checks shows it
     const pairParts = new Set<string>();
     const sel = this.pairSel !== null && this.interferenceOn ? this.interference[this.pairSel] : null;
@@ -2818,9 +3084,9 @@ export class Workbench {
       // Exterior: what is seen from outside, painted. Mechanism: what is inside (a focus keeps its own
       // shells as a ghost). X-ray: the mechanism under ghosted shells.
       const outside = exposed(p);
-      if (look === 'exterior' && !outside) visible = false;
-      if (look === 'mechanism' && shell && !scope) visible = false;
-      if (!inScope && !ghosts) visible = false;
+      // (a library design's own parts are drawn whatever: it is what was opened - a frame or a column has
+      // nothing the finished droid shows, and Exterior drew it empty)
+      if (!lookShows({ look, outside, shell, inScope, scope: this.scope?.kind ?? null, context: this.context })) visible = false;
       // a step: what is still to come is hidden; the step's context lightly ghosted
       const f = first.get(id);
       const toCome = !!cur && f !== undefined && f > this.step;
@@ -3377,17 +3643,6 @@ export class Workbench {
 
   fastenerInfo(id: string) {
     return this.fast.get(id)?.f ?? this.focus?.asm.fasteners?.find((f) => f.id === id) ?? null;
-  }
-}
-
-/** A zero-length normal (a degenerate triangle in a decimated mesh) shades as NaN, and one
- *  NaN pixel spreads through the bloom into a white screen: give those an arbitrary unit normal. */
-function saneNormals(geo: THREE.BufferGeometry) {
-  const n = geo.attributes.normal as THREE.BufferAttribute;
-  for (let i = 0; i < n.count; i++) {
-    const x = n.getX(i), y = n.getY(i), z = n.getZ(i);
-    const l = Math.hypot(x, y, z);
-    if (!Number.isFinite(l) || l < 1e-6) n.setXYZ(i, 0, 1, 0);
   }
 }
 

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>DJ R3X Build</title>
+  </head>
+  <!-- The Build viewer on its own (src/viewer/page.ts): the skeleton Build's panels mount into
+       (workbench/buildpanel.ts injectBuildDom), with none of the sim's other modes. -->
+  <body data-mode="build">
+    <div id="stage"></div>
+    <div id="loading">Loading&hellip;</div>
+
+    <div id="view-bar" class="view-bar">
+      <nav id="bb-crumbs" class="bb-crumbs" aria-label="Build location" hidden></nav>
+      <div class="vb-seg bb-looks" role="radiogroup" aria-label="Look">
+        <button role="radio" data-look="exterior" aria-checked="true" title="The painted shells (1)">Exterior</button>
+        <button role="radio" data-look="mechanism" aria-checked="false" title="The CAD mechanism: every part, joint and linkage (2)">Mechanism</button>
+        <button role="radio" data-look="inspect" aria-checked="false" title="Shells ghosted over the mechanism (3)">X-ray</button>
+      </div>
+    </div>
+
+    <aside id="scene-panel" class="side" aria-label="Build">
+      <header>
+        <h1><span class="h-build" data-build>Build</span></h1>
+        <button id="scene-collapse" class="icon" aria-expanded="true" aria-controls="scene-body">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
+      </header>
+      <nav class="rail" aria-label="Build sections"></nav>
+      <div id="scene-body" class="side-body"></div>
+    </aside>
+
+    <aside id="panel" aria-label="Inspector">
+      <header>
+        <h1>DJ R3X</h1>
+        <button id="r3x-collapse" class="icon" aria-expanded="true" aria-controls="r3x-body">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+        </button>
+      </header>
+      <nav id="r3x-rail" class="rail" aria-label="Inspector">
+        <div class="rail-modes" hidden></div>
+      </nav>
+      <div id="r3x-body" class="r3x-body">
+        <div class="stage-modes" hidden></div>
+        <nav class="tabs" role="tablist" aria-label="Inspector sections"></nav>
+        <div id="more-menu" class="more-menu" role="menu" hidden></div>
+      </div>
+    </aside>
+
+    <script type="module" src="/src/viewer/page.ts"></script>
+  </body>
+</html>
