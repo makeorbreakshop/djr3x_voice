@@ -88,9 +88,17 @@ export function dragAction(e: { button: number; shiftKey: boolean; metaKey: bool
   return e.shiftKey ? 'pan' : 'orbit';
 }
 
-/** The orbit's centre: the point under the cursor at the drag's start, else the camera's target. */
-export function pivotFor(hit: THREE.Vector3 | null | undefined, target: THREE.Vector3): THREE.Vector3 {
-  return (hit ?? target).clone();
+/**
+ * The orbit's centre: the point under the cursor at the drag's start. On empty space, the camera's target while it
+ * is on the model (inside its bounds, padded 10%), else the model's centre (CAD: Onshape, Fusion), since a pan or a
+ * zoom toward the cursor slides the target sideways, out into the empty space around the model.
+ */
+export function pivotFor(hit: THREE.Vector3 | null | undefined, target: THREE.Vector3, model?: THREE.Box3): THREE.Vector3 {
+  if (hit) return hit.clone();
+  if (!model || model.isEmpty()) return target.clone();
+  const pad = model.getSize(new THREE.Vector3()).multiplyScalar(0.1);
+  const near = model.clone().expandByVector(pad).containsPoint(target);
+  return near ? target.clone() : model.getCenter(new THREE.Vector3());
 }
 
 /**
@@ -260,9 +268,9 @@ export class Navigator {
     this.pendingZoom = 0;
     this.wb.stopViewFly();
     if (this.ptrs.size === 1) {
-      // orbit about what is under the cursor (else the target); a pan keeps that depth under the cursor
+      // orbit about what is under the cursor (else the target, or the model's centre); a pan keeps that depth under it
       const at = this.pointAt(e.clientX, e.clientY);
-      this.pivot.copy(at.hit ? pivotFor(at.p, this.host.controls.target) : action === 'orbit' ? this.host.controls.target : at.p);
+      this.pivot.copy(action === 'orbit' ? pivotFor(at.hit ? at.p : null, this.host.controls.target, this.wb.bounds()) : at.p);
     } else if (this.ptrs.size === 2) {
       const [a, b] = [...this.ptrs.values()];
       this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
@@ -309,7 +317,7 @@ export class Navigator {
       this.pivot.copy(this.host.controls.target);
       this.pan(-e.deltaX, -e.deltaY);
     } else if (action === 'orbit') {
-      this.pivot.copy(this.host.controls.target);
+      this.pivot.copy(pivotFor(null, this.host.controls.target, this.wb.bounds()));
       // Shift: the browser may have swapped the axes
       this.orbit(-(e.deltaX || 0) * 0.6, -(e.deltaY || 0) * 0.6);
     } else if (action === 'pinch') {

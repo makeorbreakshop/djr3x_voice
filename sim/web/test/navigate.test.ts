@@ -85,6 +85,15 @@ describe('camera moves', () => {
     expect(pivotFor(null, V(0, 1, 0))).toEqual(V(0, 1, 0));
   });
 
+  it('on empty space, a target slid off the model gives way to the model centre', () => {
+    const model = new THREE.Box3(V(-0.2, 0, -0.2), V(0.2, 1, 0.2));
+    expect(pivotFor(null, V(0.1, 0.5, 0), model)).toEqual(V(0.1, 0.5, 0)); // on the model: kept
+    expect(pivotFor(null, V(0.22, 0.5, 0), model)).toEqual(V(0.22, 0.5, 0)); // within the 10% pad
+    expect(pivotFor(null, V(3, 0.5, 0), model)).toEqual(V(0, 0.5, 0)); // out in space: the centre
+    expect(pivotFor(V(3, 0, 0), V(0, 0, 0), model)).toEqual(V(3, 0, 0)); // a hit always wins
+    expect(pivotFor(null, V(3, 0, 0), new THREE.Box3())).toEqual(V(3, 0, 0)); // nothing shown
+  });
+
   it('orbit turns the rig about the pivot: the pivot stays put on screen, the view never flips', () => {
     const pos = V(0, 0.5, 2), target = V(0, 0.5, 0), pivot = V(0.3, 0.6, 0.1);
     const cam = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
