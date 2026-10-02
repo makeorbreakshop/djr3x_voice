@@ -104,7 +104,10 @@ class Suite:
             return True
         from .droid import coupling_allows
 
-        return coupling_allows(self.couplings, {self._prof.get(k, k): v for k, v in pose.items()})[0]
+        # a joint the pose leaves out sits at 0 (link_matrices' default): a coupling still applies to it
+        full = {pj: 0.0 for pj in self._prof.values()}
+        full.update({self._prof.get(k, k): v for k, v in pose.items()})
+        return coupling_allows(self.couplings, full)[0]
 
     # ------------------------------------------------------------------ helpers
     def pts(self, bid, spacing=1.2):
