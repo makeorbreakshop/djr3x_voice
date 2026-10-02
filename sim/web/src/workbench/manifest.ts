@@ -62,6 +62,8 @@ export interface MFinish {
   color_name?: string;
   /** The kit part code whose paint this is. */
   kit?: string;
+  /** Painted in more than one colour, by region (finish.json `paint_regions`; weather.ts setRegions). */
+  regions?: { paint: string; facing?: 'out' | 'in'; r: [number, number] }[];
   note?: string;
 }
 

@@ -190,6 +190,8 @@ def _code(name):
 
 
 KIT_PAINT = {_code(k): v for k, v in json.loads(KIT_FINISH.read_text())["paint"].items()}
+# Parts painted in more than one colour, by region (finish.json `paint_regions`; split_paint_regions()).
+KIT_REGIONS = {_code(k): v for k, v in json.loads(KIT_FINISH.read_text()).get("paint_regions", {}).items()}
 
 
 # Parts whose decimated geometry rig.json is measured on (see RIG_MEASURE_BUDGET).
@@ -591,6 +593,39 @@ def split_raised_letters(obj, letter_material, min_relief_mm=0.3):
     return moved
 
 
+def split_paint_regions(obj, regions):
+    """finish.json `paint_regions` on one part: faces whose normal runs along the part's own axis (its
+    least-variance direction, `facing` out = away from the droid's vertical axis) at a radius `r` (fractions of
+    the part's radius about that axis) get the region's paint as their own material slot. The same rule as
+    Build's shader (sim/web/src/workbench/weather.ts). Works on the transformed mesh (metres)."""
+    import numpy as np
+    me = obj.data
+    co = np.array([v.co[:] for v in me.vertices])
+    c = co.mean(0)
+    _w, vec = np.linalg.eigh(np.cov((co - c).T))
+    ax = vec[:, 0]
+    if np.dot(ax, np.array([c[0], c[1], 0.0])) < 0:
+        ax = -ax
+    rel = co - c
+    R = np.linalg.norm(rel - np.outer(rel @ ax, ax), axis=1).max()
+    moved = 0
+    for reg in regions:
+        obj.data.materials.append(get_material(reg["paint"]))
+        slot = len(obj.data.materials) - 1
+        lo, hi = reg["r"]
+        sgn = 1.0 if reg.get("facing", "out") == "out" else -1.0
+        for f in me.polygons:
+            n = np.array(f.normal[:])
+            if np.dot(n, ax) * sgn < 0.5:
+                continue
+            d = np.array(f.center[:]) - c
+            r = np.linalg.norm(d - ax * np.dot(d, ax)) / R
+            if lo <= r <= hi:
+                f.material_index = slot
+                moved += 1
+    return moved
+
+
 def world_verts(obj):
     return [obj.matrix_world @ v.co for v in obj.data.vertices]
 
@@ -845,6 +880,9 @@ def main():
     if "RX-24" in by_name:
         n_letters = split_raised_letters(by_name["RX-24"], "accent_blue")
         print(f"[r3x] RX-24: {n_letters} raised letter faces -> accent_blue")
+    for n, o in parts:
+        if _code(n) in KIT_REGIONS:
+            print(f"[r3x] {n}: {split_paint_regions(o, KIT_REGIONS[_code(n)])} faces painted by region")
 
     # Mass properties on the full-resolution meshes, before decimation.
     bl2y = YUP_TO_BL.to_3x3().inverted()

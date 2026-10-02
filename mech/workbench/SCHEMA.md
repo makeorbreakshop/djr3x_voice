@@ -184,6 +184,9 @@ table (which `sim/model/build_r3x.py` also bakes the Original rig from). `materi
   "color": "#3d4045", "color_name": "goBILDA servo grey",  // optional, purchased parts: their real colour
                              // (else a reader shows the material: aluminium, steel, brass)
   "kit": "H_LE_1",           // optional: the kit part code whose paint this is (a kit part, or what stands in for one)
+  "regions": [{"paint": "accent_blue", "facing": "out", "r": [0.62, 1.0]}],  // optional (finish.json
+                             // `paint_regions`): faces along the part's own axis (least-variance direction, `out` =
+                             // away from the droid's vertical axis) at radius fraction `r` take that paint
   "note": ""
 }
 ```

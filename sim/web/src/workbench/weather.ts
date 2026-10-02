@@ -24,6 +24,7 @@ export interface WeatherSpec {
 type Cls = { weather?: WeatherSpec; stripes?: { color: string; periodM: number; duty: number; dir: [number, number] } };
 const CLASSES = palette.classes as unknown as Record<string, Cls>;
 const DUST = new THREE.Color(palette.dust as string);
+let edgeK = 1;
 
 /** The uniforms one material carries. */
 export interface WeatherUniforms {
@@ -33,6 +34,12 @@ export interface WeatherUniforms {
   uW3: { value: THREE.Vector4 };        // wearRoughness, wearMetalness, stripe dir x, stripe dir y
   uWearC: { value: THREE.Color }; uPrimerC: { value: THREE.Color }; uGrimeC: { value: THREE.Color };
   uDustC: { value: THREE.Color }; uStripeC: { value: THREE.Color };
+  /** Paint regions (finish `regions`): the part's axis (xyz) and radius (w), its centre; two regions'
+   *  [rMin, rMax, facing sign, on] and colours. */
+  uRAx: { value: THREE.Vector4 }; uRC: { value: THREE.Vector3 };
+  uR0: { value: THREE.Vector4 }; uR0C: { value: THREE.Color }; uR1: { value: THREE.Vector4 }; uR1C: { value: THREE.Color };
+  /** How much an edge counts (a coarse or finely ribbed mesh less: its creases are not wear edges). */
+  uEdgeK: { value: number };
 }
 
 export function weatherUniforms(): WeatherUniforms {
@@ -40,11 +47,18 @@ export function weatherUniforms(): WeatherUniforms {
     uWOn: { value: new THREE.Vector4() }, uW1: { value: new THREE.Vector4() }, uW2: { value: new THREE.Vector4() },
     uW3: { value: new THREE.Vector4() }, uWearC: { value: new THREE.Color() }, uPrimerC: { value: new THREE.Color() },
     uGrimeC: { value: new THREE.Color() }, uDustC: { value: DUST.clone() }, uStripeC: { value: new THREE.Color() },
+    uRAx: { value: new THREE.Vector4(0, 1, 0, 1) }, uRC: { value: new THREE.Vector3() },
+    uR0: { value: new THREE.Vector4() }, uR0C: { value: new THREE.Color() }, uR1: { value: new THREE.Vector4() }, uR1C: { value: new THREE.Color() },
+    uEdgeK: { value: 1 },
   };
 }
 
 /** Set a material's weathering from its paint class (`amount` scales it all; 0 off); `printed` for a bare print. */
-export function setWeather(u: WeatherUniforms, paint: string | undefined, amount: number, printed = false) {
+export function setWeather(u: WeatherUniforms, paint: string | undefined, amount: number, printed = false, edgeScale = 1) {
+  u.uRAx.value.w = u.uRAx.value.w || 1;
+  u.uWOn.value.w = 1;
+  edgeK = edgeScale;
+  u.uEdgeK.value = edgeScale;
   const c = paint ? CLASSES[paint] : undefined;
   const w = c?.weather;
   if (!w || amount <= 0) {
@@ -55,13 +69,88 @@ export function setWeather(u: WeatherUniforms, paint: string | undefined, amount
   }
   const st = c?.stripes;
   u.uWOn.value.set(amount, 0, st ? st.duty : 0, st ? st.periodM * 1000 : 1);
+  // (a mesh decimated far below its source is creased all over: its edge wear is scaled down, `edgeScale`)
   u.uW1.value.set(w.wear, w.grime, w.streaks, w.dust);
-  u.uW2.value.set(w.variation, w.fade, w.roughVar, w.scuffs);
+  u.uW2.value.set(w.variation, w.fade, w.roughVar, w.scuffs * edgeK);
   u.uW3.value.set(w.wearRoughness, w.wearMetalness, st ? st.dir[0] : 1, st ? st.dir[1] : 0);
   u.uWearC.value.set(w.wearColor);
   u.uPrimerC.value.set(w.primerColor);
   u.uGrimeC.value.set(w.grimeColor);
   if (st) u.uStripeC.value.set(st.color);
+}
+
+export interface PaintRegion { paint: string; facing?: 'out' | 'in'; r: [number, number] }
+
+/**
+ * A part painted by region (finish `regions`, finish.json `paint_regions`): its own axis - the least-variance
+ * direction of its vertices, pointing away from the droid's vertical axis (`toAxis`: from the part's centre
+ * toward that axis, object space) - its radius about it, and up to two regions' colours. The same rule as
+ * sim/model/build_r3x.py split_paint_regions().
+ */
+export function setRegions(u: WeatherUniforms, geo: THREE.BufferGeometry | null, regions: PaintRegion[] | undefined, toAxis: THREE.Vector3,
+  colorOf: (paint: string) => number | null) {
+  u.uR0.value.w = 0;
+  u.uR1.value.w = 0;
+  if (!geo || !regions?.length) return;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const c = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  const n = pos.count;
+  for (let i = 0; i < n; i++) c.add(v.fromBufferAttribute(pos, i));
+  c.divideScalar(Math.max(1, n));
+  // covariance and its least-variance eigenvector (power iteration on the inverse is overkill: a few Jacobi sweeps)
+  const m = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < n; i++) {
+    v.fromBufferAttribute(pos, i).sub(c);
+    const a = [v.x, v.y, v.z];
+    for (let r = 0; r < 3; r++) for (let k = 0; k < 3; k++) m[r * 3 + k] += a[r] * a[k];
+  }
+  const ax = smallestEigen(m);
+  if (ax.dot(toAxis) > 0) ax.negate(); // away from the droid's axis
+  let R = 0;
+  for (let i = 0; i < n; i++) {
+    v.fromBufferAttribute(pos, i).sub(c);
+    R = Math.max(R, v.clone().addScaledVector(ax, -v.dot(ax)).length());
+  }
+  u.uRAx.value.set(ax.x, ax.y, ax.z, R || 1);
+  u.uRC.value.copy(c);
+  regions.slice(0, 2).forEach((r, k) => {
+    const col = colorOf(r.paint);
+    if (col === null) return;
+    (k ? u.uR1 : u.uR0).value.set(r.r[0], r.r[1], r.facing === 'in' ? -1 : 1, 1);
+    (k ? u.uR1C : u.uR0C).value.setHex(col);
+  });
+}
+
+function smallestEigen(m: number[]): THREE.Vector3 {
+  // Jacobi rotations on the symmetric 3x3
+  const a = [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]];
+  const V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (let sweep = 0; sweep < 12; sweep++) {
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      if (Math.abs(a[p][q]) < 1e-12) continue;
+      const th = 0.5 * Math.atan2(2 * a[p][q], a[q][q] - a[p][p]);
+      const cs = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < 3; k++) {
+        const akp = a[k][p], akq = a[k][q];
+        a[k][p] = cs * akp - sn * akq;
+        a[k][q] = sn * akp + cs * akq;
+      }
+      for (let k = 0; k < 3; k++) {
+        const apk = a[p][k], aqk = a[q][k];
+        a[p][k] = cs * apk - sn * aqk;
+        a[q][k] = sn * apk + cs * aqk;
+      }
+      for (let k = 0; k < 3; k++) {
+        const vkp = V[k][p], vkq = V[k][q];
+        V[k][p] = cs * vkp - sn * vkq;
+        V[k][q] = sn * vkp + cs * vkq;
+      }
+    }
+  }
+  let i = 0;
+  for (let k = 1; k < 3; k++) if (a[k][k] < a[i][i]) i = k;
+  return new THREE.Vector3(V[0][i], V[1][i], V[2][i]).normalize();
 }
 
 const NOISE = /* glsl */ `
@@ -84,11 +173,21 @@ export function weatherShader(sh: THREE.WebGLProgramParametersWithUniforms, u: W
     .replace('#include <common>', `#include <common>
 uniform vec4 uWOn; uniform vec4 uW1; uniform vec4 uW2; uniform vec4 uW3;
 uniform vec3 uWearC; uniform vec3 uPrimerC; uniform vec3 uGrimeC; uniform vec3 uDustC; uniform vec3 uStripeC;
+uniform float uEdgeK; uniform vec4 uRAx; uniform vec3 uRC; uniform vec4 uR0; uniform vec3 uR0C; uniform vec4 uR1; uniform vec3 uR1C;
 varying vec3 vOPos; varying vec3 vONrm;
 ${NOISE}
 float wEdge; float wGrimeM; float wMetal; float wRough;`)
     .replace('#include <color_fragment>', `#include <color_fragment>
 wEdge = 0.0; wGrimeM = 0.0; wMetal = 0.0; wRough = 0.0;
+// paint regions (a blue ring on the ear cup's face, a grey hub): by the face's direction along the part's axis
+// and its radius about it
+if (uR0.w > 0.0 || uR1.w > 0.0) {
+  vec3 d = vOPos - uRC;
+  float rr = length(d - uRAx.xyz * dot(d, uRAx.xyz)) / uRAx.w;
+  float fa = dot(normalize(vONrm), uRAx.xyz);
+  if (uR0.w > 0.0 && fa * uR0.z > 0.5 && rr >= uR0.x && rr <= uR0.y) diffuseColor.rgb = uR0C;
+  if (uR1.w > 0.0 && fa * uR1.z > 0.5 && rr >= uR1.x && rr <= uR1.y) diffuseColor.rgb = uR1C;
+}
 if (uWOn.x > 0.0) {
   vec3 P = vOPos;                         // mm, object space
   vec3 N = normalize(vONrm);
@@ -118,13 +217,13 @@ if (uWOn.x > 0.0) {
     // edges: curvature per mm from the normal's screen derivatives; wear clusters where parts get handled and
     // breaks into chips (the bake's chipV), primer first, then metal
     float curv = length(fwidth(N)) / max(length(fwidth(P)), 1e-3);
-    float edge = smoothstep(0.006, 0.09, curv);
+    float edge = smoothstep(0.006, 0.09, curv) * (1.0 - 0.75 * smoothstep(0.25, 0.9, curv)) * uEdgeK;
     float chipN = nMid;
-    float chipV = pow(edge, 0.7) * (0.55 + 1.1 * nMid) * (0.7 + 0.6 * nBig) + (nFine - 0.5) * 0.8;
+    float chipV = pow(edge, 0.7) * (0.55 + 1.1 * nMid) * (0.7 + 0.6 * nBig) + (nFine - 0.5) * 0.8 * uEdgeK;
     float wT = 1.0 - uW1.x * amt * 0.6;
     float metal = smoothstep(wT - 0.01, wT + 0.04, chipV) * step(0.001, uW1.x);
     // a few small chips out on the flats, where it gets knocked
-    float flat_ = smoothstep(0.86, 0.9, wNoise(P * 0.22 + 2.0)) * smoothstep(0.5, 0.7, nMid) * uW1.x * amt;
+    float flat_ = smoothstep(0.86, 0.9, wNoise(P * 0.22 + 2.0)) * smoothstep(0.5, 0.7, nMid) * uW1.x * amt * uEdgeK;
     metal = max(metal, flat_);
     float primer = smoothstep(wT - 0.11, wT - 0.06, chipV) * step(0.001, uW1.x);
     // fine scuffs: thin scratches on flat paint

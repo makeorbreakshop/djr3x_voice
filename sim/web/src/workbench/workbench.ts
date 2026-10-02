@@ -21,10 +21,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
-  assemblyLabel, exposed, isKitPart, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
+  assemblyLabel, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
   type Finish, type LibraryItem, type Look, type MotionSystem, type SysJoint,
 } from './systems';
-import { setWeather, weatherShader, weatherUniforms, type WeatherUniforms } from './weather';
+import { setRegions, setWeather, weatherShader, weatherUniforms, type WeatherUniforms } from './weather';
 import { fastenerKind, fastenerPose, fastenerTravel, GUIDE_TIMING, itemU, pathAt, planSequence, timed, type SeqFastener, type SeqItem, type SeqPart, type Timing } from './sequence';
 import {
   driveFor, groundFor, meshGeometry, variantOptions, hiddenAssemblies, hiddenByVariants, joinUrl, loadManifest,
@@ -2688,7 +2688,25 @@ export class Workbench {
       {
         const real = finish !== GHOST_FINISH && (this.video || look === 'exterior');
         const paint = p.finish?.paint && p.finish.paint !== 'none' ? p.finish.paint : undefined;
-        setWeather(m.userData.weather as WeatherUniforms, paint, real ? 1 : 0, real && !paint && !!p.printed);
+        const wu = m.userData.weather as WeatherUniforms;
+        // how faceted the shown mesh is against its source: a coarse one gets less edge wear (its creases are not edges)
+        const g0 = po.mesh.geometry;
+        const tris = g0.index ? g0.index.count / 3 : (g0.attributes.position?.count ?? 0) / 3;
+        const src = p.triangles?.source ?? tris;
+        // ... and a finely detailed one (a ribbed grille: every rib an edge) too
+        const bb = p.bbox;
+        const sz = [0, 1, 2].map((k) => Math.abs(bb[1][k] - bb[0][k]) / 10);
+        const density = (p.triangles?.display ?? tris) / Math.max(1, 2 * (sz[0] * sz[1] + sz[1] * sz[2] + sz[0] * sz[2]));
+        const edgeScale = Math.min(1, Math.max(0.15, Math.sqrt(tris / Math.max(1, src)) * 2) * Math.min(1, 4 / Math.max(1e-3, density)));
+        setWeather(wu, paint, real ? 1 : 0, real && !paint && !!p.printed, edgeScale);
+        // painted by region (finish `regions`): computed once per mesh
+        const regions = real ? p.finish?.regions : undefined;
+        const key = regions ? po.mesh.geometry.uuid : '';
+        if (m.userData.regionKey !== key) {
+          m.userData.regionKey = key;
+          const b = po.sBase ?? po.base;
+          setRegions(wu, regions ? po.mesh.geometry : null, regions, new THREE.Vector3(-b.x, 0, -b.z), (k) => paintFinish(k)?.color ?? null);
+        }
       }
       // Instructions: what the step adds, in the accent at the part's own lightness (a dark servo a deep blue, bare
       // aluminium a pale one) - never mixed with its paint, which turns the orange shells purple. A part being

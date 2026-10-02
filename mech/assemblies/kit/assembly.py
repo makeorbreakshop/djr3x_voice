@@ -100,7 +100,7 @@ def _finish_doc() -> dict:
         norm = lambda m: {pid(k): v for k, v in m.items()}  # noqa: E731
         _FINISH = {"print": d["print"], "print_overrides": norm(d.get("print_overrides", {})),
                    "not_printed": norm(d.get("not_printed", {})), "paint": norm(d["paint"]),
-                   "codes": {pid(k): k for k in d["paint"]}}
+                   "codes": {pid(k): k for k in d["paint"]}, "regions": norm(d.get("paint_regions", {}))}
     return _FINISH
 
 
@@ -116,8 +116,10 @@ def kit_finish(code: str) -> tuple[dict | None, bool]:
     printed = k not in d["not_printed"]
     pr = d["print_overrides"].get(k, d["print"]) if printed else None
     pr = {a: b for a, b in pr.items() if not a.startswith("_")} if pr else None
-    return finish(paint=d["paint"][k], print=pr, kit=d["codes"][k],
-                  note=d["not_printed"].get(k, "")), printed
+    f = finish(paint=d["paint"][k], print=pr, kit=d["codes"][k], note=d["not_printed"].get(k, ""))
+    if k in d["regions"]:
+        f["regions"] = [{a: b for a, b in r.items() if not a.startswith("_")} for r in d["regions"][k]]
+    return f, printed
 
 
 def _deepest(rules, name):
