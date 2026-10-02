@@ -85,12 +85,55 @@ def P(id_, name, cls, link, T, file=None, **kw):
     return Part(id=id_, name=name, cls=cls, link=link, T=T, file=file, **kw)
 
 
-def servo_part(id_, key, link, T, file, evidence, placement="inferred", note=""):
+# Anderson's servo stand-ins, each in its own file (measured on the STLs): the centre of the flange's
+# underside, the output shaft's direction and the direction from the shaft to the body's centre. The
+# real servo (kit use_real_parts -> r3xmech.meshes.servo_seat_T) is mated on these features, so it sits
+# where the stand-in sits; without them it was shape-fitted and came out tilted ~18 deg.
+# - "standard" (servo-standard-dnp / servo-placeholder-dnp, 35 kg): case x +-20.05, y +-9.9, z -22.4..11.7,
+#   flange z 0.6..3.0 (tabs to x +-26.7), boss 11.7..12.7, spline (-9.8, 0) to z 16.8
+# - "large" (base servo-standard-dnp, 60 kg): case x +-32.5, y +-15, z -31..17, flange z 0..3 (x +-42),
+#   output (-19.5, 0) to z 25
+# - "micro" (wrist "Part 1"): case x +-11.5, flange z 17..19.5 (x +-14.9), output (5.7, 0) to z 30
+# - "dual" (hero servo.stl): a 40 x 40 x 20 box (x, y, z) with shaft stubs along y at (x -10, z 10)
+STANDIN_SEAT = {
+    "standard": dict(at=(0.0, 0.0, 0.6), axis=(0, 0, 1), body=(1, 0, 0), ref="flange"),
+    "large": dict(at=(0.0, 0.0, 0.0), axis=(0, 0, 1), body=(1, 0, 0), ref="flange"),
+    "micro": dict(at=(0.0, 0.0, 17.0), axis=(0, 0, 1), body=(-1, 0, 0), ref="flange"),
+    "dual": dict(at=(0.0, 0.0, 10.0), axis=(0, 1, 0), body=(1, 0, 0), ref="body"),
+}
+
+
+def servo_dims(key):
+    """(shaft offset from the body centre, spline top above the flange's underside) of the real servo
+    (mech/parts/models CASES: what the droid shows and what the mounts are checked against)."""
+    from assemblies.kit.assembly import SERVO_CASE
+    from parts.models import CASES
+
+    c = CASES[SERVO_CASE[key]]
+    return c["off"], c["sh"] + c["H"] - c["fh"] + c["ft"] / 2
+
+
+def seated(T_frame, stand_in, at, axis, body):
+    """The stand-in's transform that puts its seat (STANDIN_SEAT) at `at`, its shaft along `axis` and its
+    body toward `body` (all in T_frame's coordinates): a feature mate, flange face on the mount's face."""
+    s = STANDIN_SEAT[stand_in]
+    sa, sb = np.asarray(s["axis"], float), np.asarray(s["body"], float)
+    # stand-in axes -> frame: its axis -> `axis`, its body direction -> `body`
+    S = np.column_stack([sb, sa, np.cross(sb, sa)])
+    D = np.column_stack([np.asarray(body, float), np.asarray(axis, float), np.cross(body, axis)])
+    R = D @ S.T
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = np.asarray(at, float) - R @ np.asarray(s["at"], float)
+    return T_frame @ T
+
+
+def servo_part(id_, key, link, T, file, evidence, placement="inferred", note="", seat="standard", inferred_note=""):
     return P(id_, f"Servo {catalog.SERVOS[key]['listing']}", "servo", link, T, file,
              material=f"servo:{key}", mass_g=catalog.SERVOS[key]["mass_g"], printed=False,
              placement=placement, evidence=evidence, note=note or "stand-in body from the build CAD (DNP)",
-             inferred=placement == "inferred", inferred_note="servo pocket position chosen to mesh the gear"
-             if placement == "inferred" else "")
+             inferred=placement == "inferred", inferred_note=inferred_note if placement == "inferred" else "",
+             real={"seat": STANDIN_SEAT[seat]})
 
 
 def tube_generator(length, r=13.0):
@@ -338,32 +381,67 @@ def neck_drive(base_asm: Asm) -> tuple[Asm, dict]:
           inferred=True, inferred_note="stage height in the base (y=35) and lazy-susan thickness assumed"),
         P("lift_servo_cap", "base-servo-top", "mech", "turntable", Tt, f("base", "base-servo-top"),
           placement="fitted", evidence="footprint equals the base-center servo column (x -88..-33, y 34..75)"),
-        P("pan_servo_mount", "neck-rotation-servo-mount", "mech", "turntable", Tt @ trans(0, -80, 10),
-          f("base", "neck-rotation-servo-mount"), placement="fitted",
-          evidence="its 4 holes (+-25, +-15) coincide with base-center holes around (0, -80)"),
-        servo_part("pan_servo", "SERVO_35KG_270", "turntable", Tt @ trans(0, -80, 14),
-                   f("base", "servo-standard-dnp (1)"), placement="fitted",
-                   evidence="flange holes (+-24.15, +-5.05) = mount holes; shaft at x=-9.8 -> R80.6 from the axis"),
-        P("pan_horn", "servo-disc-dnp (horn disc)", "hardware", "turntable", Tt @ trans(-9.8, -80, 14 + 16.8 + 5),
-          f("base", "servo-disc-dnp"), mass_g=catalog.PURCHASED["servo_horn_disc"]["mass_g"]),
+        # The pan servo mount (plate z 0..4 with the servo window 41 x 20 and the flange holes (+-24.15,
+        # +-5.05); four 20 mm legs at y +-10..19, holes (+-25, +-15) through legs and plate) stands on
+        # base-center's raised pad (z 12, x +-37, y -98..-62 round the 70 x 20 window through the disc).
+        # Legs-down it would leave the servo body 1 mm over the pad but put the pinion 5-15 mm above the
+        # 60T sector's teeth; plate-down (legs up, the plate's corner holes on the pad's holes) the body
+        # hangs through the disc's window - the reason the window exists - and the disc horn + pinion on
+        # the shaft land in the sector's tooth band (B z 49.3..59.3 in 38..64). Both clear base-center;
+        # plate-down is the one that meshes without a part the files do not have.
+        P("pan_servo_mount", "neck-rotation-servo-mount (plate on the turntable pad, legs up)", "mech", "turntable",
+          Tt @ trans(0, -80, 16) @ frames.rot((1, 0, 0), 180),
+          f("base", "neck-rotation-servo-mount"), placement="inferred", inferred=True,
+          evidence="its 4 corner holes (+-25, +-15) on base-center's pad holes round (0, -80) (pad top z 12); "
+                   "shares no volume with base-center (legs-down at the old z 10 it shared 13,200 mm3)",
+          inferred_note="plate-down (legs up) chosen: it is the orientation in which the pinion meshes the sector "
+                        "and the servo uses the disc's 70 x 20 window; legs-down needs a ~23 mm riser under the sector"),
+    ]
+    pan_off, pan_sp = servo_dims("SERVO_35KG_270")
+    pan_seat = np.array([0.0, -80.0, 16.0])                       # flange underside on the plate top (Tt)
+    pan_shaft = pan_seat + np.array([-pan_off, 0.0, pan_sp])      # spline top, R80.6 from the pan axis
+    a.parts += [
+        servo_part("pan_servo", "SERVO_35KG_270", "turntable",
+                   seated(Tt, "standard", pan_seat, (0, 0, 1), (1, 0, 0)), f("base", "servo-standard-dnp (1)"),
+                   placement="fitted",
+                   evidence="flange on the mount plate's top face (Tt z 16), its holes on the plate's (+-24.15, "
+                            "+-5.05), body through the plate window and base-center's disc window; shaft x=-10 "
+                            "-> R80.6 from the pan axis (which tab end the shaft is at: either gives R80.6)"),
+        P("pan_horn", "servo-disc-dnp (horn disc)", "hardware", "turntable", Tt @ trans(*(pan_shaft + (0, 0, 5))),
+          f("base", "servo-disc-dnp"), mass_g=catalog.PURCHASED["servo_horn_disc"]["mass_g"], placement="fitted",
+          evidence="hub (z -5..0) on the spline top"),
         P("pan_pinion", "head-rotate-servo-gea: 15T pan pinion", "mech", "turntable",
-          Tt @ trans(-9.8, -80, 14 + 16.8 + 7.5), f("base", "head-rotate-servo-gea"), placement="fitted",
-          evidence="centre distance 80.6 = R_sector(107.5) - r_pinion(26.9) for 60T:15T at equal pitch"),
+          Tt @ trans(*(pan_shaft + (0, 0, 7.5))), f("base", "head-rotate-servo-gea"), placement="fitted",
+          evidence="on the horn disc (its 4 holes on the disc's); centre distance 80.6 = R_sector(107.5) - "
+                   "r_pinion(26.9) for 60T:15T at equal pitch"),
+    ]
+    a.parts += [
         P("lift_rail", "mgn12-rail-with-2020 (150 mm)", "hardware", "turntable", Tt @ trans(0, 51.5, 10),
           f("base", "mgn12-rail-with-2020"), placement="fitted", printed=False,
           mass_g=150 * (catalog.PURCHASED["mgn12_rail_per_mm"]["g_per_mm"] + catalog.PURCHASED["alu_2020_per_mm"]["g_per_mm"]),
           evidence="2020 sits in the base-center pocket x -10..10, y 41..62"),
     ]
-    # lift servo (60 kg) standing in the column, shaft along -B y toward the rack
-    # servo top (x=-42) under base-servo-top (B z 94.5); shaft (x=-19.5) at B z 72
-    T_ls = Tt @ basis((0, 0, -1), (1, 0, 0), (0, -1, 0), origin_to=(-59.7, 45.0, 52.5 - zt))
-    a.parts.append(servo_part("lift_servo", "SERVO_60KG_270", "turntable", T_ls, f("base", "servo-standard-dnp"),
-                              evidence="top under base-servo-top (z 94.5); shaft on the pinion axis"))
-    z_pin = 72.0   # pinion centre height in B = the lift servo's shaft
+    # lift servo (60 kg) standing on end in base-center's column, shaft along -y toward the rack. The column's
+    # pocket is 30.5 wide (x -76..-45.5) and 31 deep (y 34.2..65.2: the body below the flange), from its
+    # floor (z ~19) to base-servo-top (z 85); its tab holes are 17 apart in x round x -60.75, at z 14.75 (in
+    # the column under the pocket) and z 89.75 (in base-servo-top): 75 apart, centred on z 52.25. So the
+    # flange's underside is on the column's front face (y 34.2), the body centred at (x -60.75, z 52.25).
+    lift_off, lift_sp = servo_dims("SERVO_60KG_270")
+    lift_seat = np.array([-60.75, 34.2, 52.25])                    # Tt
+    lift_shaft = lift_seat + np.array([0.0, 0.0, lift_off])        # shaft end up (inferred: either end fits)
+    a.parts.append(servo_part("lift_servo", "SERVO_60KG_270", "turntable",
+                              seated(Tt, "large", lift_seat, (0, -1, 0), (0, 0, -1)), f("base", "servo-standard-dnp"),
+                              placement="fitted",
+                              evidence="flange underside on the column face y 34.2, body in the 30.5 x 31 pocket; tab holes "
+                                       "(x -69.25/-52.25 at z 14.75 in base-center, z 89.75 in base-servo-top) centre the "
+                                       "body at (x -60.75, z 52.25); shaft 17 above the centre (DS5160 case)",
+                              note="which end the shaft is at is not fixed by the pocket (shaft-up kept: the old placement's)"))
+    z_pin = zt + float(lift_shaft[2])   # pinion centre height in B = the lift servo's shaft (78.75)
     a.parts.append(P("lift_pinion", "lift-gear: 19T lift pinion", "mech", "turntable",
-                     TB @ trans(-59.7, 13.0, z_pin), f("base", "lift-gear"), placement="fitted",
-                     evidence="pinion centre = rack pitch line (x -32.5) - pitch radius 27.2 -> x -59.7, the "
-                              "centre of the base-center servo column (-60.5)"))
+                     TB @ trans(float(lift_shaft[0]), 13.0, z_pin), f("base", "lift-gear"), placement="fitted",
+                     evidence=f"on the lift servo's shaft (x {lift_shaft[0]:.2f}, B z {z_pin:.2f}); rack face y 13; "
+                              f"centre distance to the rack pitch line (x -32.5) {-32.5 - lift_shaft[0]:.2f} for a "
+                              f"pitch radius {LIFT_PITCH_R:.2f} (+1.0 mm: the pocket, not the rack, sets x)"))
     # slide frame S -> B at rest (rack centred on the pinion): x->x (+19.5), y->z, z->-y
     TS = TB @ basis((1, 0, 0), (0, 0, 1), (0, -1, 0), origin_to=(19.5, 28.5, z_pin + 33.5))
     a.parts += [
@@ -504,15 +582,26 @@ def head_mech(head: Asm):
           f("tilt", "neck-baseplate"), placement="fitted",
           evidence="tilt bore R3.25/R18 boss on X at z=-19 = yoke bore; top z=7 at the head floor underside (y 721)"),
     ]
-    # tilt servo: shaft || X, 36.3 mm behind the tilt axis (pitch radii 17.9 + 18.5)
-    T_ts = TNB @ basis((0, 1, 0), (0, 0, 1), (1, 0, 0), origin_to=(-12 - 16.8, 36.3 + 9.8, -19))
+    # tilt servo: neck-baseplate's two posts under the plate (x 12.5..19.5, y 19.5..27.5 and 67.5..75.5,
+    # z -23..0) carry its tabs: holes along X at y 23.35 / 71.65 (48.3 apart) and z -8 / -18 (10.1 apart),
+    # centred (y 47.5, z -13). The tabs bolt to the posts' outer face (x 19.5), the case top passes between
+    # the posts (27.5..67.5 = the 40 mm case) and the shaft points -X at the centre gear's plane (x +-4.5).
+    # Tabs on the inner face (x 12.5) would put the spline top inside the pinion.
+    tilt_off, tilt_sp = servo_dims("SERVO_35KG_270")
+    tilt_seat = np.array([19.5 + 2.5, 47.5, -13.0])               # flange underside (its top on x 19.5)
+    tilt_shaft = tilt_seat + np.array([-tilt_sp, -tilt_off, 0.0])  # spline top; shaft at (y 37.5, z -13)
+    cd = math.hypot(tilt_shaft[1], tilt_shaft[2] + 19)
     head.parts += [
-        servo_part("tilt_servo", "SERVO_35KG_270", "head", T_ts, f("tilt", "servo-standard-dnp"),
-                   evidence="shaft at the gear centre distance 36.3 mm on the plate's servo side"),
+        servo_part("tilt_servo", "SERVO_35KG_270", "head", seated(TNB, "standard", tilt_seat, (-1, 0, 0), (0, 1, 0)),
+                   f("tilt", "servo-standard-dnp"), placement="fitted",
+                   evidence="tabs on the outer faces of neck-baseplate's servo posts (x 19.5), their holes on the "
+                            "posts' (y 23.35/71.65, z -8/-18); shaft -X, toward the tilt axis end "
+                            f"(the other end is 57 mm out, beyond the gears' reach): centre distance {cd:.1f}"),
         P("tilt_pinion", "neck-servo-gear: 19T tilt pinion", "mech", "head",
-          TNB @ basis((0, 1, 0), (0, 0, 1), (1, 0, 0), origin_to=(-4.5, 36.3, -19)), f("tilt", "neck-servo-gear"),
-          placement="inferred", evidence="meshes the centre gear in its plane x -4.5..4.5", inferred=True,
-          inferred_note="angular position of the servo round the tilt axis not stated (placed behind)"),
+          TNB @ basis((0, 1, 0), (0, 0, 1), (1, 0, 0), origin_to=(-4.5, tilt_shaft[1], tilt_shaft[2])),
+          f("tilt", "neck-servo-gear"), placement="fitted",
+          evidence=f"on the servo shaft (y {tilt_shaft[1]:.1f}, z {tilt_shaft[2]:.1f}), in the centre gear's plane "
+                   f"x -4.5..4.5; {cd:.1f} from the tilt axis for tip radii 19.7 + 21.2 (2.9 mm tooth overlap)"),
     ]
     # visor: V frame = visor-base studio; bearing axis X at (y=-26, z=33); head axis at (0, -26)
     # the visor-base stands on the head floor (y 735) with its bearing axis 33 mm up (768.0); the kit's
@@ -548,19 +637,45 @@ def head_mech(head: Asm):
                             basis((x, 0, 0), (0, 1, 0), (0, 0, x), origin_to=(x * 80, y_vis, 0)),
                             f("visor", "visor-flipper-adapter"), placement="fitted",
                             evidence="R5.85 socket on the rod ends (x +-80); 4 holes R11.5 = visor-demo-arm hub"))
-    # linkage: horn 25 mm, push rod 58 mm, lever 18 mm (parallel cranks at rest)
-    shaft = np.array([4.25, y_vis - 18 + 25, -58.0])
-    T_vs = basis((0, 0, -1), (0, 1, 0), (1, 0, 0), origin_to=shaft + np.array([-16.8 - 5, 0, 0])) @ trans(9.8, 0, 0)
+    # visor servo: visor-base's centre rib (x +-2.5, y -7..50) is its mount: a 41 x 22 window (y 1..42, z
+    # 25..47) with the flange holes along X at y -2.65 / 45.65 (48.3 apart) and z 30.95 / 41.05 (10.1),
+    # centred (y 21.5, z 36). Shaft along X, parallel to the visor axle; of the two shaft ends (y 11.5 /
+    # 31.5) only y 31.5 is a rod's length (57.5 = rod 58) from the lever pin - the parallel-crank linkage.
+    vis_off, vis_sp = servo_dims("SERVO_35KG_270")
+    vis_seat = np.array([-2.5 - 2.5, 21.5, 36.0])                  # V: flange top on the rib's -X face
+    vis_shaft = vis_seat + np.array([vis_sp, vis_off, 0.0])         # V: spline top, shaft at (y 31.5, z 36)
+    S_ = frames.apply(TV, vis_shaft)                                # canonical
+    lever_pin = np.array([4.25, y_vis - 18, 0.0])                   # visor-rod-tab hole, lever down at rest
+    # horn (25 mm) angle that closes the 58 mm rod onto the lever pin, the branch nearest "horn down"
+    best = None
+    for a_ in np.radians(np.arange(-180.0, 180.0, 0.05)):
+        h = S_[1:] + 25 * np.array([math.cos(a_), math.sin(a_)])
+        e = abs(np.linalg.norm(h - lever_pin[1:]) - 58.0) + 1e-3 * abs(math.degrees(a_) + 90)
+        if best is None or e < best[0]:
+            best = (e, h)
+    horn_pin = np.array([S_[0], *best[1]])
+    u = (horn_pin - S_) / 25.0                                      # shaft -> horn pin
+    r_ = np.array([0.0, *(horn_pin - lever_pin)[1:]])               # lever pin -> horn pin, in the rod's plane
+    r_ /= np.linalg.norm(r_)
+    horn_x = S_[0] - 2.8          # horn's bottom on the boss (models.servo: spline 2.8 above it): covers the spline
     head.parts += [
-        servo_part("visor_servo", "SERVO_35KG_270", "head", T_vs, f("visor", "servo-standard-dnp"),
-                   evidence="horn 25 mm + rod 58 mm + lever 18 mm closed with parallel cranks at rest"),
+        servo_part("visor_servo", "SERVO_35KG_270", "head", seated(TV, "standard", vis_seat, (1, 0, 0), (0, -1, 0)),
+                   f("visor", "servo-standard-dnp"), placement="fitted",
+                   evidence="flange on visor-base's centre rib (-X face), its holes on the rib's (y -2.65/45.65, "
+                            "z 30.95/41.05), case through the rib's 41 x 22 window; shaft at the rib's +Y end "
+                            "(57.5 from the lever pin = the 58 mm rod)",
+                   note="which face of the rib the tabs are on is not fixed by the holes: -X keeps the horn "
+                        "nearest the lever/rod plane (x 4.25)"),
         P("visor_horn", "visor-servo-horn (25 mm)", "mech", "head",
-          basis((0, 1, 0), (0, 0, 1), (1, 0, 0), origin_to=shaft + np.array([-5, 0, 0])),
-          f("visor", "visor-servo-horn"), placement="inferred", inferred=True,
-          inferred_note="servo position chosen to close the linkage"),
+          basis(-u, np.cross((1, 0, 0), -u), (1, 0, 0), origin_to=(horn_x, *S_[1:])),
+          f("visor", "visor-servo-horn"), placement="fitted",
+          evidence=f"on the servo spline (bottom on the boss); pin 25 mm out at {math.degrees(math.atan2(u[2], u[1])):.1f} "
+                   "deg, where the 58 mm rod closes onto the lever pin"),
         P("visor_push_rod", "visor-push-rod (58 mm)", "mech", "visor",
-          basis((0, 0, 1), (1, 0, 0), (0, 1, 0), origin_to=(4.25, y_vis - 18, 0)), f("visor", "visor-push-rod"),
-          placement="inferred", inferred=True, inferred_note="rides between horn and lever (shown on the visor link)"),
+          basis(-r_, (1, 0, 0), np.cross(-r_, (1, 0, 0)), origin_to=lever_pin), f("visor", "visor-push-rod"),
+          placement="inferred", inferred=True,
+          inferred_note="lever pin to horn pin; its plane (x -0.75..4.25) beside the lever, the horn 3 mm "
+                        "further out: the pins' lengths are not in the files (shown on the visor link)"),
     ]
     head.joints += [
         Joint("head_tilt", "Head tilt (nod), servo gear on a fixed centre gear", "revolute", "head_mount", "head",
@@ -605,11 +720,18 @@ def lower_drive(lower: Asm):
           f("lower", "lower-ring-servo-mount"), placement="inferred",
           evidence="mount spans r 69..111 over P_M_3's top ring (r 88..110); servo hangs into the pedestal",
           inferred=True, inferred_note="which static part it bolts to is not stated"),
-        servo_part("lower_servo", "SERVO_35KG_270", "lower_ring_mount", TL @ trans(0, 83, 4),
+        # the mount's plate (z -3..4): window x +-20.5, y 73..93 and the flange holes (+-24.15, 77.95 / 88.01)
+        # round (0, 83); the flange on the plate's top face, the body hanging through the window
+        servo_part("lower_servo", "SERVO_35KG_270", "lower_ring_mount",
+                   seated(TL, "standard", (0, 83, 4), (0, 0, 1), (1, 0, 0)),
                    f("lower", "servo-placeholder-dnp"), placement="fitted",
-                   evidence="mount window centred (0, 83); shaft x=-9.8 -> R83.6 = (95-25)/2 x module 2.39"),
-        P("lower_pinion", "lower-ring-servo-gear: 25T", "mech", "lower_ring_mount", TL @ trans(-9.8, 83, 4 + 16.8 + 7.5),
-          f("lower", "lower-ring-servo-gear"), placement="fitted", evidence="on the servo shaft"),
+                   evidence="flange on the mount plate's top face (z 4), its holes on the plate's (+-24.15, 77.95/88.01), "
+                            "body through the 41 x 20 window; shaft x=-10 -> R83.6 = (95-25)/2 x module 2.39",
+                   note="which tab end the shaft is at is not fixed by the holes (either gives R83.6)"),
+        P("lower_pinion", "lower-ring-servo-gear: 25T", "mech", "lower_ring_mount",
+          TL @ trans(-servo_dims("SERVO_35KG_270")[0], 83, 4 + servo_dims("SERVO_35KG_270")[1] + 7.5),
+          f("lower", "lower-ring-servo-gear"), placement="fitted",
+          evidence="on the servo shaft, over a disc horn (7.5 mm, as the pan's servo-disc-dnp)"),
         P("lower_sector", "Lower ring gear sector (on the ring): Anderson's lower-ring-inner-gear, 95T-pitch internal, "
                           "79.6 deg", "mech", "lower_ring",
           trans(0, LOWER_SECTOR_LIFT, 0) @ TL @ frames.rot((0, 0, 1), 6.7), f("lower", "lower-ring-inner-gear"), placement="fitted",
@@ -631,18 +753,31 @@ def lower_drive(lower: Asm):
 def top_drive(middle: Asm, top: Asm):
     Tz = 462.0   # sector z 0..14 hangs under the top ring, below the neck guide ring (inferred)
     TT = trans(0, Tz, 0) @ ZUP
+    # The servo sits on the spacer (z 3..7 in the studio: the closed 41 x 20 window and the flange holes
+    # (+-24.15, 77.95 / 88.01); the main plate under it, z -6..3, is notched open to y 69) and drives the
+    # pinion through a disc horn like the lower ring's: so the stack is set from the pinion, which meshes
+    # the sector at z 0..10. Spacer top = 0 - 7.5 (horn) - 16.25 (flange underside to spline top) = -23.75.
+    top_off, top_sp = servo_dims("SERVO_35KG_270")
+    z_seat = 0.0 - 7.5 - top_sp
+    z_mount = z_seat - 7.0
     middle.parts += [
-        P("top_servo_mount", "top-ring-servo-mount-main", "mech", "middle_ring", TT @ trans(0, 0, -10),
+        P("top_servo_mount", "top-ring-servo-mount-main", "mech", "middle_ring", TT @ trans(0, 0, z_mount),
           f("top", "top-ring-servo-mount-main"), placement="inferred", inferred=True,
+          evidence=f"under the spacer (same studio frame), at z {z_mount:.2f} so the servo on the spacer reaches the "
+                   "pinion's plane",
           inferred_note="needs a bracket to the middle ring wall (not in the CAD); servo kept on the static side "
-                        "like the lower ring so its cable does not wind through a lazy susan"),
-        P("top_servo_spacer", "top-ring-servo-mount-spacer", "mech", "middle_ring", TT @ trans(0, 0, -10),
+                        "like the lower ring so its cable does not wind through a lazy susan; its height follows "
+                        "the inferred sector height"),
+        P("top_servo_spacer", "top-ring-servo-mount-spacer", "mech", "middle_ring", TT @ trans(0, 0, z_mount),
           f("top", "top-ring-servo-mount-spacer"), placement="fitted", evidence="same studio frame as the mount"),
-        servo_part("top_servo", "SERVO_35KG_270", "middle_ring", TT @ trans(0, 83, -16),
-                   f("top", "servo-placeholder-dnp"), evidence="same window as the lower mount (0, 83)"),
-        P("top_pinion", "top-ring-servo-gear: 20T", "mech", "middle_ring", TT @ trans(-9.8, 83, 0),
+        servo_part("top_servo", "SERVO_35KG_270", "middle_ring", seated(TT, "standard", (0, 83, z_seat), (0, 0, 1), (1, 0, 0)),
+                   f("top", "servo-placeholder-dnp"), placement="fitted",
+                   evidence="flange on the spacer's top face, its holes on the spacer's and the main plate's (+-24.15, "
+                            "77.95/88.01), body through both windows; shaft x=-10 -> R83.6",
+                   note="which tab end the shaft is at is not fixed by the holes (either gives R83.6)"),
+        P("top_pinion", "top-ring-servo-gear: 20T", "mech", "middle_ring", TT @ trans(-top_off, 83, 0),
           f("top", "top-ring-servo-gear"), placement="fitted",
-          evidence="R83.6 = (85-20)/2 x module 2.57"),
+          evidence="on the servo shaft over a disc horn; R83.6 = (85-20)/2 x module 2.57"),
     ]
     top.parts.append(P("top_sector", "Top ring gear sector (on the ring): Anderson's top-ring-inner-gear, 85T-pitch "
                                      "internal, 59.4 deg", "mech", "top_ring",
@@ -730,7 +865,8 @@ def hero_arm(top: Asm):
           f("hero", "servomount"), placement="fitted", evidence=ev,
           replaces=["ha_eb_1", "ha_eb_2", "ha_eb_3", "ha_eb_4"]),
         servo_part("hero_shoulder_servo", "DS3218_DUAL", "top_ring", W("servo"), f("hero", "servo"),
-                   evidence="its shafts on the hinge, the ears spanning the channel (hero_arm.py)", placement="fitted"),
+                   evidence="its shafts on the hinge, the ears spanning the channel (hero_arm.py)", placement="fitted",
+                   seat="dual"),
         P("hero_elbow_tube", "bodytube (into the body, square to the hinge)", "mech", "top_ring", W("bodytube"),
           f("hero", "bodytube"), placement="fitted", evidence=ev),
         P("hero_forearm", "mainarm (the arm's upright, replaces HA_SB_1/HA_SP_1/HA_SP_2)", "mech", "hero_arm",
@@ -748,7 +884,7 @@ def hero_arm(top: Asm):
         P("hero_wrist_cap", "wrist cap", "mech", "hero_arm", A("wrist_cap"), f("wrist", "Part 1 (1)"),
           placement="fitted", evidence=ev),
         P("hero_wrist_servo", "Servo " + catalog.SERVOS["SERVO_7KG"]["listing"], "servo", "hero_arm",
-          A("wrist_servo"), f("wrist", "Part 1"), material="servo:SERVO_7KG",
+          A("wrist_servo"), f("wrist", "Part 1"), material="servo:SERVO_7KG", real={"seat": STANDIN_SEAT["micro"]},
           mass_g=catalog.SERVOS["SERVO_7KG"]["mass_g"], printed=False, placement="fitted",
           evidence=ev + "; his micro-servo stand-in (the STLs' 'Part 1')"),
         P("hero_hand_arm_side", "hand-arm-side (wrist bearing half, fixed)", "mech", "hero_arm", A("hand_arm_side"),

@@ -492,7 +492,9 @@ def use_real_parts(root: Asm):
         stem = Path(p.file).stem.lower() if p.file is not None else ""
         key = p.material.split(":", 1)[1] if p.material.startswith("servo:") else None
         if p.cls == "servo" and key in SERVO_CASE:
-            p.real = {"kind": "servo", "spec": {"case": SERVO_CASE[key], "dual_shaft": key == "DS3218_DUAL", "model": key}}
+            # keeps a `seat` the assembly gave (the servo mated on its mount's features, not shape-fitted)
+            p.real = {**(p.real or {}), "kind": "servo",
+                      "spec": {"case": SERVO_CASE[key], "dual_shaft": key == "DS3218_DUAL", "model": key}}
             p.cad = "parametric"
         elif "disc-dnp" in stem or "disk-dnp" in stem:
             e = ext(p)
