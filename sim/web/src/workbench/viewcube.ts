@@ -148,10 +148,10 @@ export class ViewCube {
       this.lastCss = css;
       this.box.style.transform = css;
     }
-    // inside the viewport: left of the R3X panel, or of the guide's text column
+    // inside the viewport, under the view bar: left of the R3X panel, or of the guide's text column
     const g = this.wb.guide ? this.wb.guideRect : null;
     const panel = document.documentElement.style.getPropertyValue('--panel-space').trim() || '0px';
-    const place = g ? `${g.right + 12}px|${g.top + 8}px` : `calc(${panel} + 4px)|14px`;
+    const place = g ? `${g.right + 12}px|${g.top + 8}px` : `calc(${panel} + 4px)|60px`;
     if (place !== this.lastPlace) {
       this.lastPlace = place;
       const [right, top] = place.split('|');

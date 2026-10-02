@@ -356,3 +356,43 @@ export function printList(parts: Iterable<MPart>): { groups: PrintGroup[]; unkno
   const groups = [...by.values()].sort((a, b) => a.filament.localeCompare(b.filament) || b.count - a.count);
   return { groups, unknown };
 }
+
+// ------------------------------------------------------------------ a focus's context
+
+/**
+ * What a focused system's parts are mounted to, kept in view as solid context (the visor's servo mounts and
+ * the head plate under them; the column posts the neck's sled rides on): parts on a joint's parent link -
+ * the side that stays put - reached from the system's parts through the manifest's mates and fastener joins,
+ * up to `hops` steps (a servo -> its mount -> the plate the mount is bolted to).
+ */
+export function contextParts<N extends TreeNode>(joints: SysJoint<N>[], parts: Set<string>, hops = 2): Set<string> {
+  const out = new Set<string>();
+  const nodes = [...new Set(joints.map((j) => j.node))];
+  for (const node of nodes) {
+    const parentLinks = new Set(joints.filter((j) => j.node === node).map((j) => j.joint.parent_link));
+    const linkOf = new Map(node.asm.parts.map((p) => [p.id, p.link]));
+    const ok = (id: string) => !parts.has(id) && parentLinks.has(linkOf.get(id) ?? '');
+    // who touches whom: mates (part to part) and fasteners (every part a fastener joins)
+    const adj = new Map<string, Set<string>>();
+    const link = (a: string, b: string) => {
+      if (a === b) return;
+      (adj.get(a) ?? adj.set(a, new Set()).get(a)!).add(b);
+      (adj.get(b) ?? adj.set(b, new Set()).get(b)!).add(a);
+    };
+    const mates = (node.asm as typeof node.asm & { mates?: { a?: { part?: string }; b?: { part?: string } }[] }).mates ?? [];
+    for (const m of mates) if (m.a?.part && m.b?.part) link(m.a.part, m.b.part);
+    for (const f of node.asm.fasteners ?? []) for (const a of f.joins) for (const b of f.joins) link(a, b);
+    let front = [...parts].filter((id) => linkOf.has(id));
+    for (let h = 0; h < hops && front.length; h++) {
+      const next: string[] = [];
+      for (const id of front) for (const o of adj.get(id) ?? []) {
+        if (ok(o) && !out.has(o)) {
+          out.add(o);
+          next.push(o);
+        }
+      }
+      front = next;
+    }
+  }
+  return out;
+}

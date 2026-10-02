@@ -189,6 +189,8 @@ export class DirectDrag {
   moveMode = false;
   /** ⌘ (Mac) or Ctrl held: a drag on a part's body moves it. */
   private modHeld = false;
+  /** Shift held: in a focus, the joints further up the chain too (their handles show, a drag may move them). */
+  private shiftHeld = false;
   private lastPtr = { x: -1, y: -1 };
   private longTimer = 0;
   /** The joint tint (Workbench.setHover) is ours: the parts a ⌘-drag here would move. */
@@ -239,8 +241,9 @@ export class DirectDrag {
     // ⌘/Ctrl down or up changes what a drag on the part under the pointer would do: the cursor and tint follow
     const modKey = (e: KeyboardEvent) => {
       const held = partKey(e, PLATFORM);
-      if (held !== this.modHeld) {
+      if (held !== this.modHeld || e.shiftKey !== this.shiftHeld) {
         this.modHeld = held;
+        this.shiftHeld = e.shiftKey;
         if (this.lastPtr.x >= 0 && !this.down) this.hover(this.lastPtr.x, this.lastPtr.y);
         this.host.interact(); // the handles come and go with it
       }
@@ -249,6 +252,7 @@ export class DirectDrag {
     addEventListener('keyup', modKey);
     addEventListener('blur', () => {
       this.modHeld = false;
+      this.shiftHeld = false;
       this.tint(null);
     });
     this.mountMoveButton();
@@ -339,22 +343,27 @@ export class DirectDrag {
   // ------------------------------------------------------------------ what a part moves
 
   /** The press target of a mesh (null: grounded). */
-  targetOf(mesh: THREE.Object3D, mode: ChainMode): Target | null {
+  /** The press target of a mesh (null: grounded - or, in a focus, moved by none of its joints). In a system or
+   *  assembly focus only the focus's own joints move, unless `wide` (Shift held): then the part's chain as usual. */
+  targetOf(mesh: THREE.Object3D, mode: ChainMode, wide = false): Target | null {
     const info = this.wb.grabOf(mesh);
     if (!info) return null;
+    const mine = focusJoints(this.wb.scope, wide);
+    const ours = (node: AsmNode, j: MJoint) => !mine || mine.has(`${node.key}:${j.id}`);
     const drive = partDrive(info.node.asm, info.id);
     if (drive?.kind === 'linkage') {
       const a = actuators([info.node]).find((x) => x.servo === drive.servo);
       const lk = info.node.asm.linkages?.find((l) => l.id === drive.linkage);
-      if (a && lk) return { kind: 'servo', a, lk };
+      if (a && lk && a.joints.some((j) => ours(a.node, j))) return { kind: 'servo', a, lk };
     }
     if (drive?.kind === 'gear') {
       const g = drive.gear;
       const node = g.joint_assembly ? this.wb.nodeOf(g.joint_assembly) : info.node;
       const joint = node?.asm.joints.find((j) => j.id === g.joint);
-      if (node && joint && moves(joint)) return { kind: 'gear', gear: g, gearNode: info.node, node, joint };
+      if (node && joint && moves(joint) && ours(node, joint)) return { kind: 'gear', gear: g, gearNode: info.node, node, joint };
     }
-    const chain = pickChain(jointChain(info.node, info.link), mode);
+    const all = jointChain(info.node, info.link);
+    const chain = mine ? all.filter((c) => ours(c.node, c.joint)) : pickChain(all, mode);
     return chain.length ? { kind: 'chain', chain, node: info.node, link: info.link, mode } : null;
   }
 
@@ -816,7 +825,7 @@ export class DirectDrag {
   /** Rings and arrows for each joint the part's free drag can move, at the joint, sized to the screen. */
   private updateHandles() {
     const src = this.usable() && this.wb.explode < 1e-3 && !this.dragging ? this.handleSource() : null;
-    const t = src && src.visible ? this.targetOf(src, 'default') : null;
+    const t = src && src.visible ? this.targetOf(src, 'default', this.shiftHeld) : null;
     const chain = t?.kind === 'chain' ? t.chain : t?.kind === 'gear' ? [{ node: t.node, joint: t.joint }] : [];
     const key = chain.map((c) => `${c.node.key}:${c.joint.id}`).join('|');
     if (key !== this.handleKey) {
@@ -825,7 +834,7 @@ export class DirectDrag {
       this.handleGroup.clear();
       this.hotHandle = null;
       this.handles = chain.map(({ node, joint }) => {
-        const unit = joint.type === 'prismatic' ? arrowPairs() : circlePairs(64);
+        const unit = joint.type === 'prismatic' ? arrowPairs() : ringPairs();
         const geo = new LineSegmentsGeometry().setPositions(unit.flatMap((v) => v.toArray()));
         const obj = new THREE.Group();
         obj.matrixAutoUpdate = false;
@@ -978,7 +987,7 @@ export class DirectDrag {
     }
     if (!this.dragging) this.say(null);
     const hit = this.wb.hitAt(x, y);
-    const t = hit ? this.targetOf(hit.object, 'default') : null;
+    const t = hit ? this.targetOf(hit.object, 'default', this.shiftHeld) : null;
     if (hit && t) {
       if (hit.object !== this.hoverMesh) {
         this.hoverMesh = hit.object;
@@ -1022,7 +1031,7 @@ export class DirectDrag {
     const exploded = this.wb.explode > 1e-3;
     const hh = !exploded ? this.handleAt(e.clientX, e.clientY) : null;
     const hit = hh ? null : this.wb.hitAt(e.clientX, e.clientY);
-    const target = hit ? this.targetOf(hit.object, dm.chain) : null;
+    const target = hit ? this.targetOf(hit.object, dm.chain, e.shiftKey) : null;
     const input = { button: 0, mod: partKey(e, PLATFORM), moveMode: this.moveMode, onHandle: !!hh,
       target: (!hit ? 'none' : target ? 'movable' : 'grounded') as 'none' | 'movable' | 'grounded', exploded };
     const act = pressAction(input);
@@ -1217,15 +1226,35 @@ function circlePairs(n: number) {
   return Array.from({ length: n }, (_, i) => [at(i), at(i + 1)]).flat();
 }
 
-/** A double-headed arrow along Z (unit half-length), as segment pairs. */
+/** A revolute handle: the unit ring about Z, an arrowhead on it pointing the positive way (right hand about +Z),
+ *  and a short stub of the axis through its centre, so it reads as "turns about this axis, this way". */
+function ringPairs() {
+  const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  const a = 0.5; // where the arrowhead sits on the ring (rad)
+  const tip = V(Math.cos(a), Math.sin(a), 0);
+  const back = V(Math.sin(a), -Math.cos(a), 0).multiplyScalar(0.2); // against the positive tangent
+  const out = V(Math.cos(a), Math.sin(a), 0).multiplyScalar(0.1);
+  return [
+    ...circlePairs(64),
+    tip, tip.clone().add(back).add(out), tip, tip.clone().add(back).sub(out),
+    V(0, 0, -0.35), V(0, 0, 0.35),
+  ];
+}
+
+/** A prismatic handle: an arrow along Z (unit half-length), its head at the positive end, a tick at the other. */
 function arrowPairs() {
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-  const h = 0.22;
+  const h = 0.24;
   return [
     V(0, 0, -1), V(0, 0, 1),
     V(0, 0, 1), V(h, 0, 1 - h), V(0, 0, 1), V(-h, 0, 1 - h),
-    V(0, 0, -1), V(h, 0, -1 + h), V(0, 0, -1), V(-h, 0, -1 + h),
     V(0, 0, 1), V(0, h, 1 - h), V(0, 0, 1), V(0, -h, 1 - h),
-    V(0, 0, -1), V(0, h, -1 + h), V(0, 0, -1), V(0, -h, -1 + h),
+    V(-h * 0.6, 0, -1), V(h * 0.6, 0, -1),
   ];
+}
+
+/** The joints a focus lets a drag move ("node key:joint id"), or null (no focus, a library design, or `wide`). */
+export function focusJoints(sc: { kind: string; joints: { node: { key: string }; joint: { id: string } }[] } | null, wide: boolean): Set<string> | null {
+  if (!sc || sc.kind === 'library' || wide) return null;
+  return new Set(sc.joints.map((j) => `${j.node.key}:${j.joint.id}`));
 }
