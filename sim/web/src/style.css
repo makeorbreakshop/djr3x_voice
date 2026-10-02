@@ -600,6 +600,12 @@ details.opts { margin-top: 10px; }
 .home-one { line-height: 1; }
 section.cal > details > summary { margin-bottom: 0; }
 section.cal > details[open] > summary { margin-bottom: 8px; }
+section.cal [data-cal="trimrow"] > span { margin-right: 4px; }
+section.cal [data-cal="pairrows"] { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+section.cal .pairside { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 8px; }
+section.cal .pairside small { color: var(--muted, #8a8f99); }
+section.cal .pairside b { margin-left: auto; }
 
 /* Electronics: the reference tables open in a sheet over the viewport. */
 dialog.sheet { width: min(980px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 0; color: var(--text);

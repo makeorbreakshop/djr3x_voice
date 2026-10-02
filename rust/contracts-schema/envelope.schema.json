@@ -3049,6 +3049,32 @@
           "type": "object"
         },
         {
+          "description": "Bench calibration: one servo's trim (us added to its centre pulse), live on the controller;\n`save` also writes it into the robot profile. How a mirrored pair on one joint (Hunter's\nvisor, `visor_l` / `visor_r`) is matched so the two do not fight. Bench mode, `ui`/`cli` only.",
+          "properties": {
+            "actuator": {
+              "type": "string"
+            },
+            "save": {
+              "default": false,
+              "type": "boolean"
+            },
+            "trim_us": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "cal_trim",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actuator",
+            "trim_us"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and\nthe alive layers off, and hold every joint at the profile's home pose (reached through\nthe followers, inside each joint's v/a/j limits); the hold ends when something moves the\nbody again. With `joints`: hold just those at home. `ui`/`cli` only.",
           "properties": {
             "joints": {

@@ -139,6 +139,15 @@ pub enum PerfCommand {
         #[ts(optional)]
         limits_us: Option<[f64; 2]>,
     },
+    /// Bench calibration: one servo's trim (us added to its centre pulse), live on the controller;
+    /// `save` also writes it into the robot profile. How a mirrored pair on one joint (Hunter's
+    /// visor, `visor_l` / `visor_r`) is matched so the two do not fight. Bench mode, `ui`/`cli` only.
+    CalTrim {
+        actuator: String,
+        trim_us: f64,
+        #[serde(default)]
+        save: bool,
+    },
     /// Bench/Studio reset. No `joints`: stop every run, release the puppet, turn autonomy and
     /// the alive layers off, and hold every joint at the profile's home pose (reached through
     /// the followers, inside each joint's v/a/j limits); the hold ends when something moves the
@@ -617,5 +626,15 @@ mod tests {
         }
         let ack: Ack = serde_json::from_str(r#"{"status":"rejected","reason":"frozen"}"#).unwrap();
         assert_eq!(ack, Ack::rejected("frozen"));
+    }
+
+    #[test]
+    fn cal_trim_round_trips_and_save_defaults_off() {
+        let cmd = Command::Perf(PerfCommand::CalTrim { actuator: "visor_r".into(), trim_us: -6.5, save: true });
+        let s = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(s, r#"{"class":"perf","type":"cal_trim","actuator":"visor_r","trim_us":-6.5,"save":true}"#);
+        assert_eq!(serde_json::from_str::<Command>(&s).unwrap(), cmd);
+        let live: Command = serde_json::from_str(r#"{"class":"perf","type":"cal_trim","actuator":"visor_l","trim_us":4}"#).unwrap();
+        assert_eq!(live, Command::Perf(PerfCommand::CalTrim { actuator: "visor_l".into(), trim_us: 4.0, save: false }));
     }
 }

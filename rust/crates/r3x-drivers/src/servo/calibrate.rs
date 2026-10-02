@@ -123,6 +123,16 @@ pub fn apply_trim(text: &str, actuator: &str, trim_us: f64) -> Result<String, St
     Ok(out)
 }
 
+/// [`apply_trim`] to the profile file (temp file + rename, like [`write`]).
+pub fn write_trim(path: &Path, actuator: &str, trim_us: f64) -> Result<RobotProfile, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let out = apply_trim(&text, actuator, trim_us)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &out).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))?;
+    RobotProfile::from_json(&out).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
