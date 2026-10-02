@@ -10,6 +10,7 @@ import { LUTCubeLoader } from 'three/addons/loaders/LUTCubeLoader.js';
 import { N8AOPass } from 'n8ao';
 import { STILL } from './still';
 import { FramePacer, type PaceRates } from './pacer';
+import { aoStep, buildFrameKind, cameraHash, frameScale } from './buildframe';
 
 /**
  * The render pipeline after the scene is lit - everything between "the GPU drew the
@@ -53,13 +54,23 @@ import { FramePacer, type PaceRates } from './pacer';
 export type Quality = 'performance' | 'balanced' | 'high';
 
 /**
- * Build (setClean) renders like a CAD viewer: cheap frames while someone moves the view, one
- * full-quality frame once they stop, then nothing until something changes.
+ * Build (setClean) renders like a CAD viewer: frames while someone moves the view, one more
+ * once they stop, then nothing until something changes.
  *
- *   moving     input in the last SETTLE_MS   the dynamic scale (as everywhere)
- *   changing   settled, the scene moving     the quality's scale cap (a demo, a sweep)
- *   still      settled, nothing changed      once: native (devicePixelRatio, at most 2x);
- *                                            then no frame at all (one every REFRESH_MS)
+ *   moving     input in the last SETTLE_MS   Build's own dynamic scale (`buildDyn`): native
+ *                                            (devicePixelRatio, at most 2x) unless this machine
+ *                                            cannot hold 60 fps there
+ *   changing   settled, the scene moving     native (a demo, a sweep, a hover highlight)
+ *   still      settled, nothing changed      once: native; then no frame at all (one every
+ *                                            REFRESH_MS)
+ *
+ * One resolution for all three: a scale change reallocates the canvas and every pass's targets
+ * (N8AO's included), 25-80 ms at 2880x1800 measured, and it used to happen at the start and end
+ * of every gesture (moving at the quality's cap, still at native) and on hovers (a highlight
+ * drew 'changing' at the cap, then 'still' at native): a hitch and a soft/sharp flip each time.
+ * Native costs ~3-10 ms a frame on an M-series Mac even with every part showing (X-ray: ~800
+ * draws, 590k triangles), so Build only drops below it where frames really run long, and comes
+ * back up slowly (DynamicResolution's backoff).
  *
  * AO in Build: full resolution, denoised, a radius for millimetre parts, and transparency-aware
  * so the ghosted shells (which write depth) neither take nor cast it.
@@ -70,6 +81,16 @@ const FORGET_MS = 4000;
 const REFRESH_MS = 3000;
 const NATIVE_MAX = 2;
 const BUILD_AO = { radius: 0.025, falloff: 0.6, intensity: 0.6 };
+/**
+ * Build's two AO configurations (buildframe.ts aoStep). Still: full resolution and transparency-aware as
+ * before, but 4 samples a frame with a light denoise, accumulated over SETTLE_FRAMES frames (N8AO's
+ * `accumulate`: a running average with the noise rotated each frame), so the 16 samples of the
+ * Medium preset arrive in four ~14-16 ms frames instead of one ~20 ms frame at 3140x2474. Moving: a
+ * second pass at half resolution, 8 samples, no transparency pre-pass: ~2-3 ms over the plain frame
+ * (~9-10 ms) where full AO was ~10, so a drag keeps its shading and stays inside 16.7 ms.
+ */
+const BUILD_STILL_AO = { aoSamples: 4, denoiseSamples: 4 };
+const BUILD_MOVE_AO = { halfRes: true, aoSamples: 8, denoiseSamples: 4, denoiseRadius: 12 };
 export type ToneMap = 'neutral' | 'agx' | 'aces';
 
 const params = new URLSearchParams(location.search);
@@ -386,6 +407,14 @@ export class PostPipeline {
   private readonly smaa = new SMAAPass();
   private readonly hot: ShaderPass | null;
   private readonly dyn: DynamicResolution | null;
+  /** Build frames drawn with AO in the composer and without it (aoSkipped), for scripts/viewer-check.mjs. */
+  readonly buildFrames = { still: 0, move: 0, plain: 0 };
+  /** Build's moving-frame AO (BUILD_MOVE_AO), made on the first Build frame that needs it. */
+  private aoMove: N8AOPass | null = null;
+  /** Still frames accumulated since the last moving or changing frame (aoStep). */
+  private refined = 0;
+  /** Build's scale while moving: native, stepping down only on a machine too slow for it (SETTLE_MS). */
+  private readonly buildDyn: DynamicResolution | null;
   private quality: Quality;
   private lastFrame = -1;
   private toneMap: ToneMap;
@@ -396,7 +425,7 @@ export class PostPipeline {
   /** AO strength as the Rendering panel set it (Build draws a fraction of it). */
   private aoIntensity = 4;
   /** Build: AO settings to restore on leaving, and the still-frame bookkeeping. */
-  private aoSaved: { halfRes: boolean; radius: number; falloff: number } | null = null;
+  private aoSaved: { halfRes: boolean; radius: number; falloff: number; aoSamples: number; denoiseSamples: number } | null = null;
   private drawnSig = NaN;
   private stillAt = -Infinity;
   /** Build frames not drawn because nothing changed (measurement). */
@@ -424,6 +453,8 @@ export class PostPipeline {
     if (fixed > 0) this.dyn = null;
     else if (STILL) this.dyn = null;
     else this.dyn = new DynamicResolution(Math.min(max, 0.75), max, max);
+    const native = Math.min(dpr, NATIVE_MAX);
+    this.buildDyn = this.dyn ? new DynamicResolution(Math.min(native, Math.max(1, native * 0.625)), native, native) : null;
     renderer.setPixelRatio(fixed > 0 ? fixed : STILL ? Math.min(dpr, 2) : max);
 
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -569,8 +600,9 @@ export class PostPipeline {
       u.uVignette.value = 0;
       // Half-res AO, upsampled and blurred over a 12 px radius, smeared dark blotches over the
       // small parts, and the ghosts (which write depth) took the AO of the solids behind them.
-      this.aoSaved = { halfRes: c.halfRes, radius: c.aoRadius, falloff: c.distanceFalloff };
+      this.aoSaved = { halfRes: c.halfRes, radius: c.aoRadius, falloff: c.distanceFalloff, aoSamples: c.aoSamples, denoiseSamples: c.denoiseSamples };
       c.halfRes = false;
+      c.accumulate = true;
       c.aoRadius = BUILD_AO.radius;
       c.distanceFalloff = BUILD_AO.falloff;
       c.transparencyAware = true;
@@ -586,6 +618,9 @@ export class PostPipeline {
         c.aoRadius = this.aoSaved.radius;
         c.distanceFalloff = this.aoSaved.falloff;
         c.transparencyAware = false;
+        c.accumulate = false;
+        c.aoSamples = this.aoSaved.aoSamples;
+        c.denoiseSamples = this.aoSaved.denoiseSamples;
         c.intensity = this.aoIntensity;
         this.aoSaved = null;
       }
@@ -624,6 +659,12 @@ export class PostPipeline {
     const preset = QUALITY[this.quality];
     const ao = this.aoOn ? preset.ao : null;
     if (ao) this.ao.setQualityMode(ao);
+    // Build accumulates its still AO (BUILD_STILL_AO); the preset's samples come back on leaving
+    if (ao && this.aoSaved) {
+      this.aoSaved.aoSamples = this.ao.configuration.aoSamples;
+      this.aoSaved.denoiseSamples = this.ao.configuration.denoiseSamples;
+      Object.assign(this.ao.configuration, BUILD_STILL_AO);
+    }
     this.composer.addPass(ao ? this.ao : this.renderPass);
     if (this.hot) this.composer.addPass(this.hot);
     // bloom is the show's (the LEDs): never in a clean inspection image (Build), whatever the levels say
@@ -649,6 +690,31 @@ export class PostPipeline {
     this.syncResolution();
   }
 
+  /** Build's moving-frame AO, made once (its own targets, sized with the composer's: syncResolution). */
+  private moveAO(): N8AOPass {
+    const c = this.ao.configuration;
+    if (!this.aoMove) {
+      const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+      const m = new N8AOPass(this.scene, this.camera, buf.x, buf.y);
+      m.configuration.gammaCorrection = false;
+      m.configuration.depthAwareUpsampling = true;
+      m.autoDetectTransparency = false;
+      // transparency-aware like the still pass: the ghosts neither take nor cast AO in either, so the
+      // shading on them does not come and go with the hand (it did: the ghosts shaded only while moving)
+      m.configuration.transparencyAware = true;
+      Object.assign(m.configuration, BUILD_MOVE_AO);
+      protectEmitters(m);
+      this.aoMove = m;
+    }
+    const mc = this.aoMove.configuration;
+    // the look of the still AO (only a changed value costs anything: N8AO compares)
+    mc.aoRadius = c.aoRadius;
+    mc.distanceFalloff = c.distanceFalloff;
+    mc.intensity = c.intensity;
+    mc.color = c.color;
+    return this.aoMove;
+  }
+
   private applyScale(s: number) {
     if (s === this.renderer.getPixelRatio()) return;
     this.renderer.setPixelRatio(s);
@@ -658,6 +724,7 @@ export class PostPipeline {
 
   private syncResolution() {
     const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.aoMove?.setSize(buf.x, buf.y);
     this.film.uniforms.uResolution.value.copy(buf);
     this.showScale();
   }
@@ -673,11 +740,8 @@ export class PostPipeline {
       + this.renderer.toneMappingExposure * 5.3 + this.scene.environmentIntensity * 2.9;
     const buf = this.renderer.getSize(new THREE.Vector2());
     h += buf.x * 0.013 + buf.y * 0.017;
-    const add = (e: ArrayLike<number>, k: number) => {
-      for (let i = 0; i < e.length; i++) h += e[i] * (k + i * 0.618);
-    };
-    add(this.camera.matrixWorld.elements, 1.1);
-    add(this.camera.projectionMatrix.elements, 2.3);
+    // the camera to 1e-4 (buildframe.ts cameraHash): OrbitControls' damping residue is not a change
+    h += cameraHash(this.camera.matrixWorld.elements, 1.1) + cameraHash(this.camera.projectionMatrix.elements, 2.3);
     let n = 0;
     const visit = (o: THREE.Object3D) => {
       if (!o.visible) return;
@@ -707,10 +771,7 @@ export class PostPipeline {
     if (!this.pacer.settled(SETTLE_MS, now)) return 'moving';
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
-    const sig = this.signature();
-    if (sig !== this.drawnSig) return this.drawnSig !== this.drawnSig || this.stillAt < 0 ? 'still' : 'changing';
-    if (this.stillAt < 0 || now - this.stillAt >= REFRESH_MS) return 'still';
-    return 'skip';
+    return buildFrameKind({ settled: true, sig: this.signature(), drawnSig: this.drawnSig, stillAt: this.stillAt, now, refreshMs: REFRESH_MS });
   }
 
   render() {
@@ -718,26 +779,42 @@ export class PostPipeline {
     const interacting = this.pacer.fps(now) === Infinity;
     // Resolution adapts only while frames are meant to come at 60 fps (someone interacting);
     // a paced 30 or 15 fps interval is not a slow frame.
-    if (this.dyn && this.lastFrame >= 0 && interacting) this.dyn.sample(now - this.lastFrame);
+    // Build adapts its own scale (native first, see SETTLE_MS); the other modes the quality's cap.
+    const dyn = this.filmSaved ? this.buildDyn : this.dyn;
+    if (dyn && this.lastFrame >= 0 && interacting) dyn.sample(now - this.lastFrame);
     // A scale lowered in one interaction (often by a model upload's slow frames, not by the view) is
     // forgotten after a few quiet seconds: the next drag or orbit starts sharp and steps down only if its
     // own frames run long (the 1 s window above), instead of popping to a soft view the moment it starts.
-    if (this.dyn && this.dyn.scale < this.dyn.max && this.pacer.settled(FORGET_MS, now)) this.dyn.reset();
+    if (dyn && dyn.scale < dyn.max && this.pacer.settled(FORGET_MS, now)) dyn.reset();
     this.lastFrame = interacting ? now : -1;
     const kind = this.buildFrame(now);
-    if (kind === 'skip') {
+    // Build's AO for this frame and the still frame's accumulation (buildframe.ts aoStep): a 'skip'
+    // frame is drawn while the still AO is still accumulating, then nothing
+    const step = aoStep(!!this.filmSaved && !!this.dyn, kind, this.refined);
+    if (!step.draw) {
       this.skipped++;
       return;
     }
-    if (this.dyn) {
-      const dpr = window.devicePixelRatio || 1;
-      // the lowered scale is for the interaction; once it ends, the cap (Build: native when still)
-      const s = kind === 'still' ? Math.min(dpr, NATIVE_MAX)
-        : kind === 'changing' ? this.dyn.max
-        : kind === 'moving' || interacting ? this.dyn.scale : this.dyn.max;
-      this.applyScale(s);
+    this.refined = step.refined;
+    const drawn = kind === 'skip' ? 'still' : kind; // an accumulation frame is a still frame
+    if (dyn) {
+      // the lowered scale is for the interaction; once it ends, the cap (Build: native, and only a
+      // machine too slow for native while moving ever sees a scale change here: buildframe.ts frameScale)
+      this.applyScale(frameScale(drawn, interacting, !!this.filmSaved, this.buildDyn ?? dyn, this.dyn ?? dyn));
     }
-    this.stillAt = kind === 'still' ? now : kind ? -Infinity : this.stillAt;
+    if (kind !== 'skip') this.stillAt = kind === 'still' ? now : kind ? -Infinity : this.stillAt;
+    // Build shades progressively, as CAD viewers do. Full-resolution N8AO is most of a native frame on a
+    // real display (3140x2648, a close view of the head mech: 30 ms with it, 11 ms without, measured in the
+    // app with a GPU finish; ~20 vs ~10 ms at 3140x2474 with a readPixels sync here), so a drag with it ran
+    // at ~30 fps. Moving and changing frames take the cheap AO pass in AO's slot (half resolution, see
+    // BUILD_MOVE_AO); a still frame restarts the full pass's accumulation and the next SETTLE_FRAMES - 1
+    // frames add to it. Same targets throughout, nothing reallocated, no frame over budget, no pop.
+    const passes = this.composer.passes;
+    const aoAt = step.pass ? passes.indexOf(this.ao) : -1;
+    if (aoAt >= 0 && step.pass === 'move') passes[aoAt] = this.moveAO();
+    if (aoAt >= 0 && step.reset) (this.ao as unknown as { firstFrame(): void }).firstFrame(); // (N8AO: restart the accumulation)
+    // (counted for the viewer's regression harness, scripts/viewer-check.mjs)
+    if (kind) this.buildFrames[aoAt < 0 ? 'plain' : step.pass === 'move' ? 'move' : 'still']++;
     this.film.uniforms.uTime.value = STILL ? 0 : now / 1000;
     this.probe?.frameStart();
     // a clean inspection image (Build) keeps the room environment near its own level: the Flat
@@ -751,7 +828,8 @@ export class PostPipeline {
       this.composer.render();
       this.scene.environmentIntensity = e;
     }
-    if (kind) this.drawnSig = this.signature();
+    if (aoAt >= 0) passes[aoAt] = this.ao;
+    if (kind && kind !== 'skip') this.drawnSig = this.signature();
     this.probe?.frameEnd();
   }
 }

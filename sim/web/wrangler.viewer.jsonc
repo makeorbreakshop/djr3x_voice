@@ -1,0 +1,14 @@
+{
+  // The Build viewer as part of the site, at starforgeautomation.com/r3x/ (its own Worker beside the site's,
+  // so the meshes never enter the site's repo). Publish with `npm run publish:viewer`, then
+  // `npx wrangler deploy -c wrangler.viewer.jsonc`. host/worker.mjs strips the /r3x prefix and serves
+  // dist-viewer as static assets; missing files are real 404s (no single-page fallback), so a missing mesh
+  // fails as a 404, not as HTML. Unlisted: nothing on the site links here, and publish writes a noindex
+  // _headers and a robots.txt into the folder.
+  "name": "starforge-r3x-viewer",
+  "main": "host/worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "starforgeautomation.com/r3x/*", "zone_name": "starforgeautomation.com" }],
+  "assets": { "directory": "./dist-viewer", "binding": "ASSETS", "not_found_handling": "none", "run_worker_first": true }
+}

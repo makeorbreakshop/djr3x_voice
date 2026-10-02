@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "build:visit": "tsc --noEmit && vite build --mode visit",
+    "build:viewer": "tsc --noEmit && vite build --mode viewer",
+    "publish:viewer": "node scripts/publish-viewer.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "postinstall": "node scripts/copy-draco.mjs",
@@ -14,12 +16,14 @@
     "render:check": "node scripts/render-harness.mjs",
     "render:update": "node scripts/render-harness.mjs --update",
     "render:perf": "node scripts/render-harness.mjs --perf",
+    "viewer:check": "node scripts/viewer-check.mjs",
     "build:wasm": "wasm-pack build ../../rust/crates/r3x-performer-wasm --target web --release --out-dir ../../../sim/web/src/wasm --out-name r3x_performer --no-pack"
   },
   "dependencies": {
     "n8ao": "^2.0.1",
     "postprocessing": "^6.39.5",
-    "three": "^0.186.1"
+    "three": "^0.186.1",
+    "three-mesh-bvh": "^0.9.15"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.5.1",
@@ -27,6 +31,7 @@
     "@gltf-transform/functions": "^4.5.1",
     "@types/three": "^0.186.0",
     "draco3dgltf": "^1.5.7",
+    "meshoptimizer": "^1.3.0",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
     "typescript": "^7.0.2",

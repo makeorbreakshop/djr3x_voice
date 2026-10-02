@@ -326,3 +326,37 @@ body:not([data-mode="build"]) .bb-move-badge { display: none; }
 .bb-keys-scroll button { flex: none; width: auto; min-width: 0; margin: 0; font: inherit; color: #c9ccd2; background: rgba(255,255,255,.05); border: 1px solid rgba(242,243,245,.12); border-radius: 5px; padding: 3px 8px; cursor: pointer; }
 .bb-keys-scroll button[aria-pressed="true"] { color: #fff; background: rgba(232,118,42,.4); border-color: rgba(232,118,42,.6); }
 body:not([data-mode="build"]) .bb-keys { display: none; }
+
+/* The parts tree (buildpanel.ts renderTree, visibility.ts): one row per assembly, then its parts, each
+   with a solo button and its state - solid, ghost or hidden - for it and everything under it. The context
+   row (the rest of the droid) heads it with a focus. A row whose parts differ shows mixed: no state lit,
+   a dotted outline round the three. */
+#bv-ptree-d > summary { font-size: 12px; }
+#bv-ptree-d > #bp-show-all { float: right; margin-top: -20px; font-size: 11px; color: var(--accent-2); }
+.ptree { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.ptree li { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 24px; padding-left: calc(var(--d, 0) * 12px); }
+.ptree li.empty { padding-left: 8px; }
+.ptree .fold { flex: 0 0 14px; width: 14px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; line-height: 1; text-align: center; }
+.ptree .fold:hover { color: var(--text); background: none; }
+.ptree :is(.nm, .nm-n, .nm-l) { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+  background: none; border-color: transparent; padding: 3px 4px; font-size: 12.5px; }
+.ptree .nm-l { font-weight: 600; }
+.ptree :is(.nm, .nm-n):hover { background: #1a1d25; border-color: transparent; }
+.ptree .nm-n[aria-pressed="true"] { background: rgba(232,118,42,.12); }
+.ptree .pt-part .nm { color: var(--muted); }
+.ptree .pt-part.sel .nm { color: var(--text); background: rgba(232,118,42,.16); }
+.ptree small { flex: 0 0 auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ptree .solo { flex: 0 0 auto; width: 20px; height: 20px; padding: 2px; opacity: .45; }
+.ptree li:hover .solo, .ptree .solo[aria-pressed="true"] { opacity: 1; }
+.ptree .pt-ctx { border-bottom: 1px solid var(--line); padding-bottom: 3px; margin-bottom: 2px; }
+.ptree .pt-ctx .nm-l { font-weight: 500; color: var(--muted); }
+.ptree .pt-var { padding-top: 2px; padding-bottom: 2px; }
+.ptree .pt-var .bp-var { flex: 1; grid-template-columns: minmax(0, 1fr); gap: 2px; padding-left: 18px; }
+.ptree .pt-var .bp-var select { padding: 3px 6px; font-size: 12px; }
+.tri { flex: 0 0 auto; display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.tri button { width: 20px; height: 20px; padding: 3px; border: 0; border-radius: 0; background: none; color: #5b6170; }
+.tri button + button { border-left: 1px solid var(--line); }
+.tri button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.tri button:hover { color: var(--text); background: #1d2029; }
+.tri button[aria-checked="true"] { color: #fff; background: rgba(232,118,42,.55); }
+.tri.mixed { border-style: dotted; border-color: var(--accent-2, #e8762a); }

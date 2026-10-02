@@ -18,11 +18,17 @@ export default defineConfig(({ mode }) => ({
   // `--mode visit` (npm run build:visit): only the public page (plan Phase 10), with relative
   // asset paths so it can be hosted statically under any prefix or iframed. Otherwise the
   // panel/sim, voice.html (Phase 2 hold-to-talk, iframe-able) and visit.html together.
-  base: mode === 'visit' ? './' : '/',
+  // `--mode viewer` (npm run build:viewer): only Build on its own (viewer.html, src/viewer/), for
+  // sharing. Relative paths like visit; nothing from public/ (the kit model, sfx) goes with it, and
+  // it reads the workbench output published beside it (.env.viewer, scripts/publish-viewer.mjs).
+  base: mode === 'visit' || mode === 'viewer' ? './' : '/',
+  publicDir: mode === 'viewer' ? false : 'public',
   build:
     mode === 'visit'
       ? { outDir: 'dist-visit', rollupOptions: { input: { visit: page('./visit.html') } } }
-      : { rollupOptions: { input: { main: page('./index.html'), voice: page('./voice.html'), visit: page('./visit.html') } } },
+      : mode === 'viewer'
+        ? { outDir: 'dist-viewer', rollupOptions: { input: { viewer: page('./viewer.html') } } }
+        : { rollupOptions: { input: { main: page('./index.html'), voice: page('./voice.html'), visit: page('./visit.html'), viewer: page('./viewer.html') } } },
   server: {
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), SHOW, PROFILES] },
   },

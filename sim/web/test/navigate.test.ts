@@ -11,10 +11,26 @@ describe('wheel: mouse or trackpad', () => {
     expect(wheelDevice(w({ deltaY: 100 }))).toBe('mouse'); // Chrome / Windows notch
     expect(wheelDevice(w({ deltaY: -120 }))).toBe('mouse');
     expect(wheelDevice(w({ deltaY: 3, deltaMode: 1 }))).toBe('mouse'); // Firefox lines
-    expect(wheelDevice(w({ deltaY: 4.5 }))).toBe('trackpad'); // fractional
+    expect(wheelDevice(w({ deltaY: 4.5 }), 'other')).toBe('trackpad'); // fractional (off the Mac)
     expect(wheelDevice(w({ deltaY: 12 }))).toBe('trackpad'); // small step
     expect(wheelDevice(w({ deltaX: 3, deltaY: 40 }))).toBe('trackpad'); // both axes
     expect(wheelDevice(w({ deltaX: 100, shiftKey: true }))).toBe('mouse'); // Shift+wheel: Chrome swaps the axes
+  });
+
+  it('a Mac mouse wheel (fractional, accelerated, never sideways) zooms at every speed', () => {
+    // macOS sends a notch as pixels: 4.000244 slow, larger when spun; a trackpad's two fingers are whole pixels
+    expect(wheelDevice(w({ deltaY: 4.000244140625 }), 'mac')).toBe('mouse');
+    expect(wheelDevice(w({ deltaY: -31.2 }), 'mac')).toBe('mouse');
+    expect(wheelDevice(w({ deltaY: 3 }), 'mac')).toBe('trackpad');
+    expect(wheelDevice(w({ deltaY: 4.5, deltaX: 1 }), 'mac')).toBe('trackpad');
+    expect(wheelDevice(w({ deltaY: 4.5 }), 'other')).toBe('trackpad'); // a precision touchpad
+    const c = new WheelClassifier('auto', 220, 'mac');
+    expect(c.classify(w({ deltaY: 4.000244140625 }), 0)).toBe('zoom'); // slow
+    expect(c.classify(w({ deltaY: 13.6 }), 30)).toBe('zoom');
+    expect(c.classify(w({ deltaY: -4.000244140625 }), 1000)).toBe('zoom'); // a new gesture, still the wheel
+    // two fingers on the same Mac still pan
+    expect(c.classify(w({ deltaY: 2, deltaX: 1 }), 3000)).toBe('pan');
+    expect(c.classify(w({ deltaY: 5 }), 3016)).toBe('pan');
   });
 
   it('pinch is a ctrlKey wheel: zoom, whatever the device', () => {
@@ -24,7 +40,7 @@ describe('wheel: mouse or trackpad', () => {
   });
 
   it('two-finger scroll pans (Shift: orbits), the wheel zooms; a gesture keeps its device', () => {
-    const c = new WheelClassifier();
+    const c = new WheelClassifier('auto', 220, 'other');
     expect(c.classify(w({ deltaY: 7, deltaX: 1 }), 0)).toBe('pan');
     // later events of the same gesture, even one shaped like a notch, stay a pan
     expect(c.classify(w({ deltaY: 60 }), 16)).toBe('pan');
@@ -83,6 +99,15 @@ describe('camera moves', () => {
   it('the pivot is the point under the cursor, else the target', () => {
     expect(pivotFor(V(1, 2, 3), V(0, 0, 0))).toEqual(V(1, 2, 3));
     expect(pivotFor(null, V(0, 1, 0))).toEqual(V(0, 1, 0));
+  });
+
+  it('on empty space, a target slid off the model gives way to the model centre', () => {
+    const model = new THREE.Box3(V(-0.2, 0, -0.2), V(0.2, 1, 0.2));
+    expect(pivotFor(null, V(0.1, 0.5, 0), model)).toEqual(V(0.1, 0.5, 0)); // on the model: kept
+    expect(pivotFor(null, V(0.22, 0.5, 0), model)).toEqual(V(0.22, 0.5, 0)); // within the 10% pad
+    expect(pivotFor(null, V(3, 0.5, 0), model)).toEqual(V(0, 0.5, 0)); // out in space: the centre
+    expect(pivotFor(V(3, 0, 0), V(0, 0, 0), model)).toEqual(V(3, 0, 0)); // a hit always wins
+    expect(pivotFor(null, V(3, 0, 0), new THREE.Box3())).toEqual(V(3, 0, 0)); // nothing shown
   });
 
   it('orbit turns the rig about the pivot: the pivot stays put on screen, the view never flips', () => {

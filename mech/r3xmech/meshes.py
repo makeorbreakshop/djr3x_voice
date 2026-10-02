@@ -35,7 +35,7 @@ def load_file(path: str) -> trimesh.Trimesh:
 
 
 def part_mesh_local(part: Part) -> trimesh.Trimesh:
-    if part.real is not None and (part.file is not None or part.generator is not None):
+    if part.real is not None and "kind" in part.real and (part.file is not None or part.generator is not None):
         return real_part(part)
     if part.file is not None:
         return load_file(str(part.file))
@@ -50,6 +50,27 @@ def part_mesh(part: Part, T_link: np.ndarray | None = None) -> trimesh.Trimesh:
     T = part.T if T_link is None else T_link @ part.T
     m.apply_transform(T)
     return m
+
+
+def servo_seat_T(spec: dict, seat: dict) -> np.ndarray:
+    """The parametric servo (mech/parts/models.servo: spline top at its origin, shaft +Y, body
+    centre toward +X) in a stand-in's frame, mated by features: `seat["at"]` is where the centre of
+    the flange's underside goes ("ref": "flange", a servo screwed down on its tabs) or the middle of
+    the body on the shaft line ("ref": "body", the dual-shaft servo held by its body), `axis` the
+    output shaft's direction and `body` the direction from the shaft to the body's centre."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from parts.models import CASES
+
+    c = CASES[spec.get("case", "standard")]
+    y_ref = (-c["sh"] - c["H"] + c["fh"] - c["ft"] / 2) if seat.get("ref", "flange") == "flange" else (-c["sh"] - c["H"] / 2)
+    a = np.asarray(seat["axis"], float)
+    b = np.asarray(seat["body"], float)
+    T = np.eye(4)
+    T[:3, :3] = np.column_stack([b, a, np.cross(b, a)])
+    T[:3, 3] = np.asarray(seat["at"], float) - T[:3, :3] @ np.array([c["off"], y_ref, 0.0])
+    return T
 
 
 def real_part(part: Part) -> trimesh.Trimesh:
@@ -68,6 +89,15 @@ def real_part(part: Part) -> trimesh.Trimesh:
     def make():
         model = spec_part(part.real["kind"], part.real["spec"]).mesh
         standin = load_file(str(part.file)) if part.file is not None else part.generator()
+        if part.real.get("seat"):
+            # mated by features, not by shape: the principal-axis fit tilts a servo ~18 deg in its
+            # stand-in (the spline and flange skew the vertex cloud) and slides it ~6 mm off its seat
+            fitted = model.copy()
+            fitted.apply_transform(servo_seat_T(part.real["spec"], part.real["seat"]))
+            from scipy.spatial import cKDTree
+            ps, _ = trimesh.sample.sample_surface(fitted, 3000, seed=4)
+            err = float(cKDTree(trimesh.sample.sample_surface(standin, 3000, seed=3)[0]).query(ps)[0].mean())
+            return fitted.vertices, fitted.faces, err
         fitted, err = fit_to_standin(standin, model)
         return fitted.vertices, fitted.faces, err
 

@@ -1,0 +1,53 @@
+/* The shared viewer (viewer.html): Build without the builder's tools. body[data-viewer] is set
+   by page.ts only, so nothing here reaches the sim's Build. Hidden, not removed: the markup is
+   Build's (workbench/buildpanel.ts), and its code still finds every element. */
+
+/* Authoring and diagnostics: reload the manifest, the geometry-source legend and its filters,
+   the robot-profile tags, the contact sweep and its live servo readout */
+body[data-viewer] :is(#bp-reload, .bp-legend, .ptag, [data-bp="sweep"], .jlive),
+body[data-viewer] #bp-filters [data-f="notreal"],
+body[data-viewer] #bp-filters [data-f="inferred"] { display: none !important; }
+/* Checks is the builder's (the suite's results, overlaps, servo torque): not in the viewer at all */
+body[data-viewer] :is([data-tab="checks"], [data-body="checks"]) { display: none !important; }
+/* Servo load is the sim's live rig (mechrig); the viewer has none, so it would be an empty fold. */
+body[data-viewer] #bp-load { display: none !important; }
+/* Said twice: Instructions is in the view bar, stepping out is the breadcrumb (and Esc) */
+body[data-viewer] .bh-title :is(.bh-guide, [data-bp="scope-out"]) { display: none !important; }
+/* The joint list's own head (the count and Home) without the sweep column */
+body[data-viewer] .jhead output { margin-left: auto; }
+
+/* Said already or the builder's own notes: the inspector's second title (the header names the design, the
+   list its author), the joint count over the joints themselves, the "?" inferred marks and their notes */
+body[data-viewer] :is(#bp-title, #bp-joint-n, sup.inf) { display: none !important; }
+
+/* View: the controls that never change the model, one fold under the lists */
+body[data-viewer] details.bv-view { margin-top: 12px; }
+body[data-viewer] details.bv-view > .bv-h { margin-top: 8px; }
+
+/* The header names the open design; DJ R3X is its context (collapsed to its rail, style.css hides it) */
+body[data-viewer]:not(.r3x-collapsed) #panel header h1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+body[data-viewer] #panel header h1 .vh-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body[data-viewer] #panel header h1 .vh-ctx { color: var(--muted); font-size: 12px; font-weight: 500; }
+/* Instructions only for designs on the allow-list (page.ts INSTRUCTIONS) */
+body[data-viewer] #bb-guide.vh-off { display: none !important; }
+
+/* The view cube (viewcube.ts) keeps its corner, one row lower: the viewer's bar (crumbs, looks, Move,
+   Instructions, Copy link) runs the full width between the panels, under where the cube sat. Copy link
+   is its icon alone; the label appears only to confirm a copy. (Instructions places the cube itself.) */
+body[data-viewer]:not([data-guide]) .bb-cube { margin-top: 40px; }
+body[data-viewer] #vb-link span:empty { display: none; }
+body[data-viewer] #vb-link { padding: 6px 9px; }
+/* The cube on the viewer's light ground: pale faces and dark lettering (the sim's is dark on the dark studio) */
+body[data-viewer] .bb-cube .f { background: rgba(244, 244, 246, 0.92); border-color: rgba(60, 64, 72, 0.35); }
+body[data-viewer] .bb-cube .z.c { color: #3a3e46; }
+body[data-viewer] .bb-cube .z:hover { background: rgba(232, 118, 42, 0.5); color: #fff; }
+body[data-viewer] :is(.bb-cube-home, .bb-cube-help) { background: rgba(244, 244, 246, 0.92); color: #3a3e46; border: 1px solid rgba(60, 64, 72, 0.25); }
+body[data-viewer] :is(.bb-cube-home, .bb-cube-help):hover { background: #fff; color: #111; }
+
+/* The input and frame diagnostic (diag.ts): `?diag` or the ` key. */
+#viewer-diag { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 40; max-width: min(760px, calc(100vw - 24px));
+  padding: 8px 10px; border-radius: 8px; background: rgba(12, 12, 14, 0.86); color: #e8e6df; border: 1px solid #3a3a40; pointer-events: auto; }
+#viewer-diag pre { margin: 0; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; overflow: hidden; }
+#viewer-diag .vd-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+#viewer-diag button { font: 11px system-ui, sans-serif; padding: 2px 8px; }
+#viewer-diag .vd-note { font: 11px system-ui, sans-serif; color: #8a8f99; }

@@ -30,9 +30,30 @@ the change at the bottom of this file.
   "version": 1,
   "generated_at": "2026-09-30T12:00:00Z",
   "generator": "mech/workbench 0.1",
-  "root": Assembly
+  "root": Assembly,
+  "pack": {                              // optional; added by the PUBLISHER (sim/web/scripts/publish-viewer.mjs,
+                                         // meshpack.mjs), never by the workbench build: mech/out has none
+    "file": "meshes.0a6ed8c34c50.pack",  // beside this manifest; content-named (cache it for good)
+    "format": "r3x.meshpack.1",
+    "encoding": "gzip",                  // the file's body is gzip; inflated it is the entries back to back
+    "size": 3180000,                     // the inflated length (the reader streams it: shells first)
+    "entries": {                         // path from this manifest's folder (as `mesh` resolves) -> [offset, length]
+      "parts/head_mount_plate.glb": [0, 5120],     // the overview GLB, EXT_meshopt_compression (lossless:
+      "parts/head_mount_plate.uv.bin": [5120, 812] // no filters, no reorder); its uv.bin as built
+    }
+  }
 }
 ```
+
+Also publisher-only: `"published_files": ["uvtransfer.json", ...]`, the optional files (paths from this
+folder) the published folder has; a reader asks for no other optional file under it. And a part's
+`mesh_sig` is filled in where the build left it out (the content hash of its GLBs), so every mesh URL
+can carry it and a host can cache the data files for good.
+
+A reader that knows `pack` takes a listed file from the pack instead of its own URL; every file not
+listed (full-detail `mesh_full`, a referenced assembly's meshes: that folder's own manifest names its
+pack) and every file when the pack fails to load comes from its URL, so a packed folder still says
+where each mesh lives. A published folder holds only the packed copy of what `entries` lists.
 
 ## Assembly (recursive)
 
@@ -463,3 +484,5 @@ The assembly carries its connections (workbench/mates.py):
   root's `finish` check. Readers that do not know it colour by `material`, as before.
 - v1 (2026-10-02): part `mass_props` (optional): the solid from the source mesh, so mass models (rigsync)
   never read the decimated, quantized display GLBs. Readers without it keep working.
+- v1 (2026-10-02): top-level `pack` (optional, publisher only): a published folder's overview meshes in one
+  file. Readers without it fetch per-part files, which a packed folder no longer holds (published copies only).

@@ -8,10 +8,12 @@
  */
 
 import './build.css';
-import type { AsmNode, Look, Workbench } from './workbench';
+import { mayExist } from './published';
+import { contextVis, type AsmNode, type Context, type Look, type Workbench } from './workbench';
+import { partKey, type Vis } from './visibility';
 import { mountGuide } from './guide';
 import { assemblyLabel, jointLabel, libraryAvailable, libraryFrom, printList, subtreeParts, type MotionSystem } from './systems';
-import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MLink, type MPart } from './manifest';
+import { variantOptions, joinUrl, loadIndex, MECH_BASE, type IndexEntry, type MAssembly, type MCheck, type MJoint, type MPart } from './manifest';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
@@ -23,7 +25,7 @@ const OUR_BUILD = 'r3x_droid';
 const LOOKS: Look[] = ['exterior', 'mechanism', 'inspect'];
 const unit = (j: MJoint) => (j.unit === 'mm' ? ' mm' : '°');
 
-interface Stored { explode?: number; look?: Look; context?: 'ghost' | 'hide'; fasteners?: boolean; closed?: string[]; folded?: string[] }
+interface Stored { explode?: number; look?: Look; context?: Context; fasteners?: boolean; closed?: string[]; opened?: string[] }
 
 /** A system's motion in a few words: its joints ("tilt · roll"), or one joint's range. */
 function systemMotion(s: MotionSystem): string {
@@ -61,21 +63,11 @@ const SRC_TITLE: Record<Src, string> = {
   placeholder: 'Placeholder: a sized box, no model yet',
 };
 const srcDot = (c?: string) => `<i class="src ${srcOf(c)}" role="img" aria-label="${SRC_LABEL[srcOf(c)]}" title="${esc(SRC_TITLE[srcOf(c)])}"></i>`;
-const notReal = (c?: string) => srcOf(c) === 'mesh' || srcOf(c) === 'placeholder';
 
 /** The name without a parenthetical the glyph already says, or a long aside (full name on hover). */
 const shortName = (n: string) => n.replace(/\s*\((parametric|ours)\)\s*$/i, '');
 const bare = (n: string) => n.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
 
-type Filter = 'all' | 'printed' | 'hardware' | 'servos' | 'notreal' | 'inferred';
-const FILTERS: [Filter, string, (p: MPart) => boolean][] = [
-  ['all', 'All', () => true],
-  ['printed', 'Printed', (p) => p.printed === true || p.class === 'shell' || p.class === 'mech'],
-  ['hardware', 'Hardware', (p) => p.class === 'hardware' || p.class === 'bearing'],
-  ['servos', 'Servos', (p) => p.class === 'servo'],
-  ['notreal', 'Unmodelled', (p) => notReal(p.cad)],
-  ['inferred', 'Inferred', (p) => !!p.inferred],
-];
 
 /**
  * Build's markup, added to the page's two panels before they are wired (main.ts calls this
@@ -113,23 +105,14 @@ export function injectBuildDom() {
     <div id="bv-build-pane" role="tabpanel" aria-labelledby="bv-tab-build">
       <details id="bv-systems-h" class="bv-sec" data-sec="systems" open><summary>Systems</summary>
         <ul id="bv-systems" class="bv-list" aria-label="Motion systems"></ul></details>
-      <details id="bv-tree-h" class="bv-sec" data-sec="tree" open><summary>Assemblies</summary>
-        <ul id="bv-tree" class="bv-list bv-tree" aria-label="Assemblies"></ul></details>
-      <details id="bv-parts-d" class="bv-parts bv-sec" data-sec="parts"><summary>Parts <small id="bv-parts-n"></small></summary>
-        <div class="bp-filters" id="bp-filters" role="group" aria-label="Show parts"></div>
-        <div class="bp-legend">${(['parametric', 'vendor', 'mesh'] as Src[]).map((k) => `<span title="${esc(SRC_TITLE[k])}">${srcDot(k)}${SRC_LABEL[k]}</span>`).join('')}
-          <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button></div>
-        <ul id="bp-parts" class="part-tree" aria-label="Parts by link"></ul>
-      </details>
     </div>
     <div id="bv-lib-pane" role="tabpanel" aria-labelledby="bv-tab-lib" hidden>
       <ul id="bv-library" class="bv-list" aria-label="Published designs"></ul>
     </div>
-    <h3 class="bv-h">Others</h3>
-    <div class="seg" role="group" aria-label="The rest of the droid">
-      <button data-ctx="ghost" aria-pressed="true" title="The rest of the droid as a light ghost">Ghost</button>
-      <button data-ctx="hide" aria-pressed="false" title="Only what is in focus">Hide</button>
-    </div>
+    <details id="bv-ptree-d" class="bv-sec" data-sec="ptree" open><summary>Parts <small id="bv-ptree-n"></small></summary>
+      <button id="bp-show-all" class="link" data-bp="show-all" hidden>Show all</button>
+      <ul id="bv-ptree" class="ptree" aria-label="Parts by assembly"></ul></details>
+    <h3 class="bv-h">View</h3>
     <label class="inline">Explode <input id="bv-explode" type="range" min="0" max="1" step="0.01" value="0"><output id="bv-explode-out">0%</output></label>
     <p id="bv-explode-hint" class="bv-hint" hidden>Focus a system to explode it in detail.</p>
     <button id="bv-fasteners" class="toggle" aria-pressed="true" title="Screws, inserts, nuts and washers">Fasteners</button>
@@ -184,7 +167,14 @@ export function injectBuildDom() {
   tabs.parentElement!.querySelector('#more-menu')!.after(bodies);
 }
 
-export function mountBuildPanel(wb: Workbench) {
+/**
+ * `viewer`: the shared viewer (viewer.html, src/viewer/page.ts) rather than the sim's Build. It
+ * opens on the Library, and stepping out of a design goes back to the Library list (in the sim,
+ * to our build); the part drawer leaves out the modelling facts (params, fit, mates). Everything
+ * else the viewer hides is CSS on body[data-viewer] (src/viewer/viewer.css).
+ */
+export function mountBuildPanel(wb: Workbench, opts: { viewer?: boolean } = {}) {
+  const viewer = !!opts.viewer;
   const st = load();
   // Instructions: the guide opens on what is in focus (its section), else at the start
   const guide = mountGuide(wb, { onClose: () => document.getElementById('bb-guide')?.focus() });
@@ -195,10 +185,8 @@ export function mountBuildPanel(wb: Workbench) {
   let openAsm = OUR_BUILD;
   let loadedOnce = false;
   let jointsDirty = true;
-  /** Parts tab filter (the list, and the view isolates what it lists). */
-  let filter: Filter = 'all';
   /** Scene panel: Our build or Library. */
-  let src: 'build' | 'library' = 'build';
+  let src: 'build' | 'library' = viewer ? 'library' : 'build';
   let lastKind: string | null = null;
   /** The navigator's search: filters systems, assemblies and parts by name. */
   let query = '';
@@ -217,7 +205,7 @@ export function mountBuildPanel(wb: Workbench) {
   };
   $('bv-explode-out').textContent = `${Math.round(wb.explode * 100)}%`;
   if (st.look === 'exterior' || st.look === 'mechanism' || st.look === 'inspect') wb.look = st.look;
-  if (st.context === 'ghost' || st.context === 'hide') wb.context = st.context;
+  if (st.context === 'ghost' || st.context === 'hide' || st.context === 'solid') wb.context = st.context;
   /** The viewport bar's look is shared: Build's look here, the Model elsewhere (mechrig, `r3x:look`). */
   const setLook = (l: Look) => {
     if (!wb.active) {
@@ -238,13 +226,6 @@ export function mountBuildPanel(wb: Workbench) {
     setLook(next);
     document.querySelector<HTMLElement>(`[data-look="${next}"]`)?.focus();
     e.preventDefault();
-  });
-  document.querySelectorAll<HTMLButtonElement>('[data-ctx]').forEach((b) => {
-    b.onclick = () => {
-      wb.setContext(b.dataset.ctx as 'ghost' | 'hide');
-      st.context = wb.context;
-      save(st);
-    };
   });
   document.querySelectorAll<HTMLButtonElement>('[data-src]').forEach((b) => {
     b.onclick = () => {
@@ -267,7 +248,6 @@ export function mountBuildPanel(wb: Workbench) {
   $('bv-frame').onclick = () => wb.frame(false, true);
   // Navigator sections and tree nodes fold, and stay folded (per browser).
   const closed = new Set(st.closed ?? []);
-  const folded = new Set(st.folded ?? []);
   document.querySelectorAll<HTMLDetailsElement>('#sc-build details.bv-sec').forEach((d) => {
     if (closed.has(d.dataset.sec!)) d.open = false;
     d.addEventListener('toggle', () => {
@@ -277,17 +257,31 @@ export function mountBuildPanel(wb: Workbench) {
       save(st);
     });
   });
-  $('bv-tree').addEventListener('click', (e) => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('[data-fold]');
-    if (!t) return;
-    e.stopPropagation();
-    const k = t.dataset.fold!;
-    if (folded.has(k)) folded.delete(k);
-    else folded.add(k);
-    st.folded = [...folded];
-    save(st);
-    $('bv-tree').dataset.sig = '';
-    render();
+  // The parts tree: a caret folds its row; a state button sets the row (and everything under it) solid,
+  // ghost or hidden - the context row sets the rest of the droid. Rows the operator opened stay open.
+  $('bv-ptree').addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const fold = t.closest<HTMLElement>('[data-fold]');
+    if (fold) {
+      e.stopPropagation();
+      const k = fold.dataset.fold!;
+      if (opened.has(k)) opened.delete(k);
+      else opened.add(k);
+      st.opened = [...opened];
+      save(st);
+      renderTree(true);
+      return;
+    }
+    const v = t.closest<HTMLElement>('[data-vis]');
+    if (v) {
+      e.stopPropagation();
+      const state = v.dataset.vis as Vis;
+      if (v.dataset.key === CTX_ROW) {
+        wb.setContext(state === 'hidden' ? 'hide' : state);
+        st.context = wb.context;
+        save(st);
+      } else wb.setOverride(v.dataset.key!, state);
+    }
   });
   // How it works: a system's joints loop through their range
   $('bv-systems').addEventListener('click', (e) => {
@@ -324,7 +318,6 @@ export function mountBuildPanel(wb: Workbench) {
       wb.setScope(on ? null : wb.systemScope(d.sys));
       // the focus's row stays in view; the long lists below fold away
       if (!on) {
-        ($('bv-parts-d') as HTMLDetailsElement).open = false;
         $('bv-systems').querySelector(`[data-sys="${CSS.escape(d.sys)}"]`)?.scrollIntoView({ block: 'nearest' });
       }
     } else if (d.node) {
@@ -344,8 +337,11 @@ export function mountBuildPanel(wb: Workbench) {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-crumb]');
     if (!b) return;
     if (b.dataset.crumb === 'library') {
-      src = 'library';
-      render();
+      if (viewer) void toLibrary();
+      else {
+        src = 'library';
+        render();
+      }
     } else if (b.dataset.crumb === 'build') void openBuild();
   });
 
@@ -357,6 +353,7 @@ export function mountBuildPanel(wb: Workbench) {
     if (t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
     if (e.key === 'Escape') {
       if (wb.back()) e.preventDefault();
+      else if (viewer && openAsm !== OUR_BUILD) void toLibrary();
       else if (openAsm !== OUR_BUILD) void openBuild();
       return;
     }
@@ -393,6 +390,13 @@ export function mountBuildPanel(wb: Workbench) {
     wb.frame(false, true);
   }
 
+  /** The viewer: out of a design, back to the Library list (the droid whole behind it). */
+  async function toLibrary() {
+    await openBuild();
+    src = 'library';
+    render();
+  }
+
   async function openLibrary(id: string) {
     const item = libraryFrom(wb.manifest?.root).find((x) => x.id === id);
     if (!item) return;
@@ -403,6 +407,8 @@ export function mountBuildPanel(wb: Workbench) {
     if (sc) wb.setScope(sc);
   }
 
+  let readyR: () => void = () => {};
+  const readyP = new Promise<void>((res) => (readyR = res));
   async function refreshIndex(reload = false) {
     index = await loadIndex();
     torque = await loadTorque();
@@ -415,6 +421,7 @@ export function mountBuildPanel(wb: Workbench) {
       await wb.load(MECH_BASE + e.manifest);
     }
     render();
+    readyR();
   }
 
   // Live reload (dev server, src/workbench/mech.mjs): a rebuilt manifest reloads the open assembly in
@@ -427,6 +434,10 @@ export function mountBuildPanel(wb: Workbench) {
     });
   }
 
+  // Leaving Build: the view bar's looks are the Model's again, none greyed out by a shells-only design
+  window.addEventListener('r3x:mode', (e) => {
+    if ((e as CustomEvent).detail !== 'build') document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => (b.disabled = false));
+  });
   /** Build opens: fetch the index and our build once. */
   window.addEventListener('r3x:mode', (e) => {
     if ((e as CustomEvent).detail === 'build' && !loadedOnce) void refreshIndex();
@@ -441,13 +452,6 @@ export function mountBuildPanel(wb: Workbench) {
     switch (d.bp) {
       case 'select': wb.select(wb.selected === d.id ? null : d.id!); break;
       case 'deselect': wb.select(null); break;
-      case 'filter': {
-        filter = d.f as Filter;
-        const test = FILTERS.find(([f]) => f === filter)![2];
-        wb.isolate(filter === 'all' ? null : scopedParts().filter(test).map((p) => p.id));
-        break;
-      }
-      case 'eye': wb.toggleHidden(d.id!); break;
       case 'isolate': wb.isolate(wb.isolated?.size === 1 && wb.isolated.has(d.id!) ? null : [d.id!]); break;
       case 'isolate-link': {
         const ids = node?.asm.parts.filter((p) => p.link === d.link && (!wb.scope || wb.scope.parts.has(p.id))).map((p) => p.id) ?? [];
@@ -455,7 +459,13 @@ export function mountBuildPanel(wb: Workbench) {
         wb.isolate(same ? null : ids);
         break;
       }
-      case 'show-all': filter = 'all'; wb.hidden.clear(); wb.isolate(null); break;
+      case 'isolate-node': {
+        const ids = wb.partsUnder(d.key!).filter((id) => !wb.scope || wb.scope.parts.has(id));
+        const same = wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
+        wb.isolate(same ? null : ids);
+        break;
+      }
+      case 'show-all': wb.hidden.clear(); wb.isolate(null); break;
       case 'focus': if (node) wb.setFocus(node); break;
       case 'scope-out': wb.setScope(null); break;
       case 'home': wb.home(); jointsDirty = true; break;
@@ -507,10 +517,10 @@ export function mountBuildPanel(wb: Workbench) {
   jointsBody.addEventListener('focusout', (e) => { if (!jointsBody.contains(e.relatedTarget as Node)) wb.setHover(null, null); });
 
   // Parts: Up/Down move between rows, Escape closes the part drawer.
-  $('bp-parts').addEventListener('keydown', (e) => {
+  $('bv-ptree').addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const rows = [...$('bp-parts').querySelectorAll<HTMLElement>('button.nm, button.grp-btn')];
+    const rows = [...$('bv-ptree').querySelectorAll<HTMLElement>('button.nm, button.nm-n')];
     const i = rows.indexOf(t);
     if (i < 0) return;
     rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
@@ -521,7 +531,7 @@ export function mountBuildPanel(wb: Workbench) {
       e.stopPropagation(); // only the drawer closes, the scope stays
       const id = wb.selected;
       wb.select(null);
-      $('bp-parts').querySelector<HTMLElement>(`button.nm[data-id="${CSS.escape(id)}"]`)?.focus();
+      $('bv-ptree').querySelector<HTMLElement>(`button.nm[data-id="${CSS.escape(id)}"]`)?.focus();
     }
   });
 
@@ -545,7 +555,8 @@ export function mountBuildPanel(wb: Workbench) {
     wb.setMarkers(document.querySelector('[data-tab="checks"]')?.getAttribute('aria-selected') === 'true');
     renderNav();
     renderHead();
-    renderParts();
+    renderTree();
+    renderDetail();
     renderJoints();
     renderChecks();
     renderBom();
@@ -555,11 +566,14 @@ export function mountBuildPanel(wb: Workbench) {
     const press = (id: string, on: boolean) => $(id).setAttribute('aria-pressed', String(on));
     // The viewport bar's look is Build's only while Build is open (mechrig's Model otherwise).
     if (wb.active) document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => {
-      const on = b.dataset.look === wb.look;
+      // the presets set the tree: once the tree is changed (wb.custom), none of them is what is shown
+      const on = !wb.custom && b.dataset.look === wb.look;
       b.setAttribute('aria-checked', String(on));
-      b.tabIndex = on ? 0 : -1;
+      b.tabIndex = b.dataset.look === wb.look ? 0 : -1;
+      // a shells-only design has the one look (workbench shellsOnly): the others greyed out, not gone
+      b.disabled = wb.shellsOnly && b.dataset.look !== 'exterior';
     });
-    document.querySelectorAll<HTMLButtonElement>('[data-ctx]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ctx === wb.context)));
+    // (the rest of the droid is the parts tree's context row, there only with a focus: renderTree)
     $('bv-explode-hint').hidden = !(wb.explode > 0.05 && !wb.scope);
     press('bv-section', wb.section.on);
     press('bv-flip', wb.section.flip);
@@ -598,7 +612,8 @@ export function mountBuildPanel(wb: Workbench) {
     const sc = wb.scope;
     const lib = sc?.kind === 'library' || openAsm !== OUR_BUILD;
     if (lib) src = 'library';
-    else if (lastKind === 'library') src = 'build'; // stepped out of a design: back on our build
+    // stepped out of a design: back on our build (the viewer: the list its caller picked - Library, or Our build)
+    else if (lastKind === 'library' && !viewer) src = 'build';
     lastKind = lib ? 'library' : sc?.kind ?? null;
     document.querySelectorAll<HTMLButtonElement>('[data-src]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.src === src)));
     $('bv-build-pane').hidden = src !== 'build';
@@ -606,14 +621,13 @@ export function mountBuildPanel(wb: Workbench) {
 
     // breadcrumb: Our build > Neck, or Library > Head gimbal
     const here = sc?.label ?? (openAsm !== OUR_BUILD ? index.find((x) => x.id === openAsm)?.name ?? openAsm : '');
-    const root = lib ? `<button data-crumb="library" title="Back to the build (Esc)">Library</button>` : `<button data-crumb="build" ${sc ? 'title="The whole build (Esc)"' : 'aria-current="page" disabled'}>Our build</button>`;
+    const root = lib ? `<button data-crumb="library" title="${viewer ? 'Back to the Library' : 'Back to the build'} (Esc)">Library</button>` : `<button data-crumb="build" ${sc ? 'title="The whole build (Esc)"' : 'aria-current="page" disabled'}>Our build</button>`;
     // what upstream is off rest and moves the focus (a turned ring under the arm): shown, one click home
     const up = wb.upstream().map(({ node, joint, value }) => `<button class="bb-chip" data-rest="${esc(node.key)}|${esc(joint.id)}" title="Off rest: it moves ${esc(sc?.label ?? '')}. Click to put it back to 0">${esc(jointLabel(joint.name))} ${signed(value)}${unit(joint)} <span aria-hidden="true">⟲</span></button>`).join('');
     $('bb-crumbs').innerHTML = here ? `${root}<span aria-hidden="true">›</span><b aria-current="page">${esc(here)}</b>${up}` : '';
     $('bb-crumbs').hidden = !here; // at the top there is nowhere to step out to
 
     if (!wb.top) return;
-    const shown = (n: AsmNode) => wb.nodeShown(n);
     // systems, with their joints as one short line
     const hit = (...names: string[]) => !query || names.some((n) => n.toLowerCase().includes(query));
     const systems = wb.systems().filter((x) => hit(x.name, ...x.joints.map((j) => jointLabel(j.joint.name))));
@@ -631,36 +645,6 @@ export function mountBuildPanel(wb: Workbench) {
     }
     // A search shows only the groups it found something in.
     $('bv-systems-h').hidden = !!query && !systems.length;
-    // assemblies: the fitted tree, each variant group as a picker where its options hang
-    const rows: string[] = [];
-    const seenGroups = new Set<string>();
-    const walk = (n: AsmNode, depth: number) => {
-      for (const v of query ? [] : variantOptions(n.asm)) {
-        if (seenGroups.has(v.group)) continue;
-        seenGroups.add(v.group);
-        const opts: { id: string; name: string }[] = [];
-        wb.forEachNode((m) => variantOptions(m.asm).filter((o) => o.group === v.group && !opts.some((x) => x.id === o.id)).forEach((o) => opts.push({ id: o.id, name: o.name })));
-        rows.push(`<li class="var" style="--d:${depth}">${variantSelect(v.group, opts, wb.variants[v.group])}</li>`);
-      }
-      for (const c of n.children) {
-        if (!shown(c)) continue;
-        const on = sc?.kind === 'assembly' && sc.id === c.key;
-        const count = subtreeCount(c);
-        const kids = c.children.some(shown) || variantOptions(c.asm).length > 0;
-        const fold = !query && folded.has(c.key);
-        const caret = kids ? `<button class="fold" data-fold="${esc(c.key)}" aria-expanded="${!fold}" aria-label="${fold ? 'Expand' : 'Collapse'} ${esc(assemblyLabel(c.asm.name))}">${fold ? '▸' : '▾'}</button>` : '<span class="fold"></span>';
-        if (hit(c.asm.name, assemblyLabel(c.asm.name))) rows.push(`<li class="node" style="--d:${depth}">${caret}<button data-node="${esc(c.key)}" aria-pressed="${on}" title="${esc(c.asm.name)}"><span>${esc(assemblyLabel(c.asm.name))}</span><small>${count}</small></button></li>`);
-        if (!fold) walk(c, depth + 1);
-      }
-    };
-    walk(wb.top, 0);
-    $('bv-tree-h').hidden = !!query && !rows.length;
-    const treeSig = rows.join('');
-    const tree = $('bv-tree');
-    if (tree.dataset.sig !== treeSig && !tree.contains(document.activeElement as Node | null) || tree.dataset.sig === undefined) {
-      tree.dataset.sig = treeSig;
-      tree.innerHTML = treeSig;
-    }
     // library: the designs the droid is assembled from, and standalone manifests
     const items = libraryFrom(wb.manifest?.root).filter((x) => libraryAvailable(x, wb.top!));
     const standalone = index.filter((e) => e.id !== OUR_BUILD && !items.some((x) => x.nodes.includes(e.id)));
@@ -672,12 +656,6 @@ export function mountBuildPanel(wb: Workbench) {
         + standalone.map((x) => `<li><button data-manifest="${esc(x.id)}" aria-pressed="${openAsm === x.id}"><span>${esc(assemblyLabel(x.name))}</span><small>own build</small></button></li>`).join('');
     }
   }
-
-  const subtreeCount = (n: AsmNode) => {
-    let k = 0;
-    wb.forEachNode((m) => { if (wb.nodeShown(m)) k += m.asm.parts.length; }, n);
-    return k;
-  };
 
   function renderHead() {
     const m = wb.manifest;
@@ -699,87 +677,115 @@ export function mountBuildPanel(wb: Workbench) {
     $('bp-title').innerHTML = !title ? '' : `<span class="bh-name">${esc(title)}</span>${sub ? ` <small>${esc(sub)}</small>` : ''}${steps}${sc ? ' <button class="ic" data-bp="scope-out" aria-label="Back to the whole build" title="Back to the whole build (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>' : ''}`;
   }
 
-  /** Parts of the focus: the scope's, else everything fitted under the focused node. */
-  const keyOf = (a: MAssembly) => {
-    let k = a.id;
-    wb.forEachNode((n) => { if (n.asm === a) k = n.key; });
-    return k;
-  };
+  // ---------------------------------------------------------------- the parts tree
+  /**
+   * The focus's parts by assembly (visibility.ts): the context row (the rest of the droid, with a focus),
+   * then the focus's root - the deepest assembly holding all of its parts, named for the focus - and under
+   * it sub-assemblies, then parts. Every row sets itself and everything under it solid, ghost or hidden; a
+   * row whose parts differ shows mixed. Rows open by the caret (remembered); the path to a part picked in
+   * the view opens by itself. A search shows the rows with a match, open.
+   */
+  const opened = new Set(st.opened ?? []);
+  let treeHtml = '';
+  let lastSel: string | null = null;
+  const tri = (key: string, state: Vis | 'mixed' | null, label: string) => `<span class="tri${state === 'mixed' ? ' mixed' : ''}" role="radiogroup" aria-label="${esc(label)}">${
+    VIS_BUTTONS.map(([v, icon, name]) => `<button role="radio" data-vis="${v}" data-key="${esc(key)}" aria-checked="${state === v}" aria-label="${name}" title="${name}">${icon}</button>`).join('')}</span>`;
 
-  function scopedParts(): MPart[] {
-    const out: MPart[] = [];
-    const seen = new Set<string>();
-    const sc = wb.scope;
-    wb.forEachNode((n) => {
-      if (!wb.nodeShown(n)) return;
-      for (const p of n.asm.parts) if ((!sc || sc.parts.has(p.id)) && !seen.has(p.id)) { seen.add(p.id); out.push(p); }
-    }, sc ? wb.top : wb.focus);
-    return out;
-  }
-
-  // ---------------------------------------------------------------- Parts
-  const groupName = (a: MAssembly, l: MLink) => {
-    const j = l.joint ? a.joints.find((x) => x.id === l.joint) : undefined;
-    const name = bare(l.name);
-    if (!j) return { name, how: 'fixed', j };
-    const word = j.id.replace(/^head_/, '').replace(/_/g, ' ');
-    return { name, how: name.toLowerCase().startsWith(word) ? (j.type === 'prismatic' ? 'slide' : 'hinge') : word, j };
-  };
-
-  function renderParts() {
-    const node = wb.focus;
-    const body = $('bp-parts');
-    if (!node) {
-      body.innerHTML = '';
-      $('bp-filters').innerHTML = '';
-      renderDetail();
+  function renderTree(force = false) {
+    const el = $('bv-ptree');
+    const top = wb.top;
+    if (!top) {
+      el.innerHTML = treeHtml = '';
       return;
     }
-    const a = node.asm;
-    // The focus's parts (a scope's, wherever they hang: a ring's servo is on the column).
     const sc = wb.scope;
-    const subs: MAssembly[] = [];
-    wb.forEachNode((n) => { if (wb.nodeShown(n)) subs.push(n.asm); }, sc ? wb.top! : node);
-    const inScope = (p: MPart) => !sc || sc.parts.has(p.id);
-    const allParts = scopedParts();
-    // Filter chips with counts (a filter with nothing in it stands aside).
-    $('bp-filters').innerHTML = FILTERS.map(([f, label, test]) => {
-      const n = allParts.filter(test).length;
-      if (!n && f !== 'all' && filter !== f) return '';
-      return `<button class="chip" data-bp="filter" data-f="${f}" aria-pressed="${filter === f}">${label} <span>${n}</span></button>`;
-    }).join('');
-    const test0 = FILTERS.find(([f]) => f === filter)![2];
-    const named = (p: MPart) => !query || p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
-    const test = (p: MPart) => inScope(p) && test0(p) && named(p);
-    const shownN = allParts.filter((p) => test0(p) && named(p)).length;
-    $('bv-parts-n').textContent = String(shownN);
-    // A search opens the list on what it found; clearing it leaves the list as the operator had it.
-    if (query && shownN) $<HTMLDetailsElement>('bv-parts-d').open = true;
-
-    const byLink = subs.flatMap((sa) => sa.links.map((l) => ({ sa, l, parts: sa.parts.filter((p) => p.link === l.id && test(p)) })))
-      .filter((g) => g.parts.length);
-    body.innerHTML = byLink.map(({ sa, l, parts }) => {
-      const g0 = groupName(sa, l);
-      const g = sa === a ? g0 : { ...g0, name: `${bare(sa.name)} › ${g0.name}` };
-      const ids = sa.parts.filter((p) => p.link === l.id && inScope(p)).map((p) => p.id);
-      const iso = !!wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
-      const tip = `${l.name}${g.j ? ` · ${g.j.name}` : ''}. Click to show only this link`;
-      return `<li class="grp"><button class="grp-btn" data-bp="isolate-link" data-link="${esc(l.id)}" data-asm="${esc(keyOf(sa))}" aria-pressed="${iso}" title="${esc(tip)}">${esc(g.name)} <span>· ${esc(g.how)}</span></button><span class="grp-n">${parts.length}</span></li>` +
-        parts.map((p) => {
-          const hidden = wb.hidden.has(p.id);
-          if (sc && !sc.parts.has(p.id)) return '';
-          const solo = wb.isolated?.size === 1 && wb.isolated.has(p.id);
-          return `<li class="part${wb.selected === p.id ? ' sel' : ''}${hidden ? ' off' : ''}${solo ? ' solo' : ''}">
-            ${srcDot(p.cad)}
-            <button class="nm" data-bp="select" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-current="${wb.selected === p.id}"><span>${esc(shortName(p.name))}</span>${p.inferred ? `<sup class="inf" title="Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}">?</sup>` : ''}</button>
-            <span class="acts">
-              <button class="ic" data-bp="eye" data-id="${esc(p.id)}" aria-label="${hidden ? 'Show' : 'Hide'} ${esc(p.name)}" title="${hidden ? 'Show' : 'Hide'}">${hidden ? EYE_OFF : EYE}</button>
-              <button class="ic solo" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${solo}" aria-label="${solo ? 'Show everything' : `Show only ${esc(p.name)}`}" title="${solo ? 'Show everything' : 'Solo'}">${SOLO}</button>
-            </span></li>`;
-        }).join('');
-    }).join('') || `<li class="empty">${filter === 'all' && !query ? 'No parts here.' : 'No parts match.'}</li>`;
+    const inFocus = (id: string) => !sc || sc.parts.has(id);
+    const label = (n: AsmNode) => assemblyLabel(n.asm.name);
+    const named = (p: MPart, n: AsmNode) => {
+      if (!query) return true;
+      if (p.name.toLowerCase().includes(query) || p.id.toLowerCase().includes(query)) return true;
+      for (let m: AsmNode | null = n; m; m = m.parent) if (label(m).toLowerCase().includes(query)) return true;
+      return false;
+    };
+    // each shown node's own focus parts, and how many sit under each node
+    const own = new Map<string, MPart[]>();
+    const count = new Map<string, number>();
+    let total = 0;
+    wb.forEachNode((n) => {
+      if (!wb.nodeShown(n)) return;
+      const ps = n.asm.parts.filter((p) => inFocus(p.id) && named(p, n));
+      own.set(n.key, ps);
+      total += ps.length;
+      for (let m: AsmNode | null = n; m; m = m.parent) count.set(m.key, (count.get(m.key) ?? 0) + ps.length);
+    });
+    // the root: the deepest node holding every one of them
+    let root = top;
+    for (;;) {
+      const all = root.children.filter((c) => (count.get(c.key) ?? 0) === total && total > 0);
+      if (all.length !== 1 || (own.get(root.key)?.length ?? 0) > 0) break;
+      root = all[0];
+    }
+    // the path to the part picked in the view opens
+    const sel = wb.selected ? wb.partInfo(wb.selected)?.node ?? null : null;
+    const selPath = new Set<string>();
+    for (let m: AsmNode | null = sel; m; m = m.parent) selPath.add(m.key);
+    const rows: string[] = [];
+    if (sc) {
+      rows.push(`<li class="pt-row pt-ctx" style="--d:0"><span class="fold"></span><span class="nm-l">Rest of the droid</span>${tri(CTX_ROW, contextVis(wb.context), 'Rest of the droid')}</li>`);
+    }
+    const seenGroups = new Set<string>();
+    const solo = (ids: string[]) => !!wb.isolated && ids.length === wb.isolated.size && ids.every((i) => wb.isolated!.has(i));
+    const walk = (n: AsmNode, d: number) => {
+      const isRoot = n === root;
+      const kids = n.children.filter((c) => wb.nodeShown(c) && (count.get(c.key) ?? 0) > 0);
+      const parts = own.get(n.key) ?? [];
+      const open = isRoot || !!query || opened.has(n.key) || selPath.has(n.key);
+      const caret = !isRoot && (kids.length || parts.length)
+        ? `<button class="fold" data-fold="${esc(n.key)}" aria-expanded="${open}" aria-label="${open ? 'Collapse' : 'Expand'} ${esc(label(n))}">${open ? '▾' : '▸'}</button>` : '<span class="fold"></span>';
+      const name = isRoot ? (sc?.label ?? label(n)) : label(n);
+      const on = sc?.kind === 'assembly' && sc.id === n.key;
+      const nm = isRoot ? `<span class="nm-l" title="${esc(n.asm.name)}">${esc(name)}</span>`
+        : `<button class="nm-n" data-node="${esc(n.key)}" aria-pressed="${on}" title="${esc(n.asm.name)}">${esc(name)}</button>`;
+      const ids = wb.partsUnder(n.key).filter(inFocus);
+      rows.push(`<li class="pt-row pt-node${isRoot ? ' pt-root' : ''}" style="--d:${d}">${caret}${nm}<small>${count.get(n.key) ?? 0}</small>`
+        + `<button class="ic solo" data-bp="isolate-node" data-key="${esc(n.key)}" aria-pressed="${solo(ids)}" aria-label="Show only ${esc(name)}" title="Solo">${SOLO}</button>`
+        + `${tri(n.key, wb.rowState(n.key, inFocus), name)}</li>`);
+      if (!open) return;
+      // variant groups hang where their options do (our build's own picks; a library design brings its own)
+      if (!query && sc?.kind !== 'library') {
+        for (const v of variantOptions(n.asm)) {
+          if (seenGroups.has(v.group)) continue;
+          seenGroups.add(v.group);
+          const opts: { id: string; name: string }[] = [];
+          wb.forEachNode((m) => variantOptions(m.asm).filter((o) => o.group === v.group && !opts.some((x) => x.id === o.id)).forEach((o) => opts.push({ id: o.id, name: o.name })));
+          rows.push(`<li class="pt-var" style="--d:${d + 1}">${variantSelect(v.group, opts, wb.variants[v.group])}</li>`);
+        }
+      }
+      for (const c of kids) walk(c, d + 1);
+      for (const p of parts) {
+        const s1 = wb.isolated?.size === 1 && wb.isolated.has(p.id);
+        rows.push(`<li class="pt-row pt-part${wb.selected === p.id ? ' sel' : ''}" style="--d:${d + 1}"><span class="fold"></span>`
+          + `<button class="nm" data-bp="select" data-id="${esc(p.id)}" title="${esc(p.name)}" aria-current="${wb.selected === p.id}">${esc(shortName(p.name))}</button>`
+          + `<button class="ic solo" data-bp="isolate" data-id="${esc(p.id)}" aria-pressed="${s1}" aria-label="Show only ${esc(p.name)}" title="Solo">${SOLO}</button>`
+          + `${tri(partKey(p.id), wb.treeStates.get(p.id) ?? null, p.name)}</li>`);
+      }
+    };
+    if (total) walk(root, 0);
+    else rows.push(`<li class="empty">${query ? 'No parts match.' : 'No parts here.'}</li>`);
+    const html = rows.join('');
+    $('bv-ptree-n').textContent = String(total);
     $('bp-show-all').hidden = !wb.isolated && !wb.hidden.size;
-    renderDetail();
+    if (html === treeHtml && !force) return;
+    // rebuilt: keep the keyboard where it was (the same row's same button)
+    const a = document.activeElement as HTMLElement | null;
+    const keep = a && el.contains(a) ? (a.dataset.vis ? `[data-vis="${a.dataset.vis}"][data-key="${CSS.escape(a.dataset.key ?? '')}"]`
+      : a.dataset.id ? `[data-bp="${a.dataset.bp}"][data-id="${CSS.escape(a.dataset.id)}"]` : a.dataset.fold ? `[data-fold="${CSS.escape(a.dataset.fold)}"]` : '') : '';
+    el.innerHTML = treeHtml = html;
+    if (keep) el.querySelector<HTMLElement>(keep)?.focus();
+    if (wb.selected !== lastSel) {
+      lastSel = wb.selected;
+      el.querySelector('.pt-part.sel')?.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   function renderDetail() {
@@ -816,16 +822,16 @@ export function mountBuildPanel(wb: Workbench) {
     const reg = src.regression as { p95_mm?: number; mean_mm?: number; volume_ratio?: number } | undefined;
     const file = (src.file as string | undefined) ?? (src.reference as string | undefined) ?? (src.model as string | undefined) ?? '';
     el.innerHTML = head(shortName(p.name), srcDot(p.cad)) + `<dl class="facts">
-      ${row('Source', SRC_LABEL[srcOf(p.cad)], SRC_TITLE[srcOf(p.cad)] + (file ? `\n${file}` : '') + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
+      ${viewer ? '' : row('Source', SRC_LABEL[srcOf(p.cad)], SRC_TITLE[srcOf(p.cad)] + (file ? `\n${file}` : '') + (src.placement ? `\nPlaced: ${src.placement}` : ''))}
       ${row('Material', esc(p.material ?? ''))}
       ${row('Joint', j ? `${esc(bare(j.name))}${j.profile_joint ? ` <span class="mono dim">${esc(j.profile_joint)}</span>` : ''}` : 'fixed', j?.name)}
-      ${row('Mates', mates ? String(mates) : '')}
-      ${params ? row('Params', Object.entries(params).map(([k, v]) => `<span class="mono">${esc(k)} ${esc(v)}</span>`).join(' · ')) : ''}
-      ${reg ? row('Fit', `p95 ${num(reg.p95_mm ?? 0, 2)} mm`, `vs ${String(src.reference ?? 'reference')}: mean ${num(reg.mean_mm ?? 0, 2)} mm, volume ${num((reg.volume_ratio ?? 1) * 100, 1)}%`) : ''}
+      ${viewer ? '' : row('Mates', mates ? String(mates) : '')}
+      ${params && !viewer ? row('Params', Object.entries(params).map(([k, v]) => `<span class="mono">${esc(k)} ${esc(v)}</span>`).join(' · ')) : ''}
+      ${reg && !viewer ? row('Fit', `p95 ${num(reg.p95_mm ?? 0, 2)} mm`, `vs ${String(src.reference ?? 'reference')}: mean ${num(reg.mean_mm ?? 0, 2)} mm, volume ${num((reg.volume_ratio ?? 1) * 100, 1)}%`) : ''}
       ${p.mass_g ? row('Mass', `${num(p.mass_g)} g`, p.mass_note ?? '') : ''}
-      ${exp.stl || exp['3mf'] ? row('Export', `${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''}${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}`) : ''}</dl>
-      ${p.inferred ? `<p class="dr-inf">Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}</p>` : ''}
-      ${p.note ? `<details class="bp-disc"><summary>Note</summary><p>${esc(p.note)}</p></details>` : ''}`;
+      ${!viewer && (exp.stl || exp['3mf']) ? row('Export', `${exp.stl ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp.stl))}" download>STL</a>` : ''}${exp['3mf'] ? `<a href="${esc(joinUrl(node.asm.base ?? '/', exp['3mf']))}" download>3MF</a>` : ''}`) : ''}</dl>
+      ${p.inferred && !viewer ? `<p class="dr-inf">Inferred: ${esc(p.inferred_note || 'placement or part not confirmed')}</p>` : ''}
+      ${p.note && !viewer ? `<details class="bp-disc"><summary>Note</summary><p>${esc(p.note)}</p></details>` : ''}`;
   }
 
   // ---------------------------------------------------------------- Joints
@@ -995,7 +1001,31 @@ export function mountBuildPanel(wb: Workbench) {
     $('bp-bom-sum').textContent = lines.length || nPrint ? `${lines.length} items · ${nPrint} parts to print` : '';
   }
 
-  return { refreshIndex };
+  return {
+    refreshIndex,
+    /** What is open, for the viewer's header and link: the manifest (our build or a standalone
+     *  design) and which list the navigator shows. */
+    where: () => ({ manifest: openAsm, ourBuild: OUR_BUILD, list: src }),
+    /** Open a library design / a standalone manifest / our build whole; false when the id is unknown. */
+    openLibrary: async (id: string) => {
+      if (!libraryFrom(wb.manifest?.root).some((x) => x.id === id)) return false;
+      await openLibrary(id);
+      return true;
+    },
+    openManifest: async (id: string) => {
+      if (!index.some((x) => x.id === id)) return false;
+      await openManifest(id);
+      return true;
+    },
+    openBuild,
+    /** The navigator on a list (the viewer's link back to the Library or Our build). */
+    showList: (l: 'build' | 'library') => {
+      src = l;
+      render();
+    },
+    /** Resolves once the index and the first manifest are in. */
+    ready: () => readyP,
+  };
 }
 
 // ------------------------------------------------------------------ helpers
@@ -1015,6 +1045,7 @@ export interface TorqueRow {
 
 async function loadTorque(): Promise<TorqueRow[]> {
   try {
+    if (!mayExist(`${MECH_BASE}checks.json`)) return []; // a published snapshot without one (published.ts)
     const r = await fetch(`${MECH_BASE}checks.json`, { cache: 'no-store' });
     if (!r.ok) return [];
     const d = (await r.json()) as { torque?: TorqueRow[] };
@@ -1049,7 +1080,14 @@ export function checkVerdict(r: {
   return { toFix, warn, summary: bits.join(' · ') };
 }
 
-const EYE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+/** The parts tree's context row (the rest of the droid, outside the focus). */
+const CTX_ROW = '@rest';
+/** A tree row's three states, as one compact control: a filled disc, a dashed ring, a struck eye. */
+const VIS_BUTTONS: [Vis, string, string][] = [
+  ['solid', '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="currentColor"/></svg>', 'Solid'],
+  ['ghost', '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.5" stroke-dasharray="2.2 1.8"/></svg>', 'Ghost'],
+  ['hidden', '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2l12 12M6.5 4a6.5 6.5 0 0 1 8 4 9 9 0 0 1-1.6 2.2M9.8 12.3A6.4 6.4 0 0 1 1.5 8a9 9 0 0 1 2.3-2.8"/></svg>', 'Hidden'],
+];
 const STATUS_GLYPH: Record<string, string> = { fail: '✕', warn: '!', explained: 'i', pass: '✓' };
 const SOLO = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>';
 const PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z"/></svg>';
@@ -1071,7 +1109,6 @@ export function brief(c: { summary: string }): { cause: string; fix: string; ite
   return { cause: items.length > 1 ? `${first} (+${items.length - 1} more)` : first, fix: '', items };
 }
 
-const EYE_OFF = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2l12 12M6.5 4a6.5 6.5 0 0 1 8 4 9 9 0 0 1-1.6 2.2M9.8 12.3A6.4 6.4 0 0 1 1.5 8a9 9 0 0 1 2.3-2.8"/></svg>';
 
 /** The robot-profile joint a joint is, when its name does not already say it. */
 function profileTag(p: string | null | undefined, name = '') {
