@@ -71,14 +71,18 @@ export class ViewCube {
     };
     el.innerHTML = `<div class="bb-cube-stage"><div class="bb-cube-box">${(Object.keys(FACES) as CubeFace[])
       .map((f) => `<div class="f" style="transform:${FACES[f].css}">${cells(f)}</div>`).join('')}</div></div>
-      <button type="button" class="bb-cube-home" aria-label="Frame the view (F)" title="Frame the view (F)">${HOUSE}</button>`;
+      <button type="button" class="bb-cube-home" aria-label="Home view (H)" title="Home view (H)">${HOUSE}</button>
+      <button type="button" class="bb-cube-help" aria-label="Controls (?)" title="Controls (?)">?</button>`;
     document.body.append(el);
     this.el = el;
     this.box = el.querySelector('.bb-cube-box')!;
     el.querySelector<HTMLButtonElement>('.bb-cube-home')!.onclick = (e) => {
       (e.currentTarget as HTMLButtonElement).blur();
-      if (this.wb.guide) this.wb.frameGuide(true);
-      else this.wb.frame(false, true);
+      this.wb.homeView();
+    };
+    el.querySelector<HTMLButtonElement>('.bb-cube-help')!.onclick = (e) => {
+      (e.currentTarget as HTMLButtonElement).blur();
+      this.wb.nav.card.toggle();
     };
     // keyboard: the face centres are buttons
     el.addEventListener('click', (e) => {

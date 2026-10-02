@@ -1,17 +1,16 @@
 /**
  * Moving parts in Build, the way Fusion and Onshape do it - navigation first:
  *
- * - A plain left drag orbits, on a part or not (right drag orbits too, middle pans; Workbench sets the
- *   buttons); a click without a drag selects.
+ * - The camera is navigate.ts's (a plain drag on a part navigates; a click selects). A press this module takes
+ *   (a handle, a part to move) is claimed (`claims`) and the camera leaves it alone.
  * - Handles: a selected part (or, with ⌘/Ctrl held or in Move mode, a hovered one) shows a thin ring per
  *   revolute joint of its chain and an arrow per prismatic one, at the joint, sized to the screen. A handle
  *   always drags its one joint.
- * - ⌘ (Ctrl on Windows/Linux) + drag on a part's body moves it - grab cursor and a tint on what moves while
+ * - ⌘ (Mac) / Ctrl (Windows) + drag on a part's body moves it - grab cursor and a tint on what moves while
  *   held, a lock on a grounded part. Move mode (M, or Move in the view bar; Esc leaves) does the same with no
- *   key. Touch: one finger orbits; a long-press on a part, then drag, moves it.
+ *   key. Touch: a long-press on a part, then drag, moves it.
  * - One joint in its chain turns like a door or slides along its axis. Several (Hunter's head: tilt and
- *   roll): the first ~8 px lock onto the joint whose motion matches the cursor. Shift: all of them by IK;
- *   Shift+Alt: on to the ground; Alt: the nearest only.
+ *   roll): the first ~8 px lock onto the joint whose motion matches the cursor. Shift: all of them by IK.
  * - An actuator's output: a pinion or direct-drive horn turns its joint through its ratio (either visor horn
  *   turns the visor). A push-rod horn: "Drive: servo" turns that servo and the rods decide the joints;
  *   "Drive: joint" (the pill by a selected horn, or D) moves the joint it mostly drives.
@@ -33,6 +32,7 @@ import {
   dragMode, nextMoveMode, pressAction, rotaryValue, softLimit, solveIK, springStep, type ChainJoint, type ChainMode, type Coupling,
 } from './drag';
 import type { MGear, MJoint, MLinkage } from './manifest';
+import { platformOf, partKey } from './navigate';
 import { jointLabel } from './systems';
 import type { AsmNode, BuildHost, Workbench } from './workbench';
 
@@ -136,7 +136,8 @@ const LOCK_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 )}") 2 1, default`;
 const DRIVE_KEY = 'r3x.build.drive';
 const LONG_PRESS_MS = 450;
-const MOD_NAME = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
+const PLATFORM = platformOf(navigator.platform || navigator.userAgent);
+const MOD_NAME = PLATFORM === 'mac' ? '⌘' : 'Ctrl';
 
 export class DirectDrag {
   /** A drag is moving the model (the puppet and the camera stand down). */
@@ -160,7 +161,6 @@ export class DirectDrag {
   private solved = new Map<AsmNode, Pose>();
   private springs = new Map<string, { node: AsmNode; id: string; x: number; v: number }>();
   private lastTick = 0;
-  private controlsWere = true;
   private justDragged = false;
   private tag: HTMLDivElement | null = null;
   private pill: HTMLDivElement | null = null;
@@ -238,7 +238,7 @@ export class DirectDrag {
     addEventListener('keydown', (e) => this.onKey(e));
     // ⌘/Ctrl down or up changes what a drag on the part under the pointer would do: the cursor and tint follow
     const modKey = (e: KeyboardEvent) => {
-      const held = e.metaKey || e.ctrlKey;
+      const held = partKey(e, PLATFORM);
       if (held !== this.modHeld) {
         this.modHeld = held;
         if (this.lastPtr.x >= 0 && !this.down) this.hover(this.lastPtr.x, this.lastPtr.y);
@@ -309,6 +309,11 @@ export class DirectDrag {
     o.frustumCulled = false;
     o.raycast = () => {};
     parent.add(o);
+  }
+
+  /** Whether this press is ours (a handle, or a part to move): the camera (navigate.ts) leaves it alone. */
+  claims(pointerId: number): boolean {
+    return !!this.down && this.down.pointer === pointerId && !this.down.why;
   }
 
   /** Whether the pointer handler of a click should stand down (the press was a drag). */
@@ -1011,14 +1016,14 @@ export class DirectDrag {
     }
     clearTimeout(this.longTimer);
     if (!this.usable() || e.button !== 0) return; // right drag orbits, middle pans: the camera's
-    const dm = dragMode({ shift: e.shiftKey, alt: e.altKey });
+    const dm = dragMode({ shift: e.shiftKey });
     const touch = e.pointerType === 'touch';
     const base = { x: e.clientX, y: e.clientY, pointer: e.pointerId, touch, mods: { free: dm.free, ground: dm.chain === 'extend' } };
     const exploded = this.wb.explode > 1e-3;
     const hh = !exploded ? this.handleAt(e.clientX, e.clientY) : null;
     const hit = hh ? null : this.wb.hitAt(e.clientX, e.clientY);
     const target = hit ? this.targetOf(hit.object, dm.chain) : null;
-    const input = { button: 0, mod: e.metaKey || e.ctrlKey, moveMode: this.moveMode, onHandle: !!hh,
+    const input = { button: 0, mod: partKey(e, PLATFORM), moveMode: this.moveMode, onHandle: !!hh,
       target: (!hit ? 'none' : target ? 'movable' : 'grounded') as 'none' | 'movable' | 'grounded', exploded };
     const act = pressAction(input);
     if (act === 'navigate') {
@@ -1028,8 +1033,6 @@ export class DirectDrag {
         this.longTimer = window.setTimeout(() => {
           if (this.down || pressAction({ ...input, longPress: true }) !== 'move') return;
           this.down = { ...base, x: clientX, y: clientY, pointer: pointerId, hit, target, handle: null, why: null };
-          this.controlsWere = this.host.controls.enabled;
-          this.host.controls.enabled = false;
           this.say('Move', clientX, clientY - 40, true);
         }, LONG_PRESS_MS);
         this.longFrom = { x: e.clientX, y: e.clientY, pointer: e.pointerId };
@@ -1046,8 +1049,6 @@ export class DirectDrag {
     }
     if (!this.down.why) {
       // a handle or a part to move: the press is ours, not the camera's
-      this.controlsWere = this.host.controls.enabled;
-      this.host.controls.enabled = false;
     }
   }
 
@@ -1136,7 +1137,6 @@ export class DirectDrag {
   }
 
   private release() {
-    if (this.down && !this.down.why) this.host.controls.enabled = this.controlsWere;
     this.down = null;
     this.grab = null;
     this.dragging = false;

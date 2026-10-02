@@ -366,7 +366,7 @@ export function mountBuildPanel(wb: Workbench) {
       setLook(LOOKS[k]);
       e.preventDefault();
     } else if (e.key === 'f' || e.key === 'F') {
-      wb.frame(false, true);
+      wb.frameSelection(); // the selected part, else everything
       e.preventDefault();
     }
   });

@@ -28,11 +28,9 @@ describe('navigation or move: what a press does', () => {
     expect(pressAction(press({ moveMode: true, exploded: true }))).toBe('blocked');
   });
 
-  it('modifiers pick the joints: lock by default, Alt the nearest, Shift all, Shift+Alt to the ground', () => {
-    expect(dragMode({ shift: false, alt: false })).toEqual({ chain: 'default', free: false });
-    expect(dragMode({ shift: false, alt: true })).toEqual({ chain: 'nearest', free: false });
-    expect(dragMode({ shift: true, alt: false })).toEqual({ chain: 'default', free: true });
-    expect(dragMode({ shift: true, alt: true })).toEqual({ chain: 'extend', free: true });
+  it('a part drag: the direction lock, or with Shift all its joints together (no other variants)', () => {
+    expect(dragMode({ shift: false })).toEqual({ chain: 'default', free: false });
+    expect(dragMode({ shift: true })).toEqual({ chain: 'default', free: true });
   });
 
   it('Move mode: M toggles, Esc leaves, other keys keep it', () => {

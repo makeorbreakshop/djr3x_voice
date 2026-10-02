@@ -299,5 +299,30 @@ body:not([data-mode="build"]) .bb-move-badge { display: none; }
 .bb-cube-home { position: absolute; left: -6px; top: -4px; width: 22px; height: 22px; padding: 3px; border-radius: 5px; border: 0;
   background: rgba(14,16,21,.6); color: #c9ccd2; cursor: pointer; }
 .bb-cube-home:hover { color: #fff; background: rgba(14,16,21,.85); }
+.bb-cube-help { position: absolute; left: -6px; top: 22px; width: 22px; height: 22px; padding: 0; border-radius: 5px; border: 0;
+  background: rgba(14,16,21,.6); color: #c9ccd2; font: 600 12px/22px system-ui, sans-serif; cursor: pointer; }
+.bb-cube-help:hover { color: #fff; background: rgba(14,16,21,.85); }
 .bb-cube-home svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
 @media (max-width: 720px) { .bb-cube { transform: scale(.85); transform-origin: top right; } }
+
+/* The controls card (controlscard.ts): ? or the ? by the view cube */
+.bb-keys { position: fixed; z-index: 30; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px));
+  padding: 12px 14px 12px; border-radius: 10px; font: 12.5px/1.35 system-ui, sans-serif; color: #e6e8ec;
+  background: #15171c; border: 1px solid rgba(242,243,245,.14); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+.bb-keys[hidden] { display: none; }
+.bb-keys header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.bb-keys header b { font-size: 13px; }
+.bb-keys header .bb-keys-close { flex: none; width: auto; height: auto; min-width: 0; margin: 0; border: 0; background: none; color: #c9ccd2; font-size: 18px; line-height: 1; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+.bb-keys header .bb-keys-close:hover { background: rgba(255,255,255,.08); color: #fff; }
+.bb-keys table { width: 100%; border-collapse: collapse; }
+.bb-keys th, .bb-keys td { text-align: left; padding: 4px 6px; border-top: 1px solid rgba(242,243,245,.07); vertical-align: top; }
+.bb-keys thead th { border-top: 0; color: #9aa0aa; font-weight: 500; font-size: 11.5px; }
+.bb-keys tbody th { color: #9aa0aa; font-weight: 500; white-space: nowrap; width: 1%; }
+.bb-keys-row { margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.bb-keys-row.dim { color: #9aa0aa; font-size: 11.5px; }
+.bb-keys kbd { font: 11px ui-monospace, monospace; padding: 0 4px; border: 1px solid rgba(242,243,245,.25); border-radius: 3px; color: #e6e8ec; }
+.bb-keys-scroll { margin-top: 10px; display: flex; align-items: center; gap: 4px; color: #9aa0aa; font-size: 11.5px; }
+.bb-keys-scroll span { margin-right: 4px; }
+.bb-keys-scroll button { flex: none; width: auto; min-width: 0; margin: 0; font: inherit; color: #c9ccd2; background: rgba(255,255,255,.05); border: 1px solid rgba(242,243,245,.12); border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+.bb-keys-scroll button[aria-pressed="true"] { color: #fff; background: rgba(232,118,42,.4); border-color: rgba(232,118,42,.6); }
+body:not([data-mode="build"]) .bb-keys { display: none; }

@@ -21,6 +21,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DirectDrag } from './direct';
 import { poleSafe, ViewCube } from './viewcube';
+import { Navigator } from './navigate';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
   assemblyLabel, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
@@ -212,7 +213,7 @@ export class Workbench {
   private saved: { pos: THREE.Vector3; target: THREE.Vector3; min: number; max: number; polar: [number, number]; az: [number, number] } | null = null;
   private sweep: { node: AsmNode; joint: string; t0: number; path: [number, number][]; contact: number | null } | null = null;
   private picking = { x: 0, y: 0, down: false };
-  private savedButtons: OrbitControls['mouseButtons'] | null = null;
+  private controlsWere = true;
   /** The view cube's turn to a view: the direction swings (slerp) about the target, the distance kept. */
   private spin: { d0: THREE.Vector3; q: THREE.Quaternion; dist: number; start: number; dur: number } | null = null;
   /** Instructions open on a section (null: Build as usual). */
@@ -233,6 +234,8 @@ export class Workbench {
   readonly direct: DirectDrag;
   /** The view cube in the viewport's corner (viewcube.ts). */
   readonly cube: ViewCube;
+  /** The camera's input in Build: orbit, pan, zoom (navigate.ts). */
+  readonly nav: Navigator;
 
   constructor(private host: BuildHost) {
     this.root.name = 'build';
@@ -275,6 +278,7 @@ export class Workbench {
       this.pick(e.clientX, e.clientY);
     });
     this.direct = new DirectDrag(this, host);
+    this.nav = new Navigator(this, host);
     this.cube = new ViewCube(this, host);
     host.controls.addEventListener('start', () => { this.spin = null; });
     this.cube.update(false);
@@ -320,9 +324,9 @@ export class Workbench {
       c.maxPolarAngle = Math.PI;
       c.minAzimuthAngle = -Infinity;
       c.maxAzimuthAngle = Infinity;
-      // as in Onshape: left and right drag orbit, middle pans (wheel and pinch zoom; touch as it was)
-      this.savedButtons = { ...c.mouseButtons };
-      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+      // Build's camera input is navigate.ts (CAD conventions); OrbitControls only holds the target
+      this.controlsWere = c.enabled;
+      c.enabled = false;
       if (this.top) this.frame();
     } else if (this.saved) {
       this.host.camera.position.copy(this.saved.pos);
@@ -335,7 +339,7 @@ export class Workbench {
       this.fly = null;
       this.spin = null;
       this.stopDemo();
-      if (this.savedButtons) c.mouseButtons = this.savedButtons;
+      c.enabled = this.controlsWere;
       this.direct.setMoveMode(false);
       this.cube.update(false);
     }
@@ -2696,6 +2700,7 @@ export class Workbench {
   tick(now = performance.now()) {
     if (!this.active) return;
     this.direct.tick(now);
+    this.nav.tick(now);
     this.cube.update(!this.video);
     this.holdInspection();
     let moving = false;
@@ -3268,6 +3273,32 @@ export class Workbench {
 
   /** Point the camera at the model in view - the scope's parts when there is a scope - from
    *  3/4 front, or keeping the view direction. `animate`: fly there. */
+  /** Frame one part (double-click): the view turns to it and orbits about it, keeping the direction. */
+  framePart(id: string) {
+    const o = this.parts.get(id)?.mesh ?? this.fast.get(id)?.obj;
+    if (!o) return;
+    const box = new THREE.Box3().setFromObject(o);
+    if (!box.isEmpty()) this.frameBox(box, true, true);
+  }
+
+  /** Frame everything in view (the focus, else the build), keeping the direction. */
+  frameAll() {
+    if (this.guide) this.frameGuide(true);
+    else this.frame(true, true);
+  }
+
+  /** F: the selected part, else everything. */
+  frameSelection() {
+    if (this.selected && !this.guide) this.framePart(this.selected);
+    else this.frameAll();
+  }
+
+  /** H / Home: the default view of the focus (or the droid), from the front three-quarter. */
+  homeView() {
+    if (this.guide) this.frameGuide(true);
+    else this.frame(false, true);
+  }
+
   frame(keepDirection = false, animate = false) {
     let box = this.scope ? this.bounds(true, this.scope.parts) : this.bounds(true);
     if (box.isEmpty() && this.scope) box = this.bounds(false, this.scope.parts);
