@@ -243,6 +243,11 @@ details.bv-sec[hidden] { display: none; }
   color: #f2f3f5; background: rgba(14,16,21,.78); white-space: nowrap; }
 .bb-labels span::before { content: ""; position: absolute; left: -10px; top: 50%; width: 9px; height: 1px; background: rgba(242,243,245,.7); }
 body:not([data-mode="build"]) .bb-labels { display: none; }
+/* direct manipulation (direct.ts): the live value by the cursor while dragging a part, or a short hint */
+.bb-drag-tag { position: fixed; z-index: 6; pointer-events: none; padding: 3px 8px; border-radius: 5px; font: 12px/1.35 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums; color: #f2f3f5; background: rgba(14,16,21,.84); border: 1px solid rgba(232,118,42,.55); white-space: nowrap; }
+.bb-drag-tag.hint { border-color: rgba(242,243,245,.18); color: #c9ccd2; }
+body:not([data-mode="build"]) .bb-drag-tag { display: none; }
 /* the overlap picked in Checks: what it is, in words */
 .intf li.on > button { background: rgba(255,59,48,.08); }
 .intf li.known.on > button { background: rgba(242,194,48,.08); }

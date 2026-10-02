@@ -19,6 +19,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { DirectDrag } from './direct';
 import { gearMatrix, hornMatrix, linkMatrices, rodMatrix, solveRod, type Pose } from './kinematics';
 import {
   assemblyLabel, exposed, isKitPart, paintFinish, exteriorFinish, finishProblem, jointLabel, libraryParts, MATERIAL, mechanismFinish, motionSystems, movedBy, subtreeParts,
@@ -224,6 +225,9 @@ export class Workbench {
     color: GUIDE_COLOR.add, dashSize: 0.0035, gapSize: 0.0025, transparent: true, depthTest: false, depthWrite: false,
   }));
 
+  /** Press-and-drag on the model (direct.ts). */
+  readonly direct: DirectDrag;
+
   constructor(private host: BuildHost) {
     this.root.name = 'build';
     this.root.visible = false;
@@ -258,11 +262,13 @@ export class Workbench {
       this.picking = { x: e.clientX, y: e.clientY, down: e.button === 0 };
     });
     el.addEventListener('pointerup', (e) => {
+      const dragged = this.direct.takeClick();
       if (!this.active || !this.picking.down) return;
       this.picking.down = false;
-      if (Math.hypot(e.clientX - this.picking.x, e.clientY - this.picking.y) > 4) return;
+      if (dragged || Math.hypot(e.clientX - this.picking.x, e.clientY - this.picking.y) > 4) return;
       this.pick(e.clientX, e.clientY);
     });
+    this.direct = new DirectDrag(this, host);
   }
 
   onChange(fn: () => void) {
@@ -641,6 +647,7 @@ export class Workbench {
   }
 
   private clear() {
+    this.undoStack = [];
     this.root.clear();
     this.parts.clear();
     this.fast.clear();
@@ -1249,6 +1256,7 @@ export class Workbench {
   }
 
   home() {
+    this.pushUndo();
     this.sweep = null;
     this.demo = null;
     this.labels(null);
@@ -1257,6 +1265,60 @@ export class Workbench {
     this.pose();
     this.refresh();
     this.emit();
+  }
+
+  // ------------------------------------------------------------------ direct manipulation (direct.ts)
+
+  /** A drag is moving the model. */
+  get dragging() {
+    return this.direct.dragging;
+  }
+
+  /** Re-pose after `node.pose` was written in place; `notify`: the panel and listeners too. */
+  applyPose(notify = true) {
+    this.pose();
+    if (notify) this.emit();
+    else this.host.interact();
+  }
+
+  /** Anything animating the pose (How it works, a sweep) stops: the hand is on the model. */
+  stopMotion() {
+    if (this.sweep) {
+      this.sweep = null;
+      this.contact = null;
+    }
+    this.stopDemo();
+  }
+
+  private undoStack: Map<AsmNode, Pose>[] = [];
+
+  /** Keep the pose as it is now for Ctrl/Cmd+Z (before a drag, a nudge, Home). */
+  pushUndo() {
+    const m = new Map<AsmNode, Pose>();
+    this.forEachNode((n) => m.set(n, { ...n.pose }));
+    this.undoStack.push(m);
+    if (this.undoStack.length > 50) this.undoStack.shift();
+  }
+
+  /** Back to the last kept pose; false when there is none. */
+  undoPose(): boolean {
+    const m = this.undoStack.pop();
+    if (!m) return false;
+    this.stopMotion();
+    this.forEachNode((n) => (n.pose = { ...(m.get(n) ?? {}) }));
+    this.contact = null;
+    this.pose();
+    this.refresh();
+    this.emit();
+    return true;
+  }
+
+  /** What a part or fastener mesh is: its assembly node, the link it rides and its id. */
+  grabOf(mesh: THREE.Object3D): { node: AsmNode; link: string | null; id: string } | null {
+    const po = this.allParts.find((x) => x.mesh === mesh);
+    if (po) return { node: po.node, link: po.part.link ?? null, id: po.part.id };
+    const fo = this.allFast.find((x) => x.obj === mesh);
+    return fo ? { node: fo.node, link: fo.f.link ?? null, id: fo.f.id } : null;
   }
 
   /** Apply every node's pose: link matrices, horns and rods. */
@@ -3178,6 +3240,12 @@ export class Workbench {
   }
 
   private pick(x: number, y: number) {
+    const h = this.hitAt(x, y)?.object;
+    this.select(h ? (h.userData.partId ?? h.userData.fastenerId) : null);
+  }
+
+  /** The nearest part or fastener a click at a screen point would select (null: none). */
+  hitAt(x: number, y: number): THREE.Intersection | null {
     const el = this.host.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((x - el.left) / el.width) * 2 - 1, -((y - el.top) / el.height) * 2 + 1);
     const ray = new THREE.Raycaster();
@@ -3196,8 +3264,7 @@ export class Workbench {
       }
       return true;
     });
-    const h = hits[0]?.object;
-    this.select(h ? (h.userData.partId ?? h.userData.fastenerId) : null);
+    return hits[0] ?? null;
   }
 
   // ------------------------------------------------------------------ queries for the panel

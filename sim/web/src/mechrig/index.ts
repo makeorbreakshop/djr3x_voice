@@ -146,7 +146,7 @@ export class MechRig {
   frame(joints: Record<string, number> | null | undefined, t: number) {
     const wb = this.host.workbench;
     if (wb.active) {
-      const live = this.puppeting && !!joints && !this.servos.dragging;
+      const live = this.puppeting && !!joints && !this.servos.dragging && !wb.dragging;
       if (live) {
         this.followPuppet(joints!);
         this.host.interact();
