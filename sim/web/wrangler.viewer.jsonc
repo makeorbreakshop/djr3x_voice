@@ -1,0 +1,10 @@
+{
+  // The Build viewer on its own subdomain: static assets only (no Worker script, nothing metered).
+  // Publish with `npm run publish:viewer`, then `npx wrangler deploy -c wrangler.viewer.jsonc`.
+  // Missing files are real 404s (no single-page fallback), so a missing mesh fails as a 404, not as HTML.
+  "name": "r3x-viewer",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "r3x.starforgeautomation.com", "custom_domain": true }],
+  "assets": { "directory": "./dist-viewer", "not_found_handling": "none" }
+}

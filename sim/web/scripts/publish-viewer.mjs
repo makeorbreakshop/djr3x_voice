@@ -137,4 +137,24 @@ if (!flag('--no-pack')) {
   }
 }
 for (const l of packed) console.log(`packed ${l}`);
+
+// Static-host files (Cloudflare Workers static assets; others ignore them): the page at the root, a year's
+// caching for the content-hashed scripts and meshes (the JSON is fetched no-store), and no search indexing,
+// since the meshes come from the club's group-only kit and the viewer is shared by link within the club.
+fs.copyFileSync(path.join(OUT, 'viewer.html'), path.join(OUT, 'index.html'));
+fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
+fs.writeFileSync(path.join(OUT, '_headers'), `/*
+  X-Robots-Tag: noindex, nofollow
+  X-Content-Type-Options: nosniff
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/*
+  Cache-Control: public, max-age=31536000, immutable
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/viewer.html
+  Cache-Control: no-cache
+`);
 console.log(`published ${entries.map((a) => a.id).join(', ')}: ${files} files, ${(bytes / 1e6).toFixed(1)} MB of data -> ${OUT}`);
