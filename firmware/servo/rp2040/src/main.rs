@@ -11,7 +11,7 @@
 //! | `usb` | - | the USB device stack |
 //!
 //! Pin map (see README): channel n = GPIO n for n in 0..16 (hardware PWM slice n/2, A/B),
-//! channels 16/17 = GPIO16/17 (PIO0 SM0/SM1), INA219 on I2C0 (SDA GPIO20, SCL GPIO21),
+//! channels 16/17/18 = GPIO16/17/18 (PIO0 SM0/SM1/SM2), INA219 on I2C0 (SDA GPIO20, SCL GPIO21),
 //! servo rail enable GPIO22 (active high), status LED GPIO25.
 
 #![no_std]
@@ -37,6 +37,7 @@ use embassy_time::{Duration, Instant, Ticker, Timer};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::{Builder, UsbDevice};
 use r3x_servo_ctl::{ina219_shunt_to_ma, Controller, CHANNELS, DT};
+const _: () = assert!(CHANNELS == 19); // 16 PWM slices + PIO0 SM0..SM2
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -101,14 +102,16 @@ async fn main(spawner: Spawner) {
     ];
     PwmBatch::set_enabled(true, |b| slices.iter().for_each(|s| b.enable(s)));
 
-    // PIO PWM, channels 16..18.
-    let Pio { mut common, sm0, sm1, .. } = Pio::new(p.PIO0, Irqs);
+    // PIO PWM, channels 16..19 (18: the second visor servo, GPIO18).
+    let Pio { mut common, sm0, sm1, sm2, .. } = Pio::new(p.PIO0, Irqs);
     static PRG: StaticCell<PioPwmProgram<'static, PIO0>> = StaticCell::new();
     let prg = PRG.init(PioPwmProgram::new(&mut common));
     let mut pio16 = PioPwm::new(&mut common, sm0, p.PIN_16, prg);
     let mut pio17 = PioPwm::new(&mut common, sm1, p.PIN_17, prg);
+    let mut pio18 = PioPwm::new(&mut common, sm2, p.PIN_18, prg);
     pio16.set_period(CoreDuration::from_millis(20));
     pio17.set_period(CoreDuration::from_millis(20));
+    pio18.set_period(CoreDuration::from_millis(20));
 
     static CTL: StaticCell<Ctl> = StaticCell::new();
     let ctl: &'static Ctl = CTL.init(Mutex::new(RefCell::new(Controller::new())));
@@ -143,7 +146,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(serial_rx(rx, ctl).unwrap());
     spawner.spawn(serial_tx(tx).unwrap());
     spawner.spawn(rail_task(i2c, ctl).unwrap());
-    spawner.spawn(control(ctl, slices, pio16, pio17, rail, led).unwrap());
+    spawner.spawn(control(ctl, slices, pio16, pio17, pio18, rail, led).unwrap());
 }
 
 #[embassy_executor::task]
@@ -218,11 +221,12 @@ async fn control(
     mut slices: [Pwm<'static>; 8],
     mut pio16: PioPwm<'static, PIO0, 0>,
     mut pio17: PioPwm<'static, PIO0, 1>,
+    mut pio18: PioPwm<'static, PIO0, 2>,
     mut rail: Output<'static>,
     mut led: Output<'static>,
 ) -> ! {
     let mut ticker = Ticker::every(Duration::from_hz(r3x_servo_ctl::CONTROL_HZ as u64));
-    let mut pio_on = [false; 2];
+    let mut pio_on = [false; 3];
     let mut n: u32 = 0;
     loop {
         ticker.next().await;
@@ -248,7 +252,8 @@ async fn control(
         n = n.wrapping_add(1);
         if n.is_multiple_of(4) {
             pio_write(&mut pio16, &mut pio_on[0], pulses[16]);
-            pio_write(&mut pio17, &mut pio_on[1], pulses[CHANNELS - 1]);
+            pio_write(&mut pio17, &mut pio_on[1], pulses[17]);
+            pio_write(&mut pio18, &mut pio_on[2], pulses[18]);
         }
     }
 }

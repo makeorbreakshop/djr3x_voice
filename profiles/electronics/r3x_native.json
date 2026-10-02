@@ -2,7 +2,7 @@
   "id": "r3x_native",
   "label": "R3X native (face + chest Nanos, Teensy 4.1 servo controller)",
   "vendor": "this repo",
-  "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an 8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 chest logic-panel pixels (rex_chest_v1); our Teensy 4.1 controller (firmware/servo/teensy41) runs the 18 servo channels.",
+  "description": "Today's build: an Arduino Nano in the head drives two 7-LED WS2812 eye jewels and an 8-pixel mouth V (rex_face_v3_clean); a second Nano behind the middle ring drives the 33 chest logic-panel pixels (rex_chest_v1); our Teensy 4.1 controller (firmware/servo/teensy41) runs the 19 servo channels.",
   "support": "driven",
   "emulator": "native",
   "boards": [
@@ -278,7 +278,7 @@
     {
       "id": "servo_ctl",
       "model": "Teensy 4.1 + 3 x 74AHCT245 + INA219 + rail MOSFET",
-      "role": "18 servo channels (FlexPWM + QuadTimer, 50 Hz, 0.43 us), goals at event time",
+      "role": "19 servo channels (FlexPWM + QuadTimer, 50 Hz, 0.43 us), goals at event time",
       "url": "https://www.pjrc.com/store/teensy41.html",
       "dims_mm": [
         61.0,
@@ -316,7 +316,7 @@
         },
         {
           "id": "servo",
-          "kind": "servo_3p_2.54 x18",
+          "kind": "servo_3p_2.54 x19",
           "pins": [
             "ch0 pin2",
             "ch1 pin3",
@@ -336,6 +336,7 @@
             "ch15 pin33",
             "ch16 pin36",
             "ch17 pin37",
+            "ch18 pin14",
             "6V",
             "GND"
           ],
@@ -1570,7 +1571,7 @@
       "board": "servo_ctl",
       "driver": "r3x_servo",
       "support": "driven",
-      "note": "Every profile actuator with driver r3x_servo (channel n = TEENSY_SERVO_PINS[n])."
+      "note": "Every profile actuator with driver r3x_servo (channel n = TEENSY_SERVO_PINS[n]). Hunter's visor (Physical profile) is two: visor_servo_l -> actuator visor_l on channel 3, visor_servo_r -> visor_r on channel 18 (pin 14), inverted (the servos face opposite ways), each with its own trim_us to match the pair; the one visor joint drives both."
     }
   ],
   "power": [

@@ -101,10 +101,44 @@ pub fn write(path: &Path, actuator: &str, m: &Measured) -> Result<RobotProfile, 
     RobotProfile::from_json(&out).map_err(|e| e.to_string())
 }
 
+/// Set one actuator's trim (us added to its centre pulse), keeping everything else: how a pair of
+/// servos on one joint is matched after each is centred (Hunter's visor, `visor_l` / `visor_r`: trim
+/// one until the two stop fighting). The trimmed centre must stay inside the pulse range.
+pub fn apply_trim(text: &str, actuator: &str, trim_us: f64) -> Result<String, String> {
+    let before = RobotProfile::from_json(text).map_err(|e| format!("current profile invalid: {e}"))?;
+    let a = before.actuators.iter().find(|a| a.name == actuator).ok_or_else(|| format!("no actuator {actuator:?}"))?;
+    let c = &a.calibration;
+    let at = c.center_us + trim_us;
+    if !trim_us.is_finite() || at < c.pulse_min_us || at > c.pulse_max_us {
+        return Err(format!("trim {trim_us} us puts the centre at {at} us, outside {}..{}", c.pulse_min_us, c.pulse_max_us));
+    }
+    let mut doc: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let act = doc["actuators"]
+        .as_array_mut()
+        .and_then(|acts| acts.iter_mut().find(|v| v["name"] == actuator))
+        .ok_or("actuator vanished")?;
+    act["calibration"]["trim_us"] = json!(trim_us);
+    let out = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n";
+    RobotProfile::from_json(&out).map_err(|e| format!("trimmed profile invalid: {e}"))?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use r3x_contracts::profile::CalibrationStatus;
+
+    #[test]
+    fn trims_one_servo_of_the_visor_pair() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json");
+        let t = std::fs::read_to_string(path).unwrap();
+        let out = apply_trim(&t, "visor_r", -6.5).unwrap();
+        let p = RobotProfile::from_json(&out).unwrap();
+        let get = |n: &str| p.actuators.iter().find(|a| a.name == n).unwrap().calibration.clone();
+        assert_eq!((get("visor_r").trim_us, get("visor_l").trim_us), (-6.5, 0.0));
+        assert!(apply_trim(&t, "visor_r", 5000.0).unwrap_err().contains("outside"));
+        assert!(apply_trim(&t, "nope", 1.0).unwrap_err().contains("no actuator"));
+    }
 
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.json");
 

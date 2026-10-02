@@ -450,7 +450,11 @@ impl RobotProfile {
                 if !names.contains(joint.as_str()) {
                     errs.push(format!("actuator {n}: unknown joint {joint}"));
                 }
-                if !driven.insert(joint.as_str()) {
+                // a joint several servos drive at once (Hunter's visor, one each side) is fine when
+                // each of those actuators drives that joint alone
+                let shared_ok = a.joints.len() == 1
+                    && self.actuators.iter().filter(|b| b.joints.contains_key(joint)).all(|b| b.joints.len() == 1);
+                if !driven.insert(joint.as_str()) && !shared_ok {
                     errs.push(format!("actuator {n}: joint {joint} already driven"));
                 }
             }

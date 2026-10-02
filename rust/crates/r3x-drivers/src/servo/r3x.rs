@@ -53,14 +53,19 @@ impl R3xServoConfig {
 }
 
 /// Channel configs for every actuator on `kind`, keyed by primary joint (the first joint by
-/// name, as the performer's pipeline orders them).
+/// name, as the performer's pipeline orders them). A joint several servos drive at once
+/// (Hunter's visor: `visor_l` and `visor_r`, mirrored by `invert`, each with its own trim) keys
+/// its first actuator by the joint and the others `joint@actuator`; a goal for the joint goes to
+/// all of them ([`R3xServoConfig::for_joint`]).
 pub fn channel_configs(profile: &RobotProfile, kind: DriverKind) -> BTreeMap<String, ChannelConfig> {
+    let mut seen = std::collections::HashSet::new();
     profile
         .actuators
         .iter()
         .filter(|a| a.driver == kind)
         .filter_map(|a| {
             let (jname, _) = a.joints.iter().next()?;
+            let key = if seen.insert(jname.clone()) { jname.clone() } else { format!("{jname}@{}", a.name) };
             let j = profile.joint(jname)?;
             let c = &a.calibration;
             let cfg = ChannelConfig {
@@ -80,9 +85,19 @@ pub fn channel_configs(profile: &RobotProfile, kind: DriverKind) -> BTreeMap<Str
                 a_max: j.a_max as f32,
                 j_max: j.j_max as f32,
             };
-            Some((jname.clone(), cfg))
+            Some((key, cfg))
         })
         .collect()
+}
+
+impl R3xServoConfig {
+    /// Every channel that drives `joint` (one, or a mirrored pair).
+    pub fn for_joint<'a>(&'a self, joint: &'a str) -> impl Iterator<Item = &'a ChannelConfig> + 'a {
+        self.channels
+            .iter()
+            .filter(move |(k, _)| k.as_str() == joint || k.strip_prefix(joint).is_some_and(|r| r.starts_with('@')))
+            .map(|(_, c)| c)
+    }
 }
 
 pub struct R3xServoDriver {
@@ -263,8 +278,21 @@ impl Driver for R3xServoDriver {
     fn on_out(&mut self, out: &Out, _now: f64) {
         let msg = match out {
             Out::ServoGoal { joint, target, v_max, a_max, j_max, .. } => {
-                let Some(c) = self.cfg.channels.get(joint) else { return };
-                Msg::Goal { ch: c.ch, target: *target as f32, v_max: *v_max as f32, a_max: *a_max as f32, j_max: *j_max as f32 }
+                // every servo on the joint (a mirrored pair gets the same goal; each channel's own
+                // calibration turns it into its pulse: invert and trim)
+                let goals: Vec<Msg> = self
+                    .cfg
+                    .for_joint(joint)
+                    .map(|c| Msg::Goal { ch: c.ch, target: *target as f32, v_max: *v_max as f32, a_max: *a_max as f32, j_max: *j_max as f32 })
+                    .collect();
+                for m in &goals {
+                    if let Msg::Goal { ch, .. } = m {
+                        if self.channel_on(*ch) {
+                            self.send(m);
+                        }
+                    }
+                }
+                return;
             }
             Out::ServoPulse { actuator, us } => {
                 let Some(&ch) = self.cfg.actuators.get(actuator) else { return };
@@ -389,6 +417,36 @@ mod tests {
         let roll = &cfg.channels["head_roll"];
         assert_eq!((roll.ch, roll.gear, roll.soft_min, roll.soft_max), (17, 2.4, -10.0, 10.0));
         assert_eq!(cfg.actuators["headroll"], 17);
+    }
+
+    /// The Physical rig's visor (`robot.generated.json`): one joint, two channels, mirrored by
+    /// `invert`, each with its own trim; one goal reaches both.
+    #[test]
+    fn the_visor_goal_reaches_both_mirrored_servos() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json");
+        let mut p = RobotProfile::load(path).unwrap();
+        for (n, t) in [("visor_l", 8.0), ("visor_r", -5.0)] {
+            p.actuators.iter_mut().find(|a| a.name == n).unwrap().calibration.trim_us = t;
+        }
+        let cfg = R3xServoConfig::from_profile(&p);
+        let v: Vec<_> = cfg.for_joint("visor").copied().collect();
+        assert_eq!(v.len(), 2);
+        assert_eq!((v[0].ch, v[1].ch), (cfg.actuators["visor_l"], cfg.actuators["visor_r"]));
+        assert_ne!(v[0].invert, v[1].invert, "mirrored");
+        assert_eq!((v[0].trim_us, v[1].trim_us), (8.0, -5.0));
+        // the controller turns one goal into equal and opposite pulses about centre + trim
+        let cal = |c: &ChannelConfig| r3x_motion::Calibration {
+            center_us: f64::from(c.center_us), center_value: f64::from(c.center_value), trim_us: f64::from(c.trim_us),
+            invert: c.invert, gear: f64::from(c.gear), mm_per_deg: None, pulse_min_us: f64::from(c.pulse_min_us),
+            pulse_max_us: f64::from(c.pulse_max_us), range_deg: f64::from(c.range_deg),
+        };
+        let (l, r) = (cal(&v[0]), cal(&v[1]));
+        for x in [-15.0, 0.0, 12.0, 30.0] {
+            let dl = l.value_to_us(x) - (l.center_us + 8.0);
+            let dr = r.value_to_us(x) - (r.center_us - 5.0);
+            assert!((dl + dr).abs() < 1e-6, "{x}: {dl} {dr}");
+        }
+        assert!(cfg.for_joint("visor_l").next().is_none() && cfg.for_joint("vis").next().is_none());
     }
 
     #[test]

@@ -278,6 +278,11 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
                 act["servo"] = key
         rest[name] = 0.0
 
+    # A joint several servos drive at once (Hunter's visor: one each side, mirrored): one profile actuator per
+    # servo, the first on the joint's channel, the others on the next free channels; a negative
+    # servo_deg_per_unit flips `invert`. Each carries its own trim_us (the pair is matched by it).
+    _split_actuators(gen, mech_joints, changes)
+
     # Drives: one entry per servo part (a push-rod pair is two servos serving two joints).
     drives = []
     seen = set()
@@ -346,6 +351,48 @@ def generate(manifest: Path, profile_path: Path, phase_a_path: Path | None = Non
         "total_kg": _rd(sum(x["kg"] for x in links), 3),
     }
     return {"profile": gen, "changes": changes, "tree": tree}
+
+
+def _split_actuators(gen: dict, mech_joints: dict, changes: list) -> None:
+    acts = gen.get("actuators", [])
+    for name, mj in mech_joints.items():
+        by = (mj["drive"] or {}).get("servo_deg_per_unit_by_servo") or {}
+        if len(by) < 2 or not mj["driven"]:
+            continue
+        old = next((a for a in acts if list(a.get("joints", {})) == [name]), None)
+        if old is None:
+            continue
+        used = {a["channel"] for a in acts if a.get("driver") == old.get("driver")}
+        i = acts.index(old)
+        new = []
+        for k, (servo, sdpu) in enumerate(by.items()):
+            a = copy.deepcopy(old)
+            tag = servo.rsplit("_", 1)[-1]
+            a["name"] = f"{old['name']}_{tag}"
+            if k:
+                ch = 0
+                while ch in used:
+                    ch += 1
+                used.add(ch)
+                a["channel"] = ch
+            cal = a["calibration"]
+            # new servos on the Physical build: the centre is the servo's own, not the Original rig's script
+            cal.update(center_us=1500, trim_us=cal.get("trim_us", 0) if not k else 0, gear=abs(sdpu),
+                       invert=bool(old["calibration"].get("invert")) != (sdpu < 0), status="assumed")
+            a["note"] = (f"{servo} (mech part): one of {len(by)} servos on {name}, {sdpu:+g} servo deg per joint deg; "
+                         "invert follows the sign (the two face opposite ways). trim_us matches the pair: centre each, then "
+                         "trim one until they do not fight.")
+            new.append(a)
+            changes.append(dict(joint=name, field=f"actuator {a['name']}", old=old["name"] if not k else "-",
+                                new=f"channel {a['channel']}, invert {a['calibration']['invert']}", behaviour=True,
+                                note="the joint's servos, one actuator each (hardware only; the sim is unaffected)"))
+        acts[i:i + 1] = new
+        sc = gen.get("servo_controller") or {}
+        top = max(a["channel"] for a in acts if a.get("driver") == old.get("driver")) + 1
+        if sc and sc.get("channels", 0) < top:
+            changes.append(dict(joint="-", field="servo_controller.channels", old=sc["channels"], new=top, behaviour=False,
+                                note="one more servo channel (the controller firmware's CHANNELS)"))
+            sc["channels"] = top
 
 
 def _couplings(tree) -> list[dict]:

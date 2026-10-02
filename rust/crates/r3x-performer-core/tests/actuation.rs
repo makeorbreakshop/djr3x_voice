@@ -317,3 +317,37 @@ fn coupled_limits_clamp_commands_on_the_physical_rig() {
     let lim = c.range_at(act.target_of("head_roll").unwrap()).unwrap().1;
     assert!(act.target_of("head_tilt").unwrap() <= lim + 1e-9);
 }
+
+/// Hunter's visor on the Physical rig: one joint, two servos facing opposite ways (rigsync splits
+/// the actuator: `visor_l` on the joint's channel, `visor_r` on the next free one, inverted). A visor
+/// command sets both, and their pulses are equal and opposite about the centre, each offset by its
+/// own trim (the pair is matched by trimming one).
+#[test]
+fn a_visor_command_drives_both_servos_equal_and_opposite_plus_trim() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../profiles/r3x/robot.generated.json");
+    let mut profile = r3x_contracts::RobotProfile::load(path).unwrap();
+    for (name, trim) in [("visor_l", 12.0), ("visor_r", -7.0)] {
+        profile.actuators.iter_mut().find(|a| a.name == name).expect(name).calibration.trim_us = trim;
+    }
+    let mut act = Actuation::from_profile(&profile, &BTreeMap::new(), Rng::new(1)).unwrap();
+    let chans: Vec<usize> = act.channels.iter().enumerate().filter(|(_, c)| c.primary_joint == "visor").map(|(i, _)| i).collect();
+    assert_eq!(chans.len(), 2, "two visor channels");
+    act.command("visor", 10.0);
+    for &i in &chans {
+        assert_eq!(act.channels[i].follower.target, 10.0, "{}", act.channels[i].cfg.name);
+    }
+    {
+        let by = |n: &str| act.channels.iter().find(|c| c.cfg.name == n).unwrap();
+        let (l, r) = (by("visor_l"), by("visor_r"));
+        for v in [-15.0, -5.0, 0.0, 10.0, 25.0] {
+            let dl = l.value_to_us(v) - (l.center_us + 12.0);
+            let dr = r.value_to_us(v) - (r.center_us - 7.0);
+            assert!((dl + dr).abs() < 1e-6 && (v == 0.0 || dl.abs() > 1.0), "visor {v}: {dl} vs {dr}");
+        }
+    }
+    // and through the pipeline: the two channels' pulses mirror each other about centre + trim
+    run(&mut act, 3.0);
+    let by = |n: &str| act.channels.iter().find(|c| c.cfg.name == n).unwrap();
+    let (ul, ur) = (by("visor_l").us - (by("visor_l").center_us + 12.0), by("visor_r").us - (by("visor_r").center_us - 7.0));
+    assert!((ul + ur).abs() < 1.0 && ul.abs() > 20.0, "{ul} {ur}");
+}

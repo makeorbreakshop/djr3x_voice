@@ -1,10 +1,10 @@
 # Robot profile: mech model vs `robot.json`
 
-Generated 2026-10-02T19:43:42+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-02T19:43:42+00:00; assemblies r3x_droid, base, pedestal_cap_column, base_panels_closed, column_internals, hunter_head, lower_ring, middle_ring, top_ring; not fitted: pedestal_cap_kit, base_panels_open, base_panels_port, internals_anderson, r3x_neck_guide_race, r3x_top_drive, r3x_lower_drive).
+Generated 2026-10-02T19:51:03+00:00 by `mech/.venv/bin/python -m rigsync` from `out/r3x_droid/manifest.json` (built 2026-10-02T19:43:42+00:00; assemblies r3x_droid, base, pedestal_cap_column, base_panels_closed, column_internals, hunter_head, lower_ring, middle_ring, top_ring; not fitted: pedestal_cap_kit, base_panels_open, base_panels_port, internals_anderson, r3x_neck_guide_race, r3x_top_drive, r3x_lower_drive).
 
 `robot.generated.json` is NOT live. To try it: runtime `R3X_PROFILE=profiles/r3x/robot.generated.json`, sim `?profile=generated`. To adopt it: `mech/.venv/bin/python -m rigsync --apply` (backs up robot.json).
 
-**51 changes; 16 change how existing clips play (marked ⚠).**
+**54 changes; 18 change how existing clips play (marked ⚠).**
 
 ## Changes
 
@@ -54,6 +54,9 @@ Generated 2026-10-02T19:43:42+00:00 by `mech/.venv/bin/python -m rigsync` from `
 |  | visor | soft | -12 .. 27 | -13.2 .. 28.2 |  |
 |  | visor | animation | -12 .. 27 | -13.2 .. 28.2 |  |
 |  | visor | v_max | 150 | 301.8 |  |
+| ⚠ | visor | actuator visor_l | visor | channel 3, invert True | the joint's servos, one actuator each (hardware only; the sim is unaffected) |
+| ⚠ | visor | actuator visor_r | - | channel 18, invert False | the joint's servos, one actuator each (hardware only; the sim is unaffected) |
+|  | - | servo_controller.channels | 18 | 19 | one more servo channel (the controller firmware's CHANNELS) |
 
 Not in the mech model (values kept): poker_claw_upper, poker_claw_lower, throttle_claw_a, throttle_claw_b, hero_claw_l, hero_claw_r, hero_claw_t.
 
