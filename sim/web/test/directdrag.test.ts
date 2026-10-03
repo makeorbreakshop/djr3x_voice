@@ -99,8 +99,8 @@ describe('drag projections', () => {
   });
 
   it('coupled limits: the dependent range from the table, and the driver stops where the dependent would collide', () => {
-    const fromDroid = (DROID as { couplings?: Coupling[] } | null)?.couplings?.find((c) => c.joint === 'head_tilt' && c.depends_on === 'head_lift');
-    const c: Coupling = fromDroid ?? {
+    // a fixed table: this tests the coupling maths, not whichever head the local mech/out was built with
+    const c: Coupling = {
       joint: 'head_tilt', depends_on: 'head_lift',
       table: [[-37, -20, 15], [-32, -20, 15], [-27, -20, 20], [-22, -20, 20], [-17, -20, 20], [-12, -20, 25], [0, -20, 25], [45, -20, 25]],
     };
